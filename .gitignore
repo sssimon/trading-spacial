@@ -1,0 +1,82 @@
+# ══════════════════════════════════════════════════════════════
+#  .gitignore — Crypto Scanner / Trading Signal System
+# ══════════════════════════════════════════════════════════════
+
+# ── Configuración sensible ────────────────────────────────────
+# Contiene bot token de Telegram y chat_id — NUNCA commitear
+config.json
+
+# ── Base de datos y datos en tiempo real ──────────────────────
+signals.db
+signals.db-journal
+signals.db-wal
+data/symbols_status.json
+data/signals_history.csv
+data/positions_summary.json
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+watchdog.log
+webhook.log
+
+# ── Archivos PID del proceso supervisor ───────────────────────
+*.pid
+
+# ── Reportes HTML generados ───────────────────────────────────
+BTC_Dashboard.html
+BTC_Report_*.html
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# ── Frontend ─────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── Claude Code ──────────────────────────────────────────────
+# settings.local.json puede contener rutas/permisos personales
+.claude/settings.local.json
+
+# ── MemPalace ────────────────────────────────────────────────
+# Índice de minado local — se regenera con `mempalace mine .`
+# Descomenta si no quieres commitear el archivo de configuración
+# mempalace.yaml
+
+# ── n8n (deprecado) ──────────────────────────────────────────
+n8n/
+
+# ── Docker volumes locales ───────────────────────────────────
+# Los volúmenes de Docker son locales, no se versionan
+.docker/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDEs ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── Archivos temporales ───────────────────────────────────────
+*.tmp
+*.bak
+*.swp
+*.swo
+*~

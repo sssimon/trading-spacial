@@ -1,0 +1,50 @@
+wing: trading
+rooms:
+- name: backtesting_btcusdt
+  description: Files from Backtesting_BTCUSDT/
+  keywords:
+  - backtesting_btcusdt
+  - backtesting_btcusdt
+- name: dashboard
+  description: Files from Dashboard/
+  keywords:
+  - dashboard
+  - dashboard
+- name: data
+  description: Files from data/
+  keywords:
+  - data
+  - data
+- name: documentation
+  description: Files from docs/
+  keywords:
+  - documentation
+  - docs
+- name: frontend
+  description: Files from frontend/
+  keywords:
+  - frontend
+  - frontend
+- name: logs
+  description: Files from logs/
+  keywords:
+  - logs
+  - logs
+- name: n8n
+  description: Files from n8n/
+  keywords:
+  - n8n
+  - n8n
+- name: scripts
+  description: Files from scripts/
+  keywords:
+  - scripts
+  - scripts
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
