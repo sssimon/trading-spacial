@@ -190,11 +190,13 @@ def start_service(svc: dict):
 
     # 4. Arrancar proceso
     log.info(f"Iniciando: {svc['name']}  ({os.path.basename(svc['script'])})")
+    log_path = os.path.join(SCRIPT_DIR, "logs", f"{os.path.splitext(os.path.basename(svc['script']))[0]}.log")
+    log_fh   = open(log_path, "a", encoding="utf-8")
     proc = subprocess.Popen(
         [PYTHON, svc["script"]],
         cwd=SCRIPT_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=log_fh,
     )
     svc["process"] = proc
 

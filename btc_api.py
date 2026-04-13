@@ -653,8 +653,6 @@ def build_telegram_message(rep: dict) -> str:
         header = f"Scanner Update {symbol}"
         emoji  = "SCAN"
 
-    stars = "***" if score >= 4 else ("**" if score >= 2 else "*")
-
     lines = [
         f"*{header}*",
         f"`{ts}`",
@@ -663,7 +661,7 @@ def build_telegram_message(rep: dict) -> str:
         "",
         f"*Precio:* `${price:,.2f}`",
         f"*LRC 1H:* `{lrc.get('pct')}%`  _(zona <= 25% = LONG)_",
-        f"*Score:* `{score}/10` {stars}  _{slabel}_",
+        f"*Score:* `{score}/10`  _{slabel}_",
         f"*Macro 4H:* `{'Alcista' if macro.get('price_above') else 'Adversa'}`  _(Precio vs SMA100)_",
         "",
     ]
