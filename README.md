@@ -172,6 +172,57 @@ python -m pytest tests/test_api.py -v
 
 ---
 
+## Troubleshooting
+
+### El scanner no genera señales
+1. Verificar conexion a Binance: `curl -s https://api.binance.com/api/v3/ping`
+2. Revisar logs: `tail -f logs/btc_api.log`
+3. Verificar que `config.json` existe y tiene formato valido
+4. Forzar scan manual: `curl -X POST http://localhost:8000/scan`
+5. Revisar el endpoint de salud: `curl http://localhost:8000/health`
+
+### Telegram no envia mensajes
+1. Verificar `telegram_bot_token` y `telegram_chat_id` en `config.json`
+2. Probar envio: `curl http://localhost:8000/webhook/test`
+3. Verificar que `signal_filters.min_score` no es demasiado alto (default: 4)
+4. Revisar logs para errores de Telegram: `grep -i telegram logs/btc_api.log`
+5. Si usa proxy: verificar formato `socks5://127.0.0.1:1080`
+
+### El dashboard no carga datos
+1. Verificar que `btc_api.py` esta corriendo: `curl http://localhost:8000/status`
+2. Si usa Docker: verificar que el container esta activo: `docker ps`
+3. Verificar proxy en nginx: `curl http://localhost:3000/api/status`
+4. Revisar la consola del navegador para errores CORS
+
+### Errores de base de datos
+1. Verificar que `signals.db` existe y no esta corrupto
+2. Si esta corrupto, restaurar desde backup: `cp backups/signals_YYYYMMDD.db signals.db`
+3. Para recrear la DB: eliminar `signals.db` y reiniciar `btc_api.py`
+
+### El watchdog no inicia (Windows)
+1. Verificar que Python esta en PATH: `python --version`
+2. Ejecutar como administrador: `powershell -ExecutionPolicy Bypass -File scripts/INSTALAR_AUTOSTART.ps1`
+3. Verificar tarea en Task Scheduler: buscar "BTCScannerWatchdog"
+4. Revisar logs: `type logs\watchdog.log`
+
+## Deployment Checklist
+
+- [ ] Crear `config.json` con credenciales (copiar template del README)
+- [ ] Configurar `telegram_bot_token` y `telegram_chat_id`
+- [ ] Opcional: configurar `api_key` para proteger endpoints sensibles
+- [ ] Verificar conectividad a Binance: `curl https://api.binance.com/api/v3/ping`
+- [ ] Instalar dependencias: `pip install -r requirements.txt`
+- [ ] Iniciar API: `python btc_api.py`
+- [ ] Verificar salud: `curl http://localhost:8000/health`
+- [ ] Probar Telegram: `curl http://localhost:8000/webhook/test`
+- [ ] Iniciar frontend: `cd frontend && npm install && npm run dev`
+- [ ] Verificar dashboard en `http://localhost:5173`
+- [ ] Para produccion: `docker compose up --build`
+- [ ] Configurar autostart (Windows): ejecutar `scripts/INSTALAR_AUTOSTART.ps1`
+- [ ] Verificar logs se generan en `logs/`
+
+---
+
 ## Notes
 
 - `config.json` is git-ignored — contains sensitive credentials
