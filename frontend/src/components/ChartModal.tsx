@@ -70,6 +70,7 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<IChartApi | null>(null);
   const [tf, setTf]       = useState<TF>('1h');
+  const [retryCount, setRetryCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
   const [hoverPrice, setHoverPrice] = useState<number | null>(null);
@@ -247,7 +248,7 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
         chartRef.current = null;
       }
     };
-  }, [symbol, tf]);
+  }, [symbol, tf, retryCount]);
 
   if (!symbol) return null;
 
@@ -347,7 +348,7 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
           {error && !loading && (
             <div className="chart-error-overlay">
               <span>⚠ {error}</span>
-              <button className="btn btn-secondary" onClick={() => setTf(tf)}>
+              <button className="btn btn-secondary" onClick={() => setRetryCount(c => c + 1)}>
                 Reintentar
               </button>
             </div>
