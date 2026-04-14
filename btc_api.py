@@ -802,6 +802,66 @@ _scanner_state = {
 }
 
 
+def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
+    """Ejecuta scan-save-notify para un símbolo. Único punto de verdad usado
+    tanto por scanner_loop como por force_scan.
+
+    Retorna un dict con los resultados del escaneo o con clave 'error' si falla.
+    """
+    try:
+        rep     = scan(sym)
+        scan_id = save_scan(rep)
+
+        # Auto-check TP/SL para posiciones abiertas en este símbolo
+        price_now = rep.get("price")
+        if price_now:
+            check_position_stops(sym, price_now)
+
+        _scanner_state["last_scan_ts"] = rep.get("timestamp")
+        _scanner_state["last_symbol"]  = sym
+        _scanner_state["last_estado"]  = rep.get("estado", "")
+        _scanner_state["scans_total"] += 1
+
+        estado    = rep.get("estado", "")
+        is_signal = rep.get("señal_activa", False)
+        is_setup  = "SETUP VÁLIDO" in estado
+
+        if is_signal:
+            _scanner_state["signals_total"] += 1
+            log.info(f"SENAL {sym} — score {rep.get('score')}/9  "
+                     f"precio ${rep.get('price')}")
+            append_signal_log(rep, scan_id)
+            append_signal_csv(rep, scan_id)
+        elif is_setup:
+            log.info(f"SETUP {sym} — score {rep.get('score')}/9 (sin gatillo)")
+            append_signal_log(rep, scan_id)
+            append_signal_csv(rep, scan_id)
+
+        if should_notify_signal(rep, cfg):
+            push_telegram_direct(rep, cfg)
+            if cfg.get("webhook_url", "").strip():
+                push_webhook(rep, scan_id, cfg)
+        else:
+            log.info(f"{sym}: {estado[:55]}")
+
+        return {
+            "symbol":    sym,
+            "scan_id":   scan_id,
+            "timestamp": rep.get("timestamp"),
+            "estado":    rep.get("estado"),
+            "price":     rep.get("price"),
+            "lrc_pct":   rep.get("lrc_1h", {}).get("pct"),
+            "score":     rep.get("score"),
+            "señal":     rep.get("señal_activa"),
+            "gatillo":   rep.get("gatillo_activo"),
+        }
+
+    except Exception as e:
+        _scanner_state["errors"] += 1
+        log.error(f"Error escaneando {sym}: {e}")
+        return {"symbol": sym, "error": str(e)}
+
+
 def scanner_loop():
     cfg      = load_config()
     interval = cfg.get("scan_interval_sec", SCAN_INTERVAL_SEC)
@@ -818,43 +878,7 @@ def scanner_loop():
         for sym in symbols:
             if not _scanner_state["running"]:
                 break
-            try:
-                rep     = scan(sym)
-                scan_id = save_scan(rep)
-                # Auto-check TP/SL para posiciones abiertas en este símbolo
-                price_now = rep.get("price")
-                if price_now:
-                    check_position_stops(sym, price_now)
-                _scanner_state["last_scan_ts"] = rep.get("timestamp")
-                _scanner_state["last_symbol"]  = sym
-                _scanner_state["last_estado"]  = rep.get("estado", "")
-                _scanner_state["scans_total"] += 1
-
-                estado    = rep.get("estado", "")
-                is_signal = rep.get("señal_activa", False)
-                is_setup  = "SETUP VÁLIDO" in estado
-
-                if is_signal:
-                    _scanner_state["signals_total"] += 1
-                    log.info(f"SENAL {sym} — score {rep.get('score')}/9  "
-                             f"precio ${rep.get('price')}")
-                    append_signal_log(rep, scan_id)
-                    append_signal_csv(rep, scan_id)
-                elif is_setup:
-                    log.info(f"SETUP {sym} — score {rep.get('score')}/9 (sin gatillo)")
-                    append_signal_log(rep, scan_id)
-                    append_signal_csv(rep, scan_id)
-
-                if should_notify_signal(rep, cfg):
-                    push_telegram_direct(rep, cfg)
-                    if cfg.get("webhook_url", "").strip():
-                        push_webhook(rep, scan_id, cfg)
-                else:
-                    log.info(f"{sym}: {estado[:55]}")
-
-            except Exception as e:
-                _scanner_state["errors"] += 1
-                log.error(f"Error escaneando {sym}: {e}")
+            execute_scan_for_symbol(sym, cfg)
 
         # Actualizar data/symbols_status.json al final de cada ciclo
         try:
@@ -977,46 +1001,7 @@ def force_scan(
     """Ejecuta el scanner ahora. Sin symbol escanea todos los pares activos."""
     cfg     = load_config()
     symbols = [symbol.upper()] if symbol else get_active_symbols(cfg.get("num_symbols", 20))
-    results = []
-
-    for sym in symbols:
-        try:
-            rep     = scan(sym)
-            scan_id = save_scan(rep)
-            _scanner_state["last_scan_ts"] = rep.get("timestamp")
-            _scanner_state["last_symbol"]  = sym
-            _scanner_state["last_estado"]  = rep.get("estado", "")
-            _scanner_state["scans_total"] += 1
-
-            is_sig_fs = rep.get("señal_activa", False)
-            is_stp_fs = "SETUP VÁLIDO" in rep.get("estado", "")
-            if is_sig_fs:
-                _scanner_state["signals_total"] += 1
-                append_signal_log(rep, scan_id)
-                append_signal_csv(rep, scan_id)
-            elif is_stp_fs:
-                append_signal_log(rep, scan_id)
-                append_signal_csv(rep, scan_id)
-
-            if should_notify_signal(rep, cfg):
-                push_telegram_direct(rep, cfg)
-                if cfg.get("webhook_url", "").strip():
-                    push_webhook(rep, scan_id, cfg)
-
-            results.append({
-                "symbol":    sym,
-                "scan_id":   scan_id,
-                "timestamp": rep.get("timestamp"),
-                "estado":    rep.get("estado"),
-                "price":     rep.get("price"),
-                "lrc_pct":   rep.get("lrc_1h", {}).get("pct"),
-                "score":     rep.get("score"),
-                "señal":     rep.get("señal_activa"),
-                "gatillo":   rep.get("gatillo_activo"),
-            })
-        except Exception as e:
-            results.append({"symbol": sym, "error": str(e)})
-
+    results = [execute_scan_for_symbol(sym, cfg) for sym in symbols]
     return {"scanned": len(results), "results": results}
 
 
