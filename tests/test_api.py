@@ -1487,3 +1487,65 @@ class TestSignalDeduplication:
         cfg = {"signal_filters": {}}
         btc_api._mark_notified("BTCUSDT")
         assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — Signal Performance
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSignalPerformance:
+    @pytest.fixture(autouse=True)
+    def setup_api(self, tmp_path, monkeypatch):
+        import btc_api
+        db_path = str(tmp_path / "test_perf.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        btc_api.init_db()
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from fastapi import FastAPI
+        import btc_api
+        test_app = FastAPI()
+        test_app.get("/signals/performance")(btc_api.get_signals_performance)
+        return TestClient(test_app)
+
+    def test_performance_no_data(self, client):
+        r = client.get("/signals/performance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["total_completed"] == 0
+
+    def test_performance_with_data(self, client):
+        import btc_api
+        con = btc_api.get_db()
+        # Insert completed signals
+        # Signal 1: Win (score 8)
+        con.execute("""
+            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status)
+            VALUES (1, 'BTCUSDT', '2025-01-01T00:00:00', 60000.0, 8, 62000.0, 5.0, -1.0, 'completed')
+        """)
+        # Signal 2: Loss (score 4)
+        con.execute("""
+            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status)
+            VALUES (2, 'ETHUSDT', '2025-01-01T01:00:00', 3000.0, 4, 2900.0, 1.0, -5.0, 'completed')
+        """)
+        con.commit()
+        con.close()
+
+        r = client.get("/signals/performance")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_completed"] == 2
+        assert data["overall_win_rate"] == 0.5
+        assert data["avg_max_runup_pct"] == 3.0  # (5+1)/2
+        assert data["avg_max_drawdown_pct"] == -3.0 # (-1-5)/2
+        
+        # Check by_score
+        by_score = data["by_score"]
+        assert len(by_score) == 2
+        assert by_score[0]["score"] == 8
+        assert by_score[0]["win_rate"] == 1.0
+        assert by_score[1]["score"] == 4
+        assert by_score[1]["win_rate"] == 0.0

@@ -39,9 +39,87 @@ from logging.handlers import RotatingFileHandler
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
-from btc_scanner import scan, get_top_symbols
+from btc_scanner import scan, get_top_symbols, get_klines
+
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  TRACKING DE PERFORMANCE HISTÓRICO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_pending_signal_outcomes():
+    """
+    Recorre señales pendientes y actualiza su precio 1h, 4h y 24h después.
+    También actualiza max_runup y max_drawdown si no han pasado 24h.
+    """
+    con = get_db()
+    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
+    con.close()
+
+    if not rows:
+        return
+
+    now = datetime.now(timezone.utc)
+    updated_count = 0
+
+    for r in [dict(row) for row in rows]:
+        try:
+            sig_ts = datetime.fromisoformat(r["signal_ts"])
+            if sig_ts.tzinfo is None:
+                sig_ts = sig_ts.replace(tzinfo=timezone.utc)
+
+            age_hours = (now - sig_ts).total_seconds() / 3600
+            symbol    = r["symbol"]
+            sig_price = r["signal_price"]
+
+            updates = {}
+
+            # 1. Capturar precios en hitos (1h, 4h, 24h)
+            # Solo si no los tenemos ya y ha pasado el tiempo
+            if r["price_1h"] is None and age_hours >= 1.0:
+                df = get_klines(symbol, "1m", limit=1)
+                if not df.empty: updates["price_1h"] = float(df["close"].iloc[-1])
+
+            if r["price_4h"] is None and age_hours >= 4.0:
+                df = get_klines(symbol, "1m", limit=1)
+                if not df.empty: updates["price_4h"] = float(df["close"].iloc[-1])
+
+            if r["price_24h"] is None and age_hours >= 24.0:
+                df = get_klines(symbol, "1m", limit=1)
+                if not df.empty: updates["price_24h"] = float(df["close"].iloc[-1])
+                updates["status"] = "completed"
+
+            # 2. Max Runup / Drawdown (usar 1h OHLCV como proxy si es < 24h)
+            if age_hours <= 25.0:
+                # Obtener klines desde la señal hasta ahora
+                # limit estimado: age_hours * 60 (para 1m) o usar 1h si es mucho
+                limit = min(1500, int(age_hours * 60) + 5)
+                df = get_klines(symbol, "1m", limit=limit)
+                if not df.empty:
+                    high = df["high"].max()
+                    low  = df["low"].min()
+                    updates["max_runup_pct"]    = round((high - sig_price) / sig_price * 100, 2)
+                    updates["max_drawdown_pct"] = round((low - sig_price) / sig_price * 100, 2)
+
+            if updates:
+                updates["last_checked_ts"] = now.isoformat()
+                set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+                params     = list(updates.values()) + [r["id"]]
+
+                con_up = get_db()
+                con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
+                con_up.commit()
+                con_up.close()
+                updated_count += 1
+
+        except Exception as e:
+            log.warning(f"Error trackeando performance de {r['symbol']} (id={r['id']}): {e}")
+
+    if updated_count > 0:
+        log.info(f"Performance Tracking: {updated_count} señales actualizadas.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 CONFIG_FILE       = os.path.join(SCRIPT_DIR, "config.json")
@@ -690,6 +768,29 @@ def init_db():
             notes       TEXT
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS signal_outcomes (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id         INTEGER UNIQUE REFERENCES scans(id),
+            symbol          TEXT    NOT NULL,
+            signal_ts       TEXT    NOT NULL,
+            signal_price    REAL    NOT NULL,
+            score           INTEGER,
+            macro_ok        INTEGER,
+            
+            -- Performance medida en intervalos
+            price_1h        REAL,
+            price_4h        REAL,
+            price_24h       REAL,
+            
+            -- Puntos extremos en 24h
+            max_runup_pct   REAL,  -- mejor retorno %
+            max_drawdown_pct REAL,  -- peor retorno %
+            
+            status          TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
+            last_checked_ts TEXT
+        )
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
@@ -720,6 +821,20 @@ def save_scan(rep: dict) -> int:
     scan_id = cur.lastrowid
     con.commit()
     con.close()
+
+    # Si es señal activa, registrar para seguimiento de performance
+    if señal:
+        try:
+            con_out = get_db()
+            con_out.execute("""
+                INSERT OR IGNORE INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, macro_ok)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (scan_id, symbol, ts, price, score, macro))
+            con_out.commit()
+            con_out.close()
+        except Exception as e:
+            log.warning(f"Error iniciando tracking de señal: {e}")
+
     return scan_id
 
 
@@ -1093,6 +1208,12 @@ def scanner_loop():
         except Exception as e:
             log.warning(f"update_positions_json error en ciclo: {e}")
 
+        # Seguimiento de performance de señales
+        try:
+            check_pending_signal_outcomes()
+        except Exception as e:
+            log.warning(f"check_pending_signal_outcomes error en ciclo: {e}")
+
         # Periodic DB backup (~every 24h)
         if _scanner_state["scans_total"] % _BACKUP_INTERVAL_SCANS == 0 and _scanner_state["scans_total"] > 0:
             backup_db()
@@ -1240,6 +1361,64 @@ def list_signals(
             }
             for r in rows
         ],
+    }
+
+
+@app.get("/signals/performance", summary="Métricas de éxito de las señales históricas")
+def get_signals_performance():
+    """
+    Calcula estadísticas de acierto de las señales procesadas (status='completed').
+    Win Rate se define como: precio 24h > precio señal (para LONG).
+    """
+    con = get_db()
+    # Solo señales completadas (24h de historia)
+    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'completed'").fetchall()
+    con.close()
+
+    if not rows:
+        return {
+            "ok": True,
+            "total_completed": 0,
+            "message": "No hay suficientes señales con >24h de historia."
+        }
+
+    signals = [dict(r) for r in rows]
+    total = len(signals)
+
+    # 1. Win Rate General
+    wins = sum(1 for s in signals if s["price_24h"] > s["signal_price"])
+    win_rate = wins / total
+
+    # 2. Por Score Tier
+    tiers = {}
+    for s in signals:
+        tier = s["score"]
+        if tier not in tiers:
+            tiers[tier] = {"total": 0, "wins": 0}
+        tiers[tier]["total"] += 1
+        if s["price_24h"] > s["signal_price"]:
+            tiers[tier]["wins"] += 1
+
+    tier_stats = []
+    for t in sorted(tiers.keys(), reverse=True):
+        wr = tiers[t]["wins"] / tiers[t]["total"]
+        tier_stats.append({
+            "score": t,
+            "total": tiers[t]["total"],
+            "win_rate": round(wr, 4)
+        })
+
+    # 3. Métricas de Volatilidad
+    avg_runup = sum(s["max_runup_pct"] or 0 for s in signals) / total
+    avg_drawdown = sum(s["max_drawdown_pct"] or 0 for s in signals) / total
+
+    return {
+        "ok": True,
+        "total_completed": total,
+        "overall_win_rate": round(win_rate, 4),
+        "avg_max_runup_pct": round(avg_runup, 2),
+        "avg_max_drawdown_pct": round(avg_drawdown, 2),
+        "by_score": tier_stats
     }
 
 
