@@ -325,7 +325,7 @@ def calc_rsi(close: pd.Series, period=14):
 
 def calc_bb(close: pd.Series, period=20, k=2.0):
     sma = close.rolling(period).mean()
-    std = close.rolling(period).std()
+    std = close.rolling(period).std(ddof=0)
     return sma + k * std, sma, sma - k * std   # upper, mid, lower
 
 
