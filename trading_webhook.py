@@ -33,20 +33,13 @@ def load_config():
 
 def _get_telegram_target():
     cfg = load_config()
-    # 380882623 is the legacy hardcoded target for Simon
-    return cfg.get("telegram_chat_id", "380882623")
+    return cfg.get("telegram_chat_id", "").strip() or None
 
 def _get_openclaw_cmd():
     cfg = load_config()
-    configured = cfg.get("openclaw_path", "")
+    configured = cfg.get("openclaw_path", "").strip()
     if configured and os.path.isfile(configured):
         return configured
-    
-    # Fallback to absolute path or just 'openclaw' if not on Windows
-    openclaw_cmd = r"C:\Users\simon\AppData\Roaming\npm\openclaw.cmd"
-    if os.path.exists(openclaw_cmd):
-        return openclaw_cmd
-        
     import shutil
     return shutil.which("openclaw") or "openclaw"
 
@@ -76,10 +69,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
         secret = cfg.get("webhook_secret", "").strip()
         if secret:
             received_secret = self.headers.get("X-Scanner-Secret", "").strip()
-            # fallback to X-Webhook-Secret if someone used the other name
-            if not received_secret:
-                received_secret = self.headers.get("X-Webhook-Secret", "").strip()
-            
             import hmac
             if not hmac.compare_digest(received_secret, secret):
                 logger.warning(f"Unauthorized webhook attempt from {self.address_string()}")

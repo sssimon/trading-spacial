@@ -119,6 +119,5 @@ Proxy format when needed: `socks5://127.0.0.1:1080`
 - `data/signals_history.csv` — CSV export of all signals
 
 ## Known Limitations
-- `trading_webhook.py` has a hardcoded path to OpenClaw (`C:\Users\simon\AppData\Roaming\npm\openclaw.cmd`)
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
 - The webhook process itself is not supervised by the watchdog (only btc_api.py is)

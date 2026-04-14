@@ -52,14 +52,14 @@ El sistema está **operativo** y enviando señales a Telegram correctamente. Tod
 - **Puerto:** 9000 (TCP LISTEN).
 - **Logs:** `webhook.log` muestra recepción de payload y envío exitoso a Telegram.
 - **Prueba directa:** Envío de payload de prueba → respuesta `{"status":"ok"}`.
-- **Integración OpenClaw:** Usa `openclaw.cmd` con ruta absoluta; envía al chat de Telegram (`--target 380882623`).
+- **Integración OpenClaw:** Usa `openclaw` (detectado via PATH o `openclaw_path` en config); envía al chat de Telegram configurado en `telegram_chat_id`.
 
 ### 4. Prueba de Flujo Completo
 
 1. **Escaneo forzado:** `POST /scan?force_notify=true`
 2. **Scanner** consulta Binance, calcula indicadores, construye payload con `telegram_message`.
 3. **API** llama a `push_webhook` con payload.
-4. **Webhook receptor** recibe POST, extrae `telegram_message`, ejecuta `openclaw message send --channel telegram --target 380882623`.
+4. **Webhook receptor** recibe POST, extrae `telegram_message`, ejecuta `openclaw message send --channel telegram --target <chat_id>`.
 5. **Telegram:** Mensaje recibido en el chat personal.
 
 **Resultado:** ✅ Señal recibida en Telegram con formato completo (score, precio, estado, confirmaciones).
@@ -73,7 +73,7 @@ El sistema está **operativo** y enviando señales a Telegram correctamente. Tod
 ## Problemas Identificados
 
 1. **Contador de errores no resetado:** El campo `errors: 1` persiste, aunque los errores pueden ser históricos (previos al cambio de VPN). No afecta funcionalidad.
-2. **Dependencia de ruta absoluta en webhook:** El script `trading_webhook.py` usa `C:\Users\simon\AppData\Roaming\npm\openclaw.cmd`. Si OpenClaw se reinstala en otra ubicación, fallará.
+2. **~~Dependencia de ruta absoluta en webhook:~~** Resuelto — ahora usa `openclaw_path` de config o detección automática via PATH.
 3. **Webhook como proceso independiente:** No está supervisado; si el proceso termina, las señales no se entregarán.
 4. **Logs limitados:** No hay logs detallados de los intentos de escaneo automático; sólo se ve el total de escaneos y errores.
 
@@ -81,7 +81,7 @@ El sistema está **operativo** y enviando señales a Telegram correctamente. Tod
 
 ### Correcciones Inmediatas
 - **Resetear contador de errores** después de confirmar que el VPN funciona (opcional, pero limpia métricas).
-- **Cambiar ruta de OpenClaw** a variable de entorno o detectar automáticamente (ej. `where openclaw`).
+- **~~Cambiar ruta de OpenClaw~~** Resuelto — detecta automáticamente via PATH.
 - **Implementar supervisión básica** para el proceso webhook (ej. reinicio si puerto 9000 deja de escuchar).
 
 ### Mejoras a Mediano Plazo
