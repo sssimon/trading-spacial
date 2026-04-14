@@ -4,20 +4,11 @@
 
 import React from 'react';
 import type { SymbolStatus } from '../types';
+import { timeAgo, formatPrice } from '../utils';
 
 interface SymbolCardProps {
   symbol: SymbolStatus;
   onClick?: () => void;
-}
-
-function formatPrice(price: number): string {
-  if (price >= 1000) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  if (price >= 1) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
-  }
-  return price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
 }
 
 function splitSymbol(sym: string): { base: string; quote: string } {
@@ -30,23 +21,6 @@ function splitSymbol(sym: string): { base: string; quote: string } {
   }
   // Fallback: split at 3 chars from end
   return { base: sym.slice(0, -4), quote: sym.slice(-4) };
-}
-
-function timeAgo(ts: string): string {
-  const now = Date.now();
-  const then = new Date(ts).getTime();
-  const diffMs = now - then;
-
-  if (isNaN(diffMs)) return '—';
-
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `hace ${diffSec}s`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `hace ${diffMin}m`;
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `hace ${diffHour}h`;
-  const diffDay = Math.floor(diffHour / 24);
-  return `hace ${diffDay}d`;
 }
 
 function getScoreColor(score: number): string {

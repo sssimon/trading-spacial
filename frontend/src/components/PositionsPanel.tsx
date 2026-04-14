@@ -5,6 +5,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Position, SymbolStatus, Signal } from '../types';
 import { getPositions, closePosition, cancelPosition } from '../api';
+import { timeAgo, formatPrice } from '../utils';
 import OpenPositionModal from './OpenPositionModal';
 
 interface PositionsPanelProps {
@@ -46,19 +47,10 @@ function tpSlProgress(pos: Position, currentPrice: number | null) {
   return Math.max(0, Math.min(1, progress));
 }
 
-function timeAgo(ts: string): string {
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (diff < 60)   return `${Math.floor(diff)}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
-}
-
+/** Format price with $ prefix, or '—' for null. */
 function fmtPrice(p: number | null): string {
   if (p == null) return '—';
-  if (p >= 1000) return `$${p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (p >= 1)    return `$${p.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
-  return `$${p.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 6 })}`;
+  return `$${formatPrice(p)}`;
 }
 
 function fmtPnl(usd: number | null, pct: number | null) {

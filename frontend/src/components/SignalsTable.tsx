@@ -4,28 +4,12 @@
 
 import React from 'react';
 import type { Signal } from '../types';
+import { timeAgo, formatPrice } from '../utils';
 
 interface SignalsTableProps {
   signals: Signal[];
   loading: boolean;
   onOpenPosition?: (signal: Signal) => void;
-}
-
-function timeAgo(ts: string): string {
-  const now = Date.now();
-  const then = new Date(ts).getTime();
-  const diffMs = now - then;
-
-  if (isNaN(diffMs)) return '—';
-
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `hace ${diffSec}s`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `hace ${diffMin}m`;
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `hace ${diffHour}h`;
-  const diffDay = Math.floor(diffHour / 24);
-  return `hace ${diffDay}d`;
 }
 
 function formatDatetime(ts: string): string {
@@ -38,16 +22,6 @@ function formatDatetime(ts: string): string {
     minute: '2-digit',
     second: '2-digit',
   });
-}
-
-function formatPrice(price: number): string {
-  if (price >= 1000) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  if (price >= 1) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
-  }
-  return price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
 }
 
 function getScoreClass(score: number): string {

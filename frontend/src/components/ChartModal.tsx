@@ -13,6 +13,7 @@ import {
 } from 'lightweight-charts';
 import type { SymbolStatus, OhlcvCandle } from '../types';
 import { getOhlcv } from '../api';
+import { formatPrice } from '../utils';
 
 // ── Paleta del tema oscuro ────────────────────────────────────
 const C_BG      = '#0d1117';
@@ -41,12 +42,6 @@ function priceFormat(price: number) {
   if (price >= 1000) return { precision: 2, minMove: 0.01 };
   if (price >= 1)    return { precision: 4, minMove: 0.0001 };
   return               { precision: 6, minMove: 0.000001 };
-}
-
-function formatPrice(p: number): string {
-  if (p >= 1000) return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (p >= 1)    return p.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-  return p.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 6 });
 }
 
 function computeSMA(candles: OhlcvCandle[], period: number): { time: UTCTimestamp; value: number }[] {
