@@ -4,7 +4,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Position, SymbolStatus, Signal } from '../types';
-import { getPositions, closePosition, cancelPosition } from '../api';
+import { getPositions, closePosition, cancelPosition, updatePosition } from '../api';
 import { timeAgo, formatPrice } from '../utils';
 import OpenPositionModal from './OpenPositionModal';
 
@@ -105,6 +105,62 @@ const CloseRow: React.FC<CloseRowProps> = ({ pos, currentPrice, onConfirm, onCan
   );
 };
 
+// ── Inline edit row ───────────────────────────────────────────
+
+interface EditRowProps {
+  pos: Position;
+  onSave: (id: number, changes: Record<string, unknown>) => void;
+  onCancel: () => void;
+}
+
+const EditRow: React.FC<EditRowProps> = ({ pos, onSave, onCancel }) => {
+  const [sl, setSl] = useState(String(pos.sl_price ?? ''));
+  const [tp, setTp] = useState(String(pos.tp_price ?? ''));
+  const [notes, setNotes] = useState(pos.notes ?? '');
+
+  return (
+    <tr className="pos-edit-row">
+      <td colSpan={99}>
+        <div className="pos-edit-inline">
+          <div className="pos-edit-field">
+            <label>SL</label>
+            <div className="pos-input-group">
+              <span className="pos-input-prefix">$</span>
+              <input type="number" step="any" className="pos-input pos-input--sm"
+                value={sl} onChange={e => setSl(e.target.value)} />
+            </div>
+          </div>
+          <div className="pos-edit-field">
+            <label>TP</label>
+            <div className="pos-input-group">
+              <span className="pos-input-prefix">$</span>
+              <input type="number" step="any" className="pos-input pos-input--sm"
+                value={tp} onChange={e => setTp(e.target.value)} />
+            </div>
+          </div>
+          <div className="pos-edit-field">
+            <label>Notas</label>
+            <input type="text" className="pos-input pos-input--sm"
+              value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+          <button className="btn btn-sm btn-primary" onClick={() => {
+            const changes: Record<string, unknown> = {};
+            const slVal = parseFloat(sl);
+            const tpVal = parseFloat(tp);
+            if (!isNaN(slVal)) changes.sl_price = slVal;
+            else if (sl === '') changes.sl_price = null;
+            if (!isNaN(tpVal)) changes.tp_price = tpVal;
+            else if (tp === '') changes.tp_price = null;
+            if (notes !== (pos.notes ?? '')) changes.notes = notes;
+            onSave(pos.id, changes);
+          }}>Guardar</button>
+          <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancelar</button>
+        </div>
+      </td>
+    </tr>
+  );
+};
+
 // ── Main component ─────────────────────────────────────────────
 
 const PositionsPanel: React.FC<PositionsPanelProps> = ({
@@ -117,6 +173,7 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({
   const [tab,         setTab]         = useState<'open' | 'closed'>('open');
   const [openModal,   setOpenModal]   = useState(false);
   const [closingId,   setClosingId]   = useState<number | null>(null);
+  const [editingId,   setEditingId]   = useState<number | null>(null);
   type PrefillData = { symbol: string; price?: number | null; sl?: number | null; tp?: number | null; scan_id?: number | null };
   const [prefill,     setPrefill]     = useState<PrefillData | undefined>();
 
@@ -170,6 +227,16 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({
       await cancelPosition(id);
       await load();
     } catch (e) { console.error(e); }
+  };
+
+  const handleEdit = async (id: number, changes: Record<string, unknown>) => {
+    try {
+      await updatePosition(id, changes as import('../types').PositionUpdatePayload);
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // ── Computed stats ──────────────────────────────────────────
@@ -316,8 +383,20 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({
                         <td>
                           <div className="pos-actions">
                             <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => {
+                                setEditingId(editingId === pos.id ? null : pos.id);
+                                setClosingId(null);
+                              }}
+                            >
+                              Editar
+                            </button>
+                            <button
                               className="btn btn-sm btn-danger"
-                              onClick={() => setClosingId(closingId === pos.id ? null : pos.id)}
+                              onClick={() => {
+                                setClosingId(closingId === pos.id ? null : pos.id);
+                                setEditingId(null);
+                              }}
                             >
                               Cerrar
                             </button>
@@ -331,6 +410,13 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({
                           </div>
                         </td>
                       </tr>
+                      {editingId === pos.id && (
+                        <EditRow
+                          pos={pos}
+                          onSave={handleEdit}
+                          onCancel={() => setEditingId(null)}
+                        />
+                      )}
                       {closingId === pos.id && (
                         <tr className="pos-close-row">
                           <td colSpan={10}>

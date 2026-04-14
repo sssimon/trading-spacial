@@ -2019,6 +2019,39 @@ button:focus-visible {
   color: var(--text-secondary);
 }
 
+/* Inline edit row */
+.pos-edit-row td {
+  padding: 0;
+}
+
+.pos-edit-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(59,130,246,0.05);
+  border-top: 1px solid rgba(59,130,246,0.2);
+  border-bottom: 1px solid rgba(59,130,246,0.2);
+}
+
+.pos-edit-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-edit-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.pos-input-group {
+  display: flex;
+  align-items: center;
+}
+
 /* Empty state */
 .pos-empty {
   padding: 48px 24px;
