@@ -1475,7 +1475,9 @@ def test_webhook():
     else:
         results["webhook_n8n"] = {"ok": False, "error": "webhook_url no configurado"}
 
-    overall_ok = results.get("telegram_directo", {}).get("ok", False)
+    # Overall OK if at least one notification channel works
+    overall_ok = results.get("telegram_directo", {}).get("ok", False) or \
+                 results.get("webhook_n8n", {}).get("ok", False)
     return {"ok": overall_ok, **results}
 
 

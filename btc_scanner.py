@@ -390,21 +390,43 @@ def calc_cvd_delta(df: pd.DataFrame, n=3):
     return float((buy - sell).sum())
 
 
-def detect_rsi_divergence(close: pd.Series, rsi: pd.Series, window=30):
+def detect_rsi_divergence(close: pd.Series, rsi: pd.Series, window=72):
     """
-    Divergencia alcista: precio hace mínimo más bajo, RSI hace mínimo más alto.
-    Ventana de 30 barras para 1H (≈ 1.25 días).
+    Detecta divergencias entre precio y RSI.
+    - Alcista (Bullish): Precio hace mínimo más bajo, RSI hace mínimo más alto.
+    - Bajista (Bearish): Precio hace máximo más alto, RSI hace máximo más bajo.
+    Ventana default: 72 barras (3 días en 1H).
+    Usa extremos locales de 5 puntos para filtrar ruido.
     """
     if len(close) < window:
-        return False
+        return {"bull": False, "bear": False}
+    
     p = close.iloc[-window:].values
     r = rsi.iloc[-window:].values
-    mins = [i for i in range(1, window - 1)
-            if p[i] < p[i - 1] and p[i] < p[i + 1]]
+    
+    # 1. Buscar Mínimos Locales (para Bullish)
+    # i < i-2, i-1, i+1, i+2
+    mins = [i for i in range(2, window - 2)
+            if p[i] < p[i-1] and p[i] < p[i-2] and p[i] < p[i+1] and p[i] < p[i+2]]
+    
+    bull_div = False
     if len(mins) >= 2:
         a, b = mins[-2], mins[-1]
-        return bool(p[b] < p[a] and r[b] > r[a])
-    return False
+        # Precio baja + RSI sube
+        bull_div = bool(p[b] < p[a] and r[b] > r[a])
+
+    # 2. Buscar Máximos Locales (para Bearish)
+    # i > i-2, i-1, i+1, i+2
+    maxs = [i for i in range(2, window - 2)
+            if p[i] > p[i-1] and p[i] > p[i-2] and p[i] > p[i+1] and p[i] > p[i+2]]
+    
+    bear_div = False
+    if len(maxs) >= 2:
+        a, b = maxs[-2], maxs[-1]
+        # Precio sube + RSI baja
+        bear_div = bool(p[b] > p[a] and r[b] < r[a])
+
+    return {"bull": bull_div, "bear": bear_div}
 
 
 def score_label(score):
@@ -487,7 +509,11 @@ def scan(symbol: str = None):
 
     bull_eng  = detect_bull_engulfing(df1h)
     cvd_1h    = calc_cvd_delta(df1h, n=3)
-    bull_div  = detect_rsi_divergence(df1h["close"], rsi1h, window=30)
+    
+    # Divergencias RSI (1H)
+    rsi_divs  = detect_rsi_divergence(df1h["close"], rsi1h, window=72)
+    bull_div  = rsi_divs["bull"]
+    bear_div  = rsi_divs["bear"]
 
     # ── Indicadores 4H (macro) ────────────────────────────────────────────────
     sma100_4h      = calc_sma(df4h["close"], 100).iloc[-1]
@@ -521,11 +547,17 @@ def scan(symbol: str = None):
             "activo": "VERIFICAR_MANUAL",
             "nota":   f"¿Han pasado ≥ {COOLDOWN_H}h desde el último trade?",
         },
+        "E6_Divergencia_Bajista": {
+            "activo": bear_div,
+            "nota":   "Precio sube + RSI baja (1H) — peligro de reversión bajista",
+        },
     }
 
     blocks = []
     if bull_eng:
         blocks.append("E1: BullEngulfing activo — posible micro-techo, esperar próxima vela")
+    if bear_div:
+        blocks.append("E6: Divergencia bajista RSI (1H) — señal de agotamiento alcista")
 
     # ── Score de Confirmaciones 1H (Spot V6) ──────────────────────────────────
     score = 0
