@@ -102,7 +102,11 @@ const CloseRow: React.FC<CloseRowProps> = ({ pos, currentPrice, onConfirm, onCan
       </div>
       <button
         className="btn btn-sm btn-danger"
-        onClick={() => onConfirm(parseFloat(exitPrice) || 0)}
+        onClick={() => {
+          const price = parseFloat(exitPrice);
+          if (isNaN(price) || price <= 0) { alert('Ingresa un precio de salida válido'); return; }
+          onConfirm(price);
+        }}
       >Confirmar</button>
       <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancelar</button>
     </div>
