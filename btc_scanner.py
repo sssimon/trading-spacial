@@ -24,6 +24,7 @@ import os
 import sys
 import json
 import logging
+import threading
 
 # Reconfigure stdout for Windows Unicode support
 sys.stdout.reconfigure(encoding='utf-8')
@@ -152,6 +153,9 @@ _BYBIT_INTERVAL = {"1m":"1","3m":"3","5m":"5","15m":"15","30m":"30",
                    "1d":"D","1w":"W","1M":"M"}
 
 _active_provider = None   # "binance" | "bybit"  — se detecta la primera vez
+_provider_lock = threading.Lock()           # protege escrituras a _active_provider
+_provider_fail_count = 0                    # llamadas en modo Bybit desde el último intento de Binance
+_RECOVERY_INTERVAL = 10                     # cada N llamadas en Bybit, reintentar Binance
 
 
 def _load_proxy() -> dict:
@@ -262,19 +266,41 @@ def get_klines(symbol: str, interval: str, limit: int = 210) -> pd.DataFrame:
     Intenta Binance primero (todos los mirrors). Si todos fallan con
     error de red o HTTP >= 400, cambia a Bybit automáticamente y
     registra el proveedor activo para los siguientes ciclos.
-    """
-    global _active_provider
 
-    # Si ya sabemos que Bybit funciona, ir directo
+    Cuando el proveedor activo es Bybit, cada _RECOVERY_INTERVAL
+    llamadas se reintenta Binance. Si responde, se restaura como
+    proveedor principal.
+    """
+    global _active_provider, _provider_fail_count
+
+    # Si ya sabemos que Bybit funciona, ir directo — pero reintentar
+    # Binance periódicamente para recuperar el proveedor preferido.
     if _active_provider == "bybit":
+        with _provider_lock:
+            _provider_fail_count += 1
+            should_retry = (_provider_fail_count >= _RECOVERY_INTERVAL)
+            if should_retry:
+                _provider_fail_count = 0
+
+        if should_retry:
+            try:
+                df = _klines_binance(symbol, interval, limit)
+                with _provider_lock:
+                    _active_provider = "binance"
+                log.info("✅ Binance recuperado — volviendo a proveedor principal")
+                return df
+            except Exception:
+                log.debug("Binance sigue sin responder, manteniendo Bybit")
+
         return _klines_bybit(symbol, interval, limit)
 
     # Intentar Binance
     try:
         df = _klines_binance(symbol, interval, limit)
         if _active_provider != "binance":
+            with _provider_lock:
+                _active_provider = "binance"
             log.info("✅ Proveedor de datos: Binance")
-            _active_provider = "binance"
         return df
     except Exception as binance_err:
         log.warning(f"⚠️  Todos los mirrors de Binance fallaron ({binance_err}). "
@@ -283,8 +309,10 @@ def get_klines(symbol: str, interval: str, limit: int = 210) -> pd.DataFrame:
     # Fallback a Bybit
     df = _klines_bybit(symbol, interval, limit)
     if _active_provider != "bybit":
+        with _provider_lock:
+            _active_provider = "bybit"
+            _provider_fail_count = 0
         log.info("✅ Proveedor de datos: Bybit (fallback automático)")
-        _active_provider = "bybit"
     return df
 
 
