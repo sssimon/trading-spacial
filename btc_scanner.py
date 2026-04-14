@@ -23,11 +23,15 @@ import time
 import os
 import sys
 import json
+import io
 import logging
 
 # Reconfigure stdout for Windows Unicode support
-sys.stdout.reconfigure(encoding='utf-8')
-sys.stderr.reconfigure(encoding='utf-8')
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except (AttributeError, io.UnsupportedOperation):
+    pass
 
 log = logging.getLogger("btc_scanner")
 
