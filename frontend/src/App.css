@@ -2296,3 +2296,17 @@ button:focus-visible {
   .pos-form-row { flex-direction: column; }
   .pos-dir-toggle { max-width: 200px; }
 }
+
+/* Error Boundary */
+.error-boundary {
+  padding: 32px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--red-dim);
+  border-radius: var(--radius-lg);
+  margin: 16px 0;
+}
+.error-boundary-content { max-width: 400px; margin: 0 auto; }
+.error-boundary-icon { font-size: 2rem; display: block; margin-bottom: 8px; }
+.error-boundary h3 { color: var(--text-primary); margin: 0 0 8px; }
+.error-boundary-msg { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 16px; word-break: break-word; }
