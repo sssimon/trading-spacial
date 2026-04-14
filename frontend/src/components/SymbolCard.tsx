@@ -155,7 +155,7 @@ const SymbolCard: React.FC<SymbolCardProps> = ({ symbol, onClick }) => {
       {/* Footer: macro + time */}
       <div className="card-footer">
         <span className={`macro-badge ${symbol.gatillo ? 'macro-badge--ok' : 'macro-badge--ko'}`}>
-          Macro {symbol.gatillo ? '✓' : '✗'}
+          Trigger {symbol.gatillo ? '✓' : '✗'}
         </span>
         <span className="card-time" title={tsFormatted}>
           {symbol.ts ? timeAgo(symbol.ts) : '—'}
