@@ -309,7 +309,11 @@ def calc_lrc(close: pd.Series, period=100, k=2.0):
     lower = reg[-1] - k * std
     mid   = reg[-1]
     price = close.iloc[-1]
-    lrc_pct = (price - lower) / (upper - lower) * 100 if upper != lower else 50.0
+    if abs(upper - lower) < 1e-10:
+        lrc_pct = 50.0
+    else:
+        lrc_pct = (price - lower) / (upper - lower) * 100
+        lrc_pct = max(0.0, min(100.0, lrc_pct))
     return round(lrc_pct, 2), round(upper, 2), round(lower, 2), round(mid, 2)
 
 
