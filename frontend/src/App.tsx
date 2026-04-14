@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getSymbols, getStatus, getSignals, forceScan } from './api';
 import type { SymbolStatus, StatusResponse, Signal } from './types';
 import ChartModal from './components/ChartModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import SymbolsGrid from './components/SymbolsGrid';
@@ -134,28 +135,34 @@ const App: React.FC = () => {
         {/* ── Mercado tab ──────────────────────────────────── */}
         {mainTab === 'mercado' && (
           <>
-            <SymbolsGrid
-              symbols={symbols}
-              loading={loading}
-              filter={filter}
-              onFilterChange={setFilter}
-              onSymbolClick={setSelectedSymbol}
-            />
-            <SignalsTable
-              signals={signals}
-              loading={loading}
-              onOpenPosition={handleOpenFromSignal}
-            />
+            <ErrorBoundary fallbackLabel="Error en el grid de simbolos">
+              <SymbolsGrid
+                symbols={symbols}
+                loading={loading}
+                filter={filter}
+                onFilterChange={setFilter}
+                onSymbolClick={setSelectedSymbol}
+              />
+            </ErrorBoundary>
+            <ErrorBoundary fallbackLabel="Error en la tabla de senales">
+              <SignalsTable
+                signals={signals}
+                loading={loading}
+                onOpenPosition={handleOpenFromSignal}
+              />
+            </ErrorBoundary>
           </>
         )}
 
         {/* ── Posiciones tab ───────────────────────────────── */}
         {mainTab === 'posiciones' && (
-          <PositionsPanel
-            symbols={symbols}
-            onOpenFromSignal={signalForPos}
-            onSignalConsumed={() => setSignalForPos(null)}
-          />
+          <ErrorBoundary fallbackLabel="Error en el panel de posiciones">
+            <PositionsPanel
+              symbols={symbols}
+              onOpenFromSignal={signalForPos}
+              onSignalConsumed={() => setSignalForPos(null)}
+            />
+          </ErrorBoundary>
         )}
       </main>
 
