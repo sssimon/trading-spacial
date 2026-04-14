@@ -17,8 +17,10 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from typing import Optional, List
 import threading
@@ -26,9 +28,11 @@ import sqlite3
 import json
 import os
 import time
+import hmac
 import requests as req_lib
 from datetime import datetime, timezone, timedelta
 import logging
+from logging.handlers import RotatingFileHandler
 
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -78,6 +82,7 @@ def load_config() -> dict:
             "min_score":       0,      # score mínimo para enviar (0 = sin filtro)
             "require_macro_ok": False, # exigir macro 4H alcista
             "notify_setup":    False,  # enviar también setups sin gatillo
+            "dedup_window_minutes": 30, # ventana de deduplicación (minutos)
         },
     }
     if os.path.exists(CONFIG_FILE):
@@ -90,6 +95,44 @@ def load_config() -> dict:
             sf_defaults.update(stored["signal_filters"])
         defaults["signal_filters"] = sf_defaults
     return defaults
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  API KEY AUTHENTICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(key: str = Security(_api_key_header)):
+    """Verify API key for sensitive endpoints. If no key configured, allow all."""
+    cfg = load_config()
+    expected = cfg.get("api_key", "").strip()
+    if not expected:
+        return  # No key configured = open access (backward compatible)
+    if not key or not hmac.compare_digest(key, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONFIG VALIDATION (Pydantic)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SignalFiltersUpdate(BaseModel):
+    min_score: Optional[int] = Field(None, ge=0, le=10)
+    require_macro_ok: Optional[bool] = None
+    notify_setup: Optional[bool] = None
+
+
+class ConfigUpdate(BaseModel):
+    webhook_url: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
+    scan_interval_sec: Optional[int] = Field(None, ge=60, le=3600)
+    num_symbols: Optional[int] = Field(None, ge=1, le=50)
+    proxy: Optional[str] = None
+    signal_filters: Optional[SignalFiltersUpdate] = None
+    api_key: Optional[str] = None
 
 
 def save_config(updates: dict) -> dict:
@@ -134,6 +177,30 @@ def should_notify_signal(rep: dict, cfg: dict) -> bool:
         return True
 
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DEDUPLICACIÓN DE SEÑALES
+# ─────────────────────────────────────────────────────────────────────────────
+
+_notified_signals: dict = {}  # symbol -> last_notified_iso
+
+
+def _is_duplicate_signal(symbol: str, cfg: dict) -> bool:
+    """Check if we already notified for this symbol within the dedup window."""
+    filters = cfg.get("signal_filters", {})
+    window_minutes = filters.get("dedup_window_minutes", 30)
+    last = _notified_signals.get(symbol)
+    if not last:
+        return False
+    last_dt = datetime.fromisoformat(last)
+    now = datetime.now(timezone.utc)
+    return (now - last_dt).total_seconds() < window_minutes * 60
+
+
+def _mark_notified(symbol: str):
+    """Mark a symbol as notified now."""
+    _notified_signals[symbol] = datetime.now(timezone.utc).isoformat()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,7 +298,7 @@ def append_signal_log(rep: dict, scan_id: int):
             f"[{ts} UTC]  {tipo}  {sym}  (scan_id={scan_id})",
             sep,
             f"  Precio : ${price:>12,.4f}",
-            f"  LRC 1H : {lrc}%   Score: {score}/10  {slabel}",
+            f"  LRC 1H : {lrc}%   Score: {score}/9  {slabel}",
             f"  Macro  : {macro_s}",
         ]
         if is_sig:
@@ -342,22 +409,59 @@ def db_update_position(pos_id: int, data: dict) -> Optional[dict]:
 
 
 def check_position_stops(symbol: str, price: float):
-    """Auto-cierra posiciones abiertas si el precio toca TP o SL."""
+    """Auto-cierra posiciones abiertas si el precio toca TP o SL. Sends notifications."""
     con = get_db()
     rows = con.execute(
         "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
     ).fetchall()
     con.close()
+
+    cfg = load_config()
+
     for pos in [dict(r) for r in rows]:
+        reason = None
+        exit_price = None
+
         if pos["direction"] == "LONG":
             if pos["tp_price"] and price >= pos["tp_price"]:
-                db_close_position(pos["id"], pos["tp_price"], "TP_HIT")
-                log.info(f"POSICION #{pos['id']} {symbol} TP HIT @ ${pos['tp_price']}")
-                _write_position_event_log(pos, "TP_HIT", pos["tp_price"])
+                reason, exit_price = "TP_HIT", pos["tp_price"]
             elif pos["sl_price"] and price <= pos["sl_price"]:
-                db_close_position(pos["id"], pos["sl_price"], "SL_HIT")
-                log.info(f"POSICION #{pos['id']} {symbol} SL HIT @ ${pos['sl_price']}")
-                _write_position_event_log(pos, "SL_HIT", pos["sl_price"])
+                reason, exit_price = "SL_HIT", pos["sl_price"]
+        else:  # SHORT
+            if pos["tp_price"] and price <= pos["tp_price"]:
+                reason, exit_price = "TP_HIT", pos["tp_price"]
+            elif pos["sl_price"] and price >= pos["sl_price"]:
+                reason, exit_price = "SL_HIT", pos["sl_price"]
+
+        if reason:
+            db_close_position(pos["id"], exit_price, reason)
+            log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
+            _write_position_event_log(pos, reason, exit_price)
+
+            # Send Telegram notification
+            entry = pos.get("entry_price", 0)
+            qty = pos.get("qty", 0)
+            pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
+            pnl_str = f"${pnl_usd:+.2f}" if qty else "N/A"
+            pnl_pct_str = f"{pnl_pct:+.2f}%" if qty else "N/A"
+
+            if reason == "SL_HIT":
+                emoji, label = "\U0001f534", "STOP LOSS"
+            else:
+                emoji, label = "\U0001f7e2", "TAKE PROFIT"
+
+            msg = (
+                f"{emoji} *{label} HIT*\n"
+                f"*{symbol}* ({pos['direction']})\n"
+                f"Entry: `${entry:.2f}` -> Exit: `${exit_price:.2f}`\n"
+                f"P&L: `{pnl_str}` ({pnl_pct_str})\n"
+                f"Reason: `{reason}`"
+            )
+
+            try:
+                _send_telegram_raw(msg, cfg)
+            except Exception as e:
+                log.warning(f"Failed to notify {reason} for {symbol}: {e}")
 
 
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
@@ -566,20 +670,24 @@ def save_scan(rep: dict) -> int:
 def get_scans(limit=50, only_signals=False, only_setups=False,
               since_hours: Optional[float] = None,
               symbol: Optional[str] = None) -> list:
-    con   = get_db()
-    conds = []
+    con    = get_db()
+    conds  = []
+    params = []
     if symbol:
-        conds.append(f"symbol = '{symbol.upper()}'")
+        conds.append("symbol = ?")
+        params.append(symbol.upper())
     if only_signals:
         conds.append("señal = 1")
     elif only_setups:
         conds.append("(señal = 1 OR setup = 1)")
     if since_hours:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        conds.append(f"ts >= '{cutoff}'")
+        conds.append("ts >= ?")
+        params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params.append(limit)
     rows  = con.execute(
-        f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", (limit,)
+        f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", params
     ).fetchall()
     con.close()
     return [dict(r) for r in rows]
@@ -661,7 +769,7 @@ def build_telegram_message(rep: dict) -> str:
         "",
         f"*Precio:* `${price:,.2f}`",
         f"*LRC 1H:* `{lrc.get('pct')}%`  _(zona <= 25% = LONG)_",
-        f"*Score:* `{score}/10`  _{slabel}_",
+        f"*Score:* `{score}/9`  _{slabel}_",
         f"*Macro 4H:* `{'Alcista' if macro.get('price_above') else 'Adversa'}`  _(Precio vs SMA100)_",
         "",
     ]
@@ -725,6 +833,27 @@ def push_telegram_direct(rep: dict, cfg: dict):
             log.warning(f"Telegram directo fallo HTTP {r.status_code}: {r.text[:120]}")
     except Exception as e:
         log.warning(f"Telegram directo error: {e}")
+
+
+def _send_telegram_raw(message: str, cfg: dict):
+    """Send a raw message to Telegram without building from a scan report."""
+    token = cfg.get("telegram_bot_token", "").strip()
+    chat_id = cfg.get("telegram_chat_id", "").strip()
+    if not token or not chat_id:
+        return
+    url = _TELEGRAM_API.format(token=token)
+    try:
+        r = req_lib.post(url, json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown",
+        }, timeout=10)
+        if r.ok:
+            log.info(f"Telegram raw send OK -> chat {chat_id}")
+        else:
+            log.warning(f"Telegram raw send fallo HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        log.warning(f"Telegram raw send error: {e}")
 
 
 def push_webhook(rep: dict, scan_id: int, cfg: dict):
@@ -799,15 +928,10 @@ _scanner_state = {
 
 
 def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
-    """Ejecuta el ciclo completo de escaneo para un símbolo.
+    """Ejecuta scan-save-notify para un símbolo. Único punto de verdad usado
+    tanto por scanner_loop como por force_scan.
 
-    1. Llama a scan(sym)
-    2. Guarda en DB
-    3. Actualiza _scanner_state
-    4. Registra en logs/csv si es señal o setup
-    5. Envía notificación si cumple filtros
-
-    Retorna un dict con el resultado del escaneo o un dict con "error" si falla.
+    Retorna un dict con los resultados del escaneo o con clave 'error' si falla.
     """
     try:
         rep     = scan(sym)
@@ -829,19 +953,23 @@ def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
 
         if is_signal:
             _scanner_state["signals_total"] += 1
-            log.info(f"SENAL {sym} — score {rep.get('score')}/10  "
+            log.info(f"SENAL {sym} — score {rep.get('score')}/9  "
                      f"precio ${rep.get('price')}")
             append_signal_log(rep, scan_id)
             append_signal_csv(rep, scan_id)
         elif is_setup:
-            log.info(f"SETUP {sym} — score {rep.get('score')}/10 (sin gatillo)")
+            log.info(f"SETUP {sym} — score {rep.get('score')}/9 (sin gatillo)")
             append_signal_log(rep, scan_id)
             append_signal_csv(rep, scan_id)
 
         if should_notify_signal(rep, cfg):
-            push_telegram_direct(rep, cfg)
-            if cfg.get("webhook_url", "").strip():
-                push_webhook(rep, scan_id, cfg)
+            if not _is_duplicate_signal(sym, cfg):
+                push_telegram_direct(rep, cfg)
+                if cfg.get("webhook_url", "").strip():
+                    push_webhook(rep, scan_id, cfg)
+                _mark_notified(sym)
+            else:
+                log.info(f"{sym}: senal duplicada, notificacion omitida")
         else:
             log.info(f"{sym}: {estado[:55]}")
 
@@ -992,7 +1120,7 @@ def status():
     }
 
 
-@app.post("/scan", summary="Forzar escaneo manual")
+@app.post("/scan", summary="Forzar escaneo manual", dependencies=[Depends(verify_api_key)])
 def force_scan(
     symbol: Optional[str] = Query(
         None,
@@ -1099,7 +1227,10 @@ def signal_by_id(scan_id: int):
     if not row:
         raise HTTPException(status_code=404, detail=f"Escaneo #{scan_id} no encontrado")
     row     = dict(row)
-    payload = json.loads(row["payload"]) if row.get("payload") else {}
+    try:
+        payload = json.loads(row["payload"]) if row.get("payload") else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = {}
     return {**row, "full_report": payload,
             "telegram_message": build_telegram_message(payload)}
 
@@ -1112,12 +1243,17 @@ def get_config():
     return cfg
 
 
-@app.post("/config", summary="Actualizar configuracion")
-def update_config(body: dict = Body(...)):
-    # proteger campos sensibles que no se tocan desde el frontend
-    body.pop("webhook_secret", None)
+@app.post("/config", summary="Actualizar configuracion", dependencies=[Depends(verify_api_key)])
+def update_config(body: ConfigUpdate):
+    # Convert Pydantic model to dict, excluding unset fields
+    updates = body.model_dump(exclude_unset=True)
+    # Convert nested Pydantic model to dict
+    if "signal_filters" in updates and updates["signal_filters"] is not None:
+        updates["signal_filters"] = {
+            k: v for k, v in updates["signal_filters"].items() if v is not None
+        }
     try:
-        updated = save_config(body)
+        updated = save_config(updates)
         updated.pop("webhook_secret", None)
         return {"ok": True, "config": updated}
     except Exception as e:
@@ -1169,7 +1305,7 @@ def list_positions(
     return {"total": len(positions), "positions": positions}
 
 
-@app.post("/positions", summary="Abrir nueva posicion")
+@app.post("/positions", summary="Abrir nueva posicion", dependencies=[Depends(verify_api_key)])
 def open_position(body: dict = Body(...)):
     required = {"symbol", "entry_price"}
     missing  = required - body.keys()
@@ -1183,7 +1319,7 @@ def open_position(body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/positions/{pos_id}", summary="Editar posicion (SL/TP/notas)")
+@app.put("/positions/{pos_id}", summary="Editar posicion (SL/TP/notas)", dependencies=[Depends(verify_api_key)])
 def edit_position(pos_id: int, body: dict = Body(...)):
     pos = db_update_position(pos_id, body)
     if not pos:
@@ -1192,7 +1328,7 @@ def edit_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@app.post("/positions/{pos_id}/close", summary="Cerrar posicion manualmente")
+@app.post("/positions/{pos_id}/close", summary="Cerrar posicion manualmente", dependencies=[Depends(verify_api_key)])
 def close_position(pos_id: int, body: dict = Body(...)):
     exit_price  = body.get("exit_price")
     exit_reason = body.get("exit_reason", "MANUAL")
@@ -1206,7 +1342,7 @@ def close_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@app.delete("/positions/{pos_id}", summary="Cancelar/eliminar posicion")
+@app.delete("/positions/{pos_id}", summary="Cancelar/eliminar posicion", dependencies=[Depends(verify_api_key)])
 def delete_position(pos_id: int):
     con = get_db()
     row = con.execute("SELECT id FROM positions WHERE id=?", (pos_id,)).fetchone()
@@ -1220,7 +1356,7 @@ def delete_position(pos_id: int):
     return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}
 
 
-@app.get("/webhook/test", summary="Probar webhook y Telegram directo")
+@app.get("/webhook/test", summary="Probar webhook y Telegram directo", dependencies=[Depends(verify_api_key)])
 def test_webhook():
     cfg     = load_config()
     ts      = datetime.now(timezone.utc).isoformat()

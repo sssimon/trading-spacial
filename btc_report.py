@@ -5,6 +5,7 @@ Genera un reporte HTML con métricas clave de trading para BTC/USDT
 Fuentes: Binance Futures API, Coinglass (si disponible), Farside (ETF flows)
 """
 
+import os
 import requests
 import pandas as pd
 import json
@@ -763,7 +764,9 @@ def main():
     html = generate_html_report(charts, summary)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    out_path = f"/sessions/bold-wonderful-planck/mnt/Trading/BTC_Report_{timestamp}.html"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.environ.get("BTC_REPORT_DIR", script_dir)
+    out_path = os.path.join(out_dir, f"BTC_Report_{timestamp}.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
 
@@ -771,4 +774,11 @@ def main():
     return out_path
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="BTC Market Intelligence Report")
+    parser.add_argument("--output-dir", "-o", default=None,
+                        help="Directorio de salida (default: directorio del script)")
+    args = parser.parse_args()
+    if args.output_dir:
+        os.environ["BTC_REPORT_DIR"] = args.output_dir
     main()

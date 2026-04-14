@@ -52,7 +52,7 @@ python -m pytest tests/test_api.py -v       # API endpoints only
 ```
 Binance API (Bybit fallback)
   → btc_scanner.py: fetch OHLCV, calculate LRC/RSI/BB/SMA100
-  → Multi-timeframe scoring (0–10)
+  → Multi-timeframe scoring (0–9)
   → btc_api.py: store to signals.db (SQLite), evaluate notification filters
   → trading_webhook.py (port 9000) → OpenClaw CLI → Telegram
      OR n8n workflow (port 5678) → Telegram node
