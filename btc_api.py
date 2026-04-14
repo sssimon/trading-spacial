@@ -17,8 +17,10 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from typing import Optional, List
 import threading
@@ -26,6 +28,7 @@ import sqlite3
 import json
 import os
 import time
+import hmac
 import requests as req_lib
 from datetime import datetime, timezone, timedelta
 import logging
@@ -91,6 +94,44 @@ def load_config() -> dict:
             sf_defaults.update(stored["signal_filters"])
         defaults["signal_filters"] = sf_defaults
     return defaults
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  API KEY AUTHENTICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(key: str = Security(_api_key_header)):
+    """Verify API key for sensitive endpoints. If no key configured, allow all."""
+    cfg = load_config()
+    expected = cfg.get("api_key", "").strip()
+    if not expected:
+        return  # No key configured = open access (backward compatible)
+    if not key or not hmac.compare_digest(key, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONFIG VALIDATION (Pydantic)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SignalFiltersUpdate(BaseModel):
+    min_score: Optional[int] = Field(None, ge=0, le=10)
+    require_macro_ok: Optional[bool] = None
+    notify_setup: Optional[bool] = None
+
+
+class ConfigUpdate(BaseModel):
+    webhook_url: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
+    scan_interval_sec: Optional[int] = Field(None, ge=60, le=3600)
+    num_symbols: Optional[int] = Field(None, ge=1, le=50)
+    proxy: Optional[str] = None
+    signal_filters: Optional[SignalFiltersUpdate] = None
+    api_key: Optional[str] = None
 
 
 def save_config(updates: dict) -> dict:
@@ -1050,7 +1091,7 @@ def status():
     }
 
 
-@app.post("/scan", summary="Forzar escaneo manual")
+@app.post("/scan", summary="Forzar escaneo manual", dependencies=[Depends(verify_api_key)])
 def force_scan(
     symbol: Optional[str] = Query(
         None,
@@ -1173,12 +1214,17 @@ def get_config():
     return cfg
 
 
-@app.post("/config", summary="Actualizar configuracion")
-def update_config(body: dict = Body(...)):
-    # proteger campos sensibles que no se tocan desde el frontend
-    body.pop("webhook_secret", None)
+@app.post("/config", summary="Actualizar configuracion", dependencies=[Depends(verify_api_key)])
+def update_config(body: ConfigUpdate):
+    # Convert Pydantic model to dict, excluding unset fields
+    updates = body.model_dump(exclude_unset=True)
+    # Convert nested Pydantic model to dict
+    if "signal_filters" in updates and updates["signal_filters"] is not None:
+        updates["signal_filters"] = {
+            k: v for k, v in updates["signal_filters"].items() if v is not None
+        }
     try:
-        updated = save_config(body)
+        updated = save_config(updates)
         updated.pop("webhook_secret", None)
         return {"ok": True, "config": updated}
     except Exception as e:
@@ -1230,7 +1276,7 @@ def list_positions(
     return {"total": len(positions), "positions": positions}
 
 
-@app.post("/positions", summary="Abrir nueva posicion")
+@app.post("/positions", summary="Abrir nueva posicion", dependencies=[Depends(verify_api_key)])
 def open_position(body: dict = Body(...)):
     required = {"symbol", "entry_price"}
     missing  = required - body.keys()
@@ -1244,7 +1290,7 @@ def open_position(body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/positions/{pos_id}", summary="Editar posicion (SL/TP/notas)")
+@app.put("/positions/{pos_id}", summary="Editar posicion (SL/TP/notas)", dependencies=[Depends(verify_api_key)])
 def edit_position(pos_id: int, body: dict = Body(...)):
     pos = db_update_position(pos_id, body)
     if not pos:
@@ -1253,7 +1299,7 @@ def edit_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@app.post("/positions/{pos_id}/close", summary="Cerrar posicion manualmente")
+@app.post("/positions/{pos_id}/close", summary="Cerrar posicion manualmente", dependencies=[Depends(verify_api_key)])
 def close_position(pos_id: int, body: dict = Body(...)):
     exit_price  = body.get("exit_price")
     exit_reason = body.get("exit_reason", "MANUAL")
@@ -1267,7 +1313,7 @@ def close_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@app.delete("/positions/{pos_id}", summary="Cancelar/eliminar posicion")
+@app.delete("/positions/{pos_id}", summary="Cancelar/eliminar posicion", dependencies=[Depends(verify_api_key)])
 def delete_position(pos_id: int):
     con = get_db()
     row = con.execute("SELECT id FROM positions WHERE id=?", (pos_id,)).fetchone()
@@ -1281,7 +1327,7 @@ def delete_position(pos_id: int):
     return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}
 
 
-@app.get("/webhook/test", summary="Probar webhook y Telegram directo")
+@app.get("/webhook/test", summary="Probar webhook y Telegram directo", dependencies=[Depends(verify_api_key)])
 def test_webhook():
     cfg     = load_config()
     ts      = datetime.now(timezone.utc).isoformat()
