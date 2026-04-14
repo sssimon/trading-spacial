@@ -704,27 +704,42 @@ def build_telegram_message(rep: dict) -> str:
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def push_telegram_direct(rep: dict, cfg: dict):
-    """Envía señal directo a Telegram (sin n8n). Usa telegram_bot_token del config."""
+def push_telegram_direct(rep: dict, cfg: dict, max_retries: int = 3):
+    """Envía señal directo a Telegram con retry y backoff exponencial."""
     token   = cfg.get("telegram_bot_token", "").strip()
     chat_id = cfg.get("telegram_chat_id", "").strip()
     if not token or not chat_id:
         log.debug("Telegram directo no configurado (falta bot_token o chat_id)")
-        return
+        return False
+
     msg = build_telegram_message(rep)
     url = _TELEGRAM_API.format(token=token)
-    try:
-        r = req_lib.post(url, json={
-            "chat_id":    chat_id,
-            "text":       msg,
-            "parse_mode": "Markdown",
-        }, timeout=10)
-        if r.ok:
-            log.info(f"Telegram directo OK [{rep.get('symbol')}] -> chat {chat_id}")
-        else:
+
+    for attempt in range(max_retries):
+        try:
+            r = req_lib.post(url, json={
+                "chat_id":    chat_id,
+                "text":       msg,
+                "parse_mode": "Markdown",
+            }, timeout=10)
+            if r.ok:
+                log.info(f"Telegram directo OK [{rep.get('symbol')}] -> chat {chat_id}")
+                return True
+            if r.status_code == 429:  # Rate limited
+                retry_after = int(r.headers.get("Retry-After", 2 ** attempt))
+                log.warning(f"Telegram rate limited, retry in {retry_after}s")
+                time.sleep(retry_after)
+                continue
             log.warning(f"Telegram directo fallo HTTP {r.status_code}: {r.text[:120]}")
-    except Exception as e:
-        log.warning(f"Telegram directo error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        except Exception as e:
+            log.warning(f"Telegram directo error (attempt {attempt+1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+
+    log.error(f"Telegram: todos los intentos fallaron para [{rep.get('symbol')}]")
+    return False
 
 
 def push_webhook(rep: dict, scan_id: int, cfg: dict):
