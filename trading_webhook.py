@@ -7,6 +7,7 @@ Uses the preformatted telegram_message from the scanner payload.
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import subprocess
@@ -14,16 +15,47 @@ import sys
 
 # Configuration
 PORT = 9000
-TELEGRAM_TARGET = "380882623"  # Simon's Telegram chat ID
 _DIR     = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(_DIR, "logs", "webhook.log")
+
+def _load_webhook_config():
+    """Load telegram_chat_id and openclaw path from config.json."""
+    cfg_path = os.path.join(_DIR, "config.json")
+    cfg = {}
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+    return cfg
+
+def _get_telegram_target():
+    return _load_webhook_config().get("telegram_chat_id", "")
+
+def _get_openclaw_cmd():
+    cfg = _load_webhook_config()
+    configured = cfg.get("openclaw_path", "")
+    if configured and os.path.isfile(configured):
+        return configured
+    import shutil
+    found = shutil.which("openclaw")
+    if found:
+        return found
+    return "openclaw"
+
 os.makedirs(os.path.join(_DIR, "logs"), exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,  # 5 MB per file
+            backupCount=5,              # keep 5 old files
+            encoding="utf-8",
+        ),
         logging.StreamHandler()
     ]
 )
@@ -83,9 +115,12 @@ def construct_fallback_message(payload):
 def send_via_openclaw(message):
     """Send message to Telegram using OpenClaw CLI."""
     try:
-        # Use absolute path to openclaw.cmd
-        openclaw_cmd = r"C:\Users\simon\AppData\Roaming\npm\openclaw.cmd"
-        cmd = [openclaw_cmd, "message", "send", "--channel", "telegram", "--target", TELEGRAM_TARGET, "--message", message]
+        openclaw_cmd = _get_openclaw_cmd()
+        telegram_target = _get_telegram_target()
+        if not telegram_target:
+            logger.error("telegram_chat_id not configured in config.json")
+            return False
+        cmd = [openclaw_cmd, "message", "send", "--channel", "telegram", "--target", telegram_target, "--message", message]
         logger.info(f"Executing: {' '.join(cmd)}")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

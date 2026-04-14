@@ -10,7 +10,7 @@ import pytest
 import sqlite3
 import tempfile
 from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -438,9 +438,11 @@ class TestAPIEndpoints:
         data = r.json()
         assert data.get("symbol") == "BTCUSDT"
 
-    def test_webhook_test_sin_config_400(self, client):
+    def test_webhook_test_sin_config(self, client):
         r = client.get("/webhook/test")
-        assert r.status_code == 400
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is False
 
     def test_webhook_test_con_url(self, client, tmp_path, monkeypatch):
         import btc_api
@@ -569,3 +571,755 @@ class TestLoadConfig:
         # notify_setup_only debe tener valor por defecto
         assert "notify_setup_only" in cfg
         assert cfg["notify_setup_only"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — Posiciones CRUD (funciones de DB)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPositionsCRUD:
+    """Tests for the position management system (DB-level functions)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_db(self, tmp_path, monkeypatch):
+        """Fresh DB for each test."""
+        import btc_api
+        db_path = str(tmp_path / "test_pos.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        btc_api.init_db()
+
+    # --- db_create_position ---
+
+    def test_create_position_basic(self):
+        """Create a position with minimal data (symbol + entry_price)."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        assert isinstance(pos, dict)
+        assert pos["id"] > 0
+        assert pos["symbol"] == "BTCUSDT"
+        assert pos["entry_price"] == 65000.0
+        assert pos["status"] == "open"
+        assert pos["direction"] == "LONG"  # default
+
+    def test_create_position_full(self):
+        """Create a position with all fields."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "ethusdt",
+            "entry_price": 3500.0,
+            "sl_price": 3200.0,
+            "tp_price": 4000.0,
+            "qty": 1.5,
+            "direction": "LONG",
+            "notes": "Test position",
+            "size_usd": 5250.0,
+        })
+        assert pos["symbol"] == "ETHUSDT"  # uppercased
+        assert pos["entry_price"] == 3500.0
+        assert pos["sl_price"] == 3200.0
+        assert pos["tp_price"] == 4000.0
+        assert pos["qty"] == 1.5
+        assert pos["direction"] == "LONG"
+        assert pos["status"] == "open"
+        assert pos["notes"] == "Test position"
+
+    def test_create_position_short_direction(self):
+        """Create a SHORT position."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 68000.0,
+            "direction": "short",
+        })
+        assert pos["direction"] == "SHORT"
+
+    def test_create_position_with_scan_id(self):
+        """Position linked to a scan_id."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "scan_id": 42,
+        })
+        assert pos["scan_id"] == 42
+
+    def test_create_position_qty_from_size_usd(self):
+        """When qty is not given, it is derived from size_usd / entry_price."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 50000.0,
+            "size_usd": 1000.0,
+        })
+        # qty = 1000 / 50000 = 0.02
+        assert pos["qty"] == pytest.approx(0.02, abs=1e-6)
+
+    # --- db_get_positions ---
+
+    def test_get_positions_empty(self):
+        """No positions returns empty list."""
+        import btc_api
+        positions = btc_api.db_get_positions()
+        assert positions == []
+
+    def test_get_positions_returns_all(self):
+        """Get all positions regardless of status."""
+        import btc_api
+        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        positions = btc_api.db_get_positions()
+        assert len(positions) == 2
+
+    def test_get_positions_filter_status(self):
+        """Filter positions by status."""
+        import btc_api
+        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        btc_api.db_close_position(pos2["id"], 3800.0, "TP_HIT")
+
+        open_pos = btc_api.db_get_positions(status="open")
+        closed_pos = btc_api.db_get_positions(status="closed")
+        all_pos = btc_api.db_get_positions()
+
+        assert len(open_pos) == 1
+        assert open_pos[0]["symbol"] == "BTCUSDT"
+        assert len(closed_pos) == 1
+        assert closed_pos[0]["symbol"] == "ETHUSDT"
+        assert len(all_pos) == 2
+
+    def test_get_positions_status_all_returns_everything(self):
+        """status='all' behaves same as no filter."""
+        import btc_api
+        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        btc_api.db_close_position(pos2["id"], 3800.0, "MANUAL")
+
+        all_pos = btc_api.db_get_positions(status="all")
+        assert len(all_pos) == 2
+
+    def test_get_positions_ordered_desc(self):
+        """Positions are returned in descending id order (newest first)."""
+        import btc_api
+        p1 = btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        p2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        positions = btc_api.db_get_positions()
+        assert positions[0]["id"] == p2["id"]
+        assert positions[1]["id"] == p1["id"]
+
+    # --- db_close_position ---
+
+    def test_close_position(self):
+        """Close a position and verify exit data."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
+        })
+        closed = btc_api.db_close_position(pos["id"], 68000.0, "TP_HIT")
+        assert closed is not None
+        assert closed["exit_price"] == 68000.0
+        assert closed["exit_reason"] == "TP_HIT"
+        assert closed["status"] == "closed"
+        assert closed["exit_ts"] is not None
+
+    def test_close_position_pnl_long(self):
+        """P&L calculation correct for LONG position."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
+        })
+        closed = btc_api.db_close_position(pos["id"], 68000.0, "TP_HIT")
+        # PnL = (68000 - 65000) * 0.1 = 300
+        assert closed["pnl_usd"] == pytest.approx(300.0, abs=0.01)
+        assert closed["pnl_pct"] > 0
+
+    def test_close_position_pnl_long_loss(self):
+        """Negative P&L for LONG position that drops."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
+        })
+        closed = btc_api.db_close_position(pos["id"], 63000.0, "SL_HIT")
+        # PnL = (63000 - 65000) * 0.1 = -200
+        assert closed["pnl_usd"] == pytest.approx(-200.0, abs=0.01)
+        assert closed["pnl_pct"] < 0
+
+    def test_close_position_pnl_short(self):
+        """P&L calculation correct for SHORT position."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 68000.0,
+            "qty": 0.1,
+            "direction": "SHORT",
+        })
+        closed = btc_api.db_close_position(pos["id"], 65000.0, "TP_HIT")
+        # PnL for SHORT = (entry - exit) * qty = (68000 - 65000) * 0.1 = 300
+        assert closed["pnl_usd"] == pytest.approx(300.0, abs=0.01)
+        assert closed["pnl_pct"] > 0
+
+    def test_close_position_pnl_short_loss(self):
+        """Negative P&L for SHORT position that rises."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "SHORT",
+        })
+        closed = btc_api.db_close_position(pos["id"], 68000.0, "SL_HIT")
+        # PnL = (65000 - 68000) * 0.1 = -300
+        assert closed["pnl_usd"] == pytest.approx(-300.0, abs=0.01)
+        assert closed["pnl_pct"] < 0
+
+    def test_close_nonexistent_position_returns_none(self):
+        """Closing a position that does not exist returns None."""
+        import btc_api
+        result = btc_api.db_close_position(9999, 68000.0, "MANUAL")
+        assert result is None
+
+    # --- db_update_position ---
+
+    def test_update_position_sl_tp(self):
+        """Update SL/TP of an open position."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+        })
+        updated = btc_api.db_update_position(pos["id"], {
+            "sl_price": 64000.0,
+            "tp_price": 72000.0,
+        })
+        assert updated is not None
+        assert updated["sl_price"] == 64000.0
+        assert updated["tp_price"] == 72000.0
+        # Entry price unchanged
+        assert updated["entry_price"] == 65000.0
+
+    def test_update_position_notes(self):
+        """Update notes field."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        updated = btc_api.db_update_position(pos["id"], {"notes": "Updated note"})
+        assert updated["notes"] == "Updated note"
+
+    def test_update_position_rejects_invalid_fields(self):
+        """Only allowed fields can be updated; invalid fields return None."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        # db_update_position uses an 'allowed' set whitelist;
+        # passing only invalid fields returns None (no updates)
+        result = btc_api.db_update_position(pos["id"], {"malicious_field": "hacked"})
+        assert result is None
+
+    def test_update_position_mixed_valid_invalid_fields(self):
+        """Mixed valid and invalid fields: only valid ones are applied."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+        })
+        updated = btc_api.db_update_position(pos["id"], {
+            "sl_price": 64000.0,
+            "evil_field": "drop table",
+        })
+        assert updated is not None
+        assert updated["sl_price"] == 64000.0
+
+    def test_update_position_allowed_fields(self):
+        """All allowed fields can be updated."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        updated = btc_api.db_update_position(pos["id"], {
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "size_usd": 1000.0,
+            "qty": 0.5,
+            "notes": "all fields",
+            "entry_price": 65500.0,
+        })
+        assert updated["sl_price"] == 63000.0
+        assert updated["tp_price"] == 70000.0
+        assert updated["size_usd"] == 1000.0
+        assert updated["qty"] == 0.5
+        assert updated["notes"] == "all fields"
+        assert updated["entry_price"] == 65500.0
+
+    # --- check_position_stops ---
+
+    def test_check_stops_sl_hit_long(self):
+        """SL hit on LONG position auto-closes it."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 62000.0)  # below SL
+        positions = btc_api.db_get_positions(status="closed")
+        assert len(positions) == 1
+        assert positions[0]["exit_reason"] == "SL_HIT"
+        assert positions[0]["exit_price"] == 63000.0  # closes at SL price
+
+    def test_check_stops_tp_hit_long(self):
+        """TP hit on LONG position auto-closes it."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 71000.0)  # above TP
+        positions = btc_api.db_get_positions(status="closed")
+        assert len(positions) == 1
+        assert positions[0]["exit_reason"] == "TP_HIT"
+        assert positions[0]["exit_price"] == 70000.0  # closes at TP price
+
+    def test_check_stops_price_between_sl_tp(self):
+        """Price between SL and TP does not close the position."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 66000.0)
+        open_pos = btc_api.db_get_positions(status="open")
+        closed_pos = btc_api.db_get_positions(status="closed")
+        assert len(open_pos) == 1
+        assert len(closed_pos) == 0
+
+    def test_check_stops_no_sl_tp(self):
+        """Position without SL/TP is never auto-closed."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 50000.0)  # huge drop
+        open_pos = btc_api.db_get_positions(status="open")
+        assert len(open_pos) == 1  # still open
+
+    def test_check_stops_different_symbol(self):
+        """Only positions matching the symbol are checked."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("ETHUSDT", 1000.0)  # different symbol
+        open_pos = btc_api.db_get_positions(status="open")
+        assert len(open_pos) == 1  # BTC position still open
+
+    def test_check_stops_sl_at_exact_price(self):
+        """SL triggered when price equals SL exactly."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 63000.0)  # exactly at SL
+        closed_pos = btc_api.db_get_positions(status="closed")
+        assert len(closed_pos) == 1
+        assert closed_pos[0]["exit_reason"] == "SL_HIT"
+
+    def test_check_stops_tp_at_exact_price(self):
+        """TP triggered when price equals TP exactly."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 70000.0)  # exactly at TP
+        closed_pos = btc_api.db_get_positions(status="closed")
+        assert len(closed_pos) == 1
+        assert closed_pos[0]["exit_reason"] == "TP_HIT"
+
+    def test_check_stops_multiple_positions(self):
+        """Multiple open positions for same symbol are all checked."""
+        import btc_api
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 60000.0,
+            "sl_price": 58000.0,
+            "tp_price": 68000.0,
+            "direction": "LONG",
+        })
+        # Price triggers TP on second position (>=68000) but not first (needs >=70000)
+        btc_api.check_position_stops("BTCUSDT", 69000.0)
+        open_pos = btc_api.db_get_positions(status="open")
+        closed_pos = btc_api.db_get_positions(status="closed")
+        assert len(open_pos) == 1
+        assert len(closed_pos) == 1
+        assert closed_pos[0]["entry_price"] == 60000.0  # second one hit TP
+
+    def test_check_stops_already_closed_not_affected(self):
+        """Already-closed positions are not re-checked."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+            "tp_price": 70000.0,
+            "direction": "LONG",
+        })
+        btc_api.db_close_position(pos["id"], 68000.0, "MANUAL")
+        # Now check stops with price below SL -- should NOT re-close
+        btc_api.check_position_stops("BTCUSDT", 60000.0)
+        closed_pos = btc_api.db_get_positions(status="closed")
+        assert len(closed_pos) == 1
+        assert closed_pos[0]["exit_reason"] == "MANUAL"  # original reason
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — Posiciones API endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPositionsAPI:
+    """Tests for position API endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def setup_test_app(self, tmp_path, monkeypatch):
+        """Configure app with temp DB and config."""
+        import btc_api
+        db_path = str(tmp_path / "test_pos_api.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        cfg_path = str(tmp_path / "config.json")
+        with open(cfg_path, "w") as f:
+            json.dump({"webhook_url": "", "webhook_secret": "",
+                       "notify_setup_only": False, "scan_interval_sec": 300}, f)
+        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        # Monkeypatch DATA_DIR and LOGS_DIR to temp dirs to avoid file writes
+        monkeypatch.setattr(btc_api, "DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setattr(btc_api, "LOGS_DIR", str(tmp_path / "logs"))
+        monkeypatch.setattr(btc_api, "POSITIONS_JSON_FILE",
+                            str(tmp_path / "data" / "positions_summary.json"))
+        monkeypatch.setattr(btc_api, "SIGNALS_LOG_FILE",
+                            str(tmp_path / "logs" / "signals.log"))
+        btc_api.init_db()
+
+    @pytest.fixture
+    def client(self):
+        """TestClient with position routes registered."""
+        from fastapi.testclient import TestClient
+        from fastapi import FastAPI
+        import btc_api
+
+        test_app = FastAPI()
+        test_app.get("/positions")(btc_api.list_positions)
+        test_app.post("/positions")(btc_api.open_position)
+        test_app.put("/positions/{pos_id}")(btc_api.edit_position)
+        test_app.post("/positions/{pos_id}/close")(btc_api.close_position)
+        test_app.delete("/positions/{pos_id}")(btc_api.delete_position)
+
+        return TestClient(test_app)
+
+    def test_get_positions_empty(self, client):
+        """GET /positions returns 200 with empty list."""
+        r = client.get("/positions")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 0
+        assert data["positions"] == []
+
+    def test_create_position_via_api(self, client):
+        """POST /positions creates a position."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["position"]["symbol"] == "BTCUSDT"
+        assert data["position"]["entry_price"] == 65000.0
+        assert data["position"]["status"] == "open"
+
+    def test_create_position_missing_fields(self, client):
+        """POST /positions without required fields returns 422."""
+        r = client.post("/positions", json={"symbol": "BTCUSDT"})
+        assert r.status_code == 422
+
+    def test_create_position_full_fields(self, client):
+        """POST /positions with all optional fields."""
+        r = client.post("/positions", json={
+            "symbol": "ETHUSDT",
+            "entry_price": 3500.0,
+            "sl_price": 3200.0,
+            "tp_price": 4000.0,
+            "qty": 1.5,
+            "direction": "LONG",
+            "notes": "API test",
+        })
+        assert r.status_code == 200
+        pos = r.json()["position"]
+        assert pos["sl_price"] == 3200.0
+        assert pos["tp_price"] == 4000.0
+        assert pos["qty"] == 1.5
+
+    def test_close_position_via_api(self, client):
+        """POST /positions/{id}/close closes a position."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "qty": 0.1,
+        })
+        pos_id = r.json()["position"]["id"]
+
+        r2 = client.post(f"/positions/{pos_id}/close", json={
+            "exit_price": 68000.0,
+            "exit_reason": "MANUAL",
+        })
+        assert r2.status_code == 200
+        data = r2.json()
+        assert data["ok"] is True
+        assert data["position"]["status"] == "closed"
+        assert data["position"]["exit_price"] == 68000.0
+        assert data["position"]["exit_reason"] == "MANUAL"
+
+    def test_close_position_missing_exit_price(self, client):
+        """POST /positions/{id}/close without exit_price returns 422."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        pos_id = r.json()["position"]["id"]
+        r2 = client.post(f"/positions/{pos_id}/close", json={})
+        assert r2.status_code == 422
+
+    def test_close_nonexistent_position_via_api(self, client):
+        """POST /positions/9999/close returns 404."""
+        r = client.post("/positions/9999/close", json={
+            "exit_price": 68000.0,
+        })
+        assert r.status_code == 404
+
+    def test_edit_position_via_api(self, client):
+        """PUT /positions/{id} updates allowed fields."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+            "sl_price": 63000.0,
+        })
+        pos_id = r.json()["position"]["id"]
+
+        r2 = client.put(f"/positions/{pos_id}", json={
+            "sl_price": 64000.0,
+            "tp_price": 72000.0,
+        })
+        assert r2.status_code == 200
+        pos = r2.json()["position"]
+        assert pos["sl_price"] == 64000.0
+        assert pos["tp_price"] == 72000.0
+
+    def test_edit_position_invalid_fields_returns_404(self, client):
+        """PUT /positions/{id} with only invalid fields returns 404."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        pos_id = r.json()["position"]["id"]
+        r2 = client.put(f"/positions/{pos_id}", json={"bad_field": "value"})
+        # db_update_position returns None for only-invalid fields -> 404
+        assert r2.status_code == 404
+
+    def test_delete_position_via_api(self, client):
+        """DELETE /positions/{id} cancels the position."""
+        r = client.post("/positions", json={
+            "symbol": "BTCUSDT",
+            "entry_price": 65000.0,
+        })
+        pos_id = r.json()["position"]["id"]
+
+        r2 = client.delete(f"/positions/{pos_id}")
+        assert r2.status_code == 200
+        assert r2.json()["ok"] is True
+
+        # Verify it's marked as cancelled
+        r3 = client.get("/positions")
+        positions = r3.json()["positions"]
+        assert len(positions) == 1
+        assert positions[0]["status"] == "cancelled"
+
+    def test_delete_nonexistent_position(self, client):
+        """DELETE /positions/9999 returns 404."""
+        r = client.delete("/positions/9999")
+        assert r.status_code == 404
+
+    def test_get_positions_filter_open(self, client):
+        """GET /positions?status=open filters correctly."""
+        client.post("/positions", json={
+            "symbol": "BTCUSDT", "entry_price": 65000.0,
+        })
+        r = client.post("/positions", json={
+            "symbol": "ETHUSDT", "entry_price": 3500.0,
+        })
+        pos_id = r.json()["position"]["id"]
+        client.post(f"/positions/{pos_id}/close", json={
+            "exit_price": 3800.0, "exit_reason": "MANUAL",
+        })
+
+        r_open = client.get("/positions?status=open")
+        assert r_open.json()["total"] == 1
+        assert r_open.json()["positions"][0]["symbol"] == "BTCUSDT"
+
+        r_closed = client.get("/positions?status=closed")
+        assert r_closed.json()["total"] == 1
+        assert r_closed.json()["positions"][0]["symbol"] == "ETHUSDT"
+
+    def test_full_position_lifecycle(self, client):
+        """Create -> Edit -> Close lifecycle via API."""
+        # Create
+        r1 = client.post("/positions", json={
+            "symbol": "SOLUSDT",
+            "entry_price": 150.0,
+            "qty": 10.0,
+            "direction": "LONG",
+        })
+        assert r1.status_code == 200
+        pos_id = r1.json()["position"]["id"]
+
+        # Edit (trail stop loss up)
+        r2 = client.put(f"/positions/{pos_id}", json={
+            "sl_price": 145.0,
+            "tp_price": 180.0,
+        })
+        assert r2.status_code == 200
+        assert r2.json()["position"]["sl_price"] == 145.0
+
+        # Close
+        r3 = client.post(f"/positions/{pos_id}/close", json={
+            "exit_price": 175.0,
+            "exit_reason": "MANUAL",
+        })
+        assert r3.status_code == 200
+        pos = r3.json()["position"]
+        assert pos["status"] == "closed"
+        assert pos["pnl_usd"] == pytest.approx(250.0, abs=0.01)  # (175-150)*10
+    def test_dedup_window_default(self, tmp_path, monkeypatch):
+        import btc_api
+        cfg_path = str(tmp_path / "config.json")
+        with open(cfg_path, "w") as f:
+            json.dump({}, f)
+        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        cfg = btc_api.load_config()
+        assert cfg["signal_filters"]["dedup_window_minutes"] == 30
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — Signal deduplication
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSignalDeduplication:
+    @pytest.fixture(autouse=True)
+    def clear_notified(self):
+        """Clear the in-memory dedup tracker before each test."""
+        import btc_api
+        btc_api._notified_signals.clear()
+        yield
+        btc_api._notified_signals.clear()
+
+    def test_first_signal_is_not_duplicate(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is False
+
+    def test_same_symbol_is_duplicate_within_window(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        btc_api._mark_notified("BTCUSDT")
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is True
+
+    def test_different_symbol_is_not_duplicate(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        btc_api._mark_notified("BTCUSDT")
+        assert btc_api._is_duplicate_signal("ETHUSDT", cfg) is False
+
+    def test_signal_outside_window_is_not_duplicate(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        # Simulate a notification from 31 minutes ago
+        old_ts = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        btc_api._notified_signals["BTCUSDT"] = old_ts
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is False
+
+    def test_signal_inside_window_is_duplicate(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        # Simulate a notification from 10 minutes ago
+        recent_ts = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        btc_api._notified_signals["BTCUSDT"] = recent_ts
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is True
+
+    def test_custom_dedup_window(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 5}}
+        # 6 minutes ago should be outside a 5-minute window
+        old_ts = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+        btc_api._notified_signals["BTCUSDT"] = old_ts
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is False
+
+    def test_mark_notified_updates_timestamp(self):
+        import btc_api
+        cfg = {"signal_filters": {"dedup_window_minutes": 30}}
+        btc_api._mark_notified("BTCUSDT")
+        ts1 = btc_api._notified_signals["BTCUSDT"]
+        assert ts1 is not None
+        # Mark again — timestamp should be present
+        btc_api._mark_notified("BTCUSDT")
+        ts2 = btc_api._notified_signals["BTCUSDT"]
+        assert ts2 >= ts1
+
+    def test_default_window_from_config(self):
+        """When dedup_window_minutes is not set, default to 30."""
+        import btc_api
+        cfg = {"signal_filters": {}}
+        btc_api._mark_notified("BTCUSDT")
+        assert btc_api._is_duplicate_signal("BTCUSDT", cfg) is True
