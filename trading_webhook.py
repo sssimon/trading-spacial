@@ -19,6 +19,17 @@ _DIR     = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(_DIR, "logs", "webhook.log")
 os.makedirs(os.path.join(_DIR, "logs"), exist_ok=True)
 
+def load_config():
+    """Load config.json if it exists."""
+    cfg_path = os.path.join(_DIR, "config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading config.json: {e}")
+    return {}
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,6 +46,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Endpoint not found")
             return
         
+        # Security: Validate secret if configured
+        cfg = load_config()
+        secret = cfg.get("webhook_secret", "").strip()
+        if secret:
+            received_secret = self.headers.get("X-Scanner-Secret", "").strip()
+            # fallback to X-Webhook-Secret if someone used the other name
+            if not received_secret:
+                received_secret = self.headers.get("X-Webhook-Secret", "").strip()
+            
+            import hmac
+            if not hmac.compare_digest(received_secret, secret):
+                logger.warning(f"Unauthorized webhook attempt from {self.address_string()}")
+                self.send_error(401, "Unauthorized: Invalid secret")
+                return
+
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length == 0:
             self.send_error(400, "Empty body")
@@ -83,9 +109,20 @@ def construct_fallback_message(payload):
 def send_via_openclaw(message):
     """Send message to Telegram using OpenClaw CLI."""
     try:
-        # Use absolute path to openclaw.cmd
-        openclaw_cmd = r"C:\Users\simon\AppData\Roaming\npm\openclaw.cmd"
-        cmd = [openclaw_cmd, "message", "send", "--channel", "telegram", "--target", TELEGRAM_TARGET, "--message", message]
+        cfg = load_config()
+        # Use target from config, fallback to default
+        target = cfg.get("telegram_chat_id", TELEGRAM_TARGET)
+        
+        # Detect openclaw command
+        openclaw_cmd = cfg.get("openclaw_path")
+        if not openclaw_cmd or not os.path.exists(openclaw_cmd):
+            # Fallback to absolute path or just 'openclaw' if not on Windows
+            openclaw_cmd = r"C:\Users\simon\AppData\Roaming\npm\openclaw.cmd"
+            if not os.path.exists(openclaw_cmd):
+                import shutil
+                openclaw_cmd = shutil.which("openclaw") or "openclaw"
+
+        cmd = [openclaw_cmd, "message", "send", "--channel", "telegram", "--target", str(target), "--message", message]
         logger.info(f"Executing: {' '.join(cmd)}")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
