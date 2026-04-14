@@ -99,7 +99,7 @@ const SignalsTable: React.FC<SignalsTableProps> = ({ signals, loading, onOpenPos
                   </td>
                   <td className="col-score">
                     <span className={`score-pill ${getScoreClass(sig.score ?? 0)}`}>
-                      {sig.score != null ? sig.score.toFixed(1) : '—'}
+                      {sig.score != null ? sig.score.toFixed(0) : '—'}
                     </span>
                   </td>
                   <td className="col-estado">

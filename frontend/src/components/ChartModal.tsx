@@ -303,7 +303,7 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
           <div className="chart-chip">
             <span className="chart-chip-label">Score</span>
             <span className="chart-chip-val" style={{ color: scoreColor }}>
-              {score}/10
+              {score}/9
             </span>
           </div>
           <div className="chart-chip">

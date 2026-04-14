@@ -47,8 +47,8 @@ const SymbolCard: React.FC<SymbolCardProps> = ({ symbol, onClick }) => {
 
   // Clamp lrc_pct to 0–100 for bar display
   const lrcBarPct   = Math.min(100, Math.max(0, lrc));
-  // Score 0–10 for bar
-  const scoreBarPct = Math.min(100, Math.max(0, (score / 10) * 100));
+  // Score 0–9 for bar
+  const scoreBarPct = Math.min(100, Math.max(0, (score / 9) * 100));
 
   let cardClass = 'symbol-card';
   if (isSenal) cardClass += ' symbol-card--signal';
@@ -115,7 +115,7 @@ const SymbolCard: React.FC<SymbolCardProps> = ({ symbol, onClick }) => {
         <div className="metric-row">
           <span className="metric-name">Score</span>
           <span className="metric-val" style={{ color: getScoreColor(score) }}>
-            {symbol.score != null ? score.toFixed(1) : '—'}
+            {symbol.score != null ? score.toFixed(0) : '—'}
           </span>
         </div>
         <div className="bar-track">

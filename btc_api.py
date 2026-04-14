@@ -28,7 +28,6 @@ import sqlite3
 import json
 import os
 import time
-import shutil
 import glob
 import hmac
 import requests as req_lib
@@ -696,19 +695,26 @@ def get_active_symbols(n: int = 20) -> List[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups")
-_BACKUP_INTERVAL_SCANS = 288  # ~24h at 5min intervals
+_BACKUP_INTERVAL_CYCLES = 288  # ~24h at 5min cycles (288 × 5min = 1440min)
 _BACKUP_MAX_FILES = 7
+_backup_cycles_since_last = 0
 
 
 def backup_db():
-    """Create a timestamped backup of signals.db. Keeps last 7 backups."""
+    """Create a timestamped backup of signals.db using sqlite3 online backup.
+    Keeps last 7 backups. Uses sqlite3.Connection.backup() for a consistent
+    snapshot even while the database is actively being written to (WAL mode)."""
     if not os.path.exists(DB_FILE):
         return
     os.makedirs(_BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(_BACKUP_DIR, f"signals_{timestamp}.db")
     try:
-        shutil.copy2(DB_FILE, backup_path)
+        src = sqlite3.connect(DB_FILE)
+        dst = sqlite3.connect(backup_path)
+        src.backup(dst)
+        dst.close()
+        src.close()
         log.info(f"DB backup: {backup_path}")
         # Cleanup old backups
         backups = sorted(glob.glob(os.path.join(_BACKUP_DIR, "signals_*.db")))
@@ -1233,9 +1239,12 @@ def scanner_loop():
         except Exception as e:
             log.warning(f"check_pending_signal_outcomes error en ciclo: {e}")
 
-        # Periodic DB backup (~every 24h)
-        if _scanner_state["scans_total"] % _BACKUP_INTERVAL_SCANS == 0 and _scanner_state["scans_total"] > 0:
+        # Periodic DB backup (~every 24h, counted per cycle not per symbol)
+        global _backup_cycles_since_last
+        _backup_cycles_since_last += 1
+        if _backup_cycles_since_last >= _BACKUP_INTERVAL_CYCLES:
             backup_db()
+            _backup_cycles_since_last = 0
 
         elapsed    = time.time() - cycle_start
         sleep_time = max(5, interval - elapsed)
@@ -1530,31 +1539,30 @@ def update_config(body: ConfigUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/ohlcv", summary="Velas OHLCV para graficar (fuente: Binance)")
+@app.get("/ohlcv", summary="Velas OHLCV para graficar")
 def get_ohlcv(
     symbol:   str = Query("BTCUSDT", description="Par de trading (ej: ETHUSDT)"),
     interval: str = Query("1h",      description="Intervalo: 5m,15m,1h,4h,1d"),
     limit:    int = Query(300,       ge=1, le=1000, description="Número de velas"),
 ):
-    """Retorna datos OHLCV listos para lightweight-charts (timestamps en segundos UTC)."""
+    """Retorna datos OHLCV listos para lightweight-charts (timestamps en segundos UTC).
+    Usa get_klines() del scanner (proxy + fallback a Bybit integrados)."""
     VALID = {"1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"}
     if interval not in VALID:
         raise HTTPException(status_code=400, detail=f"Intervalo invalido: {interval}")
-    url = (
-        f"https://api.binance.com/api/v3/klines"
-        f"?symbol={symbol.upper()}&interval={interval}&limit={limit}"
-    )
     try:
-        r = req_lib.get(url, timeout=15)
-        r.raise_for_status()
-        raw = r.json()
+        df = get_klines(symbol.upper(), interval, limit=limit)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Error Binance: {e}")
+        raise HTTPException(status_code=502, detail=f"Error obteniendo OHLCV: {e}")
+
+    if df.empty:
+        return {"symbol": symbol.upper(), "interval": interval, "candles": [], "volumes": []}
 
     candles, volumes = [], []
-    for k in raw:
-        ts = int(k[0]) // 1000          # ms → segundos UTC
-        o, h, l, c, v = float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])
+    for _, row in df.iterrows():
+        ts = int(row.name.timestamp()) if hasattr(row.name, 'timestamp') else 0
+        o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
+        v = float(row["volume"])
         candles.append({"time": ts, "open": o, "high": h, "low": l, "close": c})
         volumes.append({
             "time":  ts,
