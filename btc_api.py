@@ -94,7 +94,36 @@ def load_config() -> dict:
         if "signal_filters" in stored:
             sf_defaults.update(stored["signal_filters"])
         defaults["signal_filters"] = sf_defaults
-    return defaults
+
+    # ENV var overrides (for Docker/container deployments)
+    cfg = defaults
+    _env_map = {
+        "TRADING_WEBHOOK_URL":       "webhook_url",
+        "TRADING_TELEGRAM_CHAT_ID":  "telegram_chat_id",
+        "TRADING_TELEGRAM_BOT_TOKEN": "telegram_bot_token",
+        "TRADING_WEBHOOK_SECRET":    "webhook_secret",
+        "TRADING_API_KEY":           "api_key",
+        "TRADING_PROXY":             "proxy",
+    }
+    _env_map_int = {
+        "TRADING_SCAN_INTERVAL": "scan_interval_sec",
+        "TRADING_NUM_SYMBOLS":   "num_symbols",
+    }
+
+    for env_key, cfg_key in _env_map.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            cfg[cfg_key] = val
+
+    for env_key, cfg_key in _env_map_int.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            try:
+                cfg[cfg_key] = int(val)
+            except ValueError:
+                pass
+
+    return cfg
 
 
 # ─────────────────────────────────────────────────────────────────────────────

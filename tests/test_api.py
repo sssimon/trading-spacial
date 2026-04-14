@@ -572,6 +572,17 @@ class TestLoadConfig:
         assert "notify_setup_only" in cfg
         assert cfg["notify_setup_only"] is False
 
+    def test_env_var_override(self, tmp_path, monkeypatch):
+        import btc_api
+        cfg_path = str(tmp_path / "config.json")
+        with open(cfg_path, "w") as f:
+            json.dump({"telegram_chat_id": "from_file"}, f)
+        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setenv("TRADING_TELEGRAM_CHAT_ID", "from_env")
+        cfg = btc_api.load_config()
+        assert cfg["telegram_chat_id"] == "from_env"  # ENV takes precedence
+
+    def test_env_var_int_conversion(self, tmp_path, monkeypatch):
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — execute_scan_for_symbol
@@ -1400,6 +1411,9 @@ class TestPositionsAPI:
         with open(cfg_path, "w") as f:
             json.dump({}, f)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setenv("TRADING_SCAN_INTERVAL", "120")
+        cfg = btc_api.load_config()
+        assert cfg["scan_interval_sec"] == 120
         cfg = btc_api.load_config()
         assert cfg["signal_filters"]["dedup_window_minutes"] == 30
 
