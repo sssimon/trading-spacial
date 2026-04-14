@@ -29,6 +29,7 @@ import time
 import requests as req_lib
 from datetime import datetime, timezone, timedelta
 import logging
+from logging.handlers import RotatingFileHandler
 
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

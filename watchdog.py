@@ -14,6 +14,7 @@ import sys
 import os
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 
 SCRIPT_DIR     = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +41,12 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,  # 5 MB per file
+            backupCount=5,              # keep 5 old files
+            encoding="utf-8",
+        ),
         logging.StreamHandler(sys.stdout),
     ],
 )

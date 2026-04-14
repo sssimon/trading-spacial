@@ -7,6 +7,7 @@ Uses the preformatted telegram_message from the scanner payload.
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import subprocess
@@ -49,7 +50,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,  # 5 MB per file
+            backupCount=5,              # keep 5 old files
+            encoding="utf-8",
+        ),
         logging.StreamHandler()
     ]
 )
