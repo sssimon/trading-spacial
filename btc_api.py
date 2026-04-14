@@ -342,22 +342,59 @@ def db_update_position(pos_id: int, data: dict) -> Optional[dict]:
 
 
 def check_position_stops(symbol: str, price: float):
-    """Auto-cierra posiciones abiertas si el precio toca TP o SL."""
+    """Auto-cierra posiciones abiertas si el precio toca TP o SL. Sends notifications."""
     con = get_db()
     rows = con.execute(
         "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
     ).fetchall()
     con.close()
+
+    cfg = load_config()
+
     for pos in [dict(r) for r in rows]:
+        reason = None
+        exit_price = None
+
         if pos["direction"] == "LONG":
             if pos["tp_price"] and price >= pos["tp_price"]:
-                db_close_position(pos["id"], pos["tp_price"], "TP_HIT")
-                log.info(f"POSICION #{pos['id']} {symbol} TP HIT @ ${pos['tp_price']}")
-                _write_position_event_log(pos, "TP_HIT", pos["tp_price"])
+                reason, exit_price = "TP_HIT", pos["tp_price"]
             elif pos["sl_price"] and price <= pos["sl_price"]:
-                db_close_position(pos["id"], pos["sl_price"], "SL_HIT")
-                log.info(f"POSICION #{pos['id']} {symbol} SL HIT @ ${pos['sl_price']}")
-                _write_position_event_log(pos, "SL_HIT", pos["sl_price"])
+                reason, exit_price = "SL_HIT", pos["sl_price"]
+        else:  # SHORT
+            if pos["tp_price"] and price <= pos["tp_price"]:
+                reason, exit_price = "TP_HIT", pos["tp_price"]
+            elif pos["sl_price"] and price >= pos["sl_price"]:
+                reason, exit_price = "SL_HIT", pos["sl_price"]
+
+        if reason:
+            db_close_position(pos["id"], exit_price, reason)
+            log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
+            _write_position_event_log(pos, reason, exit_price)
+
+            # Send Telegram notification
+            entry = pos.get("entry_price", 0)
+            qty = pos.get("qty", 0)
+            pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
+            pnl_str = f"${pnl_usd:+.2f}" if qty else "N/A"
+            pnl_pct_str = f"{pnl_pct:+.2f}%" if qty else "N/A"
+
+            if reason == "SL_HIT":
+                emoji, label = "\U0001f534", "STOP LOSS"
+            else:
+                emoji, label = "\U0001f7e2", "TAKE PROFIT"
+
+            msg = (
+                f"{emoji} *{label} HIT*\n"
+                f"*{symbol}* ({pos['direction']})\n"
+                f"Entry: `${entry:.2f}` -> Exit: `${exit_price:.2f}`\n"
+                f"P&L: `{pnl_str}` ({pnl_pct_str})\n"
+                f"Reason: `{reason}`"
+            )
+
+            try:
+                _send_telegram_raw(msg, cfg)
+            except Exception as e:
+                log.warning(f"Failed to notify {reason} for {symbol}: {e}")
 
 
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
@@ -729,6 +766,27 @@ def push_telegram_direct(rep: dict, cfg: dict):
             log.warning(f"Telegram directo fallo HTTP {r.status_code}: {r.text[:120]}")
     except Exception as e:
         log.warning(f"Telegram directo error: {e}")
+
+
+def _send_telegram_raw(message: str, cfg: dict):
+    """Send a raw message to Telegram without building from a scan report."""
+    token = cfg.get("telegram_bot_token", "").strip()
+    chat_id = cfg.get("telegram_chat_id", "").strip()
+    if not token or not chat_id:
+        return
+    url = _TELEGRAM_API.format(token=token)
+    try:
+        r = req_lib.post(url, json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown",
+        }, timeout=10)
+        if r.ok:
+            log.info(f"Telegram raw send OK -> chat {chat_id}")
+        else:
+            log.warning(f"Telegram raw send fallo HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        log.warning(f"Telegram raw send error: {e}")
 
 
 def push_webhook(rep: dict, scan_id: int, cfg: dict):
