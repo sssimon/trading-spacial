@@ -843,6 +843,8 @@ def scanner_loop():
 
                 if should_notify_signal(rep, cfg):
                     push_telegram_direct(rep, cfg)
+                    if cfg.get("webhook_url", "").strip():
+                        push_webhook(rep, scan_id, cfg)
                 else:
                     log.info(f"{sym}: {estado[:55]}")
 
@@ -994,6 +996,8 @@ def force_scan(
 
             if should_notify_signal(rep, cfg):
                 push_telegram_direct(rep, cfg)
+                if cfg.get("webhook_url", "").strip():
+                    push_webhook(rep, scan_id, cfg)
 
             results.append({
                 "symbol":    sym,
