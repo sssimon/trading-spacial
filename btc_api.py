@@ -566,20 +566,24 @@ def save_scan(rep: dict) -> int:
 def get_scans(limit=50, only_signals=False, only_setups=False,
               since_hours: Optional[float] = None,
               symbol: Optional[str] = None) -> list:
-    con   = get_db()
-    conds = []
+    con    = get_db()
+    conds  = []
+    params = []
     if symbol:
-        conds.append(f"symbol = '{symbol.upper()}'")
+        conds.append("symbol = ?")
+        params.append(symbol.upper())
     if only_signals:
         conds.append("señal = 1")
     elif only_setups:
         conds.append("(señal = 1 OR setup = 1)")
     if since_hours:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-        conds.append(f"ts >= '{cutoff}'")
+        conds.append("ts >= ?")
+        params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params.append(limit)
     rows  = con.execute(
-        f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", (limit,)
+        f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", params
     ).fetchall()
     con.close()
     return [dict(r) for r in rows]
