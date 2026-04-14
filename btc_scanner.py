@@ -664,7 +664,7 @@ def fmt(rep):
         f"  Precio > SMA100  : {ok(rep['macro_4h']['price_above'])}  "
         f"({'alcista ✅' if rep['macro_4h']['price_above'] else 'bajista ⚠️ — solo operar si hay confluencia fuerte'})",
         DIV,
-        f"  ── SCORE 1H : {rep['score']}/10  ({rep['score_label']}) ──────────────────",
+        f"  ── SCORE 1H : {rep['score']}/9  ({rep['score_label']}) ──────────────────",
     ]
 
     for k, v in rep.get("confirmations", {}).items():

@@ -231,7 +231,7 @@ def append_signal_log(rep: dict, scan_id: int):
             f"[{ts} UTC]  {tipo}  {sym}  (scan_id={scan_id})",
             sep,
             f"  Precio : ${price:>12,.4f}",
-            f"  LRC 1H : {lrc}%   Score: {score}/10  {slabel}",
+            f"  LRC 1H : {lrc}%   Score: {score}/9  {slabel}",
             f"  Macro  : {macro_s}",
         ]
         if is_sig:
@@ -661,7 +661,7 @@ def build_telegram_message(rep: dict) -> str:
         "",
         f"*Precio:* `${price:,.2f}`",
         f"*LRC 1H:* `{lrc.get('pct')}%`  _(zona <= 25% = LONG)_",
-        f"*Score:* `{score}/10`  _{slabel}_",
+        f"*Score:* `{score}/9`  _{slabel}_",
         f"*Macro 4H:* `{'Alcista' if macro.get('price_above') else 'Adversa'}`  _(Precio vs SMA100)_",
         "",
     ]
@@ -832,12 +832,12 @@ def scanner_loop():
 
                 if is_signal:
                     _scanner_state["signals_total"] += 1
-                    log.info(f"SENAL {sym} — score {rep.get('score')}/10  "
+                    log.info(f"SENAL {sym} — score {rep.get('score')}/9  "
                              f"precio ${rep.get('price')}")
                     append_signal_log(rep, scan_id)
                     append_signal_csv(rep, scan_id)
                 elif is_setup:
-                    log.info(f"SETUP {sym} — score {rep.get('score')}/10 (sin gatillo)")
+                    log.info(f"SETUP {sym} — score {rep.get('score')}/9 (sin gatillo)")
                     append_signal_log(rep, scan_id)
                     append_signal_csv(rep, scan_id)
 
