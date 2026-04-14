@@ -582,8 +582,6 @@ class TestLoadConfig:
         cfg = btc_api.load_config()
         assert cfg["telegram_chat_id"] == "from_env"  # ENV takes precedence
 
-    def test_env_var_int_conversion(self, tmp_path, monkeypatch):
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — execute_scan_for_symbol
 # ─────────────────────────────────────────────────────────────────────────────

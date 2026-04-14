@@ -304,42 +304,76 @@ class TestDetectBullEngulfing:
 
 class TestDetectRSIDivergence:
     def test_datos_insuficientes(self):
-        close = pd.Series([85000.0] * 20)
-        rsi   = pd.Series([50.0] * 20)
-        assert scanner.detect_rsi_divergence(close, rsi, window=30) is False
+        close = pd.Series([85000.0] * 50)
+        rsi   = pd.Series([50.0] * 50)
+        res = scanner.detect_rsi_divergence(close, rsi, window=72)
+        assert res["bull"] is False
+        assert res["bear"] is False
 
     def test_sin_minimos(self):
         """Serie monotonamente decreciente → sin mínimos locales → False."""
-        close = pd.Series(np.linspace(90000, 80000, 50))
-        rsi   = pd.Series(np.linspace(70, 30, 50))
-        assert scanner.detect_rsi_divergence(close, rsi, window=30) is False
+        close = pd.Series(np.linspace(90000, 80000, 100))
+        rsi   = pd.Series(np.linspace(70, 30, 100))
+        res = scanner.detect_rsi_divergence(close, rsi, window=72)
+        assert res["bull"] is False
 
     def test_divergencia_alcista_detectada(self):
         """
         Precio hace lower low, RSI hace higher low → divergencia alcista → True.
-        Los dos mínimos deben estar dentro de la ventana, en posiciones internas (no índice 0).
+        Usa extremos de 5 puntos: p[i] < p[i-2], p[i-1], p[i+1], p[i+2]
         """
-        window = 40
-        n = window + 10  # buffer extra para que los mínimos no caigan en el borde
+        window = 72
+        n = window + 20
         close = np.ones(n) * 85000.0
         rsi_vals = np.ones(n) * 50.0
 
-        # Los últimos `window` elementos son los índices [n-window .. n-1]
-        # En términos relativos dentro de la ventana: posición relativa = i - (n - window)
-        # Mínimo 1: posición relativa 5  → absoluta n-window+5
-        p1 = n - window + 5
+        # Mínimo 1: Posición 10 dentro de ventana
+        p1 = n - window + 10
         close[p1] = 84000.0
-        rsi_vals[p1] = 35.0
+        rsi_vals[p1] = 30.0
+        # Asegurar extremos locales de 5 puntos
+        for offset in [-2, -1, 1, 2]:
+            close[p1 + offset] = 84500.0
 
-        # Mínimo 2: posición relativa 20 → absoluta n-window+20
-        p2 = n - window + 20
+        # Mínimo 2: Posición 40 dentro de ventana
+        p2 = n - window + 40
         close[p2] = 83000.0   # lower low
-        rsi_vals[p2] = 38.0   # higher low
+        rsi_vals[p2] = 35.0   # higher low
+        for offset in [-2, -1, 1, 2]:
+            close[p2 + offset] = 83500.0
 
         close_s = pd.Series(close)
         rsi_s   = pd.Series(rsi_vals)
         result = scanner.detect_rsi_divergence(close_s, rsi_s, window=window)
-        assert result is True
+        assert result["bull"] is True
+        assert result["bear"] is False
+
+    def test_divergencia_bajista_detectada(self):
+        """Precio hace higher high, RSI hace lower high."""
+        window = 72
+        n = window + 20
+        close = np.ones(n) * 80000.0
+        rsi_vals = np.ones(n) * 50.0
+
+        # Máximo 1
+        p1 = n - window + 15
+        close[p1] = 85000.0
+        rsi_vals[p1] = 75.0
+        for offset in [-2, -1, 1, 2]:
+            close[p1 + offset] = 84000.0
+
+        # Máximo 2
+        p2 = n - window + 45
+        close[p2] = 86000.0   # higher high
+        rsi_vals[p2] = 70.0   # lower high
+        for offset in [-2, -1, 1, 2]:
+            close[p2 + offset] = 85500.0
+
+        close_s = pd.Series(close)
+        rsi_s   = pd.Series(rsi_vals)
+        result = scanner.detect_rsi_divergence(close_s, rsi_s, window=window)
+        assert result["bear"] is True
+        assert result["bull"] is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
