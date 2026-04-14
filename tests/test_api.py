@@ -262,7 +262,8 @@ class TestAPIEndpoints:
         monkeypatch.setattr(btc_api, "DB_FILE", tmp_db)
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
-            json.dump({"webhook_url": "", "webhook_secret": "",
+            json.dump({"webhook_url": "", "webhook_secret": "s3cret",
+                       "telegram_bot_token": "tok123", "api_key": "",
                        "notify_setup_only": False, "scan_interval_sec": 300}, f)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
 
@@ -288,6 +289,7 @@ class TestAPIEndpoints:
         test_app.get("/signals/latest")(btc_api.latest_signal)
         test_app.get("/signals/latest/message")(btc_api.latest_message)
         test_app.get("/signals/{scan_id}")(btc_api.signal_by_id)
+        test_app.get("/config")(btc_api.get_config)
         test_app.get("/webhook/test")(btc_api.test_webhook)
 
         return TestClient(test_app)
@@ -304,6 +306,20 @@ class TestAPIEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert "scanner_state" in data
+
+    def test_status_strips_secrets(self, client):
+        r = client.get("/status")
+        assert r.status_code == 200
+        cfg = r.json()["config"]
+        for key in ("webhook_secret", "telegram_bot_token", "api_key"):
+            assert key not in cfg, f"{key} should not be exposed in /status"
+
+    def test_config_strips_secrets(self, client):
+        r = client.get("/config")
+        assert r.status_code == 200
+        cfg = r.json()
+        for key in ("webhook_secret", "telegram_bot_token", "api_key"):
+            assert key not in cfg, f"{key} should not be exposed in GET /config"
 
     def test_signals_vacio(self, client):
         r = client.get("/signals")

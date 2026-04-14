@@ -223,6 +223,14 @@ async def verify_api_key(key: str = Security(_api_key_header)):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+_SECRET_KEYS = {"webhook_secret", "telegram_bot_token", "api_key"}
+
+
+def _strip_secrets(cfg: dict) -> dict:
+    """Remove sensitive fields from a config dict before returning to clients."""
+    return {k: v for k, v in cfg.items() if k not in _SECRET_KEYS}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG VALIDATION (Pydantic)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1298,7 +1306,8 @@ def list_symbols():
     return {"total": len(result), "symbols": result}
 
 
-@app.get("/status", summary="Estado detallado del scanner")
+@app.get("/status", summary="Estado detallado del scanner",
+         dependencies=[Depends(verify_api_key)])
 def status():
     latest = get_latest_scan()
     return {
@@ -1311,8 +1320,7 @@ def status():
             "lrc_pct": latest["lrc_pct"] if latest else None,
             "score":   latest["score"]   if latest else None,
         } if latest else None,
-        "config": {k: v for k, v in load_config().items()
-                   if k not in ("webhook_secret",)},
+        "config": _strip_secrets(load_config()),
     }
 
 
@@ -1489,12 +1497,10 @@ def signal_by_id(scan_id: int):
             "telegram_message": build_telegram_message(payload)}
 
 
-@app.get("/config", summary="Leer configuracion actual")
+@app.get("/config", summary="Leer configuracion actual",
+         dependencies=[Depends(verify_api_key)])
 def get_config():
-    cfg = load_config()
-    # nunca exponer el secreto del webhook
-    cfg.pop("webhook_secret", None)
-    return cfg
+    return _strip_secrets(load_config())
 
 
 @app.post("/config", summary="Actualizar configuracion", dependencies=[Depends(verify_api_key)])
@@ -1508,8 +1514,7 @@ def update_config(body: ConfigUpdate):
         }
     try:
         updated = save_config(updates)
-        updated.pop("webhook_secret", None)
-        return {"ok": True, "config": updated}
+        return {"ok": True, "config": _strip_secrets(updated)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
