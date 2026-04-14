@@ -6,6 +6,9 @@
 # Contiene bot token de Telegram y chat_id — NUNCA commitear
 config.json
 
+# ── Datos de backtesting (descargados de Binance) ────────────
+data/backtest/
+
 # ── Base de datos y datos en tiempo real ──────────────────────
 signals.db
 signals.db-journal
