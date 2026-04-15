@@ -1015,6 +1015,7 @@ def build_telegram_message(rep: dict) -> str:
             "GESTION DE RIESGO (1H Spot)",
             f"   SL:  `${sz.get('sl_precio', '?')}` _{sz.get('sl_pct', '2%')} abajo_",
             f"   TP:  `${sz.get('tp_precio', '?')}` _{sz.get('tp_pct', '4%')} arriba_",
+            f"   ATR(14) 1H       : ${sz.get('atr_1h', 'N/A')}",
             "   R:R: `2:1`",
             f"   Qty: `{sz.get('qty_btc', '?')}` _(ejemplo $1,000 capital, riesgo 1%)_",
             "",
@@ -1132,6 +1133,7 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
         "sl_precio":       rep.get("sizing_1h", {}).get("sl_precio"),
         "tp_precio":       rep.get("sizing_1h", {}).get("tp_precio"),
         "qty_btc":         rep.get("sizing_1h", {}).get("qty_btc"),
+        "atr_1h":          rep.get("sizing_1h", {}).get("atr_1h"),
         "telegram_message": msg,
         "confirmations": {
             k: v for k, v in rep.get("confirmations", {}).items()
