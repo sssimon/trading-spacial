@@ -627,18 +627,24 @@ def scan(symbol: str = None):
     trigger_active, trigger_details = check_trigger_5m(df5)
 
     # ── Sizing informativo (1H Spot) ──────────────────────────────────────────
+    atr_val    = float(calc_atr(df1h, ATR_PERIOD).iloc[-1])
     capital    = 1000.0
     risk_usd   = capital * 0.01
-    sl_dist    = price * (SL_PCT / 100)
+
+    # ATR-based SL/TP (adaptativo a volatilidad)
+    sl_dist    = atr_val * ATR_SL_MULT
+    tp_dist    = atr_val * ATR_TP_MULT
+    sl_price   = round(price - sl_dist, 2)
+    tp_price   = round(price + tp_dist, 2)
+    sl_pct_val = round(sl_dist / price * 100, 2)
+    tp_pct_val = round(tp_dist / price * 100, 2)
+
     qty_btc    = risk_usd / sl_dist
     val_pos    = qty_btc * price
-    # Spot: valor posición no puede superar 98% del capital
+    # Spot: valor posicion no puede superar 98% del capital
     if val_pos > capital * 0.98:
         qty_btc = (capital * 0.98) / price
         val_pos  = qty_btc * price
-
-    tp_price   = round(price * (1 + TP_PCT / 100), 2)
-    sl_price   = round(price * (1 - SL_PCT / 100), 2)
 
     # ── Veredicto ─────────────────────────────────────────────────────────────
     if not in_long_zone:
@@ -685,8 +691,10 @@ def scan(symbol: str = None):
         "sizing_1h": {
             "capital_usd": capital,
             "riesgo_usd":  round(risk_usd, 2),
-            "sl_pct":      f"{SL_PCT}%",
-            "tp_pct":      f"{TP_PCT}%",
+            "atr_1h":      round(atr_val, 2),
+            "sl_mode":     "atr",
+            "sl_pct":      f"{sl_pct_val}%",
+            "tp_pct":      f"{tp_pct_val}%",
             "sl_precio":   sl_price,
             "tp_precio":   tp_price,
             "qty_btc":     round(qty_btc, 6),

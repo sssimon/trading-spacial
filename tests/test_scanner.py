@@ -613,6 +613,22 @@ class TestScan:
         rep = scanner.scan()
         assert 0 <= rep["score"] <= 10
 
+    @patch("btc_scanner.get_klines")
+    def test_scan_sizing_uses_atr(self, mock_klines):
+        df1h, df4h, df5m = self._make_scan_mock()
+        mock_klines.side_effect = [df5m, df1h, df4h]
+
+        rep = scanner.scan("BTCUSDT")
+        sz = rep["sizing_1h"]
+        assert "atr_1h" in sz
+        assert "sl_mode" in sz
+        assert sz["atr_1h"] > 0
+        assert sz["sl_mode"] == "atr"
+        assert "sl_precio" in sz
+        assert "tp_precio" in sz
+        sl_dist = rep["price"] - sz["sl_precio"]
+        assert abs(sl_dist - sz["atr_1h"] * 1.5) < 1.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — _load_proxy
