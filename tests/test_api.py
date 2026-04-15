@@ -1193,6 +1193,54 @@ class TestPositionsCRUD:
         assert len(closed_pos) == 1
         assert closed_pos[0]["exit_reason"] == "MANUAL"  # original reason
 
+    def test_trailing_ratchet_moves_sl_to_breakeven(self):
+        """When price rises >= 1.5x ATR above entry, SL moves to entry (breakeven)."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 60000.0,
+            "sl_price": 59000.0,
+            "tp_price": 63000.0,
+            "direction": "LONG",
+            "atr_entry": 666.67,
+        })
+        # Price rises to entry + 1.5*ATR = 60000 + 1000 = 61000
+        btc_api.check_position_stops("BTCUSDT", 61000.0)
+        updated = btc_api.db_get_positions(status="open")
+        assert len(updated) == 1
+        assert updated[0]["sl_price"] == 60000.0  # moved to entry price
+
+    def test_trailing_ratchet_never_lowers_sl(self):
+        """SL should only go up (tighten), never down."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 60000.0,
+            "sl_price": 60000.0,  # already at breakeven
+            "tp_price": 63000.0,
+            "direction": "LONG",
+            "atr_entry": 666.67,
+        })
+        btc_api.check_position_stops("BTCUSDT", 60500.0)
+        updated = btc_api.db_get_positions(status="open")
+        assert len(updated) == 1
+        assert updated[0]["sl_price"] == 60000.0  # unchanged
+
+    def test_position_without_atr_skips_trailing(self):
+        """Legacy positions without atr_entry skip trailing logic."""
+        import btc_api
+        pos = btc_api.db_create_position({
+            "symbol": "BTCUSDT",
+            "entry_price": 60000.0,
+            "sl_price": 58800.0,
+            "tp_price": 62400.0,
+            "direction": "LONG",
+        })
+        btc_api.check_position_stops("BTCUSDT", 61500.0)
+        updated = btc_api.db_get_positions(status="open")
+        assert len(updated) == 1
+        assert updated[0]["sl_price"] == 58800.0  # unchanged, no trailing
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — Posiciones API endpoints
