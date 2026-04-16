@@ -253,7 +253,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         from btc_scanner import LRC_SHORT_MIN, detect_bear_engulfing, check_trigger_5m_short
 
-        # Regime detection: Death Cross (SMA50 < SMA200 daily) = bear confirmed
+        # Regime detection: price-based only (backtest can't call sentiment APIs)
         regime = "LONG"  # default
         if df1d is not None and len(df1d) >= 200:
             mask_1d = df1d.index <= bar_time
@@ -262,8 +262,16 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 sma50_d  = calc_sma(window_1d["close"], 50).iloc[-1]
                 sma200_d = calc_sma(window_1d["close"], 200).iloc[-1]
                 if not pd.isna(sma50_d) and not pd.isna(sma200_d):
-                    if sma50_d < sma200_d and price < sma200_d:
-                        regime = "SHORT"  # death cross + price below = confirmed bear
+                    price_score = 100
+                    if sma50_d < sma200_d: price_score -= 40
+                    if price < sma200_d: price_score -= 30
+                    ret30 = window_1d["close"].iloc[-1] / window_1d["close"].iloc[-30] - 1 if len(window_1d) >= 30 else 0
+                    if ret30 < -0.10: price_score -= 20
+                    elif ret30 < 0: price_score -= 10
+                    # In backtest, use price_score alone (no sentiment APIs)
+                    # Score < 30 = BEAR (same threshold as composite)
+                    if price_score < 30:
+                        regime = "SHORT"
 
         if lrc_pct <= LRC_LONG_MAX and regime == "LONG":
             trade_dir = "LONG"

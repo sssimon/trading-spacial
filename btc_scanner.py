@@ -599,6 +599,145 @@ def check_trigger_5m_short(df5: pd.DataFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  REGIME DETECTOR — Multi-signal, runs once per day, cached
+# ─────────────────────────────────────────────────────────────────────────────
+
+_regime_cache = {"regime": "BULL", "score": 100, "details": {}, "ts": None}
+_REGIME_TTL_SEC = 86400  # 24 hours
+
+
+def detect_regime() -> dict:
+    """
+    Composite market regime detection. Combines:
+      - Price structure (40%): Death Cross + SMA200 position
+      - Sentiment (30%): Fear & Greed Index (alternative.me)
+      - Market (30%): Binance funding rate
+
+    Returns dict with regime ("BULL"/"BEAR"/"NEUTRAL"), score (0-100), details.
+    Score > 70 = BULL, Score < 30 = BEAR, 30-70 = NEUTRAL.
+    """
+    details = {}
+    score_components = []
+
+    # ── 1. Price Structure (40% weight) ──────────────────────────────────────
+    price_score = 100  # default bullish
+    try:
+        df1d = get_klines("BTCUSDT", "1d", limit=250)
+        if len(df1d) >= 200:
+            sma50  = calc_sma(df1d["close"], 50).iloc[-1]
+            sma200 = calc_sma(df1d["close"], 200).iloc[-1]
+            price  = float(df1d["close"].iloc[-1])
+            ret30d = (price / float(df1d["close"].iloc[-30]) - 1) * 100 if len(df1d) >= 30 else 0
+
+            death_cross = bool(sma50 < sma200)
+            price_below_sma200 = bool(price < sma200)
+
+            price_score = 100
+            if death_cross:
+                price_score -= 40
+            if price_below_sma200:
+                price_score -= 30
+            if ret30d < -10:
+                price_score -= 20
+            elif ret30d < 0:
+                price_score -= 10
+            price_score = max(0, min(100, price_score))
+
+            details["price"] = {
+                "sma50": round(float(sma50), 2),
+                "sma200": round(float(sma200), 2),
+                "price": round(price, 2),
+                "death_cross": death_cross,
+                "price_below_sma200": price_below_sma200,
+                "ret_30d_pct": round(ret30d, 1),
+                "score": price_score,
+            }
+    except Exception as e:
+        log.warning(f"Regime: price structure error: {e}")
+        details["price"] = {"error": str(e), "score": price_score}
+    score_components.append(("price", price_score, 0.4))
+
+    # ── 2. Sentiment: Fear & Greed Index (30% weight) ────────────────────────
+    fng_score = 50  # default neutral
+    try:
+        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+        if r.ok:
+            data = r.json()
+            fng_value = int(data["data"][0]["value"])
+            fng_label = data["data"][0]["value_classification"]
+            fng_score = fng_value  # 0=extreme fear, 100=extreme greed
+            details["sentiment"] = {
+                "fear_greed_index": fng_value,
+                "classification": fng_label,
+                "score": fng_score,
+            }
+    except Exception as e:
+        log.warning(f"Regime: Fear & Greed error: {e}")
+        details["sentiment"] = {"error": str(e), "score": fng_score}
+    score_components.append(("sentiment", fng_score, 0.3))
+
+    # ── 3. Market: Funding Rate (30% weight) ─────────────────────────────────
+    funding_score = 50  # default neutral
+    try:
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1",
+            timeout=10
+        )
+        if r.ok:
+            data = r.json()
+            rate = float(data[0]["fundingRate"])
+            # Positive funding = bullish (longs pay shorts), negative = bearish
+            # Map: -0.01 → 0, 0 → 50, +0.01 → 100
+            funding_score = max(0, min(100, int(50 + rate * 5000)))
+            details["funding"] = {
+                "rate": rate,
+                "rate_pct": round(rate * 100, 4),
+                "score": funding_score,
+            }
+    except Exception as e:
+        log.warning(f"Regime: funding rate error: {e}")
+        details["funding"] = {"error": str(e), "score": funding_score}
+    score_components.append(("funding", funding_score, 0.3))
+
+    # ── Composite Score ──────────────────────────────────────────────────────
+    composite = sum(s * w for _, s, w in score_components)
+    composite = round(composite, 1)
+
+    if composite > 70:
+        regime = "BULL"
+    elif composite < 30:
+        regime = "BEAR"
+    else:
+        regime = "NEUTRAL"
+
+    result = {
+        "regime": regime,
+        "score": composite,
+        "details": details,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Update cache
+    global _regime_cache
+    _regime_cache = result
+    log.info(f"Regime Detection: {regime} (score={composite}) "
+             f"[price={price_score} fng={fng_score} funding={funding_score}]")
+
+    return result
+
+
+def get_cached_regime() -> dict:
+    """Return cached regime, refreshing if older than TTL."""
+    if _regime_cache["ts"] is None:
+        return detect_regime()
+    cache_age = (datetime.now(timezone.utc) -
+                 datetime.fromisoformat(_regime_cache["ts"])).total_seconds()
+    if cache_age > _REGIME_TTL_SEC:
+        return detect_regime()
+    return _regime_cache
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  SCANNER PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -611,18 +750,12 @@ def scan(symbol: str = None):
     df5  = get_klines(symbol, "5m",  limit=210)   # gatillo
     df1h = get_klines(symbol, "1h",  limit=210)   # señal principal
     df4h = get_klines(symbol, "4h",  limit=150)   # contexto macro
-    df1d = get_klines(symbol, "1d",  limit=250)   # régimen de mercado (SMA200)
-
     price = df1h["close"].iloc[-1]   # precio de cierre de la última vela 1H
 
-    # ── Régimen de mercado (Death Cross = bear confirmado) ───────────────────
-    sma50_d  = calc_sma(df1d["close"], 50).iloc[-1] if len(df1d) >= 50 else None
-    sma200_d = calc_sma(df1d["close"], 200).iloc[-1] if len(df1d) >= 200 else None
-    if (sma50_d and sma200_d and not pd.isna(sma50_d) and not pd.isna(sma200_d)
-            and sma50_d < sma200_d and price < sma200_d):
-        regime = "SHORT"  # death cross + precio debajo = bear confirmado
-    else:
-        regime = "LONG"   # default: mercado alcista o neutral
+    # ── Régimen de mercado (compuesto, cacheado por detect_regime()) ──────────
+    regime_data = get_cached_regime()
+    regime = regime_data.get("regime", "BULL")
+    regime = "LONG" if regime == "BULL" else "SHORT" if regime == "BEAR" else "LONG"
 
     # ── Indicadores 1H (señal) ────────────────────────────────────────────────
     lrc_pct, lrc_up, lrc_dn, lrc_mid = calc_lrc(df1h["close"], LRC_PERIOD, LRC_STDEV)
@@ -824,8 +957,9 @@ def scan(symbol: str = None):
         "estado":         estado,
         "señal_activa":   señal,
         "direction":      direction,
-        "regime":         regime,
-        "sma200_daily":   round(sma200_d, 2) if sma200_d and not pd.isna(sma200_d) else None,
+        "regime":         regime_data.get("regime"),
+        "regime_score":   regime_data.get("score"),
+        "regime_details": regime_data.get("details"),
         "price":          round(price, 2),
         "lrc_1h": {
             "pct":   lrc_pct,
