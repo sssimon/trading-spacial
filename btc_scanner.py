@@ -90,6 +90,9 @@ SCORE_PREMIUM   = 4
 TRIGGER_RSI_RECOVERY  = True   # RSI 5M sube respecto a la vela anterior
 TRIGGER_BULLISH_CLOSE = True   # Vela 5M cierra alcista (close > open)
 
+# ── Filtro de tendencia ADX ────────────────────────────────────────────────
+ADX_THRESHOLD = 25  # ADX < 25 = ranging market (OK for mean-reversion)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SÍMBOLOS DINÁMICOS  —  Top N por capitalización de mercado
@@ -386,6 +389,62 @@ def calc_atr(df: pd.DataFrame, period=14) -> pd.Series:
     return tr.rolling(period).mean()
 
 
+def calc_adx(df: pd.DataFrame, period=14) -> pd.Series:
+    """
+    Average Directional Index — mide la fuerza de la tendencia (no su dirección).
+    ADX < 25  →  mercado lateral/ranging  (apto para mean-reversion)
+    ADX >= 25 →  mercado en tendencia     (evitar mean-reversion)
+
+    Pasos:
+      1. +DM / -DM desde highs/lows
+      2. Suavizar +DM, -DM y TR con EMA (periodo)
+      3. +DI = smoothed +DM / ATR * 100
+      4. -DI = smoothed -DM / ATR * 100
+      5. DX  = |+DI - -DI| / (+DI + -DI) * 100
+      6. ADX = EMA de DX (periodo)
+    """
+    high  = df["high"]
+    low   = df["low"]
+    close = df["close"]
+
+    # True Range
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    # +DM y -DM
+    up_move   = high.diff()
+    down_move = (-low).diff()   # equivale a low.shift(1) - low
+
+    plus_dm  = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    plus_dm_s  = pd.Series(plus_dm,  index=df.index)
+    minus_dm_s = pd.Series(minus_dm, index=df.index)
+
+    # Suavizado con EMA (Wilder: alpha = 1/period)
+    alpha = 1.0 / period
+    atr_smooth    = tr.ewm(alpha=alpha, adjust=False).mean()
+    plus_dm_smooth  = plus_dm_s.ewm(alpha=alpha, adjust=False).mean()
+    minus_dm_smooth = minus_dm_s.ewm(alpha=alpha, adjust=False).mean()
+
+    # +DI y -DI
+    plus_di  = (plus_dm_smooth  / atr_smooth.replace(0, np.nan)) * 100
+    minus_di = (minus_dm_smooth / atr_smooth.replace(0, np.nan)) * 100
+
+    # DX
+    di_sum  = plus_di + minus_di
+    di_diff = (plus_di - minus_di).abs()
+    dx = (di_diff / di_sum.replace(0, np.nan)) * 100
+
+    # ADX = EMA de DX
+    adx = dx.ewm(alpha=alpha, adjust=False).mean()
+    return adx
+
+
 def detect_bull_engulfing(df: pd.DataFrame):
     """
     BullEngulfing: vela anterior bajista completamente engullida por vela alcista.
@@ -532,6 +591,10 @@ def scan(symbol: str = None):
     bull_div  = rsi_divs["bull"]
     bear_div  = rsi_divs["bear"]
 
+    # ADX 1H (filtro de tendencia)
+    adx_1h    = calc_adx(df1h, 14)
+    cur_adx   = round(float(adx_1h.iloc[-1]), 2) if not pd.isna(adx_1h.iloc[-1]) else 0
+
     # ── Indicadores 4H (macro) ────────────────────────────────────────────────
     sma100_4h      = calc_sma(df4h["close"], 100).iloc[-1]
     price_above_4h = bool(price > sma100_4h)
@@ -568,6 +631,10 @@ def scan(symbol: str = None):
             "activo": bear_div,
             "nota":   "Precio sube + RSI baja (1H) — peligro de reversión bajista",
         },
+        "E7_Tendencia_Fuerte": {
+            "activo": cur_adx >= ADX_THRESHOLD,
+            "nota":   f"ADX={cur_adx} >= {ADX_THRESHOLD} — mercado en tendencia fuerte, evitar mean-reversion",
+        },
     }
 
     blocks = []
@@ -575,6 +642,8 @@ def scan(symbol: str = None):
         blocks.append("E1: BullEngulfing activo — posible micro-techo, esperar próxima vela")
     if bear_div:
         blocks.append("E6: Divergencia bajista RSI (1H) — señal de agotamiento alcista")
+    if cur_adx >= ADX_THRESHOLD:
+        blocks.append(f"E7: ADX={cur_adx} >= {ADX_THRESHOLD} — tendencia fuerte, no operar mean-reversion")
 
     # ── Score de Confirmaciones 1H (Spot V6) ──────────────────────────────────
     score = 0
@@ -677,6 +746,7 @@ def scan(symbol: str = None):
             "mid":   lrc_mid,
         },
         "rsi_1h":         cur_rsi1h,
+        "adx_1h":         cur_adx,
         "macro_4h": {
             "sma100":       round(sma100_4h, 2),
             "price_above":  price_above_4h,

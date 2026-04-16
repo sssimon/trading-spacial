@@ -480,6 +480,57 @@ class TestCheckTrigger5M:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — calc_adx
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCalcADX:
+    def _make_df(self, n=50):
+        np.random.seed(42)
+        close = 100 + np.cumsum(np.random.randn(n) * 0.5)
+        high = close + np.abs(np.random.randn(n) * 0.3)
+        low = close - np.abs(np.random.randn(n) * 0.3)
+        return pd.DataFrame({"high": high, "low": low, "close": close})
+
+    def test_retorna_series(self):
+        from btc_scanner import calc_adx
+        df = self._make_df()
+        adx = calc_adx(df, period=14)
+        assert isinstance(adx, pd.Series)
+        assert len(adx) == len(df)
+
+    def test_rango_0_100(self):
+        from btc_scanner import calc_adx
+        df = self._make_df()
+        adx = calc_adx(df, period=14)
+        valid = adx.dropna()
+        assert (valid >= 0).all()
+        assert (valid <= 100).all()
+
+    def test_trending_market_high_adx(self):
+        """Strong uptrend should produce high ADX."""
+        from btc_scanner import calc_adx
+        n = 100
+        close = np.linspace(100, 200, n)  # strong uptrend
+        high = close + 1
+        low = close - 0.5
+        df = pd.DataFrame({"high": high, "low": low, "close": close})
+        adx = calc_adx(df, period=14)
+        assert adx.iloc[-1] > 25  # should be trending
+
+    def test_ranging_market_low_adx(self):
+        """Flat/ranging market should produce low ADX."""
+        from btc_scanner import calc_adx
+        n = 100
+        np.random.seed(99)
+        close = 100 + np.random.randn(n) * 0.1  # very flat
+        high = close + 0.05
+        low = close - 0.05
+        df = pd.DataFrame({"high": high, "low": low, "close": close})
+        adx = calc_adx(df, period=14)
+        assert adx.iloc[-1] < 25  # should be ranging
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — scan() con mock de API
 # ─────────────────────────────────────────────────────────────────────────────
 
