@@ -632,8 +632,8 @@ def scan(symbol: str = None):
             "nota":   "Precio sube + RSI baja (1H) — peligro de reversión bajista",
         },
         "E7_Tendencia_Fuerte": {
-            "activo": cur_adx >= ADX_THRESHOLD,
-            "nota":   f"ADX={cur_adx} >= {ADX_THRESHOLD} — mercado en tendencia fuerte, evitar mean-reversion",
+            "activo": "INFORMATIVO",
+            "nota":   f"ADX={cur_adx} (>={ADX_THRESHOLD} = tendencia fuerte). Indicador informativo, no bloquea.",
         },
     }
 
@@ -642,8 +642,6 @@ def scan(symbol: str = None):
         blocks.append("E1: BullEngulfing activo — posible micro-techo, esperar próxima vela")
     if bear_div:
         blocks.append("E6: Divergencia bajista RSI (1H) — señal de agotamiento alcista")
-    if cur_adx >= ADX_THRESHOLD:
-        blocks.append(f"E7: ADX={cur_adx} >= {ADX_THRESHOLD} — tendencia fuerte, no operar mean-reversion")
 
     # ── Score de Confirmaciones 1H (Spot V6) ──────────────────────────────────
     score = 0
