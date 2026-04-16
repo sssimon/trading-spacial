@@ -29,13 +29,14 @@ import requests
 
 # Import scanner functions
 from btc_scanner import (
-    calc_lrc, calc_rsi, calc_bb, calc_sma, calc_atr,
+    calc_lrc, calc_rsi, calc_bb, calc_sma, calc_atr, calc_adx,
     detect_bull_engulfing, calc_cvd_delta, detect_rsi_divergence,
     check_trigger_5m, score_label,
     LRC_PERIOD, LRC_STDEV, RSI_PERIOD, BB_PERIOD, BB_STDEV, VOL_PERIOD,
     LRC_LONG_MAX, SL_PCT, TP_PCT, COOLDOWN_H,
     SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
     ATR_PERIOD, ATR_SL_MULT, ATR_TP_MULT, ATR_BE_MULT,
+    ADX_THRESHOLD,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
