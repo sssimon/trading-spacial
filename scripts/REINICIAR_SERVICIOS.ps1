@@ -10,7 +10,7 @@ $Ports         = @(8000)
 $Scripts       = @("btc_api.py", "watchdog.py")
 $PidFiles      = @("btc_api.pid", "watchdog.pid")
 $DockerExe     = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-$DockerTimeout = 90   # segundos maximos esperando a que Docker arranque
+$DockerTimeout = 180  # segundos maximos esperando a que Docker arranque
 
 Write-Host ""
 Write-Host "  ===================================================" -ForegroundColor Cyan
@@ -18,36 +18,72 @@ Write-Host "   REINICIO LIMPIO - Crypto Scanner"                   -ForegroundCo
 Write-Host "  ===================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ── PASO 0: Verificar / arrancar Docker Desktop ───────────────
-Write-Host "  [0/5] Verificando Docker Desktop..." -ForegroundColor Yellow
+# ── Funciones de deteccion Docker ─────────────────────────────
+function Test-DockerProcessRunning {
+    $proc = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
+    return ($null -ne $proc)
+}
 
-function Test-DockerRunning {
+function Test-DockerDaemonReady {
     try {
         $result = docker info 2>&1
         return ($LASTEXITCODE -eq 0)
     } catch { return $false }
 }
 
-if (-not (Test-DockerRunning)) {
-    if (Test-Path $DockerExe) {
-        Write-Host "        Docker no esta corriendo. Iniciando Docker Desktop..." -ForegroundColor Gray
-        Start-Process $DockerExe
-        $elapsed = 0
-        while (-not (Test-DockerRunning) -and $elapsed -lt $DockerTimeout) {
-            Start-Sleep -Seconds 5
-            $elapsed += 5
-            Write-Host "        Esperando Docker... ($elapsed s)" -ForegroundColor DarkGray
-        }
-        if (Test-DockerRunning) {
-            Write-Host "        Docker listo." -ForegroundColor Green
+# ── PASO 0: Verificar / arrancar Docker Desktop ───────────────
+Write-Host "  [0/5] Verificando Docker Desktop..." -ForegroundColor Yellow
+
+# Activar auto-inicio con Windows (fix permanente, una sola vez)
+$regKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$regVal = Get-ItemProperty -Path $regKey -Name "Docker Desktop" -ErrorAction SilentlyContinue
+if (-not $regVal -and (Test-Path $DockerExe)) {
+    Set-ItemProperty -Path $regKey -Name "Docker Desktop" -Value "`"$DockerExe`""
+    Write-Host "        [OK] Docker Desktop configurado para iniciar con Windows." -ForegroundColor Green
+}
+
+if (Test-DockerDaemonReady) {
+    Write-Host "        Docker ya estaba listo." -ForegroundColor Gray
+} else {
+    # Si el proceso no esta corriendo, iniciarlo
+    if (-not (Test-DockerProcessRunning)) {
+        if (Test-Path $DockerExe) {
+            Write-Host "        Iniciando Docker Desktop..." -ForegroundColor Gray
+            Start-Process $DockerExe
         } else {
-            Write-Host "        [AVISO] Docker no respondio en $DockerTimeout s. Continua de todos modos." -ForegroundColor Yellow
+            Write-Host "        [ERROR] Docker Desktop no encontrado en: $DockerExe" -ForegroundColor Red
+            Write-Host "                Instala Docker Desktop desde https://www.docker.com/products/docker-desktop" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "        [AVISO] Docker Desktop no encontrado en: $DockerExe" -ForegroundColor Yellow
+        Write-Host "        Docker Desktop esta iniciando (proceso activo, daemon no listo aun)..." -ForegroundColor Gray
     }
-} else {
-    Write-Host "        Docker ya estaba corriendo." -ForegroundColor Gray
+
+    # Esperar al daemon con dos fases:
+    # Fase 1: esperar que el proceso exista (max 30s)
+    $elapsed = 0
+    while (-not (Test-DockerProcessRunning) -and $elapsed -lt 30) {
+        Start-Sleep -Seconds 3
+        $elapsed += 3
+    }
+
+    # Fase 2: esperar que el daemon responda (max DockerTimeout)
+    $elapsed = 0
+    Write-Host "        Esperando que Docker este listo..." -ForegroundColor Gray
+    while (-not (Test-DockerDaemonReady) -and $elapsed -lt $DockerTimeout) {
+        Start-Sleep -Seconds 5
+        $elapsed += 5
+        $dots = "." * [int]($elapsed / 10)
+        Write-Host "        $($elapsed)s$dots" -ForegroundColor DarkGray -NoNewline
+        Write-Host "`r" -NoNewline
+    }
+
+    if (Test-DockerDaemonReady) {
+        Write-Host "        Docker listo ($elapsed s).                    " -ForegroundColor Green
+    } else {
+        Write-Host "        [AVISO] Docker no respondio en ${DockerTimeout}s." -ForegroundColor Yellow
+        Write-Host "                El frontend (puerto 3000) no estara disponible." -ForegroundColor Yellow
+        Write-Host "                Alternativa: usa npm run dev en la carpeta frontend (puerto 5173)." -ForegroundColor Yellow
+    }
 }
 
 Write-Host "  [1/5] Deteniendo tarea del Programador..." -ForegroundColor Yellow
@@ -99,11 +135,17 @@ foreach ($pidFile in $PidFiles) {
 
 Write-Host ""
 Write-Host "  [5/5] Levantando contenedores Docker..." -ForegroundColor Yellow
-if (Test-DockerRunning) {
+if (Test-DockerDaemonReady) {
     Push-Location $RootDir
     docker compose up -d 2>&1 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkGray }
     Pop-Location
-    Write-Host "        Contenedores levantados." -ForegroundColor Green
+    # Verificar que el contenedor quedo corriendo
+    $containers = docker ps --format "{{.Names}}" 2>&1
+    if ($containers -match "crypto-scanner-frontend") {
+        Write-Host "        Frontend container activo." -ForegroundColor Green
+    } else {
+        Write-Host "        [AVISO] El contenedor frontend no aparece en docker ps." -ForegroundColor Yellow
+    }
 } else {
     Write-Host "        [AVISO] Docker no disponible, se omite docker compose." -ForegroundColor Yellow
 }
@@ -112,20 +154,47 @@ Write-Host ""
 if ($task) {
     Write-Host "  Arrancando watchdog via Task Scheduler..." -ForegroundColor Cyan
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 4
+    Start-Sleep -Seconds 5
     $status = (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue).State
     $color  = if ($status -eq "Running") { "Green" } else { "Yellow" }
-    Write-Host "  Estado tarea: $status" -ForegroundColor $color
+    Write-Host "  Estado tarea watchdog: $status" -ForegroundColor $color
 } else {
-    Write-Host "  [AVISO] Tarea no encontrada. Ejecuta INSTALAR_AUTOSTART.ps1 primero." -ForegroundColor Yellow
+    Write-Host "  [AVISO] Tarea '$TaskName' no encontrada." -ForegroundColor Yellow
+    Write-Host "          Ejecuta INSTALAR_AUTOSTART.ps1 primero para registrarla." -ForegroundColor Yellow
 }
 
+# ── VERIFICACION FINAL ────────────────────────────────────────
 Write-Host ""
-Write-Host "  === REINICIO COMPLETO =============================" -ForegroundColor Green
-Write-Host "  API:      http://localhost:8000"                     -ForegroundColor Gray
-Write-Host "  Docs:     http://localhost:8000/docs"                -ForegroundColor Gray
-Write-Host "  Frontend: http://localhost:3000"                     -ForegroundColor Gray
-$logPath = Join-Path $RootDir "logs\watchdog.log"
-Write-Host "  Log:      $logPath"                                  -ForegroundColor Gray
-Write-Host ""
+Write-Host "  Verificando servicios..." -ForegroundColor Cyan
+Start-Sleep -Seconds 3
 
+# API
+try {
+    $apiResp = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+    $apiOk = ($apiResp.StatusCode -eq 200)
+} catch { $apiOk = $false }
+
+# Frontend
+try {
+    $feResp = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+    $feOk = ($feResp.StatusCode -eq 200)
+} catch { $feOk = $false }
+
+Write-Host ""
+Write-Host "  ===================================================" -ForegroundColor Cyan
+Write-Host "   ESTADO FINAL" -ForegroundColor Cyan
+Write-Host "  ===================================================" -ForegroundColor Cyan
+$apiColor = if ($apiOk) { "Green" } else { "Red" }
+$feColor  = if ($feOk)  { "Green" } else { "Yellow" }
+$apiMark  = if ($apiOk) { "[OK]" }  else { "[NO RESPONDE]" }
+$feMark   = if ($feOk)  { "[OK]" }  else { "[NO RESPONDE]" }
+Write-Host "  API      http://localhost:8000   $apiMark" -ForegroundColor $apiColor
+Write-Host "  Docs     http://localhost:8000/docs" -ForegroundColor Gray
+Write-Host "  Frontend http://localhost:3000   $feMark" -ForegroundColor $feColor
+if (-not $feOk) {
+    Write-Host "           Alternativa dev: cd frontend && npm run dev  (puerto 5173)" -ForegroundColor DarkGray
+}
+$logPath = Join-Path $RootDir "logs\watchdog.log"
+Write-Host "  Log      $logPath" -ForegroundColor Gray
+Write-Host "  ===================================================" -ForegroundColor Cyan
+Write-Host ""
