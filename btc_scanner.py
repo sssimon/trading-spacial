@@ -68,8 +68,8 @@ BB_PERIOD      = 20
 BB_STDEV       = 2.0
 VOL_PERIOD     = 20
 ATR_PERIOD     = 14
-ATR_SL_MULT    = 1.5    # SL = entry - 1.5x ATR
-ATR_TP_MULT    = 3.0    # TP = entry + 3.0x ATR (mantiene ratio 2:1)
+ATR_SL_MULT    = 1.0    # SL = entry - 1.0x ATR (optimizado para mean-reversion)
+ATR_TP_MULT    = 4.0    # TP = entry + 4.0x ATR (ratio 4:1, adaptativo)
 ATR_BE_MULT    = 1.5    # Mover SL a breakeven cuando profit >= 1.5x ATR
 
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────

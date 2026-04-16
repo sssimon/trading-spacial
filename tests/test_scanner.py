@@ -627,7 +627,8 @@ class TestScan:
         assert "sl_precio" in sz
         assert "tp_precio" in sz
         sl_dist = rep["price"] - sz["sl_precio"]
-        assert abs(sl_dist - sz["atr_1h"] * 1.5) < 1.0
+        from btc_scanner import ATR_SL_MULT
+        assert abs(sl_dist - sz["atr_1h"] * ATR_SL_MULT) < 1.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
