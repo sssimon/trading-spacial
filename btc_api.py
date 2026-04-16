@@ -460,8 +460,8 @@ def db_create_position(data: dict) -> dict:
     cur = con.execute("""
         INSERT INTO positions
             (scan_id, symbol, direction, status, entry_price, entry_ts,
-             sl_price, tp_price, size_usd, qty, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+             sl_price, tp_price, size_usd, qty, atr_entry, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         data.get("scan_id"),
         data["symbol"].upper(),
@@ -473,6 +473,7 @@ def db_create_position(data: dict) -> dict:
         data.get("tp_price"),
         data.get("size_usd"),
         qty,
+        data.get("atr_entry"),
         data.get("notes", ""),
     ))
     pos_id = cur.lastrowid
@@ -518,7 +519,7 @@ def db_close_position(pos_id: int, exit_price: float, exit_reason: str) -> Optio
 
 
 def db_update_position(pos_id: int, data: dict) -> Optional[dict]:
-    allowed = {"sl_price", "tp_price", "size_usd", "qty", "notes", "entry_price"}
+    allowed = {"sl_price", "tp_price", "size_usd", "qty", "notes", "entry_price", "atr_entry"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return None
@@ -545,6 +546,35 @@ def check_position_stops(symbol: str, price: float):
     for pos in [dict(r) for r in rows]:
         reason = None
         exit_price = None
+
+        # Trailing ratchet: move SL to breakeven when profit >= 1.5x ATR
+        atr_entry = pos.get("atr_entry")
+        if atr_entry and pos["direction"] == "LONG" and pos["sl_price"]:
+            be_threshold = pos["entry_price"] + round(atr_entry * 1.5, 2)
+            if price >= be_threshold and pos["sl_price"] < pos["entry_price"]:
+                new_sl = pos["entry_price"]
+                con_trail = get_db()
+                con_trail.execute(
+                    "UPDATE positions SET sl_price = ? WHERE id = ?",
+                    (new_sl, pos["id"])
+                )
+                con_trail.commit()
+                con_trail.close()
+                pos["sl_price"] = new_sl
+                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
+        elif atr_entry and pos["direction"] == "SHORT" and pos["sl_price"]:
+            be_threshold = pos["entry_price"] - round(atr_entry * 1.5, 2)
+            if price <= be_threshold and pos["sl_price"] > pos["entry_price"]:
+                new_sl = pos["entry_price"]
+                con_trail = get_db()
+                con_trail.execute(
+                    "UPDATE positions SET sl_price = ? WHERE id = ?",
+                    (new_sl, pos["id"])
+                )
+                con_trail.commit()
+                con_trail.close()
+                pos["sl_price"] = new_sl
+                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
 
         if pos["direction"] == "LONG":
             if pos["tp_price"] and price >= pos["tp_price"]:
@@ -787,6 +817,7 @@ def init_db():
             exit_reason TEXT,
             pnl_usd     REAL,
             pnl_pct     REAL,
+            atr_entry   REAL,
             notes       TEXT
         )
     """)
@@ -816,6 +847,18 @@ def init_db():
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
+
+    # Migrate: add atr_entry column if missing
+    try:
+        con_mig = get_db()
+        cols = [r[1] for r in con_mig.execute("PRAGMA table_info(positions)").fetchall()]
+        if "atr_entry" not in cols:
+            con_mig.execute("ALTER TABLE positions ADD COLUMN atr_entry REAL")
+            con_mig.commit()
+            log.info("DB migration: added atr_entry column to positions")
+        con_mig.close()
+    except Exception as e:
+        log.warning(f"DB migration check: {e}")
 
 
 def save_scan(rep: dict) -> int:
@@ -972,6 +1015,7 @@ def build_telegram_message(rep: dict) -> str:
             "GESTION DE RIESGO (1H Spot)",
             f"   SL:  `${sz.get('sl_precio', '?')}` _{sz.get('sl_pct', '2%')} abajo_",
             f"   TP:  `${sz.get('tp_precio', '?')}` _{sz.get('tp_pct', '4%')} arriba_",
+            f"   ATR(14) 1H       : ${sz.get('atr_1h', 'N/A')}",
             "   R:R: `2:1`",
             f"   Qty: `{sz.get('qty_btc', '?')}` _(ejemplo $1,000 capital, riesgo 1%)_",
             "",
@@ -1089,6 +1133,7 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
         "sl_precio":       rep.get("sizing_1h", {}).get("sl_precio"),
         "tp_precio":       rep.get("sizing_1h", {}).get("tp_precio"),
         "qty_btc":         rep.get("sizing_1h", {}).get("qty_btc"),
+        "atr_1h":          rep.get("sizing_1h", {}).get("atr_1h"),
         "telegram_message": msg,
         "confirmations": {
             k: v for k, v in rep.get("confirmations", {}).items()

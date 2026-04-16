@@ -2,6 +2,20 @@
 // types.ts — TypeScript interfaces for all API responses
 // ============================================================
 
+export interface Sizing1h {
+  capital_usd?: number;
+  riesgo_usd?:  number;
+  atr_1h?:      number;
+  sl_mode?:     string;
+  sl_pct?:      string;
+  tp_pct?:      string;
+  sl_precio?:   number;
+  tp_precio?:   number;
+  qty_btc?:     number;
+  valor_pos?:   number;
+  pct_capital?: number;
+}
+
 export interface SymbolStatus {
   symbol: string;
   estado: string;
@@ -11,6 +25,7 @@ export interface SymbolStatus {
   señal: boolean;
   gatillo: boolean;
   ts: string | null;
+  sizing_1h?: Sizing1h;
 }
 
 export interface SymbolsResponse {
@@ -149,6 +164,7 @@ export interface Position {
   pnl_usd:     number | null;
   pnl_pct:     number | null;
   notes:       string | null;
+  atr_entry:   number | null;
 }
 
 export interface PositionsResponse {

@@ -306,6 +306,18 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
               {score}/9
             </span>
           </div>
+          {symbol.sizing_1h?.atr_1h && (
+            <>
+              <div className="chart-chip">
+                <span className="chart-chip-label">ATR</span>
+                <span className="chart-chip-val">${Math.round(symbol.sizing_1h.atr_1h).toLocaleString()}</span>
+              </div>
+              <div className="chart-chip">
+                <span className="chart-chip-label">SL/TP</span>
+                <span className="chart-chip-val">{symbol.sizing_1h.sl_pct} / {symbol.sizing_1h.tp_pct}</span>
+              </div>
+            </>
+          )}
           <div className="chart-chip">
             <span className="chart-chip-label">Macro 4H</span>
             <span className="chart-chip-val" style={{ color: symbol.gatillo ? C_GREEN : C_RED }}>

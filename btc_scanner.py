@@ -67,6 +67,10 @@ RSI_PERIOD     = 14
 BB_PERIOD      = 20
 BB_STDEV       = 2.0
 VOL_PERIOD     = 20
+ATR_PERIOD     = 14
+ATR_SL_MULT    = 1.0    # SL = entry - 1.0x ATR (optimizado para mean-reversion)
+ATR_TP_MULT    = 4.0    # TP = entry + 4.0x ATR (ratio 4:1, adaptativo)
+ATR_BE_MULT    = 1.5    # Mover SL a breakeven cuando profit >= 1.5x ATR
 
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
 LRC_LONG_MAX   = 25.0     # LRC% ≤ 25  →  zona de entrada
@@ -369,6 +373,19 @@ def calc_sma(close: pd.Series, period: int):
     return close.rolling(period).mean()
 
 
+def calc_atr(df: pd.DataFrame, period=14) -> pd.Series:
+    """Average True Range — mide la volatilidad real del mercado."""
+    high = df["high"]
+    low = df["low"]
+    prev_close = df["close"].shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
+
+
 def detect_bull_engulfing(df: pd.DataFrame):
     """
     BullEngulfing: vela anterior bajista completamente engullida por vela alcista.
@@ -610,18 +627,24 @@ def scan(symbol: str = None):
     trigger_active, trigger_details = check_trigger_5m(df5)
 
     # ── Sizing informativo (1H Spot) ──────────────────────────────────────────
+    atr_val    = float(calc_atr(df1h, ATR_PERIOD).iloc[-1])
     capital    = 1000.0
     risk_usd   = capital * 0.01
-    sl_dist    = price * (SL_PCT / 100)
+
+    # ATR-based SL/TP (adaptativo a volatilidad)
+    sl_dist    = atr_val * ATR_SL_MULT
+    tp_dist    = atr_val * ATR_TP_MULT
+    sl_price   = round(price - sl_dist, 2)
+    tp_price   = round(price + tp_dist, 2)
+    sl_pct_val = round(sl_dist / price * 100, 2)
+    tp_pct_val = round(tp_dist / price * 100, 2)
+
     qty_btc    = risk_usd / sl_dist
     val_pos    = qty_btc * price
-    # Spot: valor posición no puede superar 98% del capital
+    # Spot: valor posicion no puede superar 98% del capital
     if val_pos > capital * 0.98:
         qty_btc = (capital * 0.98) / price
         val_pos  = qty_btc * price
-
-    tp_price   = round(price * (1 + TP_PCT / 100), 2)
-    sl_price   = round(price * (1 - SL_PCT / 100), 2)
 
     # ── Veredicto ─────────────────────────────────────────────────────────────
     if not in_long_zone:
@@ -668,8 +691,10 @@ def scan(symbol: str = None):
         "sizing_1h": {
             "capital_usd": capital,
             "riesgo_usd":  round(risk_usd, 2),
-            "sl_pct":      f"{SL_PCT}%",
-            "tp_pct":      f"{TP_PCT}%",
+            "atr_1h":      round(atr_val, 2),
+            "sl_mode":     "atr",
+            "sl_pct":      f"{sl_pct_val}%",
+            "tp_pct":      f"{tp_pct_val}%",
             "sl_precio":   sl_price,
             "tp_precio":   tp_price,
             "qty_btc":     round(qty_btc, 6),

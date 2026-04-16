@@ -364,7 +364,17 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({
                         <td className="pos-mono">{fmtPrice(pos.entry_price)}</td>
                         <td className="pos-mono pos-current">{fmtPrice(cp)}</td>
                         <td className={`pos-mono ${pnl.cls}`}>{pnl.text}</td>
-                        <td className="pos-mono pos-sl">{fmtPrice(pos.sl_price)}</td>
+                        <td className="pos-mono pos-sl">
+                          {fmtPrice(pos.sl_price)}
+                          {pos.sl_price != null && pos.entry_price != null && pos.sl_price >= pos.entry_price && (
+                            <span style={{
+                              backgroundColor: '#22c55e', color: '#fff',
+                              fontSize: '0.65rem', padding: '1px 4px',
+                              borderRadius: '3px', marginLeft: '4px',
+                              fontWeight: 600,
+                            }}>BE</span>
+                          )}
+                        </td>
                         <td className="pos-mono pos-tp">{fmtPrice(pos.tp_price)}</td>
                         <td>
                           {prog != null ? (

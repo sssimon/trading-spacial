@@ -29,12 +29,13 @@ import requests
 
 # Import scanner functions
 from btc_scanner import (
-    calc_lrc, calc_rsi, calc_bb, calc_sma,
+    calc_lrc, calc_rsi, calc_bb, calc_sma, calc_atr,
     detect_bull_engulfing, calc_cvd_delta, detect_rsi_divergence,
     check_trigger_5m, score_label,
     LRC_PERIOD, LRC_STDEV, RSI_PERIOD, BB_PERIOD, BB_STDEV, VOL_PERIOD,
     LRC_LONG_MAX, SL_PCT, TP_PCT, COOLDOWN_H,
     SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
+    ATR_PERIOD, ATR_SL_MULT, ATR_TP_MULT, ATR_BE_MULT,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
@@ -137,13 +138,20 @@ def get_cached_data(symbol: str, interval: str) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame,
-                      symbol: str) -> list[dict]:
+                      symbol: str, sl_mode: str = "atr",
+                      atr_sl_mult: float = None, atr_tp_mult: float = None,
+                      atr_be_mult: float = None) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy."""
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
     capital = INITIAL_CAPITAL
     equity_curve = []
+
+    # Resolve ATR multipliers
+    _sl_m = atr_sl_mult if atr_sl_mult is not None else ATR_SL_MULT
+    _tp_m = atr_tp_mult if atr_tp_mult is not None else ATR_TP_MULT
+    _be_m = atr_be_mult if atr_be_mult is not None else ATR_BE_MULT
 
     # Need at least LRC_PERIOD bars of warmup
     warmup = max(LRC_PERIOD, 100) + 10
@@ -155,6 +163,11 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         # ── Check open position for SL/TP ─────────────────────────────────
         if position is not None:
+            # Trailing ratchet: move SL to breakeven
+            be_thresh = position.get("be_threshold")
+            if be_thresh and bar["high"] >= be_thresh and position["sl"] < position["entry_price"]:
+                position["sl"] = position["entry_price"]
+
             hit_sl = bar["low"] <= position["sl"]
             hit_tp = bar["high"] >= position["tp"]
 
@@ -179,7 +192,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             if exit_price is not None:
                 pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
                 risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
-                pnl_usd = risk_amount * (pnl_pct / SL_PCT)  # normalize by SL size
+                sl_pct_actual = (position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
+                pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
 
                 trade = {
                     "entry_time": position["entry_time"],
@@ -294,16 +308,28 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             size_mult = 0.5
 
         # ── Open position ─────────────────────────────────────────────────
-        sl_price = round(price * (1 - SL_PCT / 100), 2)
-        tp_price = round(price * (1 + TP_PCT / 100), 2)
+        if sl_mode == "atr":
+            atr_series = calc_atr(window_1h, ATR_PERIOD)
+            atr_val = float(atr_series.iloc[-1])
+            if pd.isna(atr_val) or atr_val <= 0:
+                continue
+            sl_price = round(price - atr_val * _sl_m, 2)
+            tp_price = round(price + atr_val * _tp_m, 2)
+            be_threshold = price + atr_val * _be_m
+        else:
+            sl_price = round(price * (1 - SL_PCT / 100), 2)
+            tp_price = round(price * (1 + TP_PCT / 100), 2)
+            be_threshold = None
 
         position = {
             "entry_price": price,
             "entry_time": bar_time,
             "score": score,
             "sl": sl_price,
+            "sl_orig": sl_price,
             "tp": tp_price,
             "size_mult": size_mult,
+            "be_threshold": be_threshold,
         }
 
     # Close any open position at last bar price
@@ -312,7 +338,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         exit_price = float(last_bar["close"])
         pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
         risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
-        pnl_usd = risk_amount * (pnl_pct / SL_PCT)
+        sl_pct_actual = (position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
+        pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
         trades.append({
             "entry_time": position["entry_time"],
             "exit_time": df1h.index[-1],
@@ -666,6 +693,8 @@ Based on backtest data:
 def main():
     parser = argparse.ArgumentParser(description="Backtest Spot V6 Strategy")
     parser.add_argument("--symbol", default="BTCUSDT", help="Trading pair (default: BTCUSDT)")
+    parser.add_argument("--sl-mode", default="atr", choices=["atr", "fixed"],
+                        help="SL/TP mode: 'atr' (dynamic) or 'fixed' (2%%/4%%)")
     parser.add_argument("--download-only", action="store_true", help="Only download data")
     args = parser.parse_args()
 
@@ -688,7 +717,7 @@ def main():
         return
 
     # Run simulation
-    trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol)
+    trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode)
     log.info(f"Simulation complete: {len(trades)} trades generated")
 
     if not trades:
