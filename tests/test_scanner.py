@@ -574,7 +574,7 @@ class TestScan:
     @patch("btc_scanner.get_klines")
     def test_scan_retorna_dict_con_claves(self, mock_klines):
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]  # 5m, 1h, 4h
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]  # 5m, 1h, 4h, 1d
 
         rep = scanner.scan()
 
@@ -589,7 +589,7 @@ class TestScan:
     @patch("btc_scanner.get_klines")
     def test_scan_precio_es_float(self, mock_klines):
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan("ETHUSDT")
         assert isinstance(rep["price"], float)
@@ -598,7 +598,7 @@ class TestScan:
     @patch("btc_scanner.get_klines")
     def test_scan_señal_activa_es_bool(self, mock_klines):
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         assert isinstance(rep["señal_activa"], bool)
@@ -612,7 +612,7 @@ class TestScan:
         df1h = make_ohlcv(n=n, base_price=85000, trend=100, noise=10)
         df4h = make_ohlcv(n=150, base_price=85000, noise=50)
         df5m = make_ohlcv(n=210, base_price=85000, noise=50)
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         # No garantizamos el valor exacto de lrc_pct ya que depende del canal,
@@ -624,7 +624,7 @@ class TestScan:
     def test_scan_sizing_coherente(self, mock_klines):
         """Verifica que el sizing no supere el 98% del capital."""
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         sz = rep["sizing_1h"]
@@ -636,7 +636,7 @@ class TestScan:
     def test_scan_sl_tp_coherentes(self, mock_klines):
         """SL debe ser menor al precio, TP mayor."""
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         price = rep["price"]
@@ -648,7 +648,7 @@ class TestScan:
     def test_scan_json_serializable(self, mock_klines):
         """El reporte debe ser completamente serializable a JSON."""
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         # Esto no debe lanzar excepción
@@ -659,7 +659,7 @@ class TestScan:
     def test_scan_score_en_rango(self, mock_klines):
         """El score debe estar entre 0 y 10."""
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         assert 0 <= rep["score"] <= 10
@@ -667,7 +667,7 @@ class TestScan:
     @patch("btc_scanner.get_klines")
     def test_scan_sizing_uses_atr(self, mock_klines):
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h]
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan("BTCUSDT")
         sz = rep["sizing_1h"]

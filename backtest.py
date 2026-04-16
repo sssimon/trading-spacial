@@ -141,7 +141,8 @@ def get_cached_data(symbol: str, interval: str) -> pd.DataFrame:
 def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame,
                       symbol: str, sl_mode: str = "atr",
                       atr_sl_mult: float = None, atr_tp_mult: float = None,
-                      atr_be_mult: float = None) -> list[dict]:
+                      atr_be_mult: float = None,
+                      df1d: pd.DataFrame = None) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy."""
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
@@ -164,13 +165,20 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         # ── Check open position for SL/TP ─────────────────────────────────
         if position is not None:
-            # Trailing ratchet: move SL to breakeven
+            pos_dir = position.get("direction", "LONG")
             be_thresh = position.get("be_threshold")
-            if be_thresh and bar["high"] >= be_thresh and position["sl"] < position["entry_price"]:
-                position["sl"] = position["entry_price"]
 
-            hit_sl = bar["low"] <= position["sl"]
-            hit_tp = bar["high"] >= position["tp"]
+            # Trailing ratchet: move SL to breakeven
+            if pos_dir == "SHORT":
+                if be_thresh and bar["low"] <= be_thresh and position["sl"] > position["entry_price"]:
+                    position["sl"] = position["entry_price"]
+                hit_sl = bar["high"] >= position["sl"]
+                hit_tp = bar["low"] <= position["tp"]
+            else:
+                if be_thresh and bar["high"] >= be_thresh and position["sl"] < position["entry_price"]:
+                    position["sl"] = position["entry_price"]
+                hit_sl = bar["low"] <= position["sl"]
+                hit_tp = bar["high"] >= position["tp"]
 
             if hit_sl and hit_tp:
                 # Both hit in same bar — assume SL hit first if open < entry
@@ -191,9 +199,12 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 exit_reason = None
 
             if exit_price is not None:
-                pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
+                if pos_dir == "SHORT":
+                    pnl_pct = (position["entry_price"] - exit_price) / position["entry_price"] * 100
+                else:
+                    pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
                 risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
-                sl_pct_actual = (position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
+                sl_pct_actual = abs(position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
                 pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
 
                 trade = {
@@ -202,6 +213,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                     "entry_price": position["entry_price"],
                     "exit_price": exit_price,
                     "exit_reason": exit_reason,
+                    "direction": pos_dir,
                     "pnl_pct": round(pnl_pct, 4),
                     "pnl_usd": round(pnl_usd, 2),
                     "score": position["score"],
@@ -234,9 +246,30 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         close_1h = window_1h["close"]
         price = float(close_1h.iloc[-1])
 
-        # LRC
+        # LRC — determine direction
         lrc_pct, lrc_up, lrc_dn, lrc_mid = calc_lrc(close_1h, LRC_PERIOD, LRC_STDEV)
-        if lrc_pct is None or lrc_pct > LRC_LONG_MAX:
+        if lrc_pct is None:
+            continue
+
+        from btc_scanner import LRC_SHORT_MIN, detect_bear_engulfing, check_trigger_5m_short
+
+        # Regime detection: Death Cross (SMA50 < SMA200 daily) = bear confirmed
+        regime = "LONG"  # default
+        if df1d is not None and len(df1d) >= 200:
+            mask_1d = df1d.index <= bar_time
+            window_1d = df1d.loc[mask_1d]
+            if len(window_1d) >= 200:
+                sma50_d  = calc_sma(window_1d["close"], 50).iloc[-1]
+                sma200_d = calc_sma(window_1d["close"], 200).iloc[-1]
+                if not pd.isna(sma50_d) and not pd.isna(sma200_d):
+                    if sma50_d < sma200_d and price < sma200_d:
+                        regime = "SHORT"  # death cross + price below = confirmed bear
+
+        if lrc_pct <= LRC_LONG_MAX and regime == "LONG":
+            trade_dir = "LONG"
+        elif lrc_pct >= LRC_SHORT_MIN and regime == "SHORT":
+            trade_dir = "SHORT"
+        else:
             continue
 
         # Macro 4H: SMA100
@@ -245,60 +278,65 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         if len(window_4h) < 100:
             continue
         sma100_4h = calc_sma(window_4h["close"], 100).iloc[-1]
-        if pd.isna(sma100_4h) or price <= sma100_4h:
+        if pd.isna(sma100_4h):
+            continue
+        if trade_dir == "LONG" and price <= sma100_4h:
+            continue
+        if trade_dir == "SHORT" and price >= sma100_4h:
             continue
 
-        # Exclusions
-        bull_eng = detect_bull_engulfing(window_1h)
-        if bull_eng:
-            continue
-
+        # Exclusions (direction-aware)
         rsi1h = calc_rsi(close_1h, RSI_PERIOD)
         rsi_divs = detect_rsi_divergence(close_1h, rsi1h, window=72)
-        if rsi_divs["bear"]:
-            continue
 
-        # 5M trigger
+        if trade_dir == "LONG":
+            if detect_bull_engulfing(window_1h):
+                continue
+            if rsi_divs["bear"]:
+                continue
+        else:  # SHORT
+            if detect_bear_engulfing(window_1h):
+                continue
+            if rsi_divs["bull"]:
+                continue
+
+        # 5M trigger (direction-aware)
         mask_5m = (df5m.index <= bar_time) & (df5m.index > bar_time - timedelta(hours=1))
         window_5m = df5m.loc[mask_5m]
         if len(window_5m) < 3:
             continue
-        trigger_active, _ = check_trigger_5m(window_5m)
+        if trade_dir == "LONG":
+            trigger_active, _ = check_trigger_5m(window_5m)
+        else:
+            trigger_active, _ = check_trigger_5m_short(window_5m)
         if not trigger_active:
             continue
 
-        # ── Compute score ─────────────────────────────────────────────────
+        # ── Compute score (direction-aware) ───────────────────────────────
         score = 0
         cur_rsi1h = float(rsi1h.iloc[-1])
-
-        # C1: RSI < 40
-        if cur_rsi1h < 40:
-            score += 2
-        # C2: Bullish RSI divergence
-        if rsi_divs["bull"]:
-            score += 2
-        # C3: Near support
-        if lrc_dn is not None:
-            dist_sup = abs(price - lrc_dn) / price * 100
-            if dist_sup <= 1.5:
-                score += 1
-        # C4: Below BB lower
         bb_up, _, bb_dn = calc_bb(close_1h, BB_PERIOD, BB_STDEV)
-        if price <= bb_dn.iloc[-1]:
-            score += 1
-        # C5: Volume above average
         vol_avg = window_1h["volume"].rolling(VOL_PERIOD).mean().iloc[-1]
-        if window_1h["volume"].iloc[-1] >= vol_avg:
-            score += 1
-        # C6: CVD delta positive
         cvd = calc_cvd_delta(window_1h, n=3)
-        if cvd > 0:
-            score += 1
-        # C7: SMA10 > SMA20
         sma10 = calc_sma(close_1h, 10).iloc[-1]
         sma20 = calc_sma(close_1h, 20).iloc[-1]
-        if sma10 > sma20:
-            score += 1
+
+        if trade_dir == "LONG":
+            if cur_rsi1h < 40: score += 2
+            if rsi_divs["bull"]: score += 2
+            if lrc_dn and abs(price - lrc_dn) / price * 100 <= 1.5: score += 1
+            if price <= bb_dn.iloc[-1]: score += 1
+            if window_1h["volume"].iloc[-1] >= vol_avg: score += 1
+            if cvd > 0: score += 1
+            if sma10 > sma20: score += 1
+        else:  # SHORT
+            if cur_rsi1h > 60: score += 2
+            if rsi_divs["bear"]: score += 2
+            if lrc_up and abs(price - lrc_up) / price * 100 <= 1.5: score += 1
+            if price >= bb_up.iloc[-1]: score += 1
+            if window_1h["volume"].iloc[-1] >= vol_avg: score += 1
+            if cvd < 0: score += 1
+            if sma10 < sma20: score += 1
 
         # Size multiplier
         if score >= SCORE_PREMIUM:
@@ -314,18 +352,28 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             atr_val = float(atr_series.iloc[-1])
             if pd.isna(atr_val) or atr_val <= 0:
                 continue
-            sl_price = round(price - atr_val * _sl_m, 2)
-            tp_price = round(price + atr_val * _tp_m, 2)
-            be_threshold = price + atr_val * _be_m
+            if trade_dir == "SHORT":
+                sl_price = round(price + atr_val * _sl_m, 2)
+                tp_price = round(price - atr_val * _tp_m, 2)
+                be_threshold = price - atr_val * _be_m
+            else:
+                sl_price = round(price - atr_val * _sl_m, 2)
+                tp_price = round(price + atr_val * _tp_m, 2)
+                be_threshold = price + atr_val * _be_m
         else:
-            sl_price = round(price * (1 - SL_PCT / 100), 2)
-            tp_price = round(price * (1 + TP_PCT / 100), 2)
+            if trade_dir == "SHORT":
+                sl_price = round(price * (1 + SL_PCT / 100), 2)
+                tp_price = round(price * (1 - TP_PCT / 100), 2)
+            else:
+                sl_price = round(price * (1 - SL_PCT / 100), 2)
+                tp_price = round(price * (1 + TP_PCT / 100), 2)
             be_threshold = None
 
         position = {
             "entry_price": price,
             "entry_time": bar_time,
             "score": score,
+            "direction": trade_dir,
             "sl": sl_price,
             "sl_orig": sl_price,
             "tp": tp_price,
@@ -706,8 +754,9 @@ def main():
     df1h = get_cached_data(symbol, "1h")
     df4h = get_cached_data(symbol, "4h")
     df5m = get_cached_data(symbol, "5m")
+    df1d = get_cached_data(symbol, "1d")
 
-    log.info(f"Data loaded: 1H={len(df1h)}, 4H={len(df4h)}, 5M={len(df5m)} candles")
+    log.info(f"Data loaded: 1H={len(df1h)}, 4H={len(df4h)}, 5M={len(df5m)}, 1D={len(df1d)} candles")
 
     if args.download_only:
         log.info("Download complete.")
@@ -718,7 +767,7 @@ def main():
         return
 
     # Run simulation
-    trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode)
+    trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode, df1d=df1d)
     log.info(f"Simulation complete: {len(trades)} trades generated")
 
     if not trades:

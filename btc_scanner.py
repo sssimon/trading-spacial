@@ -611,8 +611,18 @@ def scan(symbol: str = None):
     df5  = get_klines(symbol, "5m",  limit=210)   # gatillo
     df1h = get_klines(symbol, "1h",  limit=210)   # señal principal
     df4h = get_klines(symbol, "4h",  limit=150)   # contexto macro
+    df1d = get_klines(symbol, "1d",  limit=250)   # régimen de mercado (SMA200)
 
     price = df1h["close"].iloc[-1]   # precio de cierre de la última vela 1H
+
+    # ── Régimen de mercado (Death Cross = bear confirmado) ───────────────────
+    sma50_d  = calc_sma(df1d["close"], 50).iloc[-1] if len(df1d) >= 50 else None
+    sma200_d = calc_sma(df1d["close"], 200).iloc[-1] if len(df1d) >= 200 else None
+    if (sma50_d and sma200_d and not pd.isna(sma50_d) and not pd.isna(sma200_d)
+            and sma50_d < sma200_d and price < sma200_d):
+        regime = "SHORT"  # death cross + precio debajo = bear confirmado
+    else:
+        regime = "LONG"   # default: mercado alcista o neutral
 
     # ── Indicadores 1H (señal) ────────────────────────────────────────────────
     lrc_pct, lrc_up, lrc_dn, lrc_mid = calc_lrc(df1h["close"], LRC_PERIOD, LRC_STDEV)
@@ -699,11 +709,11 @@ def scan(symbol: str = None):
     if bull_div:
         blocks_short.append("E6S: Divergencia alcista RSI (1H) — agotamiento bajista")
 
-    # ── Determinar direccion activa ─────────────────────────────────────────
+    # ── Determinar direccion activa (filtrado por régimen de mercado) ────────
     direction = None
-    if in_long_zone:
+    if in_long_zone and regime == "LONG":
         direction = "LONG"
-    elif in_short_zone:
+    elif in_short_zone and regime == "SHORT":
         direction = "SHORT"
 
     # ── Score de Confirmaciones 1H ────────────────────────────────────────────
@@ -814,6 +824,8 @@ def scan(symbol: str = None):
         "estado":         estado,
         "señal_activa":   señal,
         "direction":      direction,
+        "regime":         regime,
+        "sma200_daily":   round(sma200_d, 2) if sma200_d and not pd.isna(sma200_d) else None,
         "price":          round(price, 2),
         "lrc_1h": {
             "pct":   lrc_pct,
