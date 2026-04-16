@@ -74,6 +74,7 @@ ATR_BE_MULT    = 1.5    # Mover SL a breakeven cuando profit >= 1.5x ATR
 
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
 LRC_LONG_MAX   = 25.0     # LRC% ≤ 25  →  zona de entrada
+LRC_SHORT_MIN  = 75.0     # LRC% >= 75  →  zona de entrada SHORT
 SL_PCT         = 2.0      # Stop Loss  2.0%
 TP_PCT         = 4.0      # Take Profit 4.0%
 COOLDOWN_H     = 6        # Horas mínimas entre trades
@@ -459,6 +460,20 @@ def detect_bull_engulfing(df: pd.DataFrame):
             and c["close"] >= p["open"])    # cierra ≥ open anterior
 
 
+def detect_bear_engulfing(df: pd.DataFrame):
+    """
+    BearEngulfing: vela anterior alcista completamente engullida por vela bajista.
+    Si está activo → NO entrar SHORT (exclusion para shorts).
+    """
+    if len(df) < 2:
+        return False
+    p, c = df.iloc[-2], df.iloc[-1]
+    return bool(p["close"] > p["open"]          # anterior alcista
+               and c["close"] < c["open"]      # actual bajista
+               and c["open"]  >= p["close"]    # abre >= cierre anterior
+               and c["close"] <= p["open"])    # cierra <= open anterior
+
+
 def calc_cvd_delta(df: pd.DataFrame, n=3):
     """Proxy CVD: volumen taker buy − sell últimas n barras."""
     buy  = df["taker_buy_base"].tail(n)
@@ -545,6 +560,36 @@ def check_trigger_5m(df5: pd.DataFrame):
     details = {
         "vela_5m_alcista":    bullish_candle,
         "rsi_5m_recuperando": rsi_recovering,
+        "rsi_5m_actual":      round(rsi5.iloc[-1], 2),
+        "rsi_5m_anterior":    round(rsi5.iloc[-2], 2),
+        "close_5m":           round(cur["close"], 2),
+        "open_5m":            round(cur["open"], 2),
+    }
+    return trigger_active, details
+
+
+def check_trigger_5m_short(df5: pd.DataFrame):
+    """
+    Evalúa si la última vela de 5M activa el gatillo de entrada SHORT.
+
+    Gatillo SHORT ACTIVO cuando:
+      1. Vela 5M cierra bajista (close < open)
+      2. RSI 5M está cayendo (RSI actual < RSI vela anterior)
+    """
+    if len(df5) < 3:
+        return False, {}
+
+    rsi5        = calc_rsi(df5["close"], RSI_PERIOD)
+    cur         = df5.iloc[-1]
+
+    bearish_candle  = bool(cur["close"] < cur["open"])
+    rsi_falling     = bool(rsi5.iloc[-1] < rsi5.iloc[-2])
+
+    trigger_active = bearish_candle and rsi_falling
+
+    details = {
+        "vela_5m_bajista":    bearish_candle,
+        "rsi_5m_cayendo":     rsi_falling,
         "rsi_5m_actual":      round(rsi5.iloc[-1], 2),
         "rsi_5m_anterior":    round(rsi5.iloc[-2], 2),
         "close_5m":           round(cur["close"], 2),
