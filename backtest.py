@@ -58,6 +58,84 @@ FEE_PCT = 0.001  # 0.1% per trade (Binance spot)
 
 _dl_last_call = 0.0
 
+
+def get_historical_fear_greed() -> pd.DataFrame:
+    """Download full Fear & Greed Index history (2018+). Cache to CSV."""
+    cache = os.path.join(DATA_DIR, "fear_greed_history.csv")
+    if os.path.exists(cache):
+        df = pd.read_csv(cache, index_col="date", parse_dates=True)
+        age_days = (datetime.now(timezone.utc) - df.index[-1].replace(tzinfo=timezone.utc)).days
+        if age_days < 7:
+            log.info(f"Fear & Greed cache: {len(df)} days ({df.index[0].date()} → {df.index[-1].date()})")
+            return df
+
+    log.info("Downloading Fear & Greed Index full history...")
+    try:
+        time.sleep(0.5)  # rate limit courtesy
+        r = requests.get("https://api.alternative.me/fng/?limit=0", timeout=30)
+        r.raise_for_status()
+        data = r.json()["data"]
+        rows = [{"date": pd.Timestamp(int(d["timestamp"]), unit="s"), "fng": int(d["value"]),
+                 "classification": d["value_classification"]} for d in data]
+        df = pd.DataFrame(rows).set_index("date").sort_index()
+        df = df[~df.index.duplicated(keep='first')]
+        df.to_csv(cache)
+        log.info(f"Fear & Greed saved: {len(df)} days ({df.index[0].date()} → {df.index[-1].date()})")
+        return df
+    except Exception as e:
+        log.warning(f"Fear & Greed download failed: {e}")
+        return pd.DataFrame()
+
+
+def get_historical_funding_rate() -> pd.DataFrame:
+    """Download BTC funding rate history from Binance Futures. Cache to CSV."""
+    cache = os.path.join(DATA_DIR, "btc_funding_rate_history.csv")
+    if os.path.exists(cache):
+        df = pd.read_csv(cache, index_col="time", parse_dates=True)
+        age_days = (datetime.now(timezone.utc) - df.index[-1].replace(tzinfo=timezone.utc)).days
+        if age_days < 7:
+            log.info(f"Funding rate cache: {len(df)} entries ({df.index[0].date()} → {df.index[-1].date()})")
+            return df
+
+    log.info("Downloading BTC funding rate history...")
+    all_data = []
+    start_ms = int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    while start_ms < end_ms:
+        try:
+            time.sleep(0.2)
+            r = requests.get(
+                "https://fapi.binance.com/fapi/v1/fundingRate",
+                params={"symbol": "BTCUSDT", "startTime": start_ms, "limit": 1000},
+                timeout=15
+            )
+            r.raise_for_status()
+            data = r.json()
+            if not data:
+                break
+            all_data.extend(data)
+            start_ms = int(data[-1]["fundingTime"]) + 1
+            if len(data) < 1000:
+                break
+        except Exception as e:
+            log.warning(f"Funding rate page error: {e}")
+            time.sleep(2)
+            continue
+
+    if not all_data:
+        log.warning("No funding rate data downloaded")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_data)
+    df["time"] = pd.to_datetime(df["fundingTime"], unit="ms")
+    df["rate"] = df["fundingRate"].astype(float)
+    df = df[["time", "rate"]].set_index("time").sort_index()
+    df = df[~df.index.duplicated(keep='first')]
+    df.to_csv(cache)
+    log.info(f"Funding rate saved: {len(df)} entries ({df.index[0].date()} → {df.index[-1].date()})")
+    return df
+
 def download_klines(symbol: str, interval: str, start_ts: int, end_ts: int) -> pd.DataFrame:
     """Download historical klines from Binance with pagination and rate limiting."""
     global _dl_last_call
@@ -164,7 +242,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       atr_sl_mult: float = None, atr_tp_mult: float = None,
                       atr_be_mult: float = None,
                       df1d: pd.DataFrame = None,
-                      sim_start: datetime = None, sim_end: datetime = None) -> list[dict]:
+                      sim_start: datetime = None, sim_end: datetime = None,
+                      df_fng: pd.DataFrame = None,
+                      df_funding: pd.DataFrame = None) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy."""
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
@@ -286,8 +366,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         from btc_scanner import LRC_SHORT_MIN, detect_bear_engulfing, check_trigger_5m_short
 
-        # Regime detection: price-based only (backtest can't call sentiment APIs)
-        regime = "LONG"  # default
+        # Regime detection: composite (same as production, using historical data)
+        # 1. Price structure (40%)
+        price_score = 100
         if df1d is not None and len(df1d) >= 200:
             mask_1d = df1d.index <= bar_time
             window_1d = df1d.loc[mask_1d]
@@ -295,16 +376,40 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 sma50_d  = calc_sma(window_1d["close"], 50).iloc[-1]
                 sma200_d = calc_sma(window_1d["close"], 200).iloc[-1]
                 if not pd.isna(sma50_d) and not pd.isna(sma200_d):
-                    price_score = 100
                     if sma50_d < sma200_d: price_score -= 40
                     if price < sma200_d: price_score -= 30
                     ret30 = window_1d["close"].iloc[-1] / window_1d["close"].iloc[-30] - 1 if len(window_1d) >= 30 else 0
                     if ret30 < -0.10: price_score -= 20
                     elif ret30 < 0: price_score -= 10
-                    # In backtest, use price_score alone (no sentiment APIs)
-                    # Score < 30 = BEAR (same threshold as composite)
-                    if price_score < 30:
-                        regime = "SHORT"
+        price_score = max(0, min(100, price_score))
+
+        # 2. Sentiment: Fear & Greed (30%)
+        fng_score = 50  # default neutral
+        if df_fng is not None and not df_fng.empty:
+            fng_mask = df_fng.index <= bar_time_naive
+            if fng_mask.any():
+                fng_score = int(df_fng.loc[fng_mask, "fng"].iloc[-1])
+
+        # 3. Funding rate (30%)
+        funding_score = 50  # default neutral
+        if df_funding is not None and not df_funding.empty:
+            fund_idx = df_funding.index
+            if fund_idx.tz is not None:
+                fund_mask = fund_idx <= bar_time
+            else:
+                fund_mask = fund_idx <= bar_time_naive
+            if fund_mask.any():
+                rate = float(df_funding.loc[fund_mask, "rate"].iloc[-1])
+                funding_score = max(0, min(100, int(50 + rate * 5000)))
+
+        # Composite (same weights as production)
+        composite = price_score * 0.4 + fng_score * 0.3 + funding_score * 0.3
+        if composite > 70:
+            regime = "LONG"
+        elif composite < 30:
+            regime = "SHORT"
+        else:
+            regime = "LONG"  # NEUTRAL = conservative LONG
 
         # LONG-only: SHORT deshabilitado por resultados de backtest
         # En BEAR regime, no opera (protege capital)
@@ -821,8 +926,13 @@ def main():
         return
 
     # Run simulation
+    # Download historical sentiment & funding data (cached, one-time)
+    df_fng = get_historical_fear_greed()
+    df_funding = get_historical_funding_rate()
+
     trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode,
-                                               df1d=df1d, sim_start=sim_start, sim_end=sim_end)
+                                               df1d=df1d, sim_start=sim_start, sim_end=sim_end,
+                                               df_fng=df_fng, df_funding=df_funding)
     log.info(f"Simulation complete: {len(trades)} trades generated")
 
     if not trades:
