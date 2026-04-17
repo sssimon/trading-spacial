@@ -621,6 +621,18 @@ def check_position_stops(symbol: str, price: float):
                 log.warning(f"Failed to notify {reason} for {symbol}: {e}")
 
 
+def update_position_trailing_sl(symbol: str, new_sl: float):
+    """Update trailing stop for open trend-following positions.
+    Only moves SL in favorable direction (up for LONG)."""
+    con = get_db()
+    con.execute(
+        "UPDATE positions SET sl_price = ? WHERE symbol = ? AND status = 'open' AND sl_price < ?",
+        (round(new_sl, 2), symbol.upper(), round(new_sl, 2))
+    )
+    con.commit()
+    con.close()
+
+
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
     try:
         _ensure_dirs()
@@ -1204,6 +1216,12 @@ def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
         price_now = rep.get("price")
         if price_now:
             check_position_stops(sym, price_now)
+
+            # Update trailing stop for trend-following positions
+            if rep.get("strategy") == "trend_following" and rep.get("tf_indicators", {}).get("trailing_stop"):
+                trailing_sl = rep["tf_indicators"]["trailing_stop"]
+                if trailing_sl and trailing_sl > 0:
+                    update_position_trailing_sl(sym, trailing_sl)
 
         _scanner_state["last_scan_ts"] = rep.get("timestamp")
         _scanner_state["last_symbol"]  = sym
