@@ -615,17 +615,19 @@ def classify_market_regime(df1h: pd.DataFrame, trades: list[dict]) -> dict:
 #  REPORT
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict]) -> str:
+def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict],
+                    sim_start: datetime = None, sim_end: datetime = None) -> str:
     """Generate markdown report."""
     m = metrics
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    period_start = START_DATE.strftime("%Y-%m-%d")
+    period_start = sim_start.strftime("%Y-%m-%d") if sim_start else "N/A"
+    period_end = sim_end.strftime("%Y-%m-%d") if sim_end else "present"
 
     report = f"""# Strategy Backtest Report — Spot V6
 
 **Generated:** {now}
 **Symbol:** {symbol}
-**Period:** {period_start} — present
+**Period:** {period_start} — {period_end}
 **Initial Capital:** ${INITIAL_CAPITAL:,.0f}
 
 ---
@@ -846,7 +848,7 @@ def main():
     print(f"{'='*60}\n")
 
     # Generate and save report
-    report = generate_report(symbol, metrics, regimes, trades)
+    report = generate_report(symbol, metrics, regimes, trades, sim_start=sim_start, sim_end=sim_end)
     report_path = os.path.join(SCRIPT_DIR, "docs", "strategy-backtest-report.md")
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
