@@ -14,6 +14,7 @@ import sys
 import json
 import time
 import shutil
+import sqlite3
 import argparse
 import logging
 import itertools
@@ -30,6 +31,34 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(
 log = logging.getLogger("auto_tune")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DB_FILE = os.path.join(SCRIPT_DIR, "signals.db")
+
+
+def save_tune_result(results: list, report_md: str, status: str = "pending"):
+    """Save tune results to DB."""
+    changes = [r for r in results if r.get("recommendation") == "CHANGE"]
+    con = sqlite3.connect(DB_FILE)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS tune_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            results_json TEXT,
+            report_md TEXT,
+            applied_ts TEXT,
+            changes_count INTEGER DEFAULT 0
+        )
+    """)
+    now = datetime.now(timezone.utc).isoformat()
+    applied_ts = now if status == "applied" else None
+    con.execute(
+        "INSERT INTO tune_results (ts, status, results_json, report_md, applied_ts, changes_count) VALUES (?, ?, ?, ?, ?, ?)",
+        (now, status, json.dumps(results, default=str), report_md, applied_ts, len(changes))
+    )
+    con.commit()
+    con.close()
+
 
 GRID = {
     "atr_sl_mult": [0.5, 0.7, 1.0, 1.2, 1.5, 2.0, 2.5],
@@ -463,13 +492,40 @@ def main():
     args = parser.parse_args()
 
     if args.apply:
-        config_path = os.path.join(SCRIPT_DIR, "config.json")
+        # Try config_proposed.json first (legacy), then DB
         proposed_path = os.path.join(SCRIPT_DIR, "config_proposed.json")
-        backup = apply_config(config_path, proposed_path)
-        if backup:
-            print(f"Config updated. Backup: {backup}")
-            config = load_config()
-            send_telegram("Config actualizado via auto-tune --apply", config)
+        config_path = os.path.join(SCRIPT_DIR, "config.json")
+
+        if os.path.exists(proposed_path):
+            backup = apply_config(config_path, proposed_path)
+            if backup:
+                print(f"Config updated from file. Backup: {backup}")
+        else:
+            # Check DB for pending
+            try:
+                con = sqlite3.connect(DB_FILE)
+                con.row_factory = sqlite3.Row
+                row = con.execute("SELECT * FROM tune_results WHERE status='pending' ORDER BY id DESC LIMIT 1").fetchone()
+                con.close()
+                if row and row["results_json"]:
+                    results = json.loads(row["results_json"])
+                    config = load_config()
+                    proposed_path_tmp = write_config_proposed(results, config)
+                    if proposed_path_tmp:
+                        backup = apply_config(config_path, proposed_path_tmp, confirm=False)
+                        if backup:
+                            # Update DB status
+                            con2 = sqlite3.connect(DB_FILE)
+                            con2.execute("UPDATE tune_results SET status='applied', applied_ts=? WHERE id=?",
+                                        (datetime.now(timezone.utc).isoformat(), row["id"]))
+                            con2.commit()
+                            con2.close()
+                            os.remove(proposed_path_tmp)
+                            print(f"Config updated from DB. Backup: {backup}")
+                else:
+                    print("No pending tune results found.")
+            except Exception as e:
+                print(f"Error: {e}")
         return
 
     config = load_config()
@@ -502,7 +558,10 @@ def main():
     elapsed = time.time() - start_time
     report = generate_report(results, elapsed)
 
+    auto_approve = config.get("auto_approve_tune", True)
+
     if not args.dry_run:
+        # Save report file (always)
         report_dir = os.path.join(SCRIPT_DIR, "data", "backtest")
         os.makedirs(report_dir, exist_ok=True)
         report_date = datetime.now().strftime("%Y%m%d")
@@ -511,13 +570,24 @@ def main():
             f.write(report)
         print(f"\nReport: {report_path}")
 
-        proposed_path = write_config_proposed(results, config)
-        if proposed_path:
-            print(f"Config proposed: {proposed_path}")
-            print(f"Apply: python auto_tune.py --apply")
-
-        telegram_msg = build_telegram_message(results)
-        send_telegram(telegram_msg, config)
+        if auto_approve:
+            # Auto mode: apply changes silently
+            if any(r.get("recommendation") == "CHANGE" for r in results):
+                proposed_path = write_config_proposed(results, config)
+                if proposed_path:
+                    cfg_path = os.path.join(SCRIPT_DIR, "config.json")
+                    apply_config(cfg_path, proposed_path, confirm=True)
+                    os.remove(proposed_path)
+            save_tune_result(results, report, status="applied")
+            telegram_msg = build_telegram_message(results)
+            telegram_msg += "\n\n_Modo auto-approve: cambios aplicados automaticamente._"
+            send_telegram(telegram_msg, config)
+        else:
+            # Manual mode: save as pending for frontend approval
+            save_tune_result(results, report, status="pending")
+            telegram_msg = build_telegram_message(results)
+            telegram_msg += "\n\n_Revisar y aprobar en el dashboard._"
+            send_telegram(telegram_msg, config)
     else:
         print("\n--- DRY RUN ---")
         print(report)
