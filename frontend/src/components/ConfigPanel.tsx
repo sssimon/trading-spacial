@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import type { SignalFilters, AppConfig } from '../types';
-import { getConfig, updateConfig } from '../api';
+import { getConfig, updateConfigFull } from '../api';
 
 interface ConfigPanelProps {
   open: boolean;
@@ -20,6 +20,7 @@ const DEFAULT_FILTERS: SignalFilters = {
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [filters, setFilters] = useState<SignalFilters>(DEFAULT_FILTERS);
+  const [autoApprove, setAutoApprove] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -33,6 +34,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
       .then((cfg) => {
         setConfig(cfg);
         setFilters({ ...DEFAULT_FILTERS, ...cfg.signal_filters });
+        setAutoApprove(cfg.auto_approve_tune ?? true);
       })
       .catch((err) => {
         setLoadError(err instanceof Error ? err.message : 'Error al cargar config');
@@ -43,9 +45,13 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
     setSaving(true);
     setSaved(false);
     try {
-      const res = await updateConfig(filters);
+      const res = await updateConfigFull({
+        signal_filters: filters,
+        auto_approve_tune: autoApprove,
+      });
       setConfig(res.config);
       setFilters({ ...DEFAULT_FILTERS, ...res.config.signal_filters });
+      setAutoApprove(res.config.auto_approve_tune ?? true);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -185,6 +191,28 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
                   setFilters((f) => ({ ...f, notify_setup: !f.notify_setup }))
                 }
                 aria-pressed={filters.notify_setup}
+              >
+                <span className="config-toggle-thumb" />
+              </button>
+            </div>
+
+            <div className="config-divider" />
+
+            <p className="config-section-title">Auto-Tune</p>
+
+            <div className="config-field config-field--toggle">
+              <div className="config-toggle-info">
+                <span className="config-label">Aprobacion automatica</span>
+                <span className="config-hint">
+                  {autoApprove
+                    ? 'Los parametros se aplican automaticamente cada mes.'
+                    : 'Recibiras una notificacion para revisar y aprobar cambios.'}
+                </span>
+              </div>
+              <button
+                className={`config-toggle ${autoApprove ? 'config-toggle--on' : ''}`}
+                onClick={() => setAutoApprove((v) => !v)}
+                aria-pressed={autoApprove}
               >
                 <span className="config-toggle-thumb" />
               </button>
