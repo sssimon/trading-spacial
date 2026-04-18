@@ -1,6 +1,13 @@
 import pytest
+import os
+import json
+import tempfile
 from datetime import datetime, timezone
-from auto_tune import calculate_periods, generate_combos, should_recommend, GRID
+from auto_tune import (
+    calculate_periods, generate_combos, should_recommend, GRID,
+    generate_report, write_config_proposed, apply_config,
+    load_config, get_current_params, build_telegram_message,
+)
 
 
 class TestCalculatePeriods:
@@ -60,3 +67,116 @@ class TestShouldRecommend:
 
     def test_handles_zero_current(self):
         assert should_recommend(0, 2000, 60, 1.2) is True
+
+
+class TestGenerateReport:
+    def test_report_has_summary(self):
+        results = [
+            {"symbol": "BTCUSDT", "recommendation": "KEEP",
+             "current_params": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+             "current_val_pnl": 3000, "proposed_params": None, "proposal_detail": None},
+            {"symbol": "DOGEUSDT", "recommendation": "CHANGE",
+             "current_params": {"atr_sl_mult": 0.7, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+             "current_val_pnl": 4000,
+             "proposed_params": {"atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
+             "proposal_detail": {"val_pnl": 5200, "val_pf": 1.28, "train_pnl": 9800,
+                                 "val_trades": 25, "total_trades": 87, "improvement_pct": 30.0,
+                                 "params": {"atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0}}},
+        ]
+        report = generate_report(results, elapsed_seconds=120)
+        assert "Auto-Tune Report" in report
+        assert "DOGEUSDT" in report
+        assert "BTCUSDT" in report
+
+    def test_report_no_changes(self):
+        results = [
+            {"symbol": "BTCUSDT", "recommendation": "KEEP",
+             "current_params": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+             "current_val_pnl": 3000, "proposed_params": None, "proposal_detail": None},
+        ]
+        report = generate_report(results, elapsed_seconds=60)
+        assert "0" in report
+
+
+class TestConfigProposed:
+    def test_no_file_when_no_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = [{"recommendation": "KEEP"}]
+            path = write_config_proposed(results, {}, output_dir=tmpdir)
+            assert path is None
+
+    def test_creates_file_when_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = [{
+                "symbol": "DOGEUSDT", "recommendation": "CHANGE",
+                "proposed_params": {"atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
+            }]
+            config = {"symbol_overrides": {"DOGEUSDT": {"atr_sl_mult": 0.7}}}
+            path = write_config_proposed(results, config, output_dir=tmpdir)
+            assert path is not None
+            with open(path) as f:
+                proposed = json.load(f)
+            assert proposed["symbol_overrides"]["DOGEUSDT"]["atr_sl_mult"] == 0.5
+
+
+class TestApplyConfig:
+    def test_apply_creates_backup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "config.json")
+            proposed_path = os.path.join(tmpdir, "config_proposed.json")
+
+            original = {"symbol_overrides": {"BTCUSDT": {"atr_sl_mult": 1.0}}}
+            proposed = {"symbol_overrides": {"BTCUSDT": {"atr_sl_mult": 0.7}}}
+
+            with open(config_path, "w") as f:
+                json.dump(original, f)
+            with open(proposed_path, "w") as f:
+                json.dump(proposed, f)
+
+            backup_path = apply_config(config_path, proposed_path, confirm=True)
+            assert backup_path is not None
+            assert os.path.exists(backup_path)
+
+            with open(config_path) as f:
+                updated = json.load(f)
+            assert updated["symbol_overrides"]["BTCUSDT"]["atr_sl_mult"] == 0.7
+
+            with open(backup_path) as f:
+                backup = json.load(f)
+            assert backup["symbol_overrides"]["BTCUSDT"]["atr_sl_mult"] == 1.0
+
+
+class TestGetCurrentParams:
+    def test_defaults_when_no_overrides(self):
+        params = get_current_params("BTCUSDT", {})
+        assert params == {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}
+
+    def test_reads_from_overrides(self):
+        config = {"symbol_overrides": {"BTCUSDT": {"atr_sl_mult": 0.7, "atr_tp_mult": 3.0}}}
+        params = get_current_params("BTCUSDT", config)
+        assert params["atr_sl_mult"] == 0.7
+        assert params["atr_tp_mult"] == 3.0
+        assert params["atr_be_mult"] == 1.5  # default
+
+    def test_handles_false_override(self):
+        config = {"symbol_overrides": {"BTCUSDT": False}}
+        params = get_current_params("BTCUSDT", config)
+        assert params == {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}
+
+
+class TestBuildTelegramMessage:
+    def test_message_with_changes(self):
+        results = [{
+            "symbol": "DOGEUSDT", "recommendation": "CHANGE",
+            "proposed_params": {"atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
+            "proposal_detail": {"improvement_pct": 30.0},
+        }]
+        msg = build_telegram_message(results)
+        assert "1 changes recommended" in msg
+        assert "DOGEUSDT" in msg
+
+    def test_message_no_changes(self):
+        results = [{"symbol": "BTCUSDT", "recommendation": "KEEP"}]
+        msg = build_telegram_message(results)
+        assert "0 changes recommended" in msg
+        assert "No parameter changes needed" in msg
