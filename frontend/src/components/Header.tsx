@@ -11,6 +11,8 @@ interface HeaderProps {
   onRefresh: () => void;
   onScan: () => void;
   onConfigOpen: () => void;
+  hasPendingTune: boolean;
+  onTuneOpen: () => void;
 }
 
 function formatTime(date: Date | null): string {
@@ -29,6 +31,8 @@ const Header: React.FC<HeaderProps> = ({
   onRefresh,
   onScan,
   onConfigOpen,
+  hasPendingTune,
+  onTuneOpen,
 }) => {
   return (
     <header className="header">
@@ -83,6 +87,17 @@ const Header: React.FC<HeaderProps> = ({
             'Escanear ahora'
           )}
         </button>
+        {hasPendingTune && (
+          <button
+            className="btn btn-icon tune-badge-btn"
+            onClick={onTuneOpen}
+            title="Parametros optimizados pendientes de revision"
+            aria-label="Revision de parametros"
+          >
+            <span className="tune-badge-icon">&#x2691;</span>
+            <span className="tune-badge-dot" />
+          </button>
+        )}
         <button
           className="btn btn-icon"
           onClick={onConfigOpen}

@@ -3,8 +3,8 @@
 // ============================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getSymbols, getStatus, getSignals, forceScan } from './api';
-import type { SymbolStatus, StatusResponse, Signal } from './types';
+import { getSymbols, getStatus, getSignals, forceScan, getTuneLatest, applyTune, rejectTune } from './api';
+import type { SymbolStatus, StatusResponse, Signal, TuneResult } from './types';
 import ChartModal from './components/ChartModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
@@ -13,6 +13,7 @@ import SymbolsGrid from './components/SymbolsGrid';
 import SignalsTable from './components/SignalsTable';
 import ConfigPanel from './components/ConfigPanel';
 import PositionsPanel from './components/PositionsPanel';
+import TuneReportModal from './components/TuneReportModal';
 
 type FilterType = 'all' | 'signals';
 type MainTab    = 'mercado' | 'posiciones';
@@ -31,20 +32,24 @@ const App: React.FC = () => {
   const [configOpen,  setConfigOpen]  = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<SymbolStatus | null>(null);
   const [mainTab,     setMainTab]     = useState<MainTab>('mercado');
+  const [tuneResult,  setTuneResult]  = useState<TuneResult | null>(null);
+  const [tuneModalOpen, setTuneModalOpen] = useState(false);
   // Signal to open as position (passed from SignalsTable → PositionsPanel)
   const [signalForPos, setSignalForPos] = useState<Signal | null>(null);
 
   // Fetch all data in parallel
   const fetchAll = useCallback(async () => {
     try {
-      const [symbolsRes, statusRes, signalsRes] = await Promise.all([
+      const [symbolsRes, statusRes, signalsRes, tuneRes] = await Promise.all([
         getSymbols(),
         getStatus(),
         getSignals({ limit: 20, only_signals: false, since_hours: 24 }),
+        getTuneLatest().catch(() => null),
       ]);
       setSymbols(symbolsRes.symbols);
       setStatus(statusRes);
       setSignals(signalsRes.signals);
+      setTuneResult(tuneRes);
       setLastRefresh(new Date());
       setError(null);
     } catch (err) {
@@ -85,6 +90,18 @@ const App: React.FC = () => {
     setMainTab('posiciones');
   }, []);
 
+  const handleTuneApply = useCallback(async () => {
+    await applyTune();
+    await fetchAll();
+  }, [fetchAll]);
+
+  const handleTuneReject = useCallback(async () => {
+    await rejectTune();
+    await fetchAll();
+  }, [fetchAll]);
+
+  const hasPendingTune = tuneResult?.status === 'pending';
+
   const scannerRunning = status?.scanner_state?.running ?? false;
 
   return (
@@ -96,9 +113,20 @@ const App: React.FC = () => {
         onRefresh={handleRefresh}
         onScan={handleScan}
         onConfigOpen={() => setConfigOpen(true)}
+        hasPendingTune={hasPendingTune}
+        onTuneOpen={() => setTuneModalOpen(true)}
       />
 
       <ConfigPanel open={configOpen} onClose={() => setConfigOpen(false)} />
+
+      {tuneModalOpen && tuneResult && (
+        <TuneReportModal
+          tune={tuneResult}
+          onApply={handleTuneApply}
+          onReject={handleTuneReject}
+          onClose={() => setTuneModalOpen(false)}
+        />
+      )}
 
       <ChartModal
         symbol={selectedSymbol}

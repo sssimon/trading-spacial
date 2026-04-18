@@ -2369,3 +2369,99 @@ button:focus-visible {
   width: 40px;
   text-align: center;
 }
+
+/* ── Tune Report Modal ────────────────────────────────────── */
+
+.tune-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+}
+
+.tune-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(600px, 92vw);
+  max-height: 85vh;
+  background: var(--bg-card, #1a1a2e);
+  border: 1px solid var(--border, #2d2d44);
+  border-radius: 12px;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.tune-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border, #2d2d44);
+}
+
+.tune-modal-title { font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary, #e0e0e0); }
+.tune-modal-subtitle { font-size: 13px; color: var(--text-muted, #888); margin: 4px 0 0; }
+
+.tune-close-btn {
+  background: none; border: none; color: var(--text-muted, #888);
+  font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+}
+.tune-close-btn:hover { background: var(--bg-card-hover, #2d2d44); }
+
+.tune-modal-body { padding: 16px 24px; overflow-y: auto; flex: 1; }
+
+.tune-banner { padding: 10px 24px; font-size: 13px; font-weight: 500; text-align: center; }
+.tune-banner--applied { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.tune-banner--rejected { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+.tune-section { margin-bottom: 20px; }
+.tune-section-title { font-size: 14px; font-weight: 600; color: var(--text-primary, #e0e0e0); margin: 0 0 12px; }
+.tune-empty { text-align: center; padding: 32px; color: var(--text-muted, #888); font-size: 14px; }
+
+.tune-change-card {
+  background: var(--bg-card-hover, #16162a); border: 1px solid var(--border, #2d2d44);
+  border-radius: 8px; padding: 14px 16px; margin-bottom: 10px;
+}
+.tune-change-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.tune-change-symbol { font-size: 15px; font-weight: 600; color: var(--text-primary, #e0e0e0); }
+.tune-change-improvement {
+  font-size: 14px; font-weight: 600; color: #22c55e;
+  background: rgba(34, 197, 94, 0.12); padding: 2px 8px; border-radius: 4px;
+}
+
+.tune-change-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tune-change-table th { text-align: right; padding: 4px 10px; color: var(--text-muted, #888); font-weight: 500; font-size: 12px; }
+.tune-change-table th:first-child { text-align: left; }
+.tune-change-table td { text-align: right; padding: 5px 10px; color: var(--text-primary, #e0e0e0); }
+.tune-change-table td:first-child { text-align: left; font-weight: 500; }
+.tune-row-current td { color: var(--text-muted, #888); }
+.tune-pnl-positive { color: #22c55e !important; font-weight: 600; }
+.tune-change-meta { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #888); }
+
+.tune-collapse-btn { background: none; border: none; color: var(--text-muted, #888); font-size: 13px; cursor: pointer; padding: 4px 0; }
+.tune-collapse-btn:hover { color: var(--text-primary, #e0e0e0); }
+.tune-kept-list { margin-top: 8px; }
+.tune-kept-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; font-size: 13px; border-bottom: 1px solid var(--border, #1a1a2e); }
+.tune-kept-symbol { font-weight: 500; color: var(--text-primary, #e0e0e0); width: 80px; }
+.tune-kept-params { color: var(--text-muted, #888); flex: 1; }
+.tune-kept-status { color: #22c55e; font-size: 12px; }
+
+.tune-modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--border, #2d2d44); }
+.tune-apply-btn { min-width: 160px; }
+
+.tune-badge-btn { position: relative; }
+.tune-badge-icon { font-size: 18px; }
+.tune-badge-dot {
+  position: absolute; top: 4px; right: 4px; width: 8px; height: 8px;
+  background: #f59e0b; border-radius: 50%;
+  animation: tune-pulse 2s infinite;
+}
+@keyframes tune-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
