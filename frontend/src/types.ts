@@ -135,6 +135,7 @@ export interface AppConfig {
   num_symbols: number;
   telegram_chat_id: string;
   signal_filters: SignalFilters;
+  auto_approve_tune: boolean;
 }
 
 export interface ConfigUpdateResponse {
@@ -196,4 +197,40 @@ export interface PositionUpdatePayload {
 export interface PositionClosePayload {
   exit_price:  number;
   exit_reason?: ExitReason;
+}
+
+// ---- Auto-Tune -------------------------------------------------------
+
+export interface TuneSymbolResult {
+  symbol: string;
+  recommendation: 'CHANGE' | 'KEEP' | 'NO_DATA' | 'ERROR';
+  current_params: {
+    atr_sl_mult: number;
+    atr_tp_mult: number;
+    atr_be_mult: number;
+  };
+  proposed_params?: {
+    atr_sl_mult: number;
+    atr_tp_mult: number;
+    atr_be_mult: number;
+  } | null;
+  current_val_pnl?: number;
+  proposal_detail?: {
+    val_pnl: number;
+    val_pf: number;
+    improvement_pct: number;
+    total_trades: number;
+    train_pnl: number;
+    val_trades: number;
+  } | null;
+}
+
+export interface TuneResult {
+  id: number;
+  ts: string;
+  status: 'pending' | 'applied' | 'rejected';
+  results?: TuneSymbolResult[];
+  report_md?: string;
+  applied_ts?: string | null;
+  changes_count: number;
 }

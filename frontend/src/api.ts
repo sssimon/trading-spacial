@@ -19,6 +19,7 @@ import type {
   PositionUpdatePayload,
   PositionClosePayload,
   Position,
+  TuneResult,
 } from './types';
 
 const BASE_URL = '/api';
@@ -148,5 +149,34 @@ export async function closePosition(id: number, payload: PositionClosePayload): 
 export async function cancelPosition(id: number): Promise<{ ok: boolean; message: string }> {
   return request<{ ok: boolean; message: string }>(`/positions/${id}`, {
     method: 'DELETE',
+  });
+}
+
+// ---- Auto-Tune -------------------------------------------------------
+
+// GET /tune/latest
+export async function getTuneLatest(): Promise<TuneResult | null> {
+  return request<TuneResult | null>('/tune/latest');
+}
+
+// POST /tune/apply
+export async function applyTune(): Promise<{ ok: boolean; applied: number; backup: string }> {
+  return request<{ ok: boolean; applied: number; backup: string }>('/tune/apply', {
+    method: 'POST',
+  });
+}
+
+// POST /tune/reject
+export async function rejectTune(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/tune/reject', { method: 'POST' });
+}
+
+// POST /config — extended to support auto_approve_tune
+export async function updateConfigFull(
+  body: { signal_filters?: SignalFilters; auto_approve_tune?: boolean }
+): Promise<ConfigUpdateResponse> {
+  return request<ConfigUpdateResponse>('/config', {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
