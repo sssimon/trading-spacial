@@ -404,9 +404,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         # Composite (same weights as production)
         composite = price_score * 0.4 + fng_score * 0.3 + funding_score * 0.3
-        if composite > 70:
+        if composite > 60:
             regime = "LONG"
-        elif composite < 30:
+        elif composite < 40:
             regime = "SHORT"
         else:
             regime = "LONG"  # NEUTRAL = conservative LONG

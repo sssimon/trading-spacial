@@ -750,9 +750,9 @@ def detect_regime() -> dict:
     composite = sum(s * w for _, s, w in score_components)
     composite = round(composite, 1)
 
-    if composite > 70:
+    if composite > 60:
         regime = "BULL"
-    elif composite < 30:
+    elif composite < 40:
         regime = "BEAR"
     else:
         regime = "NEUTRAL"
