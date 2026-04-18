@@ -18,6 +18,9 @@ backups/
 data/symbols_status.json
 data/signals_history.csv
 data/positions_summary.json
+data/ohlcv.db
+data/ohlcv.db-wal
+data/ohlcv.db-shm
 
 # ── Logs ──────────────────────────────────────────────────────
 logs/
