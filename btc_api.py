@@ -29,6 +29,7 @@ import json
 import os
 import time
 import glob
+import shutil
 import hmac
 import requests as req_lib
 from datetime import datetime, timezone, timedelta
@@ -257,6 +258,7 @@ class ConfigUpdate(BaseModel):
     proxy: Optional[str] = None
     signal_filters: Optional[SignalFiltersUpdate] = None
     api_key: Optional[str] = None
+    auto_approve_tune: Optional[bool] = None
 
 
 def save_config(updates: dict) -> dict:
@@ -846,6 +848,17 @@ def init_db():
             
             status          TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
             last_checked_ts TEXT
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS tune_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            results_json TEXT,
+            report_md TEXT,
+            applied_ts TEXT,
+            changes_count INTEGER DEFAULT 0
         )
     """)
     con.commit()
@@ -1575,7 +1588,10 @@ def signal_by_id(scan_id: int):
 @app.get("/config", summary="Leer configuracion actual",
          dependencies=[Depends(verify_api_key)])
 def get_config():
-    return _strip_secrets(load_config())
+    cfg = load_config()
+    result = _strip_secrets(cfg)
+    result["auto_approve_tune"] = cfg.get("auto_approve_tune", True)
+    return result
 
 
 @app.post("/config", summary="Actualizar configuracion", dependencies=[Depends(verify_api_key)])
@@ -1737,6 +1753,112 @@ def test_webhook():
     overall_ok = results.get("telegram_directo", {}).get("ok", False) or \
                  results.get("webhook_n8n", {}).get("ok", False)
     return {"ok": overall_ok, **results}
+
+
+# ── Auto-Tune Endpoints ──────────────────────────────────────────────────────
+
+@app.get("/tune/latest", summary="Latest tune result")
+def tune_latest():
+    """Returns the most recent tune_result row (with parsed results_json) or null."""
+    con = get_db()
+    row = con.execute(
+        "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    result = dict(row)
+    # Parse results_json so the frontend gets an object, not a string
+    if result.get("results_json"):
+        try:
+            result["results_json"] = json.loads(result["results_json"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return result
+
+
+@app.post("/tune/apply", summary="Apply pending tune proposal",
+          dependencies=[Depends(verify_api_key)])
+def tune_apply():
+    """Applies the latest pending tune proposal to config.json symbol_overrides."""
+    con = get_db()
+    row = con.execute(
+        "SELECT * FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(status_code=404, detail="No pending tune proposal found")
+
+    result = dict(row)
+    tune_id = result["id"]
+
+    # Parse results_json to extract CHANGE recommendations
+    try:
+        results = json.loads(result["results_json"]) if result.get("results_json") else {}
+    except (json.JSONDecodeError, TypeError):
+        con.close()
+        raise HTTPException(status_code=500, detail="Invalid results_json in tune proposal")
+
+    # Create config backup
+    now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_name = f"config_backup_{now_str}.json"
+    backup_path = os.path.join(SCRIPT_DIR, backup_name)
+    if os.path.exists(CONFIG_FILE):
+        shutil.copy2(CONFIG_FILE, backup_path)
+
+    # Load config and apply changes
+    cfg = load_config()
+    overrides = cfg.get("symbol_overrides", {})
+    applied_count = 0
+
+    # Extract CHANGE recommendations from results
+    recommendations = results.get("recommendations", [])
+    for rec in recommendations:
+        if rec.get("action") != "CHANGE":
+            continue
+        symbol = rec.get("symbol", "")
+        params = rec.get("params", {})
+        if symbol and params:
+            if symbol not in overrides:
+                overrides[symbol] = {}
+            overrides[symbol].update(params)
+            applied_count += 1
+
+    cfg["symbol_overrides"] = overrides
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    log.info(f"Auto-tune applied: {applied_count} changes, backup: {backup_name}")
+
+    # Update tune_result status
+    con.execute(
+        "UPDATE tune_results SET status = 'applied', applied_ts = ?, changes_count = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), applied_count, tune_id)
+    )
+    con.commit()
+    con.close()
+
+    return {"ok": True, "applied": applied_count, "backup": backup_name}
+
+
+@app.post("/tune/reject", summary="Reject pending tune proposal",
+          dependencies=[Depends(verify_api_key)])
+def tune_reject():
+    """Rejects the latest pending tune proposal."""
+    con = get_db()
+    row = con.execute(
+        "SELECT id FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(status_code=404, detail="No pending tune proposal found")
+
+    con.execute(
+        "UPDATE tune_results SET status = 'rejected' WHERE id = ?",
+        (row["id"],)
+    )
+    con.commit()
+    con.close()
+    return {"ok": True}
 
 
 @app.get("/health", summary="Health check for monitoring and Docker")
