@@ -1058,8 +1058,8 @@ class TestQueryMethods:
         bars = [_mk_bar(open_time=t * 3600_000, price=float(t)) for t in [3, 1, 4, 1, 5, 9, 2, 6]]
         _storage.upsert_many(bars)
         df = _storage.tail("BTCUSDT", "1h", 3)
-        # last 3 bars sorted ascending by open_time
-        assert list(df["open_time"]) == [4 * 3600_000, 5 * 3600_000, 6 * 3600_000]
+        # Input dedupes via composite PK to {1,2,3,4,5,6,9}; tail(3) last 3 ASC.
+        assert list(df["open_time"]) == [5 * 3600_000, 6 * 3600_000, 9 * 3600_000]
 
     def test_range_returns_filtered(self, tmp_ohlcv_db):
         _storage.upsert_many([_mk_bar(open_time=t * 3600_000) for t in range(10)])
