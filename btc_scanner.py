@@ -769,6 +769,16 @@ def get_cached_regime() -> dict:
 #  SCANNER PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
+def metrics_inc_direction_disabled(symbol: str, direction: str) -> None:
+    """Increment the direction_disabled_skips_total metric."""
+    try:
+        from data import metrics
+        metrics.inc("direction_disabled_skips_total",
+                    labels={"symbol": symbol, "direction": direction})
+    except Exception:
+        pass  # metrics optional — don't crash scan on metric failure
+
+
 def scan(symbol: str = None):
     symbol = symbol or SYMBOL
     ts  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -957,9 +967,21 @@ def scan(symbol: str = None):
         rep.update({"estado": f"⛔ {symbol} deshabilitado en config", "señal_activa": False,
                     "direction": None, "price": round(price, 2)})
         return rep
-    _sl_m = _so.get("atr_sl_mult", ATR_SL_MULT) if isinstance(_so, dict) else ATR_SL_MULT
-    _tp_m = _so.get("atr_tp_mult", ATR_TP_MULT) if isinstance(_so, dict) else ATR_TP_MULT
-    _be_m = _so.get("atr_be_mult", ATR_BE_MULT) if isinstance(_so, dict) else ATR_BE_MULT
+    resolved = resolve_direction_params(_sym_overrides, symbol, direction)
+    if resolved is None:
+        # Direction disabled for this symbol (spec §5 form 3).
+        metrics_inc_direction_disabled(symbol, direction)
+        rep.update({
+            "estado": f"⛔ {direction} deshabilitado para {symbol}",
+            "señal_activa": False,
+            "direction": direction,
+            "direction_disabled": True,
+            "price": round(price, 2),
+        })
+        return rep
+    _sl_m = resolved["atr_sl_mult"]
+    _tp_m = resolved["atr_tp_mult"]
+    _be_m = resolved["atr_be_mult"]
 
     sl_dist    = atr_val * _sl_m
     tp_dist    = atr_val * _tp_m

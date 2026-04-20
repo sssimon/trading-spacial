@@ -997,3 +997,172 @@ class TestVolMultIntegration:
         })
         vol = annualized_vol_yang_zhang(df)
         assert vol > TARGET_VOL_ANNUAL  # high-vol series → mult < 1
+
+
+class TestScanWithDirectionalOverrides:
+    """Integration tests for resolver wiring in btc_scanner.scan() (#151)."""
+
+    def _make_scan_mock_long_zone(self):
+        """Reuse the existing test_scanner helper for LONG-zone DataFrames."""
+        instance = TestScan()
+        return instance._make_scan_mock()  # returns df1h, df4h, df5m
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_uses_per_direction_long_params(self, mock_klines, monkeypatch, tmp_path):
+        """Per-direction 'long' block is used when direction == LONG.
+
+        The resolver is monkeypatched to always return the LONG block, isolating
+        scan()'s use of resolve_direction_params from the LRC-driven direction logic.
+        """
+        df1h, df4h, df5m = self._make_scan_mock_long_zone()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {
+                "BTCUSDT": {
+                    "long":  {"atr_sl_mult": 0.3, "atr_tp_mult": 6.0, "atr_be_mult": 2.0},
+                    "short": {"atr_sl_mult": 2.5, "atr_tp_mult": 2.0, "atr_be_mult": 3.0},
+                }
+            }
+        }))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+
+        # Force resolver to always return the LONG block regardless of how scan()
+        # computes `direction`.  This isolates the unit under test (scan's use of the
+        # resolver's output) from the LRC-driven direction logic.
+        original_resolver = scanner.resolve_direction_params
+        monkeypatch.setattr(
+            scanner,
+            "resolve_direction_params",
+            lambda overrides, symbol, direction: original_resolver(overrides, symbol, "LONG"),
+        )
+
+        rep = scanner.scan("BTCUSDT")
+        sz = rep["sizing_1h"]
+        # Unconditional — test fails if resolver was not called or wrong block chosen.
+        assert sz["atr_sl_mult"] == 0.3
+        assert sz["atr_tp_mult"] == 6.0
+        assert sz["atr_be_mult"] == 2.0
+        assert not rep.get("direction_disabled")
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_direction_disabled_returns_flag(self, mock_klines, monkeypatch, tmp_path):
+        """When the active direction is disabled in overrides, scan flags it and skips.
+
+        The resolver is monkeypatched to always return None (disabled), so the
+        direction_disabled path in scan() is exercised unconditionally.
+        """
+        df1h, df4h, df5m = self._make_scan_mock_long_zone()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {
+                "BTCUSDT": {
+                    "long": None,
+                    "short": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+                }
+            }
+        }))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+
+        # Force resolver to return None (direction disabled) regardless of scan's
+        # internally computed direction.  This guarantees the disabled branch runs.
+        monkeypatch.setattr(
+            scanner,
+            "resolve_direction_params",
+            lambda overrides, symbol, direction: None,
+        )
+
+        rep = scanner.scan("BTCUSDT")
+        # Unconditional — test fails if the disabled path was not taken.
+        assert rep.get("direction_disabled") is True
+        assert rep.get("señal_activa") is False
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_mix_flat_plus_partial_inherits(self, mock_klines, monkeypatch, tmp_path):
+        """Flat dict + partial short block — LONG uses the flat triplet.
+
+        Values (1.1/4.1/1.6) are deliberately different from the global defaults
+        (1.0/4.0/1.5) so the test would fail if the resolver fell back to defaults
+        instead of reading the config.  The resolver is monkeypatched to force the
+        LONG path, making the assertions unconditional.
+        """
+        df1h, df4h, df5m = self._make_scan_mock_long_zone()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {
+                "BTCUSDT": {
+                    "atr_sl_mult": 1.1, "atr_tp_mult": 4.1, "atr_be_mult": 1.6,
+                    "short": {"atr_sl_mult": 1.4},
+                }
+            }
+        }))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+
+        original_resolver = scanner.resolve_direction_params
+        monkeypatch.setattr(
+            scanner,
+            "resolve_direction_params",
+            lambda overrides, symbol, direction: original_resolver(overrides, symbol, "LONG"),
+        )
+
+        rep = scanner.scan("BTCUSDT")
+        sz = rep["sizing_1h"]
+        # Unconditional — LONG path → uses flat triplet (distinct from global defaults).
+        assert sz["atr_sl_mult"] == 1.1
+        assert sz["atr_tp_mult"] == 4.1
+        assert sz["atr_be_mult"] == 1.6
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_legacy_flat_dict_backward_compat(self, mock_klines, monkeypatch, tmp_path):
+        """Flat-dict config (current production shape) still works unchanged.
+
+        Values (1.1/4.2/1.6) are deliberately different from the global defaults
+        (1.0/4.0/1.5) so the test fails if the resolver ignores the config and
+        returns defaults instead.  The resolver is monkeypatched to force the LONG
+        path so the flat dict is consulted (direction=None short-circuits to defaults).
+        """
+        df1h, df4h, df5m = self._make_scan_mock_long_zone()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {
+                "BTCUSDT": {"atr_sl_mult": 1.1, "atr_tp_mult": 4.2, "atr_be_mult": 1.6}
+            }
+        }))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+
+        original_resolver = scanner.resolve_direction_params
+        monkeypatch.setattr(
+            scanner,
+            "resolve_direction_params",
+            lambda overrides, symbol, direction: original_resolver(overrides, symbol, "LONG"),
+        )
+
+        rep = scanner.scan("BTCUSDT")
+        sz = rep["sizing_1h"]
+        assert sz["atr_sl_mult"] == 1.1
+        assert sz["atr_tp_mult"] == 4.2
+        assert sz["atr_be_mult"] == 1.6
+        assert not rep.get("direction_disabled")
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_no_overrides_uses_defaults(self, mock_klines, monkeypatch, tmp_path):
+        """When the symbol is absent from overrides, global defaults apply."""
+        df1h, df4h, df5m = self._make_scan_mock_long_zone()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"symbol_overrides": {}}))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+
+        rep = scanner.scan("BTCUSDT")
+        sz = rep["sizing_1h"]
+        assert sz["atr_sl_mult"] == scanner.ATR_SL_MULT
+        assert sz["atr_tp_mult"] == scanner.ATR_TP_MULT
+        assert sz["atr_be_mult"] == scanner.ATR_BE_MULT
