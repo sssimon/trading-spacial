@@ -27,6 +27,8 @@ import pandas as pd
 import numpy as np
 import requests
 
+from data import market_data as md
+
 # Import scanner functions
 from btc_scanner import (
     calc_lrc, calc_rsi, calc_bb, calc_sma, calc_atr, calc_adx,
@@ -56,7 +58,6 @@ FEE_PCT = 0.001  # 0.1% per trade (Binance spot)
 #  DATA DOWNLOAD
 # ─────────────────────────────────────────────────────────────────────────────
 
-_dl_last_call = 0.0
 
 
 def get_historical_fear_greed() -> pd.DataFrame:
@@ -136,100 +137,31 @@ def get_historical_funding_rate() -> pd.DataFrame:
     log.info(f"Funding rate saved: {len(df)} entries ({df.index[0].date()} → {df.index[-1].date()})")
     return df
 
-def download_klines(symbol: str, interval: str, start_ts: int, end_ts: int) -> pd.DataFrame:
-    """Download historical klines from Binance with pagination and rate limiting."""
-    global _dl_last_call
-    all_data = []
-    current_start = start_ts
-    limit = 1000
-
-    while current_start < end_ts:
-        url = (
-            f"https://api.binance.com/api/v3/klines"
-            f"?symbol={symbol}&interval={interval}"
-            f"&startTime={current_start}&endTime={end_ts}&limit={limit}"
-        )
-        try:
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            log.warning(f"Binance error: {e}, retrying in 5s...")
-            time.sleep(5)
-            continue
-
-        if not data:
-            break
-
-        all_data.extend(data)
-        current_start = int(data[-1][0]) + 1  # next ms after last candle
-
-        if len(data) < limit:
-            break
-
-        # Rate limit: max 5 requests/sec to Binance
-        elapsed = time.time() - _dl_last_call
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
-        _dl_last_call = time.time()
-
-    if not all_data:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(all_data, columns=[
-        "ts", "open", "high", "low", "close", "volume",
-        "close_time", "quote_volume", "trades",
-        "taker_buy_base", "taker_buy_quote", "ignore"
-    ])
-    for c in ["open", "high", "low", "close", "volume", "taker_buy_base", "taker_buy_quote"]:
-        df[c] = df[c].astype(float)
-    df["ts"] = pd.to_datetime(df["ts"], unit="ms")
-    df.set_index("ts", inplace=True)
-    df = df[~df.index.duplicated(keep='first')]
-    return df
-
-
 def get_cached_data(symbol: str, interval: str, start_date: datetime = None) -> pd.DataFrame:
-    """Download data or load from cache. Extends cache in both directions as needed."""
-    cache_file = os.path.join(DATA_DIR, f"{symbol}_{interval}.csv")
+    """Historical bars fetched via data.market_data (SQLite cache + provider failover).
+
+    Previously kept its own per-symbol CSV cache with bidirectional pagination —
+    that's now handled by the unified data layer. Returns the legacy DataFrame
+    shape (DatetimeIndex + OHLCV columns) for backward compatibility with
+    simulate_strategy and the downstream auto_tune / grid_search scripts.
+    """
     want_start = start_date or DEFAULT_START
-    start_ms = int(want_start.timestamp() * 1000)
-    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = datetime.now(timezone.utc)
 
-    if os.path.exists(cache_file):
-        df = pd.read_csv(cache_file, index_col="ts", parse_dates=True)
-        changed = False
-
-        # Extend backwards if cache starts later than requested
-        first_ts = int(df.index[0].timestamp() * 1000)
-        if first_ts > start_ms + 86400_000:
-            log.info(f"Extending cache backwards for {symbol} {interval} to {want_start.date()}...")
-            old_df = download_klines(symbol, interval, start_ms, first_ts - 1)
-            if not old_df.empty:
-                df = pd.concat([old_df, df])
-                changed = True
-
-        # Extend forward if cache is older than 24h
-        last_ts = int(df.index[-1].timestamp() * 1000)
-        if (end_ms - last_ts) > 86400_000:
-            log.info(f"Updating cache forward for {symbol} {interval}...")
-            new_df = download_klines(symbol, interval, last_ts + 1, end_ms)
-            if not new_df.empty:
-                df = pd.concat([df, new_df])
-                changed = True
-
-        if changed:
-            df = df[~df.index.duplicated(keep='first')].sort_index()
-            df.to_csv(cache_file)
-
-        log.info(f"Cache: {cache_file} ({len(df)} candles, {df.index[0].date()} → {df.index[-1].date()})")
+    # Bulk-backfill ahead of the range query so the first read doesn't
+    # trigger piecewise fetches inside get_klines_range.
+    md.backfill(symbol, interval, want_start, now)
+    df = md.get_klines_range(symbol, interval, want_start, now)
+    if df.empty:
         return df
 
-    log.info(f"Downloading {symbol} {interval} from {want_start.date()}...")
-    df = download_klines(symbol, interval, start_ms, end_ms)
-    if not df.empty:
-        df.to_csv(cache_file)
-        log.info(f"Saved {len(df)} candles to {cache_file}")
+    df = df.copy()
+    df["ts"] = pd.to_datetime(df["open_time"], unit="ms")
+    df = (
+        df.drop(columns=["open_time", "provider", "fetched_at"], errors="ignore")
+          .set_index("ts")
+    )
+    log.info(f"{symbol} {interval}: {len(df)} candles ({df.index[0].date()} → {df.index[-1].date()})")
     return df
 
 
