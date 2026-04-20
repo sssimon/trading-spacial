@@ -46,3 +46,56 @@ class TestTuneScriptE2E:
                 assert "N" in b
                 assert "pf" in b
                 assert "pnl" in b
+
+
+class TestApplyTuneScript:
+    def test_apply_tune_produces_valid_config_patch(self, tmp_path):
+        """Given a synthetic tune_results.json, apply produces a well-formed config."""
+        tune_out = tmp_path / "tune.json"
+        tune_out.write_text(json.dumps({
+            "train_start": "2022-01-01", "train_end": "2024-12-31",
+            "generated_at": "2026-04-20T00:00:00Z", "git_sha": "abc",
+            "grid": {"sl": [1.0], "tp": [4.0], "be": [1.5]},
+            "results": {
+                "BTCUSDT": {
+                    "long":  {"best": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5,
+                                         "N": 100, "pnl": 5000, "pf": 1.5}},
+                    "short": {"best": {"atr_sl_mult": 1.2, "atr_tp_mult": 3.0, "atr_be_mult": 2.0,
+                                         "N": 100, "pnl": 6000, "pf": 1.8}},
+                },
+                "RUNEUSDT": {
+                    "long":  {"best": {"atr_sl_mult": 0.7, "atr_tp_mult": 6.0, "atr_be_mult": 2.5,
+                                         "N": 80, "pnl": 3000, "pf": 1.2}},
+                    "short": {"best": {"atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 2.0,
+                                         "N": 15, "pnl": -500, "pf": 0.6}},
+                },
+            },
+        }))
+        base_cfg = tmp_path / "config.json"
+        base_cfg.write_text(json.dumps({"scan_interval_sec": 300}))
+        patched = tmp_path / "config.tuned.json"
+
+        result = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "apply_tune_to_config.py"),
+            "--tune-results", str(tune_out),
+            "--base-config", str(base_cfg),
+            "--output", str(patched),
+        ], capture_output=True, text=True, cwd=str(ROOT), timeout=30)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+        data = json.loads(patched.read_text())
+        assert "symbol_overrides" in data
+        assert data["scan_interval_sec"] == 300  # base preserved
+
+        btc = data["symbol_overrides"]["BTCUSDT"]
+        # BTCUSDT: both dedicated (N=100, PF=1.5 and 1.8) → {long: {...}, short: {...}}
+        assert "long" in btc and isinstance(btc["long"], dict)
+        assert "short" in btc and isinstance(btc["short"], dict)
+        assert btc["long"]["atr_sl_mult"] == 1.0
+        assert btc["short"]["atr_sl_mult"] == 1.2
+
+        rune = data["symbol_overrides"]["RUNEUSDT"]
+        # RUNEUSDT: long=fallback (PF=1.2 < 1.3), short=disabled (N=15 < 30 OR PF=0.6 < 1.0)
+        # Expected form: mix — flat triplet from long (the non-disabled tier), short: null
+        assert rune.get("short") is None
+        assert rune.get("atr_sl_mult") == 0.7  # from the "fallback" LONG tier
