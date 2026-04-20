@@ -12,6 +12,8 @@ import json
 import base64
 import io
 import sys
+
+from data import market_data as md
 from datetime import datetime, timezone, timedelta
 import warnings
 warnings.filterwarnings('ignore')
@@ -95,18 +97,15 @@ def get_open_interest_hist(period="1h", limit=48):
     return df.sort_values("timestamp")
 
 def get_klines(interval="1h", limit=168):
-    """Velas OHLCV de BTC/USDT - Binance Spot"""
-    r = safe_get(
-        "https://api.binance.com/api/v3/klines",
-        params={"symbol": SYMBOL, "interval": interval, "limit": limit}
-    )
-    if r is None: return None
-    cols = ["open_time","open","high","low","close","volume",
-            "close_time","quote_vol","trades","taker_buy_base","taker_buy_quote","ignore"]
-    df = pd.DataFrame(r.json(), columns=cols)
+    """Velas OHLCV de BTC/USDT via data.market_data (incluye barra en curso)."""
+    try:
+        df = md.get_klines_live(SYMBOL, interval, limit)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+    df = df.copy()
     df["open_time"] = pd.to_datetime(df["open_time"].astype(int), unit="ms", utc=True)
-    for c in ["open","high","low","close","volume","quote_vol","taker_buy_base","taker_buy_quote"]:
-        df[c] = df[c].astype(float)
     return df.sort_values("open_time")
 
 def get_funding_rate(limit=8):
