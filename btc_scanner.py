@@ -106,6 +106,40 @@ def annualized_vol_yang_zhang(df_daily: pd.DataFrame) -> float:
     var_daily = max(sigma_on + k * sigma_oc + (1 - k) * sigma_rs, 1e-10)
     return float(np.sqrt(var_daily * 365))
 
+
+def _classify_tune_result(count: int, profit_factor: float | None) -> str:
+    """Classify a (symbol, direction) tuning result into one of three tiers.
+
+    Used by scripts/apply_tune_to_config.py to decide whether to commit a
+    dedicated triplet, fall back to a single-triplet per-symbol, or disable
+    the direction entirely.
+
+    Returns one of: "dedicated", "fallback", "disabled".
+
+    Rules (from spec §6):
+        N ≥ 30 AND PF ≥ 1.3   → "dedicated"
+        N ≥ 30 AND 1.0 ≤ PF < 1.3 → "fallback"
+        N < 30 OR PF < 1.0    → "disabled"
+        PF = inf (no losses)  → "dedicated" if N ≥ 30
+        PF is None or NaN     → "disabled" (insufficient info)
+    """
+    if count == 0 or profit_factor is None:
+        return "disabled"
+    try:
+        pf = float(profit_factor)
+    except (TypeError, ValueError):
+        return "disabled"
+    if np.isnan(pf):
+        return "disabled"
+    if count < 30:
+        return "disabled"
+    if pf < 1.0:
+        return "disabled"
+    if pf < 1.3:
+        return "fallback"
+    return "dedicated"  # pf ≥ 1.3 (including inf)
+
+
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
 LRC_LONG_MAX   = 25.0     # LRC% ≤ 25  →  zona de entrada
 LRC_SHORT_MIN  = 75.0     # LRC% >= 75  →  zona de entrada SHORT
