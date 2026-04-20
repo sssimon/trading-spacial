@@ -99,3 +99,51 @@ def _bars_to_df(bars) -> pd.DataFrame:
         [(b.open_time, b.open, b.high, b.low, b.close, b.volume, b.provider, b.fetched_at) for b in bars],
         columns=cols,
     )
+
+
+def get_klines_range(
+    symbol: str,
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
+    """Closed bars with open_time in [start, end] inclusive (clamped to last closed bar).
+
+    Auto-detects gaps in the cache and backfills only what's missing.
+    Raises AllProvidersFailedError if a gap cannot be filled.
+    """
+    if timeframe not in TIMEFRAMES:
+        raise ValueError(f"Unknown timeframe: {timeframe}")
+    _ensure_schema_once()
+
+    d = delta_ms(timeframe)
+    start_ms = _to_ms(start)
+    end_ms = last_closed_bar_time(timeframe, end)
+
+    # Clamp start to known first bar
+    earliest = _storage.first_bar_ms(symbol, timeframe)
+    if earliest is not None and start_ms < earliest:
+        start_ms = earliest
+
+    if start_ms > end_ms:
+        return _storage.range_(symbol, timeframe, start_ms, end_ms)
+
+    expected_count = (end_ms - start_ms) // d + 1
+    min_t, max_t, count = _storage.range_stats(symbol, timeframe, start_ms, end_ms)
+
+    if count == expected_count:
+        return _storage.range_(symbol, timeframe, start_ms, end_ms)
+
+    if count == 0:
+        _fetcher._backfill_range(symbol, timeframe, start_ms, end_ms)
+    else:
+        if min_t > start_ms:
+            _fetcher._backfill_range(symbol, timeframe, start_ms, min_t - d)
+        if max_t < end_ms:
+            _fetcher._backfill_range(symbol, timeframe, max_t + d, end_ms)
+        # Re-check; run internal gap fill if still short
+        _, _, count2 = _storage.range_stats(symbol, timeframe, start_ms, end_ms)
+        if count2 < expected_count:
+            _fetcher._fill_internal_gaps(symbol, timeframe, start_ms, end_ms)
+
+    return _storage.range_(symbol, timeframe, start_ms, end_ms)

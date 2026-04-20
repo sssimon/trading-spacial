@@ -60,3 +60,49 @@ class TestGetKlinesLive:
         # Nothing was persisted to the DB
         count = _storage._conn().execute("SELECT COUNT(*) FROM ohlcv").fetchone()[0]
         assert count == 0
+
+
+from datetime import timedelta
+
+
+class TestGetKlinesRange:
+    def test_cache_hit_no_fetch(self, tmp_ohlcv_db, fake_provider, monkeypatch):
+        monkeypatch.setattr(md, "last_closed_bar_time", lambda tf, now=None: 9 * 3600_000)
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        _storage.upsert_many(bars)
+        fake_provider.calls.clear()
+        df = md.get_klines_range(
+            "BTCUSDT", "1h",
+            datetime(1970, 1, 1, 0, 0, tzinfo=timezone.utc),
+            datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(hours=9),
+        )
+        assert len(df) == 10
+        assert fake_provider.calls == []
+
+    def test_cold_backfills_whole_range(self, tmp_ohlcv_db, fake_provider, monkeypatch):
+        monkeypatch.setattr(md, "last_closed_bar_time", lambda tf, now=None: 9 * 3600_000)
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        df = md.get_klines_range(
+            "BTCUSDT", "1h",
+            datetime(1970, 1, 1, 0, 0, tzinfo=timezone.utc),
+            datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(hours=9),
+        )
+        assert len(df) == 10
+
+    def test_left_edge_gap_filled(self, tmp_ohlcv_db, fake_provider, monkeypatch):
+        monkeypatch.setattr(md, "last_closed_bar_time", lambda tf, now=None: 9 * 3600_000)
+        all_bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", all_bars)
+        # Cache has only bars 5..9
+        _storage.upsert_many(all_bars[5:])
+        fake_provider.calls.clear()
+        df = md.get_klines_range(
+            "BTCUSDT", "1h",
+            datetime(1970, 1, 1, 0, 0, tzinfo=timezone.utc),
+            datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(hours=9),
+        )
+        assert len(df) == 10
+        # Left edge fetch: [0, 4]
+        assert fake_provider.calls[0][2] == 0
+        assert fake_provider.calls[0][3] == 4 * 3600_000
