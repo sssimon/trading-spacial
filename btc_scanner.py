@@ -140,6 +140,60 @@ def _classify_tune_result(count: int, profit_factor: float | None) -> str:
     return "dedicated"  # pf ≥ 1.3 (including inf)
 
 
+def resolve_direction_params(
+    overrides: dict | None,
+    symbol: str,
+    direction: str,
+) -> dict | None:
+    """Resolve {atr_sl_mult, atr_tp_mult, atr_be_mult} for (symbol, direction).
+
+    Returns None if the direction is disabled for that symbol (via `"short": null`).
+    Precedence: direction block (long/short) > flat dict > global defaults.
+    Case insensitive on direction.
+
+    Spec: See spec §6
+    """
+    defaults = {
+        "atr_sl_mult": ATR_SL_MULT,
+        "atr_tp_mult": ATR_TP_MULT,
+        "atr_be_mult": ATR_BE_MULT,
+    }
+
+    if direction is None:
+        return defaults
+
+    if not isinstance(overrides, dict):
+        return defaults
+
+    entry = overrides.get(symbol, {})
+    if not isinstance(entry, dict):
+        return defaults
+
+    sentinel = object()
+    dir_key = direction.lower()
+    dir_block = entry.get(dir_key, sentinel)
+
+    if dir_block is None:
+        return None  # direction disabled
+
+    if isinstance(dir_block, dict):
+        return {
+            "atr_sl_mult": dir_block.get("atr_sl_mult",
+                              entry.get("atr_sl_mult", defaults["atr_sl_mult"])),
+            "atr_tp_mult": dir_block.get("atr_tp_mult",
+                              entry.get("atr_tp_mult", defaults["atr_tp_mult"])),
+            "atr_be_mult": dir_block.get("atr_be_mult",
+                              entry.get("atr_be_mult", defaults["atr_be_mult"])),
+        }
+
+    # dir_block absent (sentinel) or wrong non-None type (e.g. string) — use flat or defaults
+    return {
+        "atr_sl_mult": entry.get("atr_sl_mult", defaults["atr_sl_mult"]),
+        "atr_tp_mult": entry.get("atr_tp_mult", defaults["atr_tp_mult"]),
+        "atr_be_mult": entry.get("atr_be_mult", defaults["atr_be_mult"]),
+    }
+
+
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
 LRC_LONG_MAX   = 25.0     # LRC% ≤ 25  →  zona de entrada
 LRC_SHORT_MIN  = 75.0     # LRC% >= 75  →  zona de entrada SHORT
