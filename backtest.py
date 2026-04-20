@@ -39,8 +39,6 @@ from btc_scanner import (
     SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
     ATR_PERIOD, ATR_SL_MULT, ATR_TP_MULT, ATR_BE_MULT,
     ADX_THRESHOLD,
-    annualized_vol_yang_zhang,
-    TARGET_VOL_ANNUAL, VOL_LOOKBACK_DAYS, VOL_MIN_FLOOR, VOL_MAX_CEIL,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
@@ -246,7 +244,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                     pnl_pct = (position["entry_price"] - exit_price) / position["entry_price"] * 100
                 else:
                     pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
-                risk_amount = capital * RISK_PER_TRADE * position["size_mult"] * position["vol_mult"]
+                risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
                 sl_pct_actual = abs(position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
                 pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
 
@@ -450,19 +448,6 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 tp_price = round(price * (1 + TP_PCT / 100), 2)
             be_threshold = None
 
-        # Vol-normalized sizing (#125). Computed at entry, no look-ahead —
-        # uses daily bars with open_time ≤ bar_time.
-        try:
-            df_daily_slice = md.get_klines_range(
-                symbol, "1d",
-                bar_time - pd.Timedelta(days=VOL_LOOKBACK_DAYS + 5),
-                bar_time,
-            )
-            asset_vol = annualized_vol_yang_zhang(df_daily_slice)
-        except Exception:
-            asset_vol = TARGET_VOL_ANNUAL
-        vol_mult = max(VOL_MAX_CEIL, min(1.0, TARGET_VOL_ANNUAL / max(asset_vol, VOL_MIN_FLOOR)))
-
         position = {
             "entry_price": price,
             "entry_time": bar_time,
@@ -472,7 +457,6 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             "sl_orig": sl_price,
             "tp": tp_price,
             "size_mult": size_mult,
-            "vol_mult": vol_mult,
             "be_threshold": be_threshold,
         }
 
@@ -481,7 +465,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         last_bar = df1h.iloc[-1]
         exit_price = float(last_bar["close"])
         pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100
-        risk_amount = capital * RISK_PER_TRADE * position["size_mult"] * position["vol_mult"]
+        risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
         sl_pct_actual = (position["entry_price"] - position["sl_orig"]) / position["entry_price"] * 100
         pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
         trades.append({

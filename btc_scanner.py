@@ -72,19 +72,21 @@ ATR_SL_MULT    = 1.0    # SL = entry - 1.0x ATR (optimizado para mean-reversion)
 ATR_TP_MULT    = 4.0    # TP = entry + 4.0x ATR (ratio 4:1, adaptativo)
 ATR_BE_MULT    = 1.5    # Mover SL a breakeven cuando profit >= 1.5x ATR
 
-# ── Volatility-normalized sizing (#125) ─────────────────────────────────────
-TARGET_VOL_ANNUAL = 0.15   # 15% target portfolio contribution per position
+# ── Yang-Zhang vol estimator (diagnostic utility only — NOT applied to sizing) ──
+# The vol-normalized sizing idea of #125 was found to regress P&L in comparative
+# backtest: the per-symbol atr_sl_mult/tp tuning from epic #121 (735 sims) already
+# adapts to volatility structurally. Multiplying a flat vol_mult on top shrinks
+# the effective risk of the highest-validated symbols (DOGE, BTC, RUNE) and
+# undoes the gains. Function kept available for telemetry / future dashboards.
+TARGET_VOL_ANNUAL = 0.15   # reference target (not currently applied)
 VOL_LOOKBACK_DAYS = 30
-VOL_MIN_FLOOR = 0.05       # clamp for assets with near-zero vol
-VOL_MAX_CEIL = 0.20        # never risk less than 20% of base per position
 
 
 def annualized_vol_yang_zhang(df_daily: pd.DataFrame) -> float:
-    """Yang-Zhang annualized vol over daily bars.
+    """Yang-Zhang annualized vol over daily bars (diagnostic utility).
 
-    Crypto note: 24/7 markets collapse the overnight term toward zero, but YZ still
-    correctly weights open-close and Rogers-Satchell components.
-    Returns TARGET_VOL_ANNUAL if too few bars (neutral sizing fallback).
+    Not wired into position sizing — see note above. Returns TARGET_VOL_ANNUAL
+    when fewer than 5 bars are available.
     """
     if len(df_daily) < 5:
         return TARGET_VOL_ANNUAL
@@ -850,17 +852,7 @@ def scan(symbol: str = None):
     # ── Sizing informativo ────────────────────────────────────────────────────
     atr_val    = float(calc_atr(df1h, ATR_PERIOD).iloc[-1])
     capital    = 1000.0
-
-    # Vol-normalized risk (#125): fetch daily bars, compute vol, scale risk per symbol
-    try:
-        df_daily = md.get_klines(symbol, "1d", VOL_LOOKBACK_DAYS + 5)
-        asset_vol = annualized_vol_yang_zhang(df_daily)
-    except Exception as e:
-        log.warning("Vol calc failed for %s: %s — using neutral sizing", symbol, e)
-        asset_vol = TARGET_VOL_ANNUAL
-
-    vol_mult = max(VOL_MAX_CEIL, min(1.0, TARGET_VOL_ANNUAL / max(asset_vol, VOL_MIN_FLOOR)))
-    risk_usd = capital * 0.01 * vol_mult
+    risk_usd   = capital * 0.01
 
     # Per-symbol ATR overrides from config
     _cfg_path = os.path.join(SCRIPT_DIR, "config.json")
@@ -965,9 +957,6 @@ def scan(symbol: str = None):
             "qty_btc":     round(qty_btc, 6),
             "valor_pos":   round(val_pos, 2),
             "pct_capital": round(val_pos / capital * 100, 1),
-            "asset_vol":   round(asset_vol, 4),
-            "vol_mult":    round(vol_mult, 3),
-            "target_vol":  TARGET_VOL_ANNUAL,
         },
     })
     # Convertir tipos numpy a tipos Python nativos para serialización JSON

@@ -624,15 +624,13 @@ class TestScan:
     def test_scan_sizing_coherente(self, mock_klines):
         """Verifica que el sizing no supere el 98% del capital."""
         df1h, df4h, df5m = self._make_scan_mock()
-        mock_klines.side_effect = [df5m, df1h, df4h, df1h, df1h]  # +1 for vol 1d lookup
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
         rep = scanner.scan()
         sz = rep["sizing_1h"]
         assert sz["pct_capital"] <= 98.0
         assert sz["capital_usd"] == 1000.0
-        # riesgo = capital * 0.01 * vol_mult, where vol_mult ∈ [VOL_MAX_CEIL, 1.0]
-        assert scanner.VOL_MAX_CEIL * 10.0 <= sz["riesgo_usd"] <= 10.0
-        assert sz["riesgo_usd"] == pytest.approx(10.0 * sz["vol_mult"], abs=0.01)
+        assert sz["riesgo_usd"] == pytest.approx(10.0, abs=0.01)
 
     @patch("btc_scanner.md.get_klines")
     def test_scan_sl_tp_coherentes(self, mock_klines):
