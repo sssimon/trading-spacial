@@ -32,7 +32,7 @@ def tmp_ohlcv_db(tmp_path, monkeypatch):
 def fake_provider(monkeypatch):
     """Inject a deterministic FakeProvider as the only provider in data._fetcher."""
     from data import _fetcher
-    from tests._fakes import FakeProvider
+    from _fakes import FakeProvider
 
     fake = FakeProvider()
     monkeypatch.setattr(_fetcher, "_PROVIDERS", [fake])
@@ -47,7 +47,7 @@ def fake_provider(monkeypatch):
 def fake_providers(monkeypatch):
     """Inject two fake providers to test failover."""
     from data import _fetcher
-    from tests._fakes import FakeProvider
+    from _fakes import FakeProvider
 
     primary = FakeProvider(name="primary")
     fallback = FakeProvider(name="fallback")
