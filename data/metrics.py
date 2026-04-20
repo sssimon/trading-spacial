@@ -43,20 +43,30 @@ def _percentile(values: list[float], p: int) -> float:
     return sorted_vals[idx]
 
 
+def _labels_str(labels_key: tuple) -> str:
+    if not labels_key:
+        return ""
+    return ",".join(f"{k}={v}" for k, v in labels_key)
+
+
 def get_stats() -> dict:
-    """Snapshot of all metrics. Safe to call from any thread."""
+    """Snapshot of all metrics. Safe to call from any thread.
+
+    Inner-dict keys are stringified labels (e.g. "provider=binance"; "" when no
+    labels) so the whole payload is JSON-serializable by FastAPI.
+    """
     with _lock:
         counters_snapshot = {
-            name: dict(vals) for name, vals in _counters.items()
+            name: {_labels_str(k): v for k, v in vals.items()}
+            for name, vals in _counters.items()
         }
-        latencies_p50 = {
-            key: _percentile(list(samples), 50)
-            for key, samples in _latencies.items()
-        }
-        latencies_p95 = {
-            key: _percentile(list(samples), 95)
-            for key, samples in _latencies.items()
-        }
+        latencies_p50: dict[str, dict[str, float]] = {}
+        latencies_p95: dict[str, dict[str, float]] = {}
+        for (name, labels_key), samples in _latencies.items():
+            samples_list = list(samples)
+            label_str = _labels_str(labels_key)
+            latencies_p50.setdefault(name, {})[label_str] = _percentile(samples_list, 50)
+            latencies_p95.setdefault(name, {})[label_str] = _percentile(samples_list, 95)
     return {
         "counters": counters_snapshot,
         "latency_p50_ms": latencies_p50,
