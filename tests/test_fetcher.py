@@ -93,3 +93,83 @@ class TestFetchWithFailover:
         primary.set_bars("BTCUSDT", "1h", [make_bar("BTCUSDT", "1h", 1000)])
         _fetcher.fetch_with_failover("BTCUSDT", "1h", 0, 2000)
         assert _fetcher._active_idx == 0  # recovered
+
+
+from data import _storage
+
+
+class TestEnsureFresh:
+    def test_cold_fetches_limit_bars(self, tmp_ohlcv_db, fake_provider):
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        _fetcher.ensure_fresh("BTCUSDT", "1h", limit=5, cached_max=None, expected_max=9 * 3600_000)
+        stored = _storage._conn().execute("SELECT COUNT(*) FROM ohlcv").fetchone()[0]
+        # Requested last 5 bars: open_times 5..9 inclusive
+        assert stored == 5
+        got = _storage.tail("BTCUSDT", "1h", 100)
+        assert list(got["open_time"]) == [5 * 3600_000, 6 * 3600_000, 7 * 3600_000, 8 * 3600_000, 9 * 3600_000]
+
+    def test_warm_fetches_only_increment(self, tmp_ohlcv_db, fake_provider):
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        _storage.upsert_many([bars[i] for i in range(5)])  # cached up to 4
+        _fetcher.ensure_fresh("BTCUSDT", "1h", limit=10, cached_max=4 * 3600_000, expected_max=9 * 3600_000)
+        # Only bars 5..9 were newly requested
+        assert fake_provider.calls[-1] == ("BTCUSDT", "1h", 5 * 3600_000, 9 * 3600_000)
+
+    def test_double_checked_lock_dedup(self, tmp_ohlcv_db, fake_provider):
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        # Two threads calling ensure_fresh simultaneously
+        results = []
+        def worker():
+            _fetcher.ensure_fresh("BTCUSDT", "1h", limit=5, cached_max=None, expected_max=9 * 3600_000)
+            results.append("done")
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        assert len(results) == 4
+        # With double-checked locking, first thread fetches; others see fresh cache and return
+        assert len(fake_provider.calls) == 1
+
+
+class TestBackfillRange:
+    def test_full_backfill(self, tmp_ohlcv_db, fake_provider):
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(100)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        n = _fetcher._backfill_range("BTCUSDT", "1h", 0, 99 * 3600_000)
+        assert n == 100
+        assert _storage.max_open_time("BTCUSDT", "1h") == 99 * 3600_000
+
+    def test_chunks_respect_size(self, tmp_ohlcv_db, fake_provider, monkeypatch):
+        # CHUNK_SIZE=1000 → 1500 bars = 2 chunks
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(1500)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        _fetcher._backfill_range("BTCUSDT", "1h", 0, 1499 * 3600_000)
+        # 2 chunks = 2 provider calls
+        assert len(fake_provider.calls) == 2
+
+    def test_pre_listing_stops_and_marks_earliest(self, tmp_ohlcv_db, fake_provider):
+        # Provider has data starting at t=500*3600_000 only
+        bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(500, 600)]
+        fake_provider.set_bars("BTCUSDT", "1h", bars)
+        _fetcher._backfill_range("BTCUSDT", "1h", 0, 100 * 3600_000)
+        # Our requested range [0, 100] is entirely pre-listing → empty response → stop + mark earliest
+        assert _storage.first_bar_ms("BTCUSDT", "1h") is not None
+
+
+class TestFillInternalGaps:
+    def test_fills_single_gap(self, tmp_ohlcv_db, fake_provider):
+        all_bars = [make_bar("BTCUSDT", "1h", t * 3600_000) for t in range(10)]
+        fake_provider.set_bars("BTCUSDT", "1h", all_bars)
+        # Seed storage with bars 0-3 and 7-9 (gap in the middle: 4-6)
+        _storage.upsert_many([all_bars[i] for i in [0, 1, 2, 3, 7, 8, 9]])
+        fake_provider.calls.clear()
+        _fetcher._fill_internal_gaps("BTCUSDT", "1h", 0, 9 * 3600_000)
+        assert _storage.max_open_time("BTCUSDT", "1h") == 9 * 3600_000
+        count = _storage._conn().execute(
+            "SELECT COUNT(*) FROM ohlcv WHERE symbol='BTCUSDT' AND timeframe='1h'").fetchone()[0]
+        assert count == 10
+        # Should have fetched only the gap range (4..6 inclusive)
+        assert fake_provider.calls[0][2] == 4 * 3600_000
+        assert fake_provider.calls[0][3] == 6 * 3600_000
