@@ -70,11 +70,15 @@ Binance API (Bybit fallback)
 | `signals.db` | SQLite: `signals` + `positions` tables | — |
 
 ### Key Backend Logic (`btc_scanner.py`)
-- **Indicators:** LRC (100-bar Linear Regression Channel), RSI, Bollinger Bands, SMA100
-- **Entry zone:** LRC_LONG_MAX = 25% (price within 25% of lower channel band)
+- **Indicators:** LRC (100-bar Linear Regression Channel), RSI, Bollinger Bands, SMA100, ATR, ADX
+- **Entry zone:** LRC_LONG_MAX = 25% (long), LRC_SHORT_MIN = 75% (short, gated by regime=BEAR)
 - **Score tiers:** 0–1 = 50% size, 2–3 = normal, ≥4 = premium signal
-- **Default symbols:** BTC, ETH, BNB, SOL, XRP, ADA, AVAX, DOGE, DOT, MATIC, LINK, LTC, UNI, ATOM, XLM, NEAR, FIL, APT, OP, ARB (top 20, dynamically fetched from CoinGecko with fallback)
-- **Scan interval:** 300 seconds (configurable in config.json)
+- **Risk per trade:** fixed 1% of capital. **Do not add multiplicative risk scalers on top** — per-symbol volatility adaptation is handled by the tuned `atr_sl_mult/tp/be` values in `config.json["symbol_overrides"]` (epic #121).
+- **Curated symbols (static, 10 coins):** `DEFAULT_SYMBOLS` in `btc_scanner.py` — BTC, ETH, ADA, AVAX, DOGE, UNI, XLM, PENDLE, JUP, RUNE. This list is static since epic #135 confirmed via 768+ backtest combinations that the 13 removed tokens (BNB, SOL, XRP, DOT, MATIC, LINK, LTC, ATOM, NEAR, FIL, APT, OP, ARB) are not profitable with this strategy regardless of parameters.
+- **SHORT is bidirectional and auto-gated** by `detect_regime()` — contributes ~50% of the validated 4-year backtest P&L. See `docs/superpowers/specs/es/2026-04-17-formula-ganadora-resultados-finales.md`.
+- **Regime detector** (`detect_regime`, once daily, cached in `data/regime_cache.json`): composite score = 40% price (SMA50/200, 30d momentum) + 30% Fear & Greed + 30% Binance Futures funding rate. Scores >60 = BULL/LONG, <40 = BEAR/SHORT-enabled, 40–60 = NEUTRAL/LONG-only.
+- **Scan interval:** 300 seconds (configurable in `config.json`)
+- **Authoritative system doc:** `docs/superpowers/specs/es/2026-04-18-documento-completo-sistema-trading.md` — read this before touching sizing, symbol selection, or the regime detector.
 
 ### Key API Endpoints (`btc_api.py`)
 - `GET /symbols` — real-time status for all monitored symbols
