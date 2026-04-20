@@ -1291,6 +1291,14 @@ def scanner_loop():
         _scanner_state["symbols_active"] = symbols
         log.info(f"Ciclo iniciado — {len(symbols)} simbolos")
 
+        # Calentar el caché OHLCV en paralelo para que los scans por símbolo
+        # siguientes sean hits del caché en lugar de cold fetches a Binance.
+        # El diagnóstico per-símbolo luego hace md.get_klines en 5m/1h/4h/1d.
+        try:
+            md.prefetch(symbols, ["5m", "1h", "4h"], limit=210)
+        except Exception as e:
+            log.warning(f"prefetch batch fallo: {e}")
+
         cycle_prices = {}
         for sym in symbols:
             if not _scanner_state["running"]:
