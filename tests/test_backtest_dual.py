@@ -332,3 +332,61 @@ class TestSimulateStrategyDirectionalOverrides:
                 assert t.get("atr_sl_mult_used") == 0.7
             elif t.get("direction") == "SHORT":
                 assert t.get("atr_sl_mult_used") == 1.0
+
+
+class TestSimulateStrategyRegimeMode:
+    """Tests for regime_mode kwarg + _regime_at_time helper (#152)."""
+
+    def _mini_bars(self, n_hours=300):
+        import pandas as pd
+        from datetime import datetime, timezone, timedelta
+        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        idx1h = [start + timedelta(hours=i) for i in range(n_hours)]
+        df1h = pd.DataFrame({
+            "open":  [100 + (i % 10) for i in range(n_hours)],
+            "high":  [101 + (i % 10) for i in range(n_hours)],
+            "low":   [99  + (i % 10) for i in range(n_hours)],
+            "close": [100 + (i % 10) for i in range(n_hours)],
+            "volume": [1000] * n_hours,
+        }, index=pd.DatetimeIndex(idx1h, name="ts"))
+        df4h = df1h.iloc[::4].copy()
+        df5m = df1h.iloc[0:1].copy()
+        df1d = df1h.iloc[::24].copy()
+        return df1h, df4h, df5m, df1d
+
+    def test_simulate_strategy_default_regime_mode_unchanged(self):
+        """Without regime_mode kwarg, behaves as before (smoke test)."""
+        from backtest import simulate_strategy
+        df1h, df4h, df5m, df1d = self._mini_bars()
+        trades, _ = simulate_strategy(df1h, df4h, df5m, "BTCUSDT", df1d=df1d)
+        assert isinstance(trades, list)
+
+    def test_simulate_strategy_hybrid_mode_accepts_kwarg(self):
+        """Passing regime_mode='hybrid' does not crash."""
+        from backtest import simulate_strategy
+        df1h, df4h, df5m, df1d = self._mini_bars()
+        trades, _ = simulate_strategy(
+            df1h, df4h, df5m, "BTCUSDT", df1d=df1d, regime_mode="hybrid"
+        )
+        assert isinstance(trades, list)
+
+    def test_simulate_strategy_hybrid_momentum_mode_accepts_kwarg(self):
+        """Passing regime_mode='hybrid_momentum' does not crash."""
+        from backtest import simulate_strategy
+        df1h, df4h, df5m, df1d = self._mini_bars()
+        trades, _ = simulate_strategy(
+            df1h, df4h, df5m, "BTCUSDT", df1d=df1d, regime_mode="hybrid_momentum"
+        )
+        assert isinstance(trades, list)
+
+    def test_simulate_strategy_global_with_df1d_btc_kwarg(self):
+        """mode='global' + df1d_btc: does not crash when passed an alternative daily source."""
+        from backtest import simulate_strategy
+        df1h, df4h, df5m, df1d = self._mini_bars()
+        df1d_btc = df1d.copy()
+        df1d_btc["close"] = list(range(100, 100 + len(df1d_btc)))
+        trades, _ = simulate_strategy(
+            df1h, df4h, df5m, "BTCUSDT", df1d=df1d,
+            regime_mode="global", df1d_btc=df1d_btc,
+        )
+        assert isinstance(trades, list)

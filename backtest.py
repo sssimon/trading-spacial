@@ -40,6 +40,12 @@ from btc_scanner import (
     ATR_PERIOD, ATR_SL_MULT, ATR_TP_MULT, ATR_BE_MULT,
     ADX_THRESHOLD,
     resolve_direction_params,
+    _compute_price_score,
+    _compute_fng_score,
+    _compute_funding_score,
+    _compute_rsi_score,
+    _compute_adx_score,
+    _compute_local_regime,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
@@ -167,6 +173,82 @@ def get_cached_data(symbol: str, interval: str, start_date: datetime = None) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  REGIME HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _regime_at_time(
+    bar_time,
+    symbol: str,
+    df1d_sym,
+    df_fng,
+    df_funding,
+    regime_mode: str = "global",
+    df1d_btc=None,
+) -> dict:
+    """Compute regime for this bar_time (no look-ahead).
+
+    mode='global':           uses df1d_btc + F&G + funding (40/30/30).
+                              Fallback: if df1d_btc is None -> uses df1d_sym.
+    mode='hybrid':           uses df1d_sym + F&G + funding (50/25/25).
+    mode='hybrid_momentum':  uses df1d_sym + RSI + ADX + F&G + funding (30/15/20/20/15).
+    """
+    bar_time_naive = bar_time.tz_localize(None) if bar_time.tzinfo else bar_time
+
+    # F&G score
+    fng_score = 50
+    if df_fng is not None and not df_fng.empty:
+        fng_mask = df_fng.index <= bar_time_naive
+        if fng_mask.any():
+            fng_value = int(df_fng.loc[fng_mask, "fng"].iloc[-1])
+            fng_score = _compute_fng_score(fng_value)
+
+    # Funding score
+    funding_score = 50
+    if df_funding is not None and not df_funding.empty:
+        fund_idx = df_funding.index
+        fund_mask = fund_idx <= (bar_time if fund_idx.tz is not None else bar_time_naive)
+        if fund_mask.any():
+            rate = float(df_funding.loc[fund_mask, "rate"].iloc[-1])
+            funding_score = _compute_funding_score(rate)
+
+    # Pick daily bars source per mode
+    if regime_mode == "global":
+        df_price = df1d_btc if df1d_btc is not None else df1d_sym
+    else:
+        df_price = df1d_sym
+
+    if df_price is None:
+        return {"regime": "NEUTRAL", "score": 50.0, "mode": regime_mode,
+                "symbol": symbol, "components": {}}
+
+    window_price = df_price.loc[df_price.index <= bar_time]
+
+    # RSI + ADX only for hybrid_momentum
+    rsi_score = 50
+    adx_score = 50
+    if regime_mode == "hybrid_momentum" and df1d_sym is not None:
+        window_sym = df1d_sym.loc[df1d_sym.index <= bar_time]
+        if len(window_sym) >= 20:
+            try:
+                rsi_val = calc_rsi(window_sym["close"], 14).iloc[-1]
+                if not pd.isna(rsi_val):
+                    rsi_score = _compute_rsi_score(rsi_val)
+            except Exception:
+                pass
+            try:
+                adx_val = calc_adx(window_sym, 14).iloc[-1]
+                if not pd.isna(adx_val):
+                    adx_score = _compute_adx_score(adx_val)
+            except Exception:
+                pass
+
+    return _compute_local_regime(
+        symbol, regime_mode, window_price,
+        fng_score, funding_score, rsi_score, adx_score,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  SIMULATION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -178,7 +260,10 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       sim_start: datetime = None, sim_end: datetime = None,
                       df_fng: pd.DataFrame = None,
                       df_funding: pd.DataFrame = None,
-                      symbol_overrides: dict | None = None) -> list[dict]:
+                      symbol_overrides: dict | None = None,
+                      regime_mode: str = "global",       # NEW (#152)
+                      df1d_btc: pd.DataFrame = None,     # NEW (#152)
+                      ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy."""
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
@@ -303,50 +388,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         from btc_scanner import LRC_SHORT_MIN, detect_bear_engulfing, check_trigger_5m_short
 
-        # Regime detection: composite (same as production, using historical data)
-        # 1. Price structure (40%)
-        price_score = 100
-        if df1d is not None and len(df1d) >= 200:
-            mask_1d = df1d.index <= bar_time
-            window_1d = df1d.loc[mask_1d]
-            if len(window_1d) >= 200:
-                sma50_d  = calc_sma(window_1d["close"], 50).iloc[-1]
-                sma200_d = calc_sma(window_1d["close"], 200).iloc[-1]
-                if not pd.isna(sma50_d) and not pd.isna(sma200_d):
-                    if sma50_d < sma200_d: price_score -= 40
-                    if price < sma200_d: price_score -= 30
-                    ret30 = window_1d["close"].iloc[-1] / window_1d["close"].iloc[-30] - 1 if len(window_1d) >= 30 else 0
-                    if ret30 < -0.10: price_score -= 20
-                    elif ret30 < 0: price_score -= 10
-        price_score = max(0, min(100, price_score))
-
-        # 2. Sentiment: Fear & Greed (30%)
-        fng_score = 50  # default neutral
-        if df_fng is not None and not df_fng.empty:
-            fng_mask = df_fng.index <= bar_time_naive
-            if fng_mask.any():
-                fng_score = int(df_fng.loc[fng_mask, "fng"].iloc[-1])
-
-        # 3. Funding rate (30%)
-        funding_score = 50  # default neutral
-        if df_funding is not None and not df_funding.empty:
-            fund_idx = df_funding.index
-            if fund_idx.tz is not None:
-                fund_mask = fund_idx <= bar_time
-            else:
-                fund_mask = fund_idx <= bar_time_naive
-            if fund_mask.any():
-                rate = float(df_funding.loc[fund_mask, "rate"].iloc[-1])
-                funding_score = max(0, min(100, int(50 + rate * 5000)))
-
-        # Composite (same weights as production)
-        composite = price_score * 0.4 + fng_score * 0.3 + funding_score * 0.3
-        if composite > 60:
-            regime = "LONG"
-        elif composite < 40:
-            regime = "SHORT"
-        else:
-            regime = "LONG"  # NEUTRAL = conservative LONG
+        # Regime detection via _regime_at_time helper (#152)
+        regime_info = _regime_at_time(
+            bar_time, symbol, df1d, df_fng, df_funding,
+            regime_mode=regime_mode, df1d_btc=df1d_btc,
+        )
+        _r = regime_info["regime"]
+        regime = "LONG" if _r == "BULL" else "SHORT" if _r == "BEAR" else "LONG"
 
         # Direction based on regime + LRC zone
         if lrc_pct <= LRC_LONG_MAX and regime == "LONG":
