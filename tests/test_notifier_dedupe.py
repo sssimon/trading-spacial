@@ -49,3 +49,27 @@ def test_critical_priority_bypasses_dedupe(tmp_db):
                         priority="critical") is True
     assert should_send("infra", "infra:scanner", window_seconds=60,
                         priority="warning") is False
+
+
+def test_record_older_than_window_allows_resend(tmp_db):
+    """Sliding-window core: an old record outside the window must NOT block new sends."""
+    from datetime import datetime, timedelta, timezone
+    import btc_api
+    from notifier.dedupe import should_send
+
+    # Backdate a row manually — 2 hours old, window is 60 seconds
+    past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO notifications_sent
+               (event_type, event_key, priority, payload_json,
+                channels_sent, delivery_status, sent_at, error_log)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("health", "health:BTC:PAUSED", "warning", "{}", "telegram", "ok", past, None),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert should_send("health", "health:BTC:PAUSED", window_seconds=60) is True

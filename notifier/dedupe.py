@@ -23,7 +23,13 @@ def should_send(
 ) -> bool:
     """Return True if this event should be sent (no recent duplicate found).
 
-    Critical-priority events always pass. Window of 0 disables dedupe.
+    Critical-priority events always pass. Window of 0 or negative disables dedupe.
+
+    The string comparison `sent_at >= ?` works correctly only because both
+    writers (notifier._storage._now_iso) and this reader build the timestamp
+    via `datetime.now(timezone.utc).isoformat()`, which yields a consistent
+    `"...+00:00"` suffix. Future writers to notifications_sent.sent_at MUST
+    use the same convention or the window comparison will silently misfire.
     """
     if priority == "critical":
         return True
