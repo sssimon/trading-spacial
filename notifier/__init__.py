@@ -67,6 +67,8 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
     """
     notif_cfg = cfg.get("notifier", {}) or {}
     if not notif_cfg.get("enabled", True):
+        log.info("notify skipped (notifier disabled): %s %s",
+                  event.event_type, event.dedupe_key)
         return []
 
     window_seconds = _resolve_dedupe_window(event, cfg)
@@ -83,6 +85,17 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
     any_error: str | None = None
 
     for channel_name in channels:
+        # Channel factory check happens first — no point renderinga template for
+        # a channel we cannot dispatch to.
+        if channel_name == "telegram":
+            channel = TelegramChannel(cfg)
+        else:
+            log.warning("notify: unsupported channel %r (not yet wired — see PR B of #162)",
+                         channel_name)
+            receipts.append(DeliveryReceipt(channel=channel_name, status="failed",
+                                              error=f"unsupported channel: {channel_name}"))
+            continue
+
         bucket = ratelimit.bucket_for(channel_name)
         if not bucket.acquire():
             receipts.append(DeliveryReceipt(channel=channel_name, status="rate_limited",
@@ -102,13 +115,6 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
             receipts.append(DeliveryReceipt(channel=channel_name, status="ok",
                                               error="test_mode"))
             channels_sent.append(channel_name)
-            continue
-
-        if channel_name == "telegram":
-            channel = TelegramChannel(cfg)
-        else:
-            receipts.append(DeliveryReceipt(channel=channel_name, status="failed",
-                                              error="unsupported channel in PR A"))
             continue
 
         receipt = channel.send(message)
@@ -132,7 +138,7 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
             delivery_status=delivery_status,
             error_log=any_error,
         )
-    except Exception as e:
-        log.exception("notifier failed to persist delivery record: %s", e)
+    except Exception:
+        log.exception("notifier failed to persist delivery record")
 
     return receipts

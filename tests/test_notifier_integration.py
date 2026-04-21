@@ -97,6 +97,46 @@ def test_notify_disabled_config_returns_empty(tmp_db_and_reset):
     assert mock_post.call_count == 0
 
 
+def test_notify_render_failure_produces_failed_receipt(tmp_db_and_reset):
+    """If template rendering raises (e.g. missing template), we get a failed
+    receipt instead of a crash, and record_delivery still runs."""
+    from notifier import notify, SignalEvent
+    import notifier as notifier_mod
+
+    ev = SignalEvent(symbol="BTCUSDT", score=6, direction="LONG",
+                     entry=50_000, sl=49_000, tp=55_000)
+    with patch.object(notifier_mod, "render", side_effect=RuntimeError("boom")):
+        receipts = notify(ev, cfg=_cfg())
+
+    assert len(receipts) == 1
+    assert receipts[0].status == "failed"
+    assert "boom" in receipts[0].error
+
+    from notifier._storage import list_unread
+    rows = list_unread(limit=5)
+    assert len(rows) == 1
+    assert rows[0]["delivery_status"] == "failed"
+
+
+def test_notify_unsupported_channel_logs_warning(tmp_db_and_reset, caplog):
+    """Unknown channel name must log a warning (so operator notices config drift)."""
+    import logging
+    from notifier import notify, SignalEvent
+
+    cfg = _cfg()
+    cfg["notifier"]["channels_by_event_type"] = {"signal": ["webhook"]}
+
+    ev = SignalEvent(symbol="BTC", score=5, direction="LONG",
+                     entry=1, sl=1, tp=1)
+    with caplog.at_level(logging.WARNING, logger="notifier"):
+        receipts = notify(ev, cfg=cfg)
+
+    assert len(receipts) == 1
+    assert receipts[0].status == "failed"
+    assert "unsupported channel" in receipts[0].error.lower()
+    assert any("unsupported channel" in r.message for r in caplog.records)
+
+
 def test_notify_rate_limit_queues_overflow(tmp_db_and_reset, ok_telegram):
     """21st call in a burst hits the rate limiter (default capacity=20)."""
     from notifier import notify, SignalEvent, ratelimit
