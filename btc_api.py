@@ -872,6 +872,24 @@ def init_db():
             changes_count INTEGER DEFAULT 0
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS notifications_sent (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type      TEXT    NOT NULL,
+            event_key       TEXT    NOT NULL,
+            priority        TEXT    NOT NULL DEFAULT 'info',
+            payload_json    TEXT    NOT NULL,
+            channels_sent   TEXT    NOT NULL,
+            delivery_status TEXT    NOT NULL DEFAULT 'ok',
+            sent_at         TEXT    NOT NULL,
+            read_at         TEXT,
+            error_log       TEXT
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
+            ON notifications_sent(read_at, sent_at DESC) WHERE read_at IS NULL
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
