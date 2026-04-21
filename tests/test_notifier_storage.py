@@ -1,7 +1,4 @@
 """Storage of outbound notifications — insert, list unread, mark-read."""
-import json
-from datetime import datetime, timezone
-
 import pytest
 
 
@@ -9,7 +6,6 @@ import pytest
 def tmp_db(tmp_path, monkeypatch):
     """Isolated signals.db pointing at tmp path."""
     import btc_api
-    from notifier import _storage as notif_storage
 
     db_path = str(tmp_path / "signals.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)

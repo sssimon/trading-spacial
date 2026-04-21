@@ -888,7 +888,7 @@ def init_db():
     """)
     con.execute("""
         CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
-            ON notifications_sent(read_at, sent_at DESC) WHERE read_at IS NULL
+            ON notifications_sent(sent_at DESC) WHERE read_at IS NULL
     """)
     con.commit()
     con.close()
