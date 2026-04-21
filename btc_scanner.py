@@ -107,6 +107,43 @@ def annualized_vol_yang_zhang(df_daily: pd.DataFrame) -> float:
     return float(np.sqrt(var_daily * 365))
 
 
+def _compute_price_score(df_daily: pd.DataFrame) -> int:
+    """Score 0-100 bearish-to-bullish sobre daily bars. Pure function.
+
+    Empieza en 100, resta por condiciones bajistas:
+      - Death Cross (SMA50 < SMA200): -40
+      - Precio debajo de SMA200: -30
+      - Retorno 30d < -10%: -20 ; retorno 30d < 0 pero > -10%: -10
+
+    Returns int clamped to [0, 100]. Devuelve 100 (bullish assumption) si df_daily
+    tiene menos de 200 bars (insufficient data para SMA200).
+
+    Spec: docs/superpowers/specs/es/2026-04-20-per-symbol-regime-design.md §5
+    """
+    if df_daily is None or df_daily.empty or len(df_daily) < 200:
+        return 100
+    try:
+        sma50 = df_daily["close"].rolling(50).mean().iloc[-1]
+        sma200 = df_daily["close"].rolling(200).mean().iloc[-1]
+        if pd.isna(sma50) or pd.isna(sma200):
+            return 100
+        price = float(df_daily["close"].iloc[-1])
+        score = 100
+        if sma50 < sma200:
+            score -= 40
+        if price < sma200:
+            score -= 30
+        if len(df_daily) >= 30:
+            ret30 = df_daily["close"].iloc[-1] / df_daily["close"].iloc[-30] - 1
+            if ret30 < -0.10:
+                score -= 20
+            elif ret30 < 0:
+                score -= 10
+        return max(0, min(100, int(score)))
+    except Exception:
+        return 100
+
+
 def _classify_tune_result(count: int, profit_factor: float | None) -> str:
     """Classify a (symbol, direction) tuning result into one of three tiers.
 
