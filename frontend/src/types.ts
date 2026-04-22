@@ -234,3 +234,22 @@ export interface TuneResult {
   applied_ts?: string | null;
   changes_count: number;
 }
+
+// ---- Notifications (#162 PR C) ----------------------------------------
+
+export interface Notification {
+  id: number;
+  event_type: 'signal' | 'health' | 'infra' | 'system' | 'position_exit' | string;
+  event_key: string;
+  priority: 'info' | 'warning' | 'critical' | string;
+  payload_json: string;
+  channels_sent: string;
+  delivery_status: 'ok' | 'partial' | 'failed' | 'rate_limited' | string;
+  sent_at: string;
+  read_at: string | null;
+  error_log: string | null;
+}
+
+export interface NotificationsResponse {
+  notifications: Notification[];
+}

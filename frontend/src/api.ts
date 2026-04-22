@@ -20,6 +20,7 @@ import type {
   PositionClosePayload,
   Position,
   TuneResult,
+  NotificationsResponse,
 } from './types';
 
 const BASE_URL = '/api';
@@ -178,5 +179,30 @@ export async function updateConfigFull(
   return request<ConfigUpdateResponse>('/config', {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+}
+
+// ---- Notifications (#162 PR C) ---------------------------------------
+
+// GET /notifications?unread=true&limit=50 — defaults to unread only
+export async function getNotifications(opts: { unread?: boolean; limit?: number } = {}): Promise<NotificationsResponse> {
+  const params = new URLSearchParams();
+  if (opts.unread !== undefined) params.set('unread', String(opts.unread));
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return request<NotificationsResponse>(`/notifications${qs ? `?${qs}` : ''}`);
+}
+
+// POST /notifications/{id}/read
+export async function markNotificationRead(id: number): Promise<{ ok: boolean; id: number }> {
+  return request<{ ok: boolean; id: number }>(`/notifications/${id}/read`, {
+    method: 'POST',
+  });
+}
+
+// POST /notifications/read-all
+export async function markAllNotificationsRead(): Promise<{ ok: boolean; marked: number }> {
+  return request<{ ok: boolean; marked: number }>(`/notifications/read-all`, {
+    method: 'POST',
   });
 }

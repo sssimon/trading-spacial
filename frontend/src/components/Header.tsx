@@ -3,6 +3,7 @@
 // ============================================================
 
 import React from 'react';
+import NotificationBell from './NotificationBell';
 
 interface HeaderProps {
   scannerRunning: boolean;
@@ -98,6 +99,7 @@ const Header: React.FC<HeaderProps> = ({
             <span className="tune-badge-dot" />
           </button>
         )}
+        <NotificationBell />
         <button
           className="btn btn-icon"
           onClick={onConfigOpen}
