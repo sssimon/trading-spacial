@@ -294,8 +294,15 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       symbol_overrides: dict | None = None,
                       regime_mode: str = "global",       # NEW (#152)
                       df1d_btc: pd.DataFrame = None,     # NEW (#152)
+                      apply_kill_switch: bool = False,   # NEW (#138 PR 3)
+                      kill_switch_cfg: dict | None = None,  # NEW (#138 PR 3)
                       ) -> list[dict]:
-    """Run bar-by-bar simulation of the Spot V6 strategy."""
+    """Run bar-by-bar simulation of the Spot V6 strategy.
+
+    Kill switch (#138): disabled by default to preserve backtest reproducibility.
+    Pass apply_kill_switch=True + kill_switch_cfg to simulate production behavior
+    where REDUCED symbols use size_mult × reduce_size_factor.
+    """
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
@@ -488,6 +495,17 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             size_mult = 1.0
         else:
             size_mult = 0.5
+
+        # Kill switch #138 PR 3: optionally halve size for REDUCED symbols.
+        # Gated behind apply_kill_switch flag — defaults off in backtests
+        # to preserve reproducibility; enable when simulating production.
+        if apply_kill_switch and kill_switch_cfg is not None:
+            try:
+                from health import apply_reduce_factor
+                size_mult = apply_reduce_factor(size_mult, symbol,
+                                                {"kill_switch": kill_switch_cfg})
+            except Exception:
+                pass  # fail-open; trading decision proceeds at full size
 
         # ── Open position ─────────────────────────────────────────────────
         if sl_mode == "atr":

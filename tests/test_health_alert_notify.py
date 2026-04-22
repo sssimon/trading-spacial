@@ -91,8 +91,8 @@ def test_alert_no_renotify_when_state_unchanged(tmp_db):
     assert mock_notify.call_count == 1  # not 2
 
 
-def test_non_alert_transitions_do_not_fire_in_pr2(tmp_db):
-    """PR 2 only emits for ALERT. REDUCED/PAUSED transitions stay silent (for now)."""
+def test_transition_to_reduced_fires_notify(tmp_db):
+    """PR 3 (#138) extends notify gate to REDUCED transitions."""
     from health import evaluate_and_record
     import btc_api
 
@@ -107,4 +107,26 @@ def test_non_alert_transitions_do_not_fire_in_pr2(tmp_db):
         state = evaluate_and_record("DOGE", CFG, now=NOW)
 
     assert state == "REDUCED"
-    assert mock_notify.call_count == 0
+    assert mock_notify.call_count == 1
+    event_arg = mock_notify.call_args.args[0]
+    assert event_arg.to_state == "REDUCED"
+    assert event_arg.reason == "pnl_neg_30d"
+
+
+def test_reduced_no_renotify_when_state_unchanged(tmp_db):
+    """Idempotence: second eval on stable REDUCED does not re-fire."""
+    from health import evaluate_and_record
+    import btc_api
+
+    conn = btc_api.get_db()
+    try:
+        for i in range(25):
+            _insert_closed(conn, "DOGE", -100.0, (NOW - timedelta(days=25 - i)).isoformat())
+    finally:
+        conn.close()
+
+    with patch("health.notify") as mock_notify:
+        evaluate_and_record("DOGE", CFG, now=NOW)
+        evaluate_and_record("DOGE", CFG, now=NOW)
+
+    assert mock_notify.call_count == 1
