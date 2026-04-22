@@ -624,31 +624,29 @@ def check_position_stops(symbol: str, price: float):
             log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
             _write_position_event_log(pos, reason, exit_price)
 
-            # Send Telegram notification
+            # Send exit notification via the centralized notifier (#162 PR B).
             entry = pos.get("entry_price", 0)
             qty = pos.get("qty", 0)
             pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
-            pnl_str = f"${pnl_usd:+.2f}" if qty else "N/A"
-            pnl_pct_str = f"{pnl_pct:+.2f}%" if qty else "N/A"
-
-            if reason == "SL_HIT":
-                emoji, label = "\U0001f534", "STOP LOSS"
-            else:
-                emoji, label = "\U0001f7e2", "TAKE PROFIT"
-
-            msg = (
-                f"{emoji} *{label} HIT*\n"
-                f"*{symbol}* ({pos['direction']})\n"
-                f"Entry: `${entry:.2f}` -> Exit: `${exit_price:.2f}`\n"
-                f"P&L: `{pnl_str}` ({pnl_pct_str})\n"
-                f"Reason: `{reason}`"
-            )
 
             try:
-                # TODO (#162 PR B): migrate to notifier.notify(InfraEvent(...)) once a
-                # PositionExitEvent type exists. The pre-formatted TP/SL message has no
-                # suitable SignalEvent mapping; leaving on _send_telegram_raw for now.
-                _send_telegram_raw(msg, cfg)
+                from notifier import notify, PositionExitEvent
+                # Map legacy reason strings ("SL_HIT"/"TP_HIT") to tier codes.
+                exit_reason_code = "SL" if reason == "SL_HIT" else (
+                    "TP" if reason == "TP_HIT" else reason
+                )
+                notify(
+                    PositionExitEvent(
+                        symbol=symbol,
+                        direction=pos.get("direction", "LONG"),
+                        exit_reason=exit_reason_code,
+                        entry_price=float(entry or 0.0),
+                        exit_price=float(exit_price or 0.0),
+                        pnl_usd=float(pnl_usd or 0.0),
+                        pnl_pct=float(pnl_pct or 0.0),
+                    ),
+                    cfg=cfg,
+                )
             except Exception as e:
                 log.warning(f"Failed to notify {reason} for {symbol}: {e}")
 
