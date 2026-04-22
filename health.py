@@ -10,6 +10,15 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+# Lazy re-export so tests can patch health.notify without reaching into notifier.
+# Using a try/except because notifier is a sibling package (not a stdlib) and
+# we want health.py to remain importable even if notifier fails to import.
+try:
+    from notifier import notify, HealthEvent  # noqa: F401
+except ImportError:
+    notify = None  # type: ignore
+    HealthEvent = None  # type: ignore
+
 
 def _month_key(dt: datetime) -> str:
     """YYYY-MM string from a datetime (used as pnl_by_month key)."""
@@ -301,6 +310,17 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
     if new_state != current:
         apply_transition(symbol, new_state=new_state, reason=reason,
                          metrics=metrics, from_state=current)
+        # PR 2 (#138): one-shot notify only on transitions into ALERT.
+        # PRs 3/4 will extend this to REDUCED and PAUSED.
+        if new_state == "ALERT" and notify is not None and HealthEvent is not None:
+            try:
+                notify(
+                    HealthEvent(symbol=symbol, from_state=current,
+                                to_state=new_state, reason=reason, metrics=metrics),
+                    cfg=cfg,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("health: ALERT notify failed for %s: %s", symbol, e)
     else:
         _record_evaluation(symbol, metrics, new_state)
     return new_state
