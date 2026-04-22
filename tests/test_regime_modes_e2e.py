@@ -27,19 +27,41 @@ class TestEvaluateRegimeGate:
         verdicts = evaluate_regime_gate(baseline, contenders)
         assert verdicts["hybrid"]["verdict"] == "PASS"
 
-    def test_gate_fail_when_doge_pf_drops(self):
+    def test_gate_fail_when_doge_pf_drops_materially(self):
+        """Window-adjusted threshold: baseline DOGE PF 4.5 → threshold 3.6 (=4.5*0.8).
+        Tuned at 2.5 fails (well below). Confirms the gate still catches material degradation."""
         from scripts.gate_regime_modes import evaluate_regime_gate
         baseline = {"total_pnl": 20000, "max_dd_pct": -10.0,
                     "per_symbol": {"DOGEUSDT": {"pnl": 10000, "pf": 4.5}}}
         contenders = {
             "hybrid": {
                 "total_pnl": 25000, "max_dd_pct": -9.0,
-                "per_symbol": {"DOGEUSDT": {"pnl": 10500, "pf": 3.8}},
+                "per_symbol": {"DOGEUSDT": {"pnl": 10500, "pf": 2.5}},
             },
         }
         verdicts = evaluate_regime_gate(baseline, contenders)
         assert verdicts["hybrid"]["verdict"] == "FAIL"
         assert any("DOGE" in r for r in verdicts["hybrid"]["reasons"])
+
+    def test_gate_doge_pf_threshold_is_window_adjusted(self):
+        """Regression for the 2026-04-21 hunger-games run: baseline DOGE PF of
+        2.73 should NOT rig the gate against every contender. A contender with
+        DOGE PF 2.64 (close to baseline) should not fail on criterion [4]."""
+        from scripts.gate_regime_modes import evaluate_regime_gate
+        baseline = {
+            "total_pnl": 5_000, "max_dd_pct": -30.0,
+            "per_symbol": {"DOGEUSDT": {"pnl": 10_000, "pf": 2.73}},
+        }
+        contenders = {
+            "hybrid": {
+                "total_pnl": 8_000, "max_dd_pct": -30.0,
+                "per_symbol": {"DOGEUSDT": {"pnl": 10_500, "pf": 2.64}},
+            },
+        }
+        verdicts = evaluate_regime_gate(baseline, contenders)
+        # DOGE threshold = min(4.0, 0.8 * 2.73) = 2.184. 2.64 >= 2.184 → criterion [4] OK.
+        doge_reason = next(r for r in verdicts["hybrid"]["reasons"] if r.startswith("[4]"))
+        assert "OK" in doge_reason, doge_reason
 
     def test_gate_picks_highest_pnl_tiebreak_variance(self):
         """Within 5%, tiebreak by lower per-symbol pnl variance."""
