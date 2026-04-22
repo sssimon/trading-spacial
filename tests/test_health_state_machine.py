@@ -104,3 +104,26 @@ def test_manual_override_expires_if_a_severe_rule_fires():
     )
     assert new == "PAUSED"
     assert reason == "3mo_consec_neg"
+
+
+def test_win_rate_exactly_at_threshold_is_healthy():
+    """wr == alert_win_rate_threshold is NOT ALERT — operator is strict <."""
+    from health import evaluate_state
+    new, _ = evaluate_state(_metrics(wr=0.15), "NORMAL", False, CFG)
+    assert new == "NORMAL"
+
+
+def test_win_rate_one_tick_below_threshold_is_alert():
+    """wr just below threshold triggers ALERT."""
+    from health import evaluate_state
+    new, reason = evaluate_state(_metrics(wr=0.1499), "NORMAL", False, CFG)
+    assert new == "ALERT"
+    assert reason == "wr_below_threshold"
+
+
+def test_invalid_current_state_raises_value_error():
+    """Garbage-in/garbage-out is not OK: bad state names must raise early."""
+    import pytest
+    from health import evaluate_state
+    with pytest.raises(ValueError, match="unknown current_state"):
+        evaluate_state(_metrics(), "DISABLED", False, CFG)

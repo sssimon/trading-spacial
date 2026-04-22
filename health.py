@@ -125,6 +125,9 @@ def evaluate_state(
     manual_override is informational: a PAUSED→NORMAL reactivation sets override=True,
     but a SUBSEQUENT severe rule (rule 2) still transitions to PAUSED.
     """
+    if current_state not in VALID_STATES:
+        raise ValueError(f"evaluate_state: unknown current_state={current_state!r}")
+
     min_trades = int(config.get("min_trades_for_eval", 20))
     if metrics.get("trades_count_total", 0) < min_trades:
         return current_state, "insufficient_data"
