@@ -9,6 +9,7 @@ from notifier._storage import record_delivery
 from notifier._templates import render
 from notifier.channels.base import DeliveryReceipt
 from notifier.channels.telegram import TelegramChannel
+from notifier.channels.webhook import WebhookChannel
 from notifier.events import (
     SignalEvent, HealthEvent, InfraEvent, SystemEvent, PositionExitEvent,
     Event,
@@ -26,17 +27,19 @@ log = logging.getLogger("notifier")
 
 
 _DEFAULT_CHANNELS_BY_EVENT_TYPE: dict[str, list[str]] = {
-    "signal": ["telegram"],
-    "health": ["telegram"],
-    "infra":  ["telegram"],
-    "system": ["telegram"],
+    "signal":        ["telegram"],
+    "health":        ["telegram"],
+    "infra":         ["telegram"],
+    "system":        ["telegram"],
+    "position_exit": ["telegram"],
 }
 
 _DEFAULT_DEDUPE_SECONDS_BY_EVENT_TYPE: dict[str, int] = {
-    "signal": 0,      # no dedupe — signals are rare and each matters
-    "health": 1800,   # 30 min
-    "infra":  300,    # 5 min
-    "system": 0,
+    "signal":        0,      # no dedupe — signals are rare and each matters
+    "health":        1800,   # 30 min
+    "infra":         300,    # 5 min
+    "system":        0,
+    "position_exit": 0,      # each exit is a discrete event; no dedupe
 }
 
 
@@ -89,8 +92,10 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
         # a channel we cannot dispatch to.
         if channel_name == "telegram":
             channel = TelegramChannel(cfg)
+        elif channel_name == "webhook":
+            channel = WebhookChannel(cfg)
         else:
-            log.warning("notify: unsupported channel %r (not yet wired — see PR B of #162)",
+            log.warning("notify: unsupported channel %r (email lands in a future PR)",
                          channel_name)
             receipts.append(DeliveryReceipt(channel=channel_name, status="failed",
                                               error=f"unsupported channel: {channel_name}"))
@@ -117,7 +122,12 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
             channels_sent.append(channel_name)
             continue
 
-        receipt = channel.send(message)
+        # WebhookChannel takes event_type as an extra arg so it can route to
+        # endpoint subscribers. Other channels ignore the kwarg.
+        if channel_name == "webhook":
+            receipt = channel.send(message, event_type=event.event_type)
+        else:
+            receipt = channel.send(message)
         receipts.append(receipt)
         if receipt.status == "ok":
             channels_sent.append(channel_name)
