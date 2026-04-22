@@ -2,6 +2,7 @@
   "scan_interval_sec": 300,
   "num_symbols": 10,
   "notify_setup_only": false,
+  "regime_mode": "hybrid",
   "signal_filters": {
     "min_score": 4,
     "require_macro_ok": false,
