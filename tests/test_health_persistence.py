@@ -146,6 +146,51 @@ def test_apply_transition_same_state_is_idempotent(tmp_db):
     assert event_count == 1  # initial transition, not a second event
 
 
+def test_apply_transition_preserves_state_since_on_same_state(tmp_db):
+    """Regression: apply_transition called with from_state != stored but
+    new_state == stored must NOT reset state_since. The CASE in ON CONFLICT
+    only advances state_since when the state actually changes.
+
+    This matters for 'how long has this symbol been in X' — the feature's
+    primary audit value.
+    """
+    import time
+    from health import apply_transition
+    import btc_api
+
+    metrics = {"trades_count_total": 50, "win_rate_20_trades": 0.5,
+                "pnl_30d": 0.0, "pnl_by_month": {},
+                "months_negative_consecutive": 0}
+
+    apply_transition("XLM", new_state="ALERT", reason="wr_below_threshold",
+                      metrics=metrics, from_state="NORMAL")
+    conn = btc_api.get_db()
+    try:
+        original_since = conn.execute(
+            "SELECT state_since FROM symbol_health WHERE symbol='XLM'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    # Tiny delay so a clobber would produce a later timestamp
+    time.sleep(0.01)
+
+    # Simulate a stale-from_state call where the stored state already matches new_state.
+    apply_transition("XLM", new_state="ALERT", reason="wr_below_threshold",
+                      metrics=metrics, from_state="NORMAL")
+
+    conn = btc_api.get_db()
+    try:
+        later_since = conn.execute(
+            "SELECT state_since FROM symbol_health WHERE symbol='XLM'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert later_since == original_since, (
+        f"state_since was clobbered: {original_since!r} → {later_since!r}")
+
+
 def test_reactivate_sets_manual_override(tmp_db):
     """reactivate_symbol flips manual_override to 1 and emits event."""
     from health import apply_transition, reactivate_symbol

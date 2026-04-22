@@ -221,13 +221,19 @@ def apply_transition(
         extra_sets = ""
         if manual_override is not None:
             extra_sets = ", manual_override = excluded.manual_override"
+        # state_since must only advance when the state actually changes. A stale
+        # from_state passed by a caller (or a concurrent write) that happens to match
+        # the stored state would otherwise silently reset "time in state".
         conn.execute(
             f"""INSERT INTO symbol_health
                 (symbol, state, state_since, last_evaluated_at, last_metrics_json, manual_override)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                   state = excluded.state,
-                  state_since = excluded.state_since,
+                  state_since = CASE
+                    WHEN symbol_health.state != excluded.state THEN excluded.state_since
+                    ELSE symbol_health.state_since
+                  END,
                   last_evaluated_at = excluded.last_evaluated_at,
                   last_metrics_json = excluded.last_metrics_json
                   {extra_sets}""",
