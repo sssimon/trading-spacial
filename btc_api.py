@@ -1986,7 +1986,7 @@ class ReactivateRequest(BaseModel):
     reason: str = "manual"
 
 
-@app.get("/health/symbols")
+@app.get("/health/symbols", dependencies=[Depends(verify_api_key)])
 def get_health_symbols():
     """List current health state per symbol."""
     con = get_db()
@@ -2004,8 +2004,11 @@ def get_health_symbols():
     return {"symbols": [dict(zip(cols, r)) for r in rows]}
 
 
-@app.get("/health/events")
-def get_health_events(symbol: Optional[str] = None, limit: int = 50):
+@app.get("/health/events", dependencies=[Depends(verify_api_key)])
+def get_health_events(
+    symbol: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=500, description="Max rows to return (capped to prevent unbounded scans)"),
+):
     """Transition history. Optionally filter by symbol."""
     con = get_db()
     try:
@@ -2031,7 +2034,7 @@ def get_health_events(symbol: Optional[str] = None, limit: int = 50):
     return {"events": [dict(zip(cols, r)) for r in rows]}
 
 
-@app.post("/health/reactivate/{symbol}")
+@app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
     """Manually reset a symbol to NORMAL with manual_override=1."""
     from health import reactivate_symbol, get_symbol_state
