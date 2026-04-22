@@ -3,8 +3,9 @@
 # ══════════════════════════════════════════════════════════════
 
 # ── Configuración sensible ────────────────────────────────────
-# Contiene bot token de Telegram y chat_id — NUNCA commitear
+# Contiene bot token de Telegram, chat_id, webhook_url — NUNCA commitear
 config.json
+config.secrets.json
 
 # ── Datos de backtesting (descargados de Binance) ────────────
 data/backtest/

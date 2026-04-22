@@ -132,7 +132,9 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
 
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
-CONFIG_FILE       = os.path.join(SCRIPT_DIR, "config.json")
+CONFIG_FILE       = os.path.join(SCRIPT_DIR, "config.json")           # legacy, secret + overrides (Simon prod)
+DEFAULTS_FILE     = os.path.join(SCRIPT_DIR, "config.defaults.json")  # committed, symbol_overrides + non-secret defaults
+SECRETS_FILE      = os.path.join(SCRIPT_DIR, "config.secrets.json")   # gitignored, telegram/webhook creds only
 DB_FILE           = os.path.join(SCRIPT_DIR, "signals.db")
 DATA_DIR          = os.path.join(SCRIPT_DIR, "data")
 LOGS_DIR          = os.path.join(SCRIPT_DIR, "logs")
@@ -159,47 +161,73 @@ logging.basicConfig(
 log = logging.getLogger("btc_api")
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursive merge: dicts merge, other types replace. Used to layer config files."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _load_json_file(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_config() -> dict:
-    defaults = {
-        "webhook_url":       "",
-        "webhook_secret":    "",
-        "notify_setup_only": False,
-        "scan_interval_sec": SCAN_INTERVAL_SEC,
-        "num_symbols":       20,
-        "telegram_chat_id":  "",   # chat_id de Telegram donde llegan las alertas
-        "telegram_bot_token": "",  # token del bot (envío directo, sin n8n)
+    """Load configuration as a layered merge.
+
+    Precedence (lowest → highest, later wins):
+      1. Hardcoded safety net (this function)
+      2. config.defaults.json (committed — symbol_overrides + tuned defaults)
+      3. config.secrets.json (gitignored — telegram/webhook creds)
+      4. config.json (legacy single-file; backward-compat for Simon prod)
+      5. TRADING_* environment variables
+    """
+    # 1. Hardcoded safety net — used if defaults file is missing. Keeps the system
+    # functional but WITHOUT symbol_overrides, which means backtests and the scanner
+    # fall back to generic ATR multipliers. This is the state the repo was in when
+    # config.json had always been gitignored — see drawer "config-json-gitignored-elephant".
+    hardcoded = {
+        "webhook_url":        "",
+        "webhook_secret":     "",
+        "notify_setup_only":  False,
+        "scan_interval_sec":  SCAN_INTERVAL_SEC,
+        "num_symbols":        10,
+        "telegram_chat_id":   "",
+        "telegram_bot_token": "",
         "signal_filters": {
-            "min_score":       0,      # score mínimo para enviar (0 = sin filtro)
-            "require_macro_ok": False, # exigir macro 4H alcista
-            "notify_setup":    False,  # enviar también setups sin gatillo
-            "dedup_window_minutes": 30, # ventana de deduplicación (minutos)
+            "min_score":            0,
+            "require_macro_ok":     False,
+            "notify_setup":         False,
+            "dedup_window_minutes": 30,
         },
         "kill_switch": {
-            "enabled": True,
-            "min_trades_for_eval": 20,
-            "alert_win_rate_threshold": 0.15,
-            "reduce_pnl_window_days": 30,
-            "reduce_size_factor": 0.5,
-            "pause_months_consecutive": 3,
-            "auto_recovery_enabled": True,
+            "enabled":                   True,
+            "min_trades_for_eval":       20,
+            "alert_win_rate_threshold":  0.15,
+            "reduce_pnl_window_days":    30,
+            "reduce_size_factor":        0.5,
+            "pause_months_consecutive":  3,
+            "auto_recovery_enabled":     True,
         },
     }
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, encoding="utf-8") as f:
-            stored = json.load(f)
-        # merge signal_filters en lugar de reemplazarlo
-        sf_defaults = defaults["signal_filters"].copy()
-        ks_defaults = defaults["kill_switch"].copy()
-        defaults.update(stored)
-        if "signal_filters" in stored:
-            sf_defaults.update(stored["signal_filters"])
-        defaults["signal_filters"] = sf_defaults
-        if "kill_switch" in stored:
-            ks_defaults.update(stored["kill_switch"])
-        defaults["kill_switch"] = ks_defaults
 
-    # ENV var overrides (for Docker/container deployments)
-    cfg = defaults
+    cfg = hardcoded
+    if os.path.exists(DEFAULTS_FILE):
+        cfg = _deep_merge(cfg, _load_json_file(DEFAULTS_FILE))
+    else:
+        log.warning("config.defaults.json missing — backtests will run without symbol_overrides")
+    if os.path.exists(SECRETS_FILE):
+        cfg = _deep_merge(cfg, _load_json_file(SECRETS_FILE))
+    if os.path.exists(CONFIG_FILE):
+        cfg = _deep_merge(cfg, _load_json_file(CONFIG_FILE))
+
     _env_map = {
         "TRADING_WEBHOOK_URL":       "webhook_url",
         "TRADING_TELEGRAM_CHAT_ID":  "telegram_chat_id",
