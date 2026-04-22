@@ -1979,6 +1979,66 @@ def tune_reject():
     return {"ok": True}
 
 
+# ── Kill switch / health endpoints (#138) ─────────────────────────────
+
+
+class ReactivateRequest(BaseModel):
+    reason: str = "manual"
+
+
+@app.get("/health/symbols")
+def get_health_symbols():
+    """List current health state per symbol."""
+    con = get_db()
+    try:
+        rows = con.execute(
+            """SELECT symbol, state, state_since, last_evaluated_at,
+                      last_metrics_json, manual_override
+               FROM symbol_health
+               ORDER BY symbol"""
+        ).fetchall()
+    finally:
+        con.close()
+    cols = ("symbol", "state", "state_since", "last_evaluated_at",
+            "last_metrics_json", "manual_override")
+    return {"symbols": [dict(zip(cols, r)) for r in rows]}
+
+
+@app.get("/health/events")
+def get_health_events(symbol: Optional[str] = None, limit: int = 50):
+    """Transition history. Optionally filter by symbol."""
+    con = get_db()
+    try:
+        if symbol:
+            rows = con.execute(
+                """SELECT id, symbol, from_state, to_state, trigger_reason,
+                          metrics_json, ts
+                   FROM symbol_health_events WHERE symbol=?
+                   ORDER BY ts DESC LIMIT ?""",
+                (symbol, limit),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """SELECT id, symbol, from_state, to_state, trigger_reason,
+                          metrics_json, ts
+                   FROM symbol_health_events ORDER BY ts DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+    finally:
+        con.close()
+    cols = ("id", "symbol", "from_state", "to_state", "trigger_reason",
+            "metrics_json", "ts")
+    return {"events": [dict(zip(cols, r)) for r in rows]}
+
+
+@app.post("/health/reactivate/{symbol}")
+def post_health_reactivate(symbol: str, body: ReactivateRequest):
+    """Manually reset a symbol to NORMAL with manual_override=1."""
+    from health import reactivate_symbol, get_symbol_state
+    reactivate_symbol(symbol.upper(), reason=body.reason)
+    return {"ok": True, "symbol": symbol.upper(), "state": get_symbol_state(symbol.upper())}
+
+
 @app.get("/health", summary="Health check for monitoring and Docker")
 def health_check():
     """Returns system health status. HTTP 200 = healthy, 503 = degraded."""
