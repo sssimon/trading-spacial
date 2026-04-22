@@ -316,8 +316,8 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
         apply_transition(symbol, new_state=new_state, reason=reason,
                          metrics=metrics, from_state=current)
         # One-shot notify on transitions into tiered states.
-        # PR 2 (#138): ALERT; PR 3 (#138): REDUCED; PR 4 will add PAUSED.
-        notify_on_states = {"ALERT", "REDUCED"}
+        # PR 2 (#138): ALERT; PR 3 (#138): REDUCED; PR 4 (#138): PAUSED.
+        notify_on_states = {"ALERT", "REDUCED", "PAUSED"}
         if new_state in notify_on_states and notify is not None and HealthEvent is not None:
             try:
                 notify(

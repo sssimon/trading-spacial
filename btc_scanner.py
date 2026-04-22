@@ -1024,6 +1024,24 @@ def scan(symbol: str = None):
         except Exception:
             pass
 
+    # Kill switch #138 PR 4: PAUSED symbols do not generate signals. Early-return
+    # with a structured report that mimics the "disabled in config" shape used below.
+    try:
+        from health import get_symbol_state
+        _health_state = get_symbol_state(symbol)
+    except Exception as e:
+        log.warning("scan: health state lookup failed for %s: %s", symbol, e)
+        _health_state = "NORMAL"
+    if _health_state == "PAUSED":
+        rep.update({
+            "estado": f"🛑 {symbol} PAUSED por kill switch (#138) — reactivar manualmente",
+            "señal_activa": False,
+            "direction": None,
+            "price": round(float(price), 2),
+            "health_state": "PAUSED",
+        })
+        return rep
+
     # ── Régimen de mercado (compuesto, cacheado por detect_regime()) ──────────
     _regime_mode = _cfg.get("regime_mode", "global")
     if _regime_mode not in ("global", "hybrid", "hybrid_momentum"):
