@@ -174,6 +174,15 @@ def load_config() -> dict:
             "notify_setup":    False,  # enviar también setups sin gatillo
             "dedup_window_minutes": 30, # ventana de deduplicación (minutos)
         },
+        "kill_switch": {
+            "enabled": True,
+            "min_trades_for_eval": 20,
+            "alert_win_rate_threshold": 0.15,
+            "reduce_pnl_window_days": 30,
+            "reduce_size_factor": 0.5,
+            "pause_months_consecutive": 3,
+            "auto_recovery_enabled": True,
+        },
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding="utf-8") as f:
@@ -893,6 +902,31 @@ def init_db():
     con.execute("""
         CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
             ON notifications_sent(sent_at DESC) WHERE read_at IS NULL
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS symbol_health (
+            symbol              TEXT PRIMARY KEY,
+            state               TEXT NOT NULL DEFAULT 'NORMAL',
+            state_since         TEXT NOT NULL,
+            last_evaluated_at   TEXT NOT NULL,
+            last_metrics_json   TEXT,
+            manual_override     INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS symbol_health_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol          TEXT NOT NULL,
+            from_state      TEXT NOT NULL,
+            to_state        TEXT NOT NULL,
+            trigger_reason  TEXT NOT NULL,
+            metrics_json    TEXT NOT NULL,
+            ts              TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_health_events_symbol
+            ON symbol_health_events(symbol, ts DESC)
     """)
     con.commit()
     con.close()
