@@ -2043,6 +2043,56 @@ def get_health_events(
     return {"events": [dict(zip(cols, r)) for r in rows]}
 
 
+# ── Notification center endpoints (#162 PR C) ────────────────────────
+@app.get("/notifications", dependencies=[Depends(verify_api_key)])
+def get_notifications(
+    unread: bool = True,
+    limit: int = Query(50, ge=1, le=200,
+                        description="Max rows returned (capped to prevent unbounded scans)"),
+):
+    """List notifications recorded by the notifier.
+
+    By default returns only unread entries; pass ?unread=false to include
+    read ones too. Sorted most-recent-first.
+    """
+    from notifier._storage import list_unread
+    if not unread:
+        # Full list (both read + unread) — use a direct query since list_unread
+        # filters on read_at IS NULL.
+        con = get_db()
+        try:
+            rows = con.execute(
+                """SELECT id, event_type, event_key, priority, payload_json,
+                          channels_sent, delivery_status, sent_at, read_at, error_log
+                   FROM notifications_sent
+                   ORDER BY sent_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        finally:
+            con.close()
+        cols = ("id", "event_type", "event_key", "priority", "payload_json",
+                "channels_sent", "delivery_status", "sent_at", "read_at", "error_log")
+        return {"notifications": [dict(zip(cols, r)) for r in rows]}
+    return {"notifications": list_unread(limit=limit)}
+
+
+@app.post("/notifications/{notif_id}/read", dependencies=[Depends(verify_api_key)])
+def post_notification_read(notif_id: int):
+    """Mark a single notification as read."""
+    from notifier._storage import mark_read
+    mark_read(notif_id)
+    return {"ok": True, "id": notif_id}
+
+
+@app.post("/notifications/read-all", dependencies=[Depends(verify_api_key)])
+def post_notifications_read_all():
+    """Mark all currently-unread notifications as read. Returns how many were updated."""
+    from notifier._storage import mark_all_read
+    n = mark_all_read()
+    return {"ok": True, "marked": n}
+
+
 @app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
     """Manually reset a symbol to NORMAL with manual_override=1."""
