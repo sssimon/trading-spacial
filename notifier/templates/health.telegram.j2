@@ -1,0 +1,6 @@
+{%- if to_state == "PAUSED" %}🛑{% elif to_state == "REDUCED" %}⚠️{% elif to_state == "ALERT" %}⚠️{% else %}ℹ️{% endif %} *Health transition*
+`{{ symbol }}` {{ from_state }} → *{{ to_state }}*
+Reason: `{{ reason }}`
+{% if metrics -%}
+Metrics: `{{ metrics|tojson|replace("`", "'") }}`
+{%- endif %}

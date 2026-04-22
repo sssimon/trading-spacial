@@ -41,6 +41,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from btc_scanner import scan, get_top_symbols
 from data import market_data as md
+from notifier import notify, SignalEvent, SystemEvent
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,6 +620,9 @@ def check_position_stops(symbol: str, price: float):
             )
 
             try:
+                # TODO (#162 PR B): migrate to notifier.notify(InfraEvent(...)) once a
+                # PositionExitEvent type exists. The pre-formatted TP/SL message has no
+                # suitable SignalEvent mapping; leaving on _send_telegram_raw for now.
                 _send_telegram_raw(msg, cfg)
             except Exception as e:
                 log.warning(f"Failed to notify {reason} for {symbol}: {e}")
@@ -872,6 +876,24 @@ def init_db():
             changes_count INTEGER DEFAULT 0
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS notifications_sent (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type      TEXT    NOT NULL,
+            event_key       TEXT    NOT NULL,
+            priority        TEXT    NOT NULL DEFAULT 'info',
+            payload_json    TEXT    NOT NULL,
+            channels_sent   TEXT    NOT NULL,
+            delivery_status TEXT    NOT NULL DEFAULT 'ok',
+            sent_at         TEXT    NOT NULL,
+            read_at         TEXT,
+            error_log       TEXT
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
+            ON notifications_sent(sent_at DESC) WHERE read_at IS NULL
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
@@ -1007,6 +1029,9 @@ def get_signals_summary() -> list:
 #  FORMATO TELEGRAM
 # ─────────────────────────────────────────────────────────────────────────────
 
+# DEPRECATED (#162): for new callers use notifier.notify(SignalEvent(...)).
+# Kept because trading_webhook.py and a few legacy paths still consume the
+# 'telegram_message' payload key emitted by scan results. Remove after those are migrated.
 def build_telegram_message(rep: dict) -> str:
     estado = rep.get("estado", "")
     symbol = rep.get("symbol", "BTCUSDT")
@@ -1083,44 +1108,34 @@ def build_telegram_message(rep: dict) -> str:
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
+# DEPRECATED (#162): for new callers use notifier.notify(SignalEvent(...)).
+# This function is now a thin shim that delegates to notifier.notify(SignalEvent(...)).
+# Kept so existing callers (scanner loop, existing tests) continue to work during the
+# transition. Once all callers patch notifier.notify instead, delete this function.
+# trading_webhook.py and legacy paths that consume 'telegram_message' payload key are
+# unaffected — they use build_telegram_message() which is unchanged.
 def push_telegram_direct(rep: dict, cfg: dict, max_retries: int = 3):
-    """Envía señal directo a Telegram con retry y backoff exponencial."""
-    token   = cfg.get("telegram_bot_token", "").strip()
-    chat_id = cfg.get("telegram_chat_id", "").strip()
-    if not token or not chat_id:
-        log.debug("Telegram directo no configurado (falta bot_token o chat_id)")
-        return False
+    """Envía señal directo a Telegram con retry y backoff exponencial.
 
-    msg = build_telegram_message(rep)
-    url = _TELEGRAM_API.format(token=token)
-
-    for attempt in range(max_retries):
-        try:
-            r = req_lib.post(url, json={
-                "chat_id":    chat_id,
-                "text":       msg,
-                "parse_mode": "Markdown",
-            }, timeout=10)
-            if r.ok:
-                log.info(f"Telegram directo OK [{rep.get('symbol')}] -> chat {chat_id}")
-                return True
-            if r.status_code == 429:  # Rate limited
-                retry_after = int(r.headers.get("Retry-After", 2 ** attempt))
-                log.warning(f"Telegram rate limited, retry in {retry_after}s")
-                time.sleep(retry_after)
-                continue
-            log.warning(f"Telegram directo fallo HTTP {r.status_code}: {r.text[:120]}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-        except Exception as e:
-            log.warning(f"Telegram directo error (attempt {attempt+1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-
-    log.error(f"Telegram: todos los intentos fallaron para [{rep.get('symbol')}]")
-    return False
+    DEPRECATED (#162): delegates to notifier.notify(SignalEvent(...)).
+    """
+    receipts = notify(
+        SignalEvent(
+            symbol=rep.get("symbol", ""),
+            score=int(rep.get("score", 0) or 0),
+            direction=rep.get("direction", "LONG"),
+            entry=float(rep.get("price") or 0.0),
+            sl=float((rep.get("sizing_1h") or {}).get("sl_precio") or 0.0),
+            tp=float((rep.get("sizing_1h") or {}).get("tp_precio") or 0.0),
+        ),
+        cfg=cfg,
+    )
+    return bool(receipts and receipts[0].status == "ok")
 
 
+# DEPRECATED (#162): for new callers use notifier.notify(SignalEvent(...)).
+# Kept because trading_webhook.py and a few legacy paths still consume the
+# 'telegram_message' payload key emitted by scan results. Remove after those are migrated.
 def _send_telegram_raw(message: str, cfg: dict):
     """Send a raw message to Telegram without building from a scan report."""
     token = cfg.get("telegram_bot_token", "").strip()
@@ -1736,13 +1751,12 @@ def test_webhook():
     chat_id = cfg.get("telegram_chat_id", "").strip()
     if token and chat_id:
         try:
-            test_msg = f"*Scanner Conectado* ✅\n`Prueba de conexión directa`\n_{ts}_"
-            r = req_lib.post(
-                _TELEGRAM_API.format(token=token),
-                json={"chat_id": chat_id, "text": test_msg, "parse_mode": "Markdown"},
-                timeout=10,
+            receipts = notify(
+                SystemEvent(kind="scanner_connected", message="Scanner online — todo OK"),
+                cfg=cfg,
             )
-            results["telegram_directo"] = {"ok": r.ok, "status_code": r.status_code}
+            ok = bool(receipts and receipts[0].status == "ok")
+            results["telegram_directo"] = {"ok": ok, "status_code": 200 if ok else 0}
         except Exception as e:
             results["telegram_directo"] = {"ok": False, "error": str(e)}
     else:

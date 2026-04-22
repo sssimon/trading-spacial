@@ -1,0 +1,3 @@
+{%- if severity == "critical" %}🚨{% elif severity == "warning" %}⚠️{% else %}ℹ️{% endif %} *Infra ({{ severity }})*
+Component: `{{ component }}`
+`{{ message|replace("`", "'") }}`
