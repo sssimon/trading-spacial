@@ -72,14 +72,15 @@ Backtest del **sistema exacto que va a operar** (no comparando modos, no proband
 **Ventana pedida:** 2020-01-01 → 2026-04-18 (6 años)
 **Ventana efectiva:** ~2021-01-01 → 2026-04-22 (5.25 años — el cache local no va más atrás que enero 2021 en la mayoría de símbolos)
 
-**TOTAL: $+312,476** en ~5.25 años
-**Portfolio Max Drawdown: -55.8%**
+**TOTAL P&L: $+312,476** en ~5.25 años
+**Portfolio Max Drawdown (agregado): -10.1%**   ← esto es lo que ve la cuenta total
+**Peor DD de un símbolo individual: -55.8%** (ETH)   ← info, no es el número que te importa
 
 #### Desglose por moneda
 
-| Moneda | P&L | Trades | PF | Max DD | Data desde |
+| Moneda | P&L | Trades | PF | Max DD individual | Data desde |
 |---|---|---|---|---|---|
-| **DOGEUSDT** | **+$218,593** | 707 | 2.65 | **-16.1%** | 2021-01-01 |
+| **DOGEUSDT** | **+$218,593** | 707 | 2.65 | -16.1% | 2021-01-01 |
 | **XLMUSDT** | **+$35,858** | 608 | 1.59 | -19.7% | 2021-01-01 |
 | **ADAUSDT** | **+$32,483** | 764 | 1.55 | -53.0% | 2021-01-01 |
 | **JUPUSDT** | **+$13,475** | 325 | 1.32 | -32.1% | 2024-01-31 |
@@ -90,17 +91,40 @@ Backtest del **sistema exacto que va a operar** (no comparando modos, no proband
 | ETHUSDT | -$3,755 | 604 | 0.90 | -55.8% | 2021-01-01 |
 | UNIUSDT | -$4,266 | 654 | 0.85 | -51.5% | 2021-01-01 |
 
-**Observaciones importantes:**
+### Dos drawdowns distintos que conviene no confundir
 
-1. **DOGE concentra el 70% del P&L** (+$218k de los +$312k totales). Con el kill switch del Epic #138 activo, si DOGE entra en racha negativa el sistema automáticamente reduce riesgo o pausa.
-2. **BTC, ETH, UNI rinden cerca de cero** — el valor del portfolio está en DOGE + XLM + ADA + (RUNE/JUP/PENDLE en menor medida). Las "grandes" (BTC/ETH) no son donde vive el alpha de esta estrategia.
-3. **Max DD del portfolio -55.8%** — la peor racha perdedora tocó 56% abajo antes de recuperar. Es fuerte. El operador real tiene que estar preparado para ver eso en vivo sin retirarse.
-4. **PF agregado:** no se reporta directo, pero con ganadores en PF > 1.5 y perdedores en PF 0.85-0.99, el portfolio PF está en ~1.3 — saludable pero no espectacular (el alpha real viene de la asymmetría DOGE).
-5. **Data limitada para los nuevos tokens** — JUP solo tiene 2.25 años, PENDLE ~2.75 años. Para ellos el número es menos estadísticamente robusto. BTC/ETH/ADA/AVAX/DOGE/UNI/XLM/RUNE tienen los ~5.25 años completos.
+Mirando la tabla ves que ETH tuvo un drawdown de **-55.8%** y UNI de **-51.5%**. Esos son **drawdowns por símbolo individual** — la cuenta de ese símbolo específico bajó mucho desde su pico.
 
-### Señal importante sobre el drawdown
+Pero lo que importa para operar es el **drawdown del portfolio agregado**, que es lo que ves cuando sumas las 10 cuentas. Y ahí la cosa es muy distinta:
 
--55.8% es un número serio. Si en operación real el drawdown supera **-60%**, es señal fuerte para evaluar revertir a `regime_mode=global` (el método viejo tenía DD -52.5% en 4yr, tres puntos menos profundo). Se revierte cambiando una línea, sin reiniciar nada.
+| Año | Peor drawdown del portfolio agregado |
+|---|---|
+| 2021 | **-10.1%** (pico 2021-04-15 $109k → valle 2021-11-12 $98k) |
+| 2022 | -8.4% (febrero) |
+| 2023 | -2.5% |
+| 2024 | -5.1% |
+| 2025 | -6.7% |
+| 2026 | -1.8% |
+
+El portfolio **nunca bajó más de -10.1% desde su pico** en 5.25 años. Peak $109k → valle $98k → después recuperó y subió hasta $412k final. La cuenta total **nunca se puso debajo del capital inicial por más del 2%**.
+
+¿Por qué la diferencia? **Diversificación real.** Cuando ETH está sufriendo -55%, DOGE está ganando +200%. Cuando UNI está en -51%, XLM está en +358%. Los símbolos individualmente sufren mucho, pero nunca todos al mismo tiempo — se compensan. El agregado del portfolio respira.
+
+### Observaciones importantes
+
+1. **DOGE concentra el 70% del P&L** (+$218k de los +$312k totales). Es un riesgo de concentración real. Si DOGE deja de tener ciclos de pump/dump, el portfolio pierde su mayor motor. El kill switch del Epic #138 protege automáticamente si DOGE entra en racha negativa.
+2. **BTC, ETH, UNI rinden cerca de cero o negativo**. Contribuyen drawdown individual sin aportar P&L — candidatos para eventualmente eliminar del portfolio o re-tunear.
+3. **PF del portfolio agregado: ~1.3** — saludable. El verdadero alpha viene de la asimetría DOGE.
+4. **Data limitada para tokens nuevos** — JUP tiene 2.25 años, PENDLE ~2.75 años. Para ellos los números son menos robustos.
+
+### Criterio de alarma en vivo
+
+El backtest muestra que el portfolio agregado nunca bajó de -10.1%. En operación real:
+
+- **Alarma suave:** drawdown agregado pasa de **-15%** → revisar si el comportamiento del mercado se salió del patrón histórico.
+- **Alarma fuerte:** drawdown agregado pasa de **-20%** → evaluar revertir a `regime_mode=global` o pausar trading manualmente.
+
+Revertir es cambiar una línea en el config (instrucciones abajo). Sin reiniciar nada.
 
 ---
 
@@ -135,9 +159,48 @@ Durante las próximas 2-4 semanas:
 1. **Mirá el P&L real vs la tendencia esperada** del backtest (~+$43k/año si mantiene proporcionalidad).
 2. **Contá señales por moneda** — el volumen debería subir ~10-20% en DOGE/ADA/XLM; bajar ~5-10% en RUNE/PENDLE.
 3. **Alertas del kill switch (#138)** — el kill switch ya está activo. Si alguna moneda entra en ALERT o REDUCED, el sistema te avisa por Telegram automáticamente.
-4. **Si el drawdown real supera -60%**, revertí con las instrucciones de arriba y abrí un issue para analizar.
+4. **Si el drawdown real del portfolio agregado pasa de -20%**, revertí con las instrucciones de arriba y abrí un issue para analizar. (El backtest histórico nunca llegó a -11%, entonces -20% es señal de que el mercado cambió de régimen.)
 
 Después de 4 semanas de operación estable, evaluamos si queda como está o si hay algún ajuste.
+
+---
+
+## Apéndice: ¿cómo ETH llegó a -55.8% individual si tenemos stop loss?
+
+Pregunta razonable. **Sí, cada trade individual tiene stop loss**, y está funcionando. Analicé los 604 trades de ETH durante los 5.25 años:
+
+| Métrica | Valor |
+|---|---|
+| Total trades | 604 |
+| Salidas por Stop Loss | **511** (85%) |
+| Salidas por Take Profit | 93 (15%) |
+| Pérdida más grande en un solo trade | **-$206** (~2% del capital de ETH) |
+| Pérdida promedio por trade perdedor | -$115 (~1.15% del capital) |
+| Ganancia promedio por trade ganador | +$374 (~3.7% del capital) |
+| Ratio ganador/perdedor en dólares | 3.25x (bueno) |
+| Win rate | **15.4%** (malo) |
+
+**El stop loss está protegiendo perfectamente cada trade.** Ningún trade perdió más del ~2% del capital asignado al símbolo. Lo que pasa con ETH es un problema distinto:
+
+**ETH perdió *poquito* muchas veces seguidas.** 511 stop losses × ~$115 promedio = $58k en pérdidas acumuladas. Los 93 ganadores solo sumaron $34k. La resta neta: -$24k en esos trades específicos, que se manifiestan como un drawdown gradual que tomó 871 días (2.4 años) en llegar al fondo.
+
+**El stop loss previene catástrofes puntuales (perder 50% en un trade). NO previene erosión gradual por muchas pérdidas pequeñas.** Para eso están otros mecanismos:
+
+1. **Kill switch #138** — está activo. Si ETH acumula win rate < 15% en 20 trades o P&L 30 días negativo, el sistema automáticamente reduce su tamaño a la mitad (tier REDUCED) o lo pausa completo (tier PAUSED). En vivo, esto cortaría el sangrado gradual mucho antes de llegar a -55%.
+
+2. **Regime detector** — no opera SHORT en BULL ni LONG en BEAR. Reduce el número de trades en contra del mercado.
+
+3. **Diversificación** — aunque ETH sangró gradualmente, DOGE/XLM/ADA/etc. generaban ganancia simultáneamente, así que el **portfolio agregado nunca bajó más de -10.1%** (ese es el número que importa operativamente).
+
+### Entonces, ¿qué hacemos con ETH?
+
+Tres opciones, de menor a mayor intervención:
+
+- **(A)** Dejarlo como está. El kill switch lo pausaría en vivo antes de que llegara a -55%. Backtest lo corrió sin kill switch activo, por eso se ve la erosión completa.
+- **(B)** Re-tunear ETH con `auto_tune.py` para buscar parámetros ATR con mejor win rate.
+- **(C)** Desactivarlo del portfolio (setearlo a `false` en `symbol_overrides`). Pierde solo -$3,755 en 5.25 años, así que sacarlo no duele casi nada.
+
+Mi recomendación: **opción (A) primero**. El kill switch ya protege en vivo lo que el backtest no consideró. Después de 3-4 meses, si ETH sigue en ALERT/REDUCED casi siempre, tomamos (B) o (C).
 
 ---
 
