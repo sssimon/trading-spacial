@@ -11,11 +11,11 @@
   },
   "kill_switch": {
     "enabled": true,
-    "min_trades_for_eval": 20,
-    "alert_win_rate_threshold": 0.15,
-    "reduce_pnl_window_days": 30,
+    "min_trades_for_eval": 10,
+    "alert_win_rate_threshold": 0.30,
+    "reduce_pnl_window_days": 14,
     "reduce_size_factor": 0.5,
-    "pause_months_consecutive": 3,
+    "pause_months_consecutive": 2,
     "auto_recovery_enabled": true
   },
   "symbol_overrides": {

@@ -76,7 +76,8 @@ def test_kill_switch_config_partial_override_preserves_defaults(tmp_path, monkey
                       "reduce_pnl_window_days", "reduce_size_factor",
                       "pause_months_consecutive", "auto_recovery_enabled"):
         assert required in ks, f"deep-merge dropped kill_switch.{required}"
-    assert ks["min_trades_for_eval"] == 20  # default preserved
+    # default preserved — value sourced from config.defaults.json (canonical)
+    assert ks["min_trades_for_eval"] == 10
 
 
 from datetime import datetime, timezone
