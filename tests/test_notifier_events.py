@@ -57,3 +57,18 @@ def test_event_to_dict_serializable():
     json.dumps(d)  # must not raise
     assert d["symbol"] == "BTCUSDT"
     assert d["event_type"] == "signal"
+
+
+def test_signal_event_health_state_default():
+    """Default health_state is 'NORMAL' so existing callers stay backward-compat."""
+    from notifier import SignalEvent
+    ev = SignalEvent(symbol="BTC", score=5, direction="LONG",
+                     entry=1.0, sl=1.0, tp=1.0)
+    assert ev.health_state == "NORMAL"
+
+
+def test_signal_event_health_state_set_to_alert():
+    from notifier import SignalEvent
+    ev = SignalEvent(symbol="BTC", score=5, direction="LONG",
+                     entry=1.0, sl=1.0, tp=1.0, health_state="ALERT")
+    assert ev.health_state == "ALERT"

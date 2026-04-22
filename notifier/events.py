@@ -41,6 +41,9 @@ class SignalEvent(_BaseEvent):
     entry: float = 0.0
     sl: float = 0.0
     tp: float = 0.0
+    # Kill-switch context (#138): "NORMAL" | "ALERT" | "REDUCED" | "PAUSED".
+    # Determines whether the template prepends a warning prefix.
+    health_state: str = "NORMAL"
 
     def __post_init__(self):
         self.event_type = "signal"

@@ -1,3 +1,6 @@
+{%- if health_state and health_state != "NORMAL" -%}
+⚠️ *{{ health_state }}* 
+{% endif -%}
 *Signal* `{{ symbol }}`
 Score: *{{ score }}* ({{ direction }})
 Entry: `{{ "%.2f"|format(entry) }}` | SL: `{{ "%.2f"|format(sl) }}` | TP: `{{ "%.2f"|format(tp) }}`

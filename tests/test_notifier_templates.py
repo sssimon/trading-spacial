@@ -80,3 +80,25 @@ def test_health_metrics_backtick_in_value_does_not_break_span():
     # metrics_line should look like: Metrics: `{"note": "watch 'DOGE' next"}`
     # i.e. exactly 2 backticks (the outer code-span delimiters)
     assert metrics_line.count("`") == 2, f"expected 2 backticks, got: {metrics_line!r}"
+
+
+def test_signal_telegram_prepends_alert_warning():
+    """ALERT symbols get a '⚠️ ALERT' prefix on the first line."""
+    from notifier._templates import render
+    from notifier import SignalEvent
+    ev = SignalEvent(symbol="BTCUSDT", score=6, direction="LONG",
+                     entry=50_000.0, sl=49_000.0, tp=55_000.0,
+                     health_state="ALERT")
+    msg = render(ev, channel="telegram")
+    assert msg.startswith("⚠️ *ALERT* "), f"unexpected prefix: {msg!r}"
+    assert "BTCUSDT" in msg
+
+
+def test_signal_telegram_no_prefix_for_normal():
+    """NORMAL symbols render identically to pre-PR — no prefix."""
+    from notifier._templates import render
+    from notifier import SignalEvent
+    ev = SignalEvent(symbol="BTCUSDT", score=6, direction="LONG",
+                     entry=50_000.0, sl=49_000.0, tp=55_000.0)
+    msg = render(ev, channel="telegram")
+    assert not msg.startswith("⚠️")
