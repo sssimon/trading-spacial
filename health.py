@@ -6,7 +6,6 @@ lands in PRs 2-4.
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -62,13 +61,15 @@ def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> d
 
     last20 = conn.execute(
         """SELECT pnl_usd FROM positions
-           WHERE symbol=? AND status='closed'
+           WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL
            ORDER BY exit_ts DESC
            LIMIT 20""",
         (symbol,),
     ).fetchall()
     if last20:
-        winners = sum(1 for (pnl,) in last20 if (pnl or 0) > 0)
+        # Explicit NULL check — avoids `(pnl or 0) > 0` silently treating
+        # breakeven (pnl=0.0) and NULL as losers via Python truthiness.
+        winners = sum(1 for (pnl,) in last20 if pnl is not None and pnl > 0)
         win_rate_20_trades = winners / len(last20)
     else:
         win_rate_20_trades = 0.0
