@@ -14,6 +14,7 @@ import SignalsTable from './components/SignalsTable';
 import ConfigPanel from './components/ConfigPanel';
 import PositionsPanel from './components/PositionsPanel';
 import TuneReportModal from './components/TuneReportModal';
+import NotificationToast from './components/NotificationToast';
 
 type FilterType = 'all' | 'signals';
 type MainTab    = 'mercado' | 'posiciones';
@@ -106,6 +107,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
+      <NotificationToast />
       <Header
         scannerRunning={scannerRunning}
         lastRefresh={lastRefresh}
