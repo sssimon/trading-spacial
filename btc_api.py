@@ -189,10 +189,14 @@ def load_config() -> dict:
             stored = json.load(f)
         # merge signal_filters en lugar de reemplazarlo
         sf_defaults = defaults["signal_filters"].copy()
+        ks_defaults = defaults["kill_switch"].copy()
         defaults.update(stored)
         if "signal_filters" in stored:
             sf_defaults.update(stored["signal_filters"])
         defaults["signal_filters"] = sf_defaults
+        if "kill_switch" in stored:
+            ks_defaults.update(stored["kill_switch"])
+        defaults["kill_switch"] = ks_defaults
 
     # ENV var overrides (for Docker/container deployments)
     cfg = defaults
@@ -280,6 +284,11 @@ def save_config(updates: dict) -> dict:
         sf = cfg.get("signal_filters", {}).copy()
         sf.update(updates.pop("signal_filters"))
         cfg["signal_filters"] = sf
+    # kill_switch se fusiona, no reemplaza (mismo patrón que signal_filters)
+    if "kill_switch" in updates:
+        ks = cfg.get("kill_switch", {}).copy()
+        ks.update(updates.pop("kill_switch"))
+        cfg["kill_switch"] = ks
     cfg.update(updates)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
