@@ -125,12 +125,11 @@ def should_recommend(current_pnl: float, proposed_pnl: float, total_trades: int,
 
 
 def load_config() -> dict:
-    """Read config.json from SCRIPT_DIR. Return {} if not found."""
-    config_path = os.path.join(SCRIPT_DIR, "config.json")
-    if not os.path.exists(config_path):
-        return {}
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Delegate to btc_api.load_config() so we pick up config.defaults.json
+    (symbol_overrides) + config.secrets.json + legacy config.json layering.
+    """
+    import btc_api
+    return btc_api.load_config()
 
 
 def get_current_params(symbol: str, config: dict) -> dict:

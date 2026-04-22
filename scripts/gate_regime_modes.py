@@ -117,13 +117,25 @@ def rank_winners(passing_contenders: dict) -> str | None:
 
 
 def run_portfolio(config_path: str, start, end, symbols, regime_mode: str, df1d_btc):
-    """Run portfolio backtest with regime_mode. Returns aggregate dict."""
+    """Run portfolio backtest with regime_mode. Returns aggregate dict.
+
+    Config loading uses btc_api.load_config() so the layered defaults +
+    secrets + legacy config.json precedence applies. The `config_path`
+    argument is kept for CLI back-compat but not used directly.
+    """
     import backtest
+    import btc_api
     from backtest import get_cached_data, simulate_strategy, calculate_metrics
 
     data_start = datetime(start.year - 1, 1, 1, tzinfo=timezone.utc)
-    cfg = json.loads(Path(config_path).read_text()) if Path(config_path).exists() else {}
+    cfg = btc_api.load_config()
     overrides = cfg.get("symbol_overrides", {})
+    if not overrides:
+        raise RuntimeError(
+            "No symbol_overrides loaded. Check config.defaults.json exists and "
+            "contains the tuned per-symbol ATR multipliers. Running the gate "
+            "without overrides produces ~40% of the documented alpha."
+        )
 
     df_fng = backtest.get_historical_fear_greed()
     df_funding = backtest.get_historical_funding_rate()

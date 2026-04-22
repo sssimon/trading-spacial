@@ -1,0 +1,32 @@
+{
+  "scan_interval_sec": 300,
+  "num_symbols": 10,
+  "notify_setup_only": false,
+  "signal_filters": {
+    "min_score": 4,
+    "require_macro_ok": false,
+    "notify_setup": false,
+    "dedup_window_minutes": 30
+  },
+  "kill_switch": {
+    "enabled": true,
+    "min_trades_for_eval": 20,
+    "alert_win_rate_threshold": 0.15,
+    "reduce_pnl_window_days": 30,
+    "reduce_size_factor": 0.5,
+    "pause_months_consecutive": 3,
+    "auto_recovery_enabled": true
+  },
+  "symbol_overrides": {
+    "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "ETHUSDT":    { "atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "ADAUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "AVAXUSDT":   { "atr_sl_mult": 1.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "DOGEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "UNIUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 1.5 },
+    "XLMUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },
+    "PENDLEUSDT": { "atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0 },
+    "JUPUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 2.5 },
+    "RUNEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 6.0, "atr_be_mult": 2.5 }
+  }
+}
