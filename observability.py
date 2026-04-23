@@ -37,19 +37,22 @@ def record_decision(
 ) -> int:
     """Insert a decision row. Returns the row id."""
     conn = _conn()
-    cur = conn.execute(
-        """INSERT INTO kill_switch_decisions
-           (ts, scan_id, symbol, engine, per_symbol_tier, portfolio_tier,
-            velocity_active, size_factor, skip, reasons_json, slider_value)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            _now_iso(), scan_id, symbol, engine, per_symbol_tier, portfolio_tier,
-            int(velocity_active), size_factor, int(skip),
-            json.dumps(reasons, default=str), slider_value,
-        ),
-    )
-    conn.commit()
-    return cur.lastrowid
+    try:
+        cur = conn.execute(
+            """INSERT INTO kill_switch_decisions
+               (ts, scan_id, symbol, engine, per_symbol_tier, portfolio_tier,
+                velocity_active, size_factor, skip, reasons_json, slider_value)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                _now_iso(), scan_id, symbol, engine, per_symbol_tier, portfolio_tier,
+                int(velocity_active), size_factor, int(skip),
+                json.dumps(reasons, default=str), slider_value,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
 
 
 def query_decisions(
@@ -60,34 +63,37 @@ def query_decisions(
 ) -> list[dict[str, Any]]:
     """Query decisions, newest first. Optional filters by symbol, engine, time."""
     conn = _conn()
-    where: list[str] = []
-    params: list[Any] = []
-    if symbol:
-        where.append("symbol = ?")
-        params.append(symbol)
-    if engine:
-        where.append("engine = ?")
-        params.append(engine)
-    if since:
-        where.append("ts >= ?")
-        params.append(since)
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    try:
+        where: list[str] = []
+        params: list[Any] = []
+        if symbol:
+            where.append("symbol = ?")
+            params.append(symbol)
+        if engine:
+            where.append("engine = ?")
+            params.append(engine)
+        if since:
+            where.append("ts >= ?")
+            params.append(since)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-    cols = ["id", "ts", "scan_id", "symbol", "engine", "per_symbol_tier",
-            "portfolio_tier", "velocity_active", "size_factor", "skip",
-            "reasons_json", "slider_value"]
-    rows = conn.execute(
-        f"""SELECT {', '.join(cols)} FROM kill_switch_decisions
-           {where_sql}
-           ORDER BY ts DESC
-           LIMIT ?""",
-        (*params, limit),
-    ).fetchall()
+        cols = ["id", "ts", "scan_id", "symbol", "engine", "per_symbol_tier",
+                "portfolio_tier", "velocity_active", "size_factor", "skip",
+                "reasons_json", "slider_value"]
+        rows = conn.execute(
+            f"""SELECT {', '.join(cols)} FROM kill_switch_decisions
+               {where_sql}
+               ORDER BY ts DESC, id DESC
+               LIMIT ?""",
+            (*params, limit),
+        ).fetchall()
 
-    result = []
-    for r in rows:
-        d = dict(zip(cols, r))
-        d["skip"] = bool(d["skip"])
-        d["velocity_active"] = bool(d["velocity_active"])
-        result.append(d)
-    return result
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["skip"] = bool(d["skip"])
+            d["velocity_active"] = bool(d["velocity_active"])
+            result.append(d)
+        return result
+    finally:
+        conn.close()

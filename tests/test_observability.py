@@ -9,8 +9,6 @@ def tmp_db(tmp_path, monkeypatch):
     import btc_api
     db_path = str(tmp_path / "signals.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-    if hasattr(btc_api, "_db_conn"):
-        delattr(btc_api, "_db_conn")
     btc_api.init_db()
     yield db_path
 
@@ -86,3 +84,22 @@ def test_query_respects_limit(tmp_db):
                         reasons={}, scan_id=None, slider_value=None, velocity_active=False)
     rows = query_decisions(limit=3)
     assert len(rows) == 3
+
+
+def test_query_filters_by_since(tmp_db):
+    from observability import record_decision, query_decisions
+    import time
+    record_decision(symbol="OLD", engine="v1", per_symbol_tier="NORMAL",
+                    portfolio_tier="NORMAL", size_factor=1.0, skip=False,
+                    reasons={}, scan_id=None, slider_value=None, velocity_active=False)
+    # Capture a cutoff between the two inserts
+    time.sleep(0.01)  # ensure different ISO timestamps
+    from datetime import datetime, timezone
+    cutoff = datetime.now(timezone.utc).isoformat()
+    time.sleep(0.01)
+    record_decision(symbol="NEW", engine="v1", per_symbol_tier="NORMAL",
+                    portfolio_tier="NORMAL", size_factor=1.0, skip=False,
+                    reasons={}, scan_id=None, slider_value=None, velocity_active=False)
+    rows = query_decisions(since=cutoff)
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "NEW"
