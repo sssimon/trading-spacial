@@ -15,9 +15,10 @@ import ConfigPanel from './components/ConfigPanel';
 import PositionsPanel from './components/PositionsPanel';
 import TuneReportModal from './components/TuneReportModal';
 import NotificationToast from './components/NotificationToast';
+import KillSwitchDashboard from './components/KillSwitchDashboard';
 
 type FilterType = 'all' | 'signals';
-type MainTab    = 'mercado' | 'posiciones';
+type MainTab    = 'mercado' | 'posiciones' | 'kill-switch';
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -160,6 +161,12 @@ const App: React.FC = () => {
           >
             Posiciones
           </button>
+          <button
+            className={`main-tab${mainTab === 'kill-switch' ? ' main-tab--active' : ''}`}
+            onClick={() => setMainTab('kill-switch')}
+          >
+            Kill Switch
+          </button>
         </div>
 
         {/* ── Mercado tab ──────────────────────────────────── */}
@@ -192,6 +199,13 @@ const App: React.FC = () => {
               onOpenFromSignal={signalForPos}
               onSignalConsumed={() => setSignalForPos(null)}
             />
+          </ErrorBoundary>
+        )}
+
+        {/* ── Kill Switch tab ─────────────────────────────────── */}
+        {mainTab === 'kill-switch' && (
+          <ErrorBoundary fallbackLabel="Error en dashboard de kill switch">
+            <KillSwitchDashboard />
           </ErrorBoundary>
         )}
       </main>
