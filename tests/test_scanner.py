@@ -1265,3 +1265,50 @@ class TestScanRegimeModeDispatch:
         rep = scanner.scan("BTCUSDT")
         assert rep is not None
         assert isinstance(rep, dict)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — scan() writes v1 decision to the observability log (#187 phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestScanWritesToDecisionLog:
+    def test_scan_records_v1_decision(self, tmp_path, monkeypatch):
+        """scan() writes a row to kill_switch_decisions with engine='v1'."""
+        import btc_api, btc_scanner, observability
+        db_path = str(tmp_path / "signals.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        if hasattr(btc_api, "_db_conn"):
+            delattr(btc_api, "_db_conn")
+        btc_api.init_db()
+
+        # Minimal DataFrame with a "close" column so scan() can read
+        # `df1h["close"].iloc[-1]` without crashing before reaching the
+        # health-state lookup + observability log write. Indicator
+        # computation downstream will blow up on a 1-row frame, but the
+        # test's try/except intentionally swallows that — we only need
+        # record_decision() to be called once.
+        tiny_df = pd.DataFrame({
+            "open": [100.0], "high": [101.0], "low": [99.0],
+            "close": [100.0], "volume": [10.0],
+            "taker_buy_base": [5.0], "taker_buy_quote": [500.0],
+        })
+        monkeypatch.setattr(btc_scanner.md, "get_klines",
+                            lambda *a, **k: tiny_df.copy())
+        # Avoid HTTP during regime detection (scan's path after PAUSED check).
+        monkeypatch.setattr(btc_scanner, "get_cached_regime",
+                            lambda: {"regime": "BULL", "score": 80.0})
+
+        try:
+            btc_scanner.scan("BTCUSDT")
+        except Exception:
+            # Scan may throw on the 1-row dataframe — fine for this test.
+            # We assert the side effect of the decision log write that
+            # happens after the health-state lookup.
+            pass
+
+        rows = observability.query_decisions(symbol="BTCUSDT")
+        assert len(rows) >= 1
+        assert rows[0]["engine"] == "v1"
+        assert rows[0]["per_symbol_tier"] in (
+            "NORMAL", "ALERT", "REDUCED", "PAUSED", "PROBATION",
+        )

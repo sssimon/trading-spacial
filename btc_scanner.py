@@ -1032,6 +1032,32 @@ def scan(symbol: str = None):
     except Exception as e:
         log.warning("scan: health state lookup failed for %s: %s", symbol, e)
         _health_state = "NORMAL"
+
+    # Observability (#187 phase 1): log the v1 decision so the dashboard
+    # can visualize + so future shadow mode can compare v2 vs v1 side-by-side.
+    # Fail-open: never break the scanner on observability errors.
+    try:
+        import observability
+        _v1_size_factor = {
+            "NORMAL": 1.0, "ALERT": 1.0, "REDUCED": 0.5,
+            "PAUSED": 0.0, "PROBATION": 0.5,
+        }.get(_health_state, 1.0)
+        _v1_skip = (_health_state == "PAUSED")
+        observability.record_decision(
+            symbol=symbol,
+            engine="v1",
+            per_symbol_tier=_health_state,
+            portfolio_tier="NORMAL",          # phase 1: hardcoded; B2 computes real aggregate
+            size_factor=_v1_size_factor,
+            skip=_v1_skip,
+            reasons={"health_state": _health_state},
+            scan_id=None,
+            slider_value=None,
+            velocity_active=False,
+        )
+    except Exception as _obs_err:
+        log.warning("observability.record_decision failed for %s: %s", symbol, _obs_err)
+
     if _health_state == "PAUSED":
         rep.update({
             "estado": f"🛑 {symbol} PAUSED por kill switch (#138) — reactivar manualmente",
