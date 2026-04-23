@@ -1705,3 +1705,76 @@ class TestSignalPerformance:
         assert by_score[0]["win_rate"] == 1.0
         assert by_score[1]["score"] == 4
         assert by_score[1]["win_rate"] == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — Kill Switch Observability Endpoints (#187 phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestKillSwitchDecisionsEndpoint:
+    @pytest.fixture(autouse=True)
+    def setup_db(self, tmp_db, monkeypatch):
+        import btc_api
+        monkeypatch.setattr(btc_api, "DB_FILE", tmp_db)
+        btc_api.init_db()
+        yield
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        import btc_api
+        return TestClient(btc_api.app)
+
+    def test_returns_empty_when_no_decisions(self, client, tmp_db):
+        """GET /kill_switch/decisions returns [] when no decisions recorded."""
+        r = client.get("/kill_switch/decisions")
+        assert r.status_code == 200
+        assert r.json()["decisions"] == []
+
+    def test_returns_recorded_decisions(self, client, tmp_db):
+        """GET /kill_switch/decisions returns what was recorded."""
+        import observability
+        observability.record_decision(
+            symbol="BTCUSDT", engine="v1", per_symbol_tier="NORMAL",
+            portfolio_tier="NORMAL", size_factor=1.0, skip=False,
+            reasons={"x": 1}, scan_id=None, slider_value=None,
+            velocity_active=False,
+        )
+        r = client.get("/kill_switch/decisions")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["decisions"]) == 1
+        assert body["decisions"][0]["symbol"] == "BTCUSDT"
+        assert body["decisions"][0]["engine"] == "v1"
+
+    def test_filters_by_symbol(self, client, tmp_db):
+        import observability
+        observability.record_decision(symbol="BTCUSDT", engine="v1",
+                                      per_symbol_tier="NORMAL", portfolio_tier="NORMAL",
+                                      size_factor=1.0, skip=False, reasons={},
+                                      scan_id=None, slider_value=None, velocity_active=False)
+        observability.record_decision(symbol="ETHUSDT", engine="v1",
+                                      per_symbol_tier="ALERT", portfolio_tier="NORMAL",
+                                      size_factor=1.0, skip=False, reasons={},
+                                      scan_id=None, slider_value=None, velocity_active=False)
+        r = client.get("/kill_switch/decisions?symbol=ETHUSDT")
+        assert r.status_code == 200
+        assert len(r.json()["decisions"]) == 1
+        assert r.json()["decisions"][0]["symbol"] == "ETHUSDT"
+
+    def test_respects_limit_query(self, client, tmp_db):
+        import observability
+        for i in range(5):
+            observability.record_decision(
+                symbol=f"S{i}", engine="v1",
+                per_symbol_tier="NORMAL", portfolio_tier="NORMAL",
+                size_factor=1.0, skip=False, reasons={},
+                scan_id=None, slider_value=None, velocity_active=False,
+            )
+        r = client.get("/kill_switch/decisions?limit=2")
+        assert r.status_code == 200
+        assert len(r.json()["decisions"]) == 2
+
+    def test_rejects_limit_over_max(self, client, tmp_db):
+        r = client.get("/kill_switch/decisions?limit=500")
+        assert r.status_code == 422  # pydantic Query validation

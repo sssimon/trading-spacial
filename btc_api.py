@@ -2148,6 +2148,25 @@ def post_notifications_read_all():
     return {"ok": True, "marked": n}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  KILL SWITCH OBSERVABILITY ENDPOINTS (#187 phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/kill_switch/decisions", dependencies=[Depends(verify_api_key)])
+def get_kill_switch_decisions(
+    symbol: Optional[str] = None,
+    engine: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Kill switch decision log (#187 phase 1). Filter by symbol/engine/since ts."""
+    import observability
+    rows = observability.query_decisions(
+        symbol=symbol, engine=engine, since=since, limit=limit,
+    )
+    return {"decisions": rows}
+
+
 @app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
     """Manually reset a symbol to NORMAL with manual_override=1."""
