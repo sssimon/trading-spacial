@@ -215,3 +215,56 @@ def test_reactivate_sets_manual_override(tmp_db):
         conn.close()
     assert row == ("NORMAL", 1)
     assert last_event[0] == "manual_override"
+
+
+def test_compute_rolling_metrics_from_trades_empty():
+    from health import compute_rolling_metrics_from_trades
+    from datetime import datetime, timezone
+    result = compute_rolling_metrics_from_trades([], now=datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert result["trades_count_total"] == 0
+    assert result["win_rate_20_trades"] is None
+    assert result["pnl_30d"] == 0.0
+    assert result["months_negative_consecutive"] == 0
+
+
+def test_compute_rolling_metrics_from_trades_basic():
+    from health import compute_rolling_metrics_from_trades
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 23, tzinfo=timezone.utc)
+    trades = [
+        {"exit_ts": "2026-04-10T12:00:00+00:00", "pnl_usd": 100.0},
+        {"exit_ts": "2026-04-15T12:00:00+00:00", "pnl_usd": -50.0},
+        {"exit_ts": "2026-04-20T12:00:00+00:00", "pnl_usd": 200.0},
+    ]
+    result = compute_rolling_metrics_from_trades(trades, now=now)
+    assert result["trades_count_total"] == 3
+    assert result["win_rate_20_trades"] == pytest.approx(2 / 3)
+    assert result["pnl_30d"] == pytest.approx(250.0)
+
+
+def test_compute_rolling_metrics_from_trades_months_consecutive():
+    from health import compute_rolling_metrics_from_trades
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 23, tzinfo=timezone.utc)
+    # 3 months all negative → months_negative_consecutive = 3
+    trades = [
+        {"exit_ts": "2026-01-15T12:00:00+00:00", "pnl_usd": -100.0},
+        {"exit_ts": "2026-02-10T12:00:00+00:00", "pnl_usd": -80.0},
+        {"exit_ts": "2026-03-05T12:00:00+00:00", "pnl_usd": -150.0},
+    ]
+    result = compute_rolling_metrics_from_trades(trades, now=now)
+    assert result["months_negative_consecutive"] == 3
+
+
+def test_compute_rolling_metrics_from_trades_win_rate_last_20():
+    from health import compute_rolling_metrics_from_trades
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 23, tzinfo=timezone.utc)
+    trades = []
+    for i in range(30):
+        ts = (now - timedelta(days=30 - i)).isoformat()
+        pnl = 100.0 if i % 5 == 0 else -20.0  # 1 win per 5 trades in last 20
+        trades.append({"exit_ts": ts, "pnl_usd": pnl})
+    result = compute_rolling_metrics_from_trades(trades, now=now)
+    # Last 20 have 4 wins / 20 = 0.20
+    assert result["win_rate_20_trades"] == pytest.approx(0.20)

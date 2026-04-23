@@ -58,60 +58,131 @@ def _months_negative_consecutive(pnl_by_month: dict[str, float], now: datetime) 
     return streak
 
 
-def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> dict[str, Any]:
-    """Compute health metrics for `symbol` from the positions table.
+def compute_rolling_metrics_from_trades(
+    closed_trades: list[dict[str, Any]],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Pure version: compute rolling metrics from a list of closed trades.
 
-    Only closed positions (`status='closed'`) are counted. `now` defaults to
-    `datetime.now(timezone.utc)` but is injectable for tests.
+    Each trade dict needs keys: `exit_ts` (ISO string), `pnl_usd` (float).
+    Extra keys are ignored.
+
+    Returns a dict with:
+      - trades_count_total (int)
+      - win_rate_20_trades (float | None) — None when no trades with exit_ts exist
+      - pnl_30d (float)
+      - pnl_by_month (dict "YYYY-MM" -> float)
+      - months_negative_consecutive (int)
+
+    Note: the DB-backed wrapper `compute_rolling_metrics` coerces None → 0.0
+    on win_rate_20_trades to preserve its historical contract.
+    """
+    if now is None:
+        now = datetime.now(tz=timezone.utc)
+
+    trades_count_total = len(closed_trades)
+
+    # Sort by exit_ts ascending for predictable slicing.
+    # Trades without exit_ts sort to the front (empty string) and get excluded
+    # from the last-20 window by the same filter the DB query applies.
+    sorted_trades = sorted(
+        closed_trades, key=lambda t: t.get("exit_ts") or ""
+    )
+
+    # Last 20 trades win rate — mirrors the DB query which restricts to
+    # rows where exit_ts IS NOT NULL.
+    trades_with_exit = [t for t in sorted_trades if t.get("exit_ts")]
+    last_20 = trades_with_exit[-20:]
+    if len(last_20) > 0:
+        # Explicit NULL/None check — avoids `(pnl or 0) > 0` silently treating
+        # breakeven (pnl=0.0) and NULL as losers via Python truthiness.
+        wins = sum(
+            1 for t in last_20
+            if t.get("pnl_usd") is not None and t["pnl_usd"] > 0
+        )
+        win_rate_20_trades: float | None = wins / len(last_20)
+    else:
+        win_rate_20_trades = None
+
+    # Last 30 days PnL
+    cutoff_30d = now - timedelta(days=30)
+    pnl_30d = 0.0
+    for t in sorted_trades:
+        exit_ts_str = t.get("exit_ts")
+        if not exit_ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(exit_ts_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        if ts >= cutoff_30d:
+            pnl_30d += float(t.get("pnl_usd") or 0)
+
+    # Monthly PnL aggregation
+    pnl_by_month: dict[str, float] = {}
+    for t in sorted_trades:
+        exit_ts_str = t.get("exit_ts")
+        if not exit_ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(exit_ts_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        key = _month_key(ts)
+        pnl_by_month[key] = pnl_by_month.get(key, 0.0) + float(t.get("pnl_usd") or 0)
+
+    months_negative_consecutive = _months_negative_consecutive(pnl_by_month, now)
+
+    return {
+        "trades_count_total": trades_count_total,
+        "win_rate_20_trades": win_rate_20_trades,
+        "pnl_30d": pnl_30d,
+        "pnl_by_month": pnl_by_month,
+        "months_negative_consecutive": months_negative_consecutive,
+    }
+
+
+def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> dict[str, Any]:
+    """DB-backed wrapper around `compute_rolling_metrics_from_trades`.
+
+    Reads closed trades for `symbol` from the `positions` table and delegates
+    to the pure function. Behavior for callers is unchanged from the pre-#186
+    implementation:
+      - `trades_count_total` counts ALL closed rows (including those with NULL
+        exit_ts), matching the original `SELECT COUNT(*)`.
+      - `win_rate_20_trades` is coerced to 0.0 when there are no trades
+        (the pure function returns None in that case).
     """
     if now is None:
         now = datetime.now(timezone.utc)
 
-    cutoff_30d = (now - timedelta(days=30)).isoformat()
-
-    total = conn.execute(
+    # Original contract: trades_count_total includes rows with NULL exit_ts.
+    total_all_closed = conn.execute(
         "SELECT COUNT(*) FROM positions WHERE symbol=? AND status='closed'",
         (symbol,),
     ).fetchone()[0]
 
-    last20 = conn.execute(
-        """SELECT pnl_usd FROM positions
-           WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL
-           ORDER BY exit_ts DESC
-           LIMIT 20""",
+    # The pure function expects trades with exit_ts (it ignores None/empty).
+    cursor = conn.execute(
+        """SELECT exit_ts, pnl_usd FROM positions
+           WHERE symbol = ? AND status = 'closed'
+             AND exit_ts IS NOT NULL""",
         (symbol,),
-    ).fetchall()
-    if last20:
-        # Explicit NULL check — avoids `(pnl or 0) > 0` silently treating
-        # breakeven (pnl=0.0) and NULL as losers via Python truthiness.
-        winners = sum(1 for (pnl,) in last20 if pnl is not None and pnl > 0)
-        win_rate_20_trades = winners / len(last20)
+    )
+    closed_trades = [
+        {"exit_ts": row[0], "pnl_usd": row[1]}
+        for row in cursor.fetchall()
+    ]
+    metrics = compute_rolling_metrics_from_trades(closed_trades, now=now)
+
+    # Overwrite with the all-closed count to preserve the legacy contract.
+    metrics["trades_count_total"] = int(total_all_closed)
+    # Preserve legacy contract: empty-case win_rate is 0.0, always a float.
+    if metrics["win_rate_20_trades"] is None:
+        metrics["win_rate_20_trades"] = 0.0
     else:
-        win_rate_20_trades = 0.0
-
-    pnl_30d_row = conn.execute(
-        """SELECT COALESCE(SUM(pnl_usd), 0) FROM positions
-           WHERE symbol=? AND status='closed' AND exit_ts >= ?""",
-        (symbol, cutoff_30d),
-    ).fetchone()
-    pnl_30d = float(pnl_30d_row[0]) if pnl_30d_row else 0.0
-
-    by_month_rows = conn.execute(
-        """SELECT substr(exit_ts, 1, 7) AS ym, SUM(pnl_usd) AS pnl
-           FROM positions
-           WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL
-           GROUP BY ym""",
-        (symbol,),
-    ).fetchall()
-    pnl_by_month = {row[0]: float(row[1] or 0.0) for row in by_month_rows}
-
-    return {
-        "trades_count_total": int(total),
-        "win_rate_20_trades": float(win_rate_20_trades),
-        "pnl_30d": pnl_30d,
-        "pnl_by_month": pnl_by_month,
-        "months_negative_consecutive": _months_negative_consecutive(pnl_by_month, now),
-    }
+        metrics["win_rate_20_trades"] = float(metrics["win_rate_20_trades"])
+    return metrics
 
 
 # ─────────────────────────────────────────────────────────────────────────────
