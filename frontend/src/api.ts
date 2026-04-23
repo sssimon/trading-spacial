@@ -21,6 +21,9 @@ import type {
   Position,
   TuneResult,
   NotificationsResponse,
+  KillSwitchDecisionsResponse,
+  KillSwitchCurrentStateResponse,
+  KillSwitchEngine,
 } from './types';
 
 const BASE_URL = '/api';
@@ -205,4 +208,33 @@ export async function markAllNotificationsRead(): Promise<{ ok: boolean; marked:
   return request<{ ok: boolean; marked: number }>(`/notifications/read-all`, {
     method: 'POST',
   });
+}
+
+// ---- Kill switch observability (#187 phase 1) ---------------------------
+
+export async function getKillSwitchDecisions(
+  opts: {
+    symbol?: string;
+    engine?: KillSwitchEngine;
+    since?: string;
+    limit?: number;
+  } = {},
+): Promise<KillSwitchDecisionsResponse> {
+  const params = new URLSearchParams();
+  if (opts.symbol) params.set('symbol', opts.symbol);
+  if (opts.engine) params.set('engine', opts.engine);
+  if (opts.since) params.set('since', opts.since);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return request<KillSwitchDecisionsResponse>(
+    `/kill_switch/decisions${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function getKillSwitchCurrentState(
+  engine: KillSwitchEngine = 'v1',
+): Promise<KillSwitchCurrentStateResponse> {
+  return request<KillSwitchCurrentStateResponse>(
+    `/kill_switch/current_state?engine=${engine}`,
+  );
 }

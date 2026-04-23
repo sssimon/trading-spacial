@@ -253,3 +253,51 @@ export interface Notification {
 export interface NotificationsResponse {
   notifications: Notification[];
 }
+
+// ─── Kill switch observability (#187 phase 1) ────────────────────────
+
+export type KillSwitchEngine = 'v1' | 'v2_shadow' | 'v2_live';
+export type KillSwitchPerSymbolTier =
+  | 'NORMAL' | 'ALERT' | 'REDUCED' | 'PAUSED' | 'PROBATION';
+export type KillSwitchPortfolioTier =
+  | 'NORMAL' | 'WARNED' | 'REDUCED' | 'FROZEN';
+
+export interface KillSwitchDecision {
+  id: number;
+  ts: string;
+  scan_id: number | null;
+  symbol: string;
+  engine: KillSwitchEngine;
+  per_symbol_tier: KillSwitchPerSymbolTier;
+  portfolio_tier: KillSwitchPortfolioTier;
+  velocity_active: boolean;
+  size_factor: number;
+  skip: boolean;
+  reasons_json: string;
+  slider_value: number | null;
+}
+
+export interface KillSwitchDecisionsResponse {
+  decisions: KillSwitchDecision[];
+}
+
+export interface KillSwitchSymbolState {
+  symbol: string;
+  per_symbol_tier: KillSwitchPerSymbolTier;
+  portfolio_tier: KillSwitchPortfolioTier;
+  size_factor: number;
+  skip: boolean;
+  velocity_active: boolean;
+  ts: string;
+  reasons_json: string;
+}
+
+export interface KillSwitchPortfolioState {
+  tier: KillSwitchPortfolioTier;
+  concurrent_failures: number;
+}
+
+export interface KillSwitchCurrentStateResponse {
+  symbols: { [symbol: string]: KillSwitchSymbolState };
+  portfolio: KillSwitchPortfolioState;
+}
