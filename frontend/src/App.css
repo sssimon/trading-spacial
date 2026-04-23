@@ -2696,3 +2696,88 @@ button:focus-visible {
   from { transform: translateX(20px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+
+/* KillSwitchDashboard (#187 phase 1) */
+.ks-dashboard {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ks-portfolio-card {
+  background: var(--bg-secondary, #1c1d25);
+  border: 1px solid var(--border, #2b2d38);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ks-portfolio-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary, #a8aab7);
+}
+
+.ks-portfolio-tier {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.ks-portfolio-meta {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #a8aab7);
+}
+
+.ks-symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.ks-symbol-card {
+  background: var(--bg-secondary, #1c1d25);
+  border: 1px solid var(--border, #2b2d38);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.ks-symbol-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ks-symbol-tier {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ks-symbol-meta {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #a8aab7);
+}
+
+.ks-symbol-ts {
+  font-size: 0.7rem;
+  color: var(--text-secondary, #a8aab7);
+  margin-top: 4px;
+}
+
+.ks-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 32px;
+  color: var(--text-secondary, #a8aab7);
+}
+
+.ks-error {
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: #ef4444;
+}
