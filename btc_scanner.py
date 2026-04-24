@@ -949,51 +949,59 @@ def scan(symbol: str = None):
     else:
         regime_data = detect_regime_for_symbol(symbol, _regime_mode)
 
-    regime = regime_data.get("regime", "BULL")
-    regime = "LONG" if regime == "BULL" else "SHORT" if regime == "BEAR" else "LONG"
+    # ── PURE DECISION KERNEL (#186 A5) ────────────────────────────────────────
+    # Delegate the indicators → direction → score → SL/TP → classification chain
+    # to strategy.core.evaluate_signal. This function is a pure mirror of the
+    # block we used to have inline; it returns a SignalDecision whose fields we
+    # map onto the legacy report shape below. Heavy I/O (data fetch, config,
+    # regime detect, observability, health-state lookup) stays in scan().
+    from strategy.core import evaluate_signal
+    from strategy.sizing import compute_size  # wired per A5 spec; not yet
+                                              # mapped onto riesgo_usd (see note below).
 
-    # ── Indicadores 1H (señal) ────────────────────────────────────────────────
-    lrc_pct, lrc_up, lrc_dn, lrc_mid = calc_lrc(df1h["close"], LRC_PERIOD, LRC_STDEV)
+    # The pure kernel consumes a `regime` dict; pass the raw detector output so
+    # evaluate_signal can read the "regime" key (BULL/BEAR/NEUTRAL).
+    decision = evaluate_signal(
+        df1h, df4h, df5, df1h,   # df1d slot: legacy scan doesn't fetch 1d,
+                                 # so pass df1h for shape-compat (unused by core).
+        symbol=symbol,
+        cfg=_cfg,
+        regime=regime_data,
+        health_state=_health_state,
+        now=datetime.now(timezone.utc),
+    )
 
-    rsi1h     = calc_rsi(df1h["close"], RSI_PERIOD)
-    cur_rsi1h = round(rsi1h.iloc[-1], 2)
+    # Legacy token: "LONG" | "SHORT" | None (distinct from the kernel's "NONE").
+    direction = None if decision.direction == "NONE" else decision.direction
 
-    bb_up1h, _, bb_dn1h = calc_bb(df1h["close"], BB_PERIOD, BB_STDEV)
+    # Pull indicators out of the decision for the report dict. These are the
+    # same values evaluate_signal just computed — no recomputation.
+    ind = decision.indicators
+    lrc_pct   = ind.get("lrc_pct")
+    lrc_up    = ind.get("lrc_upper")
+    lrc_dn    = ind.get("lrc_lower")
+    lrc_mid   = ind.get("lrc_mid")
+    cur_rsi1h = ind.get("rsi_1h")
+    bb_up1h_last = ind.get("bb_upper_1h")
+    bb_dn1h_last = ind.get("bb_lower_1h")
+    sma10_1h  = ind.get("sma10_1h")
+    sma20_1h  = ind.get("sma20_1h")
+    vol_1h    = ind.get("vol_1h")
+    vol_avg1h = ind.get("vol_avg_1h")
+    cvd_1h    = ind.get("cvd_1h")
+    cur_adx   = ind.get("adx_1h")
+    atr_val   = ind.get("atr_1h")
+    sma100_4h = ind.get("sma100_4h")
+    price_above_4h = ind.get("price_above_sma100_4h")
+    bull_div  = ind.get("bull_div_1h")
+    bear_div  = ind.get("bear_div_1h")
 
-    sma10_1h  = calc_sma(df1h["close"], 10).iloc[-1]
-    sma20_1h  = calc_sma(df1h["close"], 20).iloc[-1]
-
-    vol_avg1h = df1h["volume"].rolling(VOL_PERIOD).mean().iloc[-1]
-    vol_1h    = df1h["volume"].iloc[-1]
-
+    # Engulfings are not in the indicators dict (they're boolean conditions,
+    # not numeric indicators). Recompute here — cheap, read-only from df1h.
     bull_eng  = detect_bull_engulfing(df1h)
-    cvd_1h    = calc_cvd_delta(df1h, n=3)
-    
-    # Divergencias RSI (1H)
-    rsi_divs  = detect_rsi_divergence(df1h["close"], rsi1h, window=72)
-    bull_div  = rsi_divs["bull"]
-    bear_div  = rsi_divs["bear"]
+    bear_eng  = detect_bear_engulfing(df1h)
 
-    # ADX 1H (filtro de tendencia)
-    adx_1h    = calc_adx(df1h, 14)
-    cur_adx   = round(float(adx_1h.iloc[-1]), 2) if not pd.isna(adx_1h.iloc[-1]) else 0
-
-    # ── Indicadores 4H (macro) ────────────────────────────────────────────────
-    sma100_4h      = calc_sma(df4h["close"], 100).iloc[-1]
-    price_above_4h = bool(price > sma100_4h)
-
-    # ── Condición Primaria (1H) ───────────────────────────────────────────────
-    in_long_zone  = lrc_pct is not None and lrc_pct <= LRC_LONG_MAX
-    in_short_zone = lrc_pct is not None and lrc_pct >= LRC_SHORT_MIN
-
-    # ── Contexto macro 4H ─────────────────────────────────────────────────────
-    macro_long  = price_above_4h    # precio por encima de SMA100 en 4H
-    macro_short = not price_above_4h  # precio por debajo de SMA100 en 4H
-
-    # Bear engulfing (exclusion para SHORT)
-    bear_eng = detect_bear_engulfing(df1h)
-
-    # ── Condiciones de Exclusión (Spot V6) ────────────────────────────────────
+    # ── Condiciones de Exclusión (Spot V6) — legacy shape preserved ───────────
     excl = {
         "E1_BullEngulfing": {
             "activo": bull_eng,
@@ -1025,29 +1033,12 @@ def scan(symbol: str = None):
         },
     }
 
-    blocks_long = []
-    if bull_eng:
-        blocks_long.append("E1: BullEngulfing activo — posible micro-techo")
-    if bear_div:
-        blocks_long.append("E6: Divergencia bajista RSI (1H) — agotamiento alcista")
-
-    blocks_short = []
-    if bear_eng:
-        blocks_short.append("E1S: BearEngulfing activo — posible micro-suelo")
-    if bull_div:
-        blocks_short.append("E6S: Divergencia alcista RSI (1H) — agotamiento bajista")
-
-    # ── Determinar direccion activa (gateado por regime detector) ───────────
-    # LONG: cuando regime = BULL o NEUTRAL y precio en zona baja del canal
-    # SHORT: cuando regime = BEAR y precio en zona alta del canal
-    # Backtest full cycle 2022-2026 valido: +241% con LONG+SHORT regime-gated
-    direction = None
-    if in_long_zone and regime in ("LONG", "NEUTRAL"):
-        direction = "LONG"
-    elif in_short_zone and regime == "SHORT":
-        direction = "SHORT"
-
-    # ── Score de Confirmaciones 1H ────────────────────────────────────────────
+    # ── Score + confirmations (report-layer derivation from decision.indicators)
+    # The pure kernel exposes `decision.score` (0 when direction==NONE), but the
+    # legacy report always computed the LONG scoring block when direction was
+    # unset — callers + tests pin that shape. We reproduce it here without
+    # recomputing any indicators: the `add()` closure just reads from the
+    # already-computed `ind` dict.
     score = 0
     conf  = {}
 
@@ -1055,7 +1046,7 @@ def scan(symbol: str = None):
         nonlocal score
         pts_earned = pts if passed else 0
         score += pts_earned
-        entry = {"pass": passed, "pts": pts_earned, "max_pts": pts}
+        entry = {"pass": bool(passed), "pts": pts_earned, "max_pts": pts}
         if extra:
             entry.update(extra)
         conf[key] = entry
@@ -1068,8 +1059,8 @@ def scan(symbol: str = None):
         dist_res = abs(price - lrc_up) / price * 100 if lrc_up else 999
         add("C3_Resistencia_Cercana", 1, dist_res <= 1.5,
             {"dist_resistencia_pct": round(dist_res, 2)})
-        add("C4_BB_Superior",         1, price >= bb_up1h.iloc[-1],
-            {"bb_upper_1h": round(bb_up1h.iloc[-1], 2)})
+        add("C4_BB_Superior",         1, bb_up1h_last is not None and price >= bb_up1h_last,
+            {"bb_upper_1h": round(bb_up1h_last, 2) if bb_up1h_last is not None else None})
         add("C5_Volumen",             1, bool(vol_1h >= vol_avg1h),
             {"vol_ratio": round(vol_1h / vol_avg1h, 2)})
         add("C6_CVD_Delta_Negativo",  1, cvd_1h < 0,
@@ -1077,15 +1068,16 @@ def scan(symbol: str = None):
         add("C7_SMA10_menor_SMA20",   1, sma10_1h < sma20_1h,
             {"sma10": round(sma10_1h, 2), "sma20": round(sma20_1h, 2)})
     else:
-        # Score LONG (original)
+        # Score LONG (original — also the default when direction is None for
+        # legacy report parity).
         add("C1_RSI_Sobreventa",      2, cur_rsi1h < 40,
             {"rsi_1h": cur_rsi1h})
         add("C2_Divergencia_Alcista", 2, bull_div)
         dist_sup = abs(price - lrc_dn) / price * 100 if lrc_dn else 999
         add("C3_Soporte_Cercano",     1, dist_sup <= 1.5,
             {"dist_soporte_pct": round(dist_sup, 2)})
-        add("C4_BB_Inferior",         1, price <= bb_dn1h.iloc[-1],
-            {"bb_lower_1h": round(bb_dn1h.iloc[-1], 2)})
+        add("C4_BB_Inferior",         1, bb_dn1h_last is not None and price <= bb_dn1h_last,
+            {"bb_lower_1h": round(bb_dn1h_last, 2) if bb_dn1h_last is not None else None})
         add("C5_Volumen",             1, bool(vol_1h >= vol_avg1h),
             {"vol_ratio": round(vol_1h / vol_avg1h, 2)})
         add("C6_CVD_Delta_Positivo",  1, cvd_1h > 0,
@@ -1098,14 +1090,21 @@ def scan(symbol: str = None):
         "nota": "DXY verificar TradingView (DXY < SMA20 para LONG, > SMA20 para SHORT)",
     }
 
-    # ── Gatillo 5M ────────────────────────────────────────────────────────────
+    # ── Gatillo 5M (kept outside evaluate_signal because the report needs
+    # the detailed `trigger_details` dict, which the pure kernel does not
+    # expose — it returns only the boolean in decision.reasons). ──────────────
     if direction == "SHORT":
         trigger_active, trigger_details = check_trigger_5m_short(df5)
     else:
         trigger_active, trigger_details = check_trigger_5m(df5)
 
     # ── Sizing informativo ────────────────────────────────────────────────────
-    atr_val    = float(calc_atr(df1h, ATR_PERIOD).iloc[-1])
+    # Kept at the legacy 1% fixed formula: the existing downstream contract
+    # (tests, frontend "riesgo_usd" field, notification templates) pins this.
+    # The pure `compute_size` below layers a score-multiplier on top, which is
+    # the right model for future v2 sizing — we wire the call in (per #186 A5
+    # spec) and pass its result through the decision.reasons for observability
+    # / follow-up mapping in a separate task.
     capital    = 1000.0
     risk_usd   = capital * 0.01
     # Kill switch #138 PR 3: halve risk for REDUCED symbols.
@@ -1114,6 +1113,21 @@ def scan(symbol: str = None):
         risk_usd = apply_reduce_factor(risk_usd, symbol, _cfg)
     except Exception as e:
         log.warning("scan: reduce-factor lookup failed for %s: %s", symbol, e)
+
+    # compute_size is wired per #186 A5 but NOT mapped onto riesgo_usd to
+    # preserve the legacy report contract. Value is recorded in decision.reasons
+    # for future migration (epic #187 v2 sizing).
+    try:
+        _pure_size_usd = compute_size(
+            score=int(decision.score),
+            health_tier=_health_state,
+            capital=capital,
+            cfg=_cfg,
+        )
+        decision.reasons.setdefault("pure_size_usd", _pure_size_usd)
+    except Exception as _sz_err:
+        log.warning("scan: compute_size(score=%s, tier=%s) failed: %s",
+                    decision.score, _health_state, _sz_err)
 
     # Per-symbol ATR overrides from config (reuse _cfg loaded above)
     _sym_overrides = _cfg.get("symbol_overrides", {})
@@ -1139,6 +1153,11 @@ def scan(symbol: str = None):
     _tp_m = resolved["atr_tp_mult"]
     _be_m = resolved["atr_be_mult"]
 
+    # SL/TP: use the scan-resolved ATR multipliers (honors the legacy
+    # monkeypatchable resolve_direction_params). decision.sl_price / tp_price
+    # were computed by the pure kernel using its own resolver copy — those
+    # values agree whenever overrides aren't monkeypatched, but we recompute
+    # here to preserve the legacy branch structure under test.
     sl_dist    = atr_val * _sl_m
     tp_dist    = atr_val * _tp_m
 
@@ -1158,8 +1177,30 @@ def scan(symbol: str = None):
         qty_btc = (capital * 0.98) / price
         val_pos  = qty_btc * price
 
-    # ── Veredicto ─────────────────────────────────────────────────────────────
-    blocks = blocks_long if direction == "LONG" else blocks_short if direction == "SHORT" else []
+    # ── Veredicto (estado string + señal flag) ────────────────────────────────
+    # Reproduce the legacy branch structure:
+    #   - direction is None        → SIN SETUP
+    #   - blocks_auto present      → BLOQUEADA
+    #   - macro_4h adversa         → SETUP pero macro mala
+    #   - sin gatillo 5M           → SETUP válido, esperando gatillo
+    #   - todo OK                  → SEÑAL CONFIRMADA
+    # evaluate_signal produces a parallel estado string in decision.estado, but
+    # the legacy scan() estado format has slightly different macro phrasing —
+    # we keep the legacy template here to preserve exact-string parity.
+    blocks_long: list[str] = []
+    if bull_eng:
+        blocks_long.append("E1: BullEngulfing activo — posible micro-techo")
+    if bear_div:
+        blocks_long.append("E6: Divergencia bajista RSI (1H) — agotamiento alcista")
+    blocks_short: list[str] = []
+    if bear_eng:
+        blocks_short.append("E1S: BearEngulfing activo — posible micro-suelo")
+    if bull_div:
+        blocks_short.append("E6S: Divergencia alcista RSI (1H) — agotamiento bajista")
+
+    macro_long  = price_above_4h
+    macro_short = not price_above_4h
+    blocks   = blocks_long if direction == "LONG" else blocks_short if direction == "SHORT" else []
     macro_ok = macro_long if direction == "LONG" else macro_short if direction == "SHORT" else False
 
     if direction is None:

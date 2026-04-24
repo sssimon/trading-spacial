@@ -1312,3 +1312,150 @@ class TestScanWritesToDecisionLog:
         assert rows[0]["per_symbol_tier"] in (
             "NORMAL", "ALERT", "REDUCED", "PAUSED", "PROBATION",
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — scan() refactored to use strategy/core.evaluate_signal (#186 A5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestScanRefactorParity:
+    """Scan output shape & values must be stable across the A5 rewire.
+
+    The A5 refactor moves the decision kernel (indicators → direction → score →
+    SL/TP → classification) from btc_scanner.scan() into strategy.core.evaluate_signal.
+    This class pins the fields that downstream consumers rely on:
+      - the webhook (trading_webhook.py builds Telegram payloads from rep keys)
+      - the notifier / signal dedupe (notifier reads score, direction, estado)
+      - the frontend (symbols grid reads price, lrc_1h, score, score_label)
+      - the legacy test helpers (expect sizing_1h.atr_1h etc.)
+    Adding/removing/renaming any of these keys silently breaks production.
+    """
+
+    def _synth_dfs(self):
+        """Reuse the same mocks the older TestScan uses, for determinism."""
+        return TestScan()._make_scan_mock()
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_report_shape_is_stable(self, mock_klines, tmp_path, monkeypatch):
+        """Scan() must return a dict with ALL the keys downstream code expects.
+
+        This is a SHAPE test — the check is that every key the pre-refactor
+        report carried is still produced. If the A5 rewire drops a field by
+        accident, this test fires before production does.
+        """
+        import btc_api
+        db_path = str(tmp_path / "signals.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        if hasattr(btc_api, "_db_conn"):
+            delattr(btc_api, "_db_conn")
+        btc_api.init_db()
+
+        df1h, df4h, df5m = self._synth_dfs()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h, df1h]
+
+        rep = scanner.scan("BTCUSDT")
+
+        # Top-level keys (downstream webhook / frontend / notifier read these).
+        required_top = [
+            "symbol", "timestamp", "estado", "score", "score_label",
+            "señal_activa", "gatillo_activo", "price", "direction",
+            "lrc_1h", "sizing_1h", "confirmations", "macro_4h",
+            "rsi_1h", "adx_1h", "blocks_auto", "exclusions",
+            "gatillo_5m", "regime", "errors",
+        ]
+        for key in required_top:
+            assert key in rep, f"Missing top-level key '{key}' — breaks downstream consumers"
+
+        # Nested sub-dicts: sizing_1h shape (frontend pins these + tests do too).
+        sz = rep["sizing_1h"]
+        for key in ("capital_usd", "riesgo_usd", "atr_1h",
+                    "atr_sl_mult", "atr_tp_mult", "atr_be_mult",
+                    "sl_mode", "sl_pct", "tp_pct",
+                    "sl_precio", "tp_precio",
+                    "qty_btc", "valor_pos", "pct_capital"):
+            assert key in sz, f"Missing sizing_1h['{key}'] — pre-refactor contract"
+
+        # lrc_1h has all 4 prices.
+        for key in ("pct", "upper", "lower", "mid"):
+            assert key in rep["lrc_1h"], f"Missing lrc_1h['{key}']"
+
+        # macro_4h has the SMA100 snapshot + price_above flag.
+        for key in ("sma100", "price_above"):
+            assert key in rep["macro_4h"], f"Missing macro_4h['{key}']"
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_score_label_decorated_at_report_layer(
+        self, mock_klines, tmp_path, monkeypatch
+    ):
+        """score_label in rep is the DECORATED legacy string (stars + sizing %).
+
+        The pure kernel (strategy.core._score_label) returns the bare tier token
+        ("PREMIUM"), but scan()'s report must keep the legacy decoration
+        ("PREMIUM ⭐⭐⭐ (sizing 150%)") — downstream notifications + log
+        scrapers rely on it. This test guards against losing the decoration.
+        """
+        import btc_api
+        db_path = str(tmp_path / "signals.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        if hasattr(btc_api, "_db_conn"):
+            delattr(btc_api, "_db_conn")
+        btc_api.init_db()
+
+        df1h, df4h, df5m = self._synth_dfs()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h, df1h]
+
+        rep = scanner.scan("BTCUSDT")
+        label = rep["score_label"]
+        # Legacy decorated format: includes "⭐" for PREMIUM/ESTÁNDAR/MÍNIMA,
+        # or "INSUFICIENTE" for score==0 (no stars).
+        assert isinstance(label, str) and len(label) > 0
+        # Decoration is a superset — we don't pin the exact string because the
+        # score depends on synthesized data, but we verify the label is NOT
+        # just the bare tier token (PREMIUM/STANDARD/MINIMA/INSUFICIENTE).
+        bare_tokens = {"PREMIUM", "STANDARD", "ESTANDAR", "MINIMA", "INSUFICIENTE"}
+        if rep["score"] > 0:
+            # For nonzero score, decoration adds stars + sizing suffix.
+            assert "⭐" in label, (
+                f"score_label '{label}' missing decoration — "
+                f"the refactor likely regressed to the bare strategy.core token"
+            )
+
+    @patch("btc_scanner.md.get_klines")
+    def test_scan_direction_disabled_path_preserved(
+        self, mock_klines, tmp_path, monkeypatch
+    ):
+        """The `direction_disabled` flag path still fires when the resolver
+        returns None for the active direction.
+
+        Regression guard: the A5 rewire MUST continue to call the scanner-level
+        `resolve_direction_params` (not the pure copy in strategy.core) so that
+        monkeypatched tests and config-disabled directions still flow through
+        the same code path.
+        """
+        import btc_api
+        db_path = str(tmp_path / "signals.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        if hasattr(btc_api, "_db_conn"):
+            delattr(btc_api, "_db_conn")
+        btc_api.init_db()
+
+        df1h, df4h, df5m = self._synth_dfs()
+        mock_klines.side_effect = [df5m, df1h, df4h, df1h, df1h]
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {
+                "BTCUSDT": {"long": None},
+            }
+        }))
+        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+        # Force resolver to always signal "disabled" regardless of direction.
+        monkeypatch.setattr(
+            scanner,
+            "resolve_direction_params",
+            lambda overrides, symbol, direction: None,
+        )
+
+        rep = scanner.scan("BTCUSDT")
+        assert rep.get("direction_disabled") is True
+        assert rep.get("señal_activa") is False
