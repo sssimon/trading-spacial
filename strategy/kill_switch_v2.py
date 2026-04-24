@@ -24,6 +24,9 @@ _DEFAULT_DD_FROZEN = {"min": -0.15, "max": -0.06}
 _DEFAULT_VELOCITY_SL_COUNT = {"min": 10, "max": 3}
 _DEFAULT_VELOCITY_WINDOW_HOURS = {"min": 24, "max": 6}
 _DEFAULT_VELOCITY_COOLDOWN_HOURS = 4.0
+_DEFAULT_REGIME_BULL_BONUS = 10.0
+_DEFAULT_REGIME_BEAR_PENALTY = 10.0
+_DEFAULT_REGIME_ADJUSTMENT_ENABLED = True
 
 
 def interpolate_threshold(slider: float, t_min: float, t_max: float) -> float:
@@ -309,3 +312,47 @@ def classify_regime(regime_score: float | None) -> str:
     if regime_score < 40:
         return "BEAR"
     return "NEUTRAL"
+
+
+def apply_regime_adjustment(
+    cfg: dict[str, Any],
+    regime_score: float | None,
+) -> dict[str, Any]:
+    """Return a new cfg with kill_switch.v2.aggressiveness adjusted by regime.
+
+    BULL (score >= 60):  slider += bull_bonus (stricter thresholds).
+    BEAR (score < 40):   slider -= bear_penalty (more laxo).
+    NEUTRAL:             no change.
+    regime_score None:   no change (fail-safe).
+    Disabled by cfg:     no change.
+
+    Result clamped to [0, 100]. Does NOT mutate the input cfg.
+    Missing cfg.kill_switch.v2 block → treated as empty (defaults applied).
+    """
+    import copy
+
+    cfg_eff = copy.deepcopy(cfg) if cfg else {}
+    ks = cfg_eff.setdefault("kill_switch", {})
+    v2 = ks.setdefault("v2", {})
+
+    enabled = (
+        v2.get("advanced_overrides", {}) or {}
+    ).get("regime_adjustment_enabled", _DEFAULT_REGIME_ADJUSTMENT_ENABLED)
+    if not enabled or regime_score is None:
+        return cfg_eff
+
+    base = float(v2.get("aggressiveness", _DEFAULT_AGGRESSIVENESS))
+    adjustments = v2.get("regime_adjustments", {}) or {}
+    bull_bonus = float(adjustments.get("bull_bonus", _DEFAULT_REGIME_BULL_BONUS))
+    bear_penalty = float(adjustments.get("bear_penalty", _DEFAULT_REGIME_BEAR_PENALTY))
+
+    label = classify_regime(regime_score)
+    if label == "BULL":
+        new_slider = base + bull_bonus
+    elif label == "BEAR":
+        new_slider = base - bear_penalty
+    else:
+        new_slider = base
+
+    v2["aggressiveness"] = max(0.0, min(100.0, new_slider))
+    return cfg_eff

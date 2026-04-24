@@ -1291,3 +1291,100 @@ def test_classify_regime_neutral_between_40_and_60():
 def test_classify_regime_none_returns_unknown():
     from strategy.kill_switch_v2 import classify_regime
     assert classify_regime(None) == "UNKNOWN"
+
+
+# ── B3: apply_regime_adjustment ─────────────────────────────────────────────
+
+
+def _v2_cfg_with_slider(slider: int) -> dict:
+    return {
+        "kill_switch": {
+            "v2": {
+                "aggressiveness": slider,
+                "regime_adjustments": {
+                    "bull_bonus": 10,
+                    "bear_penalty": 10,
+                },
+                "advanced_overrides": {"regime_adjustment_enabled": True},
+            }
+        }
+    }
+
+
+def test_apply_regime_adjustment_none_score_unchanged():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, None)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 50
+
+
+def test_apply_regime_adjustment_bull_adds_bonus():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 75)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 60
+
+
+def test_apply_regime_adjustment_bear_subtracts_penalty():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 25)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 40
+
+
+def test_apply_regime_adjustment_neutral_unchanged():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 50)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 50
+
+
+def test_apply_regime_adjustment_boundary_60_is_bull():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 60)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 60
+
+
+def test_apply_regime_adjustment_boundary_40_is_neutral():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 40)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 50
+
+
+def test_apply_regime_adjustment_clamp_high():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(95)
+    cfg_eff = apply_regime_adjustment(cfg, 100)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 100
+
+
+def test_apply_regime_adjustment_clamp_low():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(5)
+    cfg_eff = apply_regime_adjustment(cfg, 0)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 0
+
+
+def test_apply_regime_adjustment_disabled_no_change():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg["kill_switch"]["v2"]["advanced_overrides"]["regime_adjustment_enabled"] = False
+    cfg_eff = apply_regime_adjustment(cfg, 75)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 50
+
+
+def test_apply_regime_adjustment_missing_regime_adjustments_uses_defaults():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = {"kill_switch": {"v2": {"aggressiveness": 50}}}
+    cfg_eff = apply_regime_adjustment(cfg, 75)
+    assert cfg_eff["kill_switch"]["v2"]["aggressiveness"] == 60
+
+
+def test_apply_regime_adjustment_does_not_mutate_input():
+    from strategy.kill_switch_v2 import apply_regime_adjustment
+    cfg = _v2_cfg_with_slider(50)
+    cfg_eff = apply_regime_adjustment(cfg, 75)
+    cfg_eff["kill_switch"]["v2"]["aggressiveness"] = 999
+    assert cfg["kill_switch"]["v2"]["aggressiveness"] == 50
