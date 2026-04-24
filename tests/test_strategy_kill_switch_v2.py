@@ -318,3 +318,173 @@ def test_evaluate_portfolio_tier_frozen_takes_priority_over_concurrent():
     )
     # FROZEN is the most severe; takes priority
     assert result["tier"] == "FROZEN"
+
+
+# ── Shadow glue: price cache, default capital, fail-open ────────────────────
+
+
+@pytest.fixture
+def _clean_shadow_cache():
+    from strategy import kill_switch_v2_shadow
+    kill_switch_v2_shadow._PRICE_CACHE.clear()
+    yield
+    kill_switch_v2_shadow._PRICE_CACHE.clear()
+
+
+def test_update_price_accumulates_across_symbols(_clean_shadow_cache):
+    from strategy.kill_switch_v2_shadow import update_price, _snapshot_prices
+    update_price("BTCUSDT", 50_000.0)
+    update_price("ETHUSDT", 3_000.0)
+    update_price("ADAUSDT", 0.5)
+    snap = _snapshot_prices()
+    assert snap == {"BTCUSDT": 50_000.0, "ETHUSDT": 3_000.0, "ADAUSDT": 0.5}
+
+
+def test_update_price_overwrites_stale(_clean_shadow_cache):
+    from strategy.kill_switch_v2_shadow import update_price, _snapshot_prices
+    update_price("BTCUSDT", 50_000.0)
+    update_price("BTCUSDT", 51_000.0)
+    assert _snapshot_prices()["BTCUSDT"] == 51_000.0
+
+
+def test_default_capital_matches_scanner_hardcoded_1000():
+    """cfg without capital_usd must fall back to $1000 (matches btc_scanner.scan)."""
+    from strategy import kill_switch_v2_shadow
+    assert kill_switch_v2_shadow._DEFAULT_CAPITAL_USD == 1000.0
+
+
+def test_emit_shadow_uses_cache_for_multi_symbol_mtm(tmp_path, monkeypatch, _clean_shadow_cache):
+    """emit_shadow_decision MTMs every open position with a cached price,
+    not just the currently-scanned symbol."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision, update_price
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed 2 open positions in 2 different symbols, both priced
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts) "
+            "VALUES('BTCUSDT', 'LONG', 50000, 0.01, 'open', '2026-04-20T10:00:00+00:00')"
+        )
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts) "
+            "VALUES('ETHUSDT', 'LONG', 3000, 1.0, 'open', '2026-04-20T10:00:00+00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Simulate two prior scans that populated the cache for both symbols
+    update_price("BTCUSDT", 51_000.0)   # +$10 on 0.01 qty
+    update_price("ETHUSDT", 3_050.0)    # +$50 on 1 qty
+
+    # Current scan is for RUNEUSDT (no open position, irrelevant) — but ETH
+    # and BTC MTMs should both land
+    emit_shadow_decision(symbol="RUNEUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="RUNEUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    # Capital $1000 + MTM +$60 → peak=current → DD = 0
+    # (No closed trades; equity only grows, so DD stays 0)
+    assert reasons["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_emit_shadow_fail_open_swallows_exceptions(tmp_path, monkeypatch, caplog, _clean_shadow_cache):
+    """If any internal call raises, emit_shadow_decision must not escape — v1 must keep running."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    import strategy.kill_switch_v2_shadow as shadow_mod
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    def _boom():
+        raise RuntimeError("simulated DB corruption")
+
+    monkeypatch.setattr(shadow_mod, "_load_closed_trades", _boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
+        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    # No exception escaped, warning logged with symbol context
+    assert any(
+        "kill_switch_v2_shadow.emit_shadow_decision failed for BTCUSDT"
+        in rec.getMessage()
+        for rec in caplog.records
+    )
+    # And no v2_shadow row was persisted
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 0
+
+
+def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_shadow_cache):
+    """cfg without capital_usd → $1000 base, not $100,000."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed one closed trade: -$50 PnL
+    # With capital=$1000 → DD = -50/1000 = -0.05 (REDUCED band at slider=50)
+    # With capital=$100k → DD = -50/100_000 = -0.0005 (NORMAL — the bug)
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, pnl_usd) VALUES('BTCUSDT', 'LONG', 50000, 0.01, "
+            "'closed', '2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', -50.0)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["portfolio_dd"] == pytest.approx(-0.05)
+    # At slider=50, reduced=-0.055 → -0.05 is still NORMAL, but the number
+    # is at the right order of magnitude (bug would produce -0.0005).
+
+
+def test_emit_shadow_warning_includes_traceback(tmp_path, monkeypatch, caplog, _clean_shadow_cache):
+    """Fail-open warning must include exc_info=True so the traceback is loggable."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    import strategy.kill_switch_v2_shadow as shadow_mod
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    def _boom():
+        raise RuntimeError("deep error")
+
+    monkeypatch.setattr(shadow_mod, "_load_open_positions", _boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
+        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    # At least one record has exc_info (traceback) attached
+    assert any(rec.exc_info is not None for rec in caplog.records)

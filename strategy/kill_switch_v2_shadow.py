@@ -13,6 +13,26 @@ from typing import Any
 
 log = logging.getLogger("kill_switch_v2_shadow")
 
+# Matches btc_scanner.scan()'s hardcoded capital (see btc_scanner.py:1121).
+# Config doesn't currently expose this; the default must match the real
+# deployed value so shadow DD is not off by ~100×.
+_DEFAULT_CAPITAL_USD = 1000.0
+
+# Price cache accumulated across scan() calls. Each scan updates its symbol's
+# price via update_price(); emit_shadow_decision MTMs every open position
+# that has a cached price. Over one full scan cycle (~10 symbols), all live
+# symbols populate.
+_PRICE_CACHE: dict[str, float] = {}
+
+
+def update_price(symbol: str, price: float) -> None:
+    """Record the latest scanned price so MTM can see every open symbol."""
+    _PRICE_CACHE[symbol] = float(price)
+
+
+def _snapshot_prices() -> dict[str, float]:
+    return dict(_PRICE_CACHE)
+
 
 def _load_closed_trades() -> list[dict[str, Any]]:
     """Load closed positions from DB for portfolio equity computation."""
@@ -60,7 +80,8 @@ def _count_concurrent_failures() -> int:
     """Count symbols whose latest v1 decision is ALERT/REDUCED/PAUSED/PROBATION."""
     import observability
     state = observability.get_current_state(engine="v1")
-    return state["portfolio"]["concurrent_failures"]
+    portfolio = state.get("portfolio") or {}
+    return int(portfolio.get("concurrent_failures", 0))
 
 
 def emit_shadow_decision(
@@ -70,21 +91,24 @@ def emit_shadow_decision(
 ) -> None:
     """Compute portfolio tier, write a v2_shadow row to the decision log.
 
-    Fail-open: any exception is caught and logged.
+    Uses the module-level price cache for MTM. Callers can pass additional
+    prices via now_price_by_symbol; they're merged in. Fail-open: any
+    exception is caught and logged with full traceback.
     """
     from strategy.kill_switch_v2 import (
         compute_portfolio_equity_curve,
         compute_portfolio_dd,
         evaluate_portfolio_tier,
-        get_portfolio_thresholds,
     )
     import observability
 
     try:
-        capital_base = float(cfg.get("capital_usd", 100_000.0))
+        capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
         closed = _load_closed_trades()
         opens = _load_open_positions()
-        prices = now_price_by_symbol or {}
+        prices = _snapshot_prices()
+        if now_price_by_symbol:
+            prices.update(now_price_by_symbol)
 
         equity_curve = compute_portfolio_equity_curve(
             closed_trades=closed,
@@ -107,9 +131,9 @@ def emit_shadow_decision(
         observability.record_decision(
             symbol=symbol,
             engine="v2_shadow",
-            per_symbol_tier="NORMAL",  # v2 per-symbol tier lands with B4 auto-cal
+            per_symbol_tier="NORMAL",
             portfolio_tier=portfolio["tier"],
-            size_factor=1.0,  # v2 sizing lands later
+            size_factor=1.0,
             skip=False,
             reasons={
                 "portfolio_dd": portfolio_dd,
@@ -122,4 +146,7 @@ def emit_shadow_decision(
             velocity_active=False,
         )
     except Exception as e:
-        log.warning("kill_switch_v2_shadow.emit_shadow_decision failed for %s: %s", symbol, e)
+        log.warning(
+            "kill_switch_v2_shadow.emit_shadow_decision failed for %s: %s",
+            symbol, e, exc_info=True,
+        )
