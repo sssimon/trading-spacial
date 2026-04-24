@@ -1306,7 +1306,9 @@ class TestScanWritesToDecisionLog:
             # happens after the health-state lookup.
             pass
 
-        rows = observability.query_decisions(symbol="BTCUSDT")
+        # B2 (#187): scan() now also writes a v2_shadow row alongside v1.
+        # Filter to the v1 engine to keep this test focused on the v1 path.
+        rows = observability.query_decisions(symbol="BTCUSDT", engine="v1")
         assert len(rows) >= 1
         assert rows[0]["engine"] == "v1"
         assert rows[0]["per_symbol_tier"] in (
@@ -1459,3 +1461,49 @@ class TestScanRefactorParity:
         rep = scanner.scan("BTCUSDT")
         assert rep.get("direction_disabled") is True
         assert rep.get("señal_activa") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — scan() emits v2_shadow portfolio tier decision (#187 B2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestScanEmitsV2ShadowDecision:
+    def test_scan_writes_v2_shadow_row(self, tmp_path, monkeypatch):
+        """scan() writes BOTH engine='v1' AND engine='v2_shadow' rows to the log."""
+        import btc_api, btc_scanner, observability
+        db_path = str(tmp_path / "signals.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        if hasattr(btc_api, "_db_conn"):
+            delattr(btc_api, "_db_conn")
+        btc_api.init_db()
+
+        # Mock market data fetch (Task 3 A6 pattern)
+        import pandas as pd
+        import numpy as np
+        def fake_klines(*a, **kw):
+            n = 250
+            idx = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
+            prices = 50_000 + np.cumsum(
+                np.random.default_rng(42).standard_normal(n) * 100
+            )
+            return pd.DataFrame({
+                "open": prices, "high": prices * 1.005, "low": prices * 0.995,
+                "close": prices, "volume": np.full(n, 1000.0),
+                "taker_buy_base": np.full(n, 500.0),
+            }, index=idx)
+
+        monkeypatch.setattr(btc_scanner.md, "get_klines", fake_klines)
+        try:
+            btc_scanner.scan("BTCUSDT")
+        except Exception:
+            pass  # let exceptions in the indicator path happen — the decision log
+                   # writes come BEFORE any possible crash
+
+        v1_rows = observability.query_decisions(symbol="BTCUSDT", engine="v1")
+        shadow_rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+        assert len(v1_rows) >= 1, "v1 row must still be logged"
+        assert len(shadow_rows) >= 1, "v2_shadow row must be logged alongside v1"
+        # The shadow row should have a valid portfolio_tier
+        assert shadow_rows[0]["portfolio_tier"] in (
+            "NORMAL", "WARNED", "REDUCED", "FROZEN",
+        )

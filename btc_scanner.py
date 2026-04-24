@@ -928,6 +928,19 @@ def scan(symbol: str = None):
     except Exception as _obs_err:
         log.warning("observability.record_decision failed for %s: %s", symbol, _obs_err)
 
+    # Shadow mode for kill switch v2 (#187 B2): compute + log portfolio tier
+    # as engine='v2_shadow' alongside the v1 row. No effect on trading.
+    try:
+        from strategy.kill_switch_v2_shadow import emit_shadow_decision
+        current_price = float(df1h["close"].iloc[-1]) if not df1h.empty else 0.0
+        emit_shadow_decision(
+            symbol=symbol,
+            cfg=_cfg if _cfg else {},
+            now_price_by_symbol={symbol: current_price},
+        )
+    except Exception as _shadow_err:
+        log.warning("kill_switch_v2_shadow emission failed for %s: %s", symbol, _shadow_err)
+
     if _health_state == "PAUSED":
         rep.update({
             "estado": f"🛑 {symbol} PAUSED por kill switch (#138) — reactivar manualmente",
