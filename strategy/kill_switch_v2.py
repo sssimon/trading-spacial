@@ -54,3 +54,57 @@ def get_portfolio_thresholds(cfg: dict[str, Any]) -> dict[str, float]:
             slider, frozen_range["min"], frozen_range["max"]
         ),
     }
+
+
+def compute_portfolio_equity_curve(
+    closed_trades: list[dict[str, Any]],
+    open_positions: list[dict[str, Any]],
+    capital_base: float,
+    now_price_by_symbol: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Compute a portfolio equity curve by applying closed trades + open MTM.
+
+    Args:
+        closed_trades: list of {"symbol", "exit_ts", "pnl_usd"} — pnl added cumulatively.
+        open_positions: list of {"symbol", "entry_price", "qty", "direction"} — MTM'd at end.
+        capital_base: starting equity.
+        now_price_by_symbol: current price per symbol, used to MTM open positions.
+
+    Returns:
+        List of {"ts": str, "equity": float} points, time-ordered.
+    """
+    # Sort closed trades by exit_ts ascending
+    sorted_closed = sorted(closed_trades, key=lambda t: t.get("exit_ts", ""))
+
+    curve: list[dict[str, Any]] = []
+
+    # Starting point
+    start_ts = sorted_closed[0].get("exit_ts") if sorted_closed else "start"
+    curve.append({"ts": start_ts, "equity": capital_base})
+
+    # Apply each closed trade
+    current_equity = capital_base
+    for trade in sorted_closed:
+        pnl = float(trade.get("pnl_usd") or 0)
+        current_equity += pnl
+        curve.append({"ts": trade.get("exit_ts", ""), "equity": current_equity})
+
+    # Add MTM point for open positions
+    mtm_total = 0.0
+    for pos in open_positions:
+        sym = pos.get("symbol")
+        if sym not in now_price_by_symbol:
+            continue
+        entry = float(pos.get("entry_price") or 0)
+        qty = float(pos.get("qty") or 0)
+        direction = pos.get("direction", "LONG")
+        current_price = now_price_by_symbol[sym]
+        if direction == "SHORT":
+            mtm_total += (entry - current_price) * qty
+        else:
+            mtm_total += (current_price - entry) * qty
+
+    if mtm_total != 0.0:
+        curve.append({"ts": "now_mtm", "equity": current_equity + mtm_total})
+
+    return curve
