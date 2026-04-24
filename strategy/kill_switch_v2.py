@@ -204,3 +204,34 @@ def evaluate_portfolio_tier(
         "reduced_threshold": thresholds["reduced_dd"],
         "frozen_threshold": thresholds["frozen_dd"],
     }
+
+
+def detect_velocity_trigger(
+    sl_timestamps: list[str],
+    now: "datetime",
+    sl_count: int,
+    window_hours: float,
+) -> bool:
+    """True if at least `sl_count` SLs fall within `window_hours` before `now`.
+
+    Malformed timestamps (not ISO-parseable) are silently skipped.
+    The window boundary is inclusive: an SL exactly `window_hours` ago counts.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if sl_count <= 0:
+        return False
+    cutoff = now - timedelta(hours=float(window_hours))
+    count = 0
+    for ts in sl_timestamps:
+        try:
+            parsed = datetime.fromisoformat(ts)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if cutoff <= parsed <= now:
+            count += 1
+            if count >= sl_count:
+                return True
+    return False

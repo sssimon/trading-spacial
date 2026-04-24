@@ -573,3 +573,73 @@ def test_get_velocity_thresholds_missing_config_uses_defaults():
     assert thr["sl_count"] == 7
     assert thr["window_hours"] == pytest.approx(15.0)
     assert thr["cooldown_hours"] == pytest.approx(4.0)
+
+
+# ── B1: detect_velocity_trigger ─────────────────────────────────────────────
+
+
+def test_detect_velocity_trigger_zero_sls_no_trigger():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    assert detect_velocity_trigger([], now, sl_count=3, window_hours=6.0) is False
+
+
+def test_detect_velocity_trigger_just_below_threshold():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    sls = [
+        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(hours=2)).isoformat(),
+    ]
+    assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is False
+
+
+def test_detect_velocity_trigger_at_threshold_fires():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    sls = [
+        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(hours=2)).isoformat(),
+        (now - timedelta(hours=3)).isoformat(),
+    ]
+    assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is True
+
+
+def test_detect_velocity_trigger_old_sls_outside_window_ignored():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    sls = [
+        (now - timedelta(hours=10)).isoformat(),
+        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(hours=2)).isoformat(),
+    ]
+    assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is False
+
+
+def test_detect_velocity_trigger_sl_at_exact_window_boundary_counts():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    sls = [
+        (now - timedelta(hours=6)).isoformat(),
+        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(hours=2)).isoformat(),
+    ]
+    assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is True
+
+
+def test_detect_velocity_trigger_handles_malformed_timestamps_gracefully():
+    from strategy.kill_switch_v2 import detect_velocity_trigger
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    sls = [
+        "not-a-timestamp",
+        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(hours=2)).isoformat(),
+        (now - timedelta(hours=3)).isoformat(),
+    ]
+    assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is True
