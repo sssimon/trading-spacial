@@ -235,3 +235,44 @@ def detect_velocity_trigger(
             if count >= sl_count:
                 return True
     return False
+
+
+def compute_velocity_state(
+    current_state: dict[str, Any],
+    triggered: bool,
+    now: "datetime",
+    cooldown_hours: float,
+) -> dict[str, Any]:
+    """Decide the new velocity state given current state + trigger outcome.
+
+    Rules:
+    - If triggered AND cooldown expired/absent → set fresh cooldown & last_trigger.
+    - If triggered AND cooldown still active → leave unchanged (avoid flapping).
+    - If not triggered → leave unchanged.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cur_until = current_state.get("velocity_cooldown_until")
+    cur_last = current_state.get("velocity_last_trigger_ts")
+
+    if not triggered:
+        return {"velocity_cooldown_until": cur_until, "velocity_last_trigger_ts": cur_last}
+
+    cooldown_active = False
+    if cur_until:
+        try:
+            parsed = datetime.fromisoformat(cur_until)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            cooldown_active = parsed > now
+        except (TypeError, ValueError):
+            cooldown_active = False
+
+    if cooldown_active:
+        return {"velocity_cooldown_until": cur_until, "velocity_last_trigger_ts": cur_last}
+
+    new_until = (now + timedelta(hours=float(cooldown_hours))).isoformat()
+    return {
+        "velocity_cooldown_until": new_until,
+        "velocity_last_trigger_ts": now.isoformat(),
+    }

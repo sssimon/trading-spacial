@@ -643,3 +643,72 @@ def test_detect_velocity_trigger_handles_malformed_timestamps_gracefully():
         (now - timedelta(hours=3)).isoformat(),
     ]
     assert detect_velocity_trigger(sls, now, sl_count=3, window_hours=6.0) is True
+
+
+# ── B1: compute_velocity_state ──────────────────────────────────────────────
+
+
+def test_compute_velocity_state_no_trigger_no_change():
+    from strategy.kill_switch_v2 import compute_velocity_state
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    current = {"velocity_cooldown_until": None, "velocity_last_trigger_ts": None}
+    new = compute_velocity_state(current, triggered=False, now=now, cooldown_hours=4.0)
+    assert new == current
+
+
+def test_compute_velocity_state_first_trigger_sets_cooldown():
+    from strategy.kill_switch_v2 import compute_velocity_state
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    current = {"velocity_cooldown_until": None, "velocity_last_trigger_ts": None}
+    new = compute_velocity_state(current, triggered=True, now=now, cooldown_hours=4.0)
+    expected_until = (now + timedelta(hours=4)).isoformat()
+    assert new["velocity_cooldown_until"] == expected_until
+    assert new["velocity_last_trigger_ts"] == now.isoformat()
+
+
+def test_compute_velocity_state_retrigger_during_active_cooldown_no_extend():
+    """While cooldown is still active, re-trigger does NOT extend it (avoid flapping)."""
+    from strategy.kill_switch_v2 import compute_velocity_state
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    active_until = (now + timedelta(hours=2)).isoformat()
+    prior_trigger = (now - timedelta(hours=2)).isoformat()
+    current = {
+        "velocity_cooldown_until": active_until,
+        "velocity_last_trigger_ts": prior_trigger,
+    }
+    new = compute_velocity_state(current, triggered=True, now=now, cooldown_hours=4.0)
+    assert new == current
+
+
+def test_compute_velocity_state_retrigger_after_cooldown_resets():
+    """After cooldown_until has passed, a new trigger sets a fresh cooldown."""
+    from strategy.kill_switch_v2 import compute_velocity_state
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    expired_until = (now - timedelta(hours=1)).isoformat()
+    prior_trigger = (now - timedelta(hours=5)).isoformat()
+    current = {
+        "velocity_cooldown_until": expired_until,
+        "velocity_last_trigger_ts": prior_trigger,
+    }
+    new = compute_velocity_state(current, triggered=True, now=now, cooldown_hours=4.0)
+    expected_until = (now + timedelta(hours=4)).isoformat()
+    assert new["velocity_cooldown_until"] == expected_until
+    assert new["velocity_last_trigger_ts"] == now.isoformat()
+
+
+def test_compute_velocity_state_handles_malformed_cooldown_as_expired():
+    """If velocity_cooldown_until is a malformed string, treat as expired."""
+    from strategy.kill_switch_v2 import compute_velocity_state
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    current = {
+        "velocity_cooldown_until": "garbage",
+        "velocity_last_trigger_ts": None,
+    }
+    new = compute_velocity_state(current, triggered=True, now=now, cooldown_hours=4.0)
+    expected_until = (now + timedelta(hours=4)).isoformat()
+    assert new["velocity_cooldown_until"] == expected_until
