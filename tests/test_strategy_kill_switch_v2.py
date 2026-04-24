@@ -1388,3 +1388,169 @@ def test_apply_regime_adjustment_does_not_mutate_input():
     cfg_eff = apply_regime_adjustment(cfg, 75)
     cfg_eff["kill_switch"]["v2"]["aggressiveness"] = 999
     assert cfg["kill_switch"]["v2"]["aggressiveness"] == 50
+
+
+# ── B3: emit_shadow_decision with regime_score ──────────────────────────────
+
+
+def test_emit_shadow_without_regime_score_backwards_compatible(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """Calling emit_shadow_decision without regime_score preserves pre-B3 behavior."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["regime"]["label"] == "UNKNOWN"
+    assert reasons["regime"]["adjustment"] == 0
+    assert reasons["regime"]["score"] is None
+
+
+def test_emit_shadow_bull_regime_applies_adjustment(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """BULL (score=75) with base=50 → effective=60; slider_value column stores effective."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+        "advanced_overrides": {"regime_adjustment_enabled": True},
+    }}}
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["regime"]["label"] == "BULL"
+    assert reasons["regime"]["score"] == 75.0
+    assert reasons["regime"]["slider_base"] == 50
+    assert reasons["regime"]["slider_effective"] == 60
+    assert reasons["regime"]["adjustment"] == 10
+    assert reasons["regime"]["enabled"] is True
+    assert rows[0]["slider_value"] == 60.0
+
+
+def test_emit_shadow_bear_regime_applies_penalty(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """BEAR (score=25) with base=50 → effective=40."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+        "advanced_overrides": {"regime_adjustment_enabled": True},
+    }}}
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=25.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["regime"]["label"] == "BEAR"
+    assert reasons["regime"]["slider_effective"] == 40
+    assert reasons["regime"]["adjustment"] == -10
+    assert rows[0]["slider_value"] == 40.0
+
+
+def test_emit_shadow_regime_disabled_records_enabled_false(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """When regime_adjustment_enabled=False, no adjustment + telemetry shows enabled=False."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+        "advanced_overrides": {"regime_adjustment_enabled": False},
+    }}}
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["regime"]["enabled"] is False
+    assert reasons["regime"]["slider_effective"] == 50
+    assert reasons["regime"]["adjustment"] == 0
+
+
+def test_emit_shadow_regime_adjustment_failure_falls_back_to_original_cfg(
+    tmp_path, monkeypatch, caplog, _clean_shadow_cache,
+):
+    """If apply_regime_adjustment raises, shadow logs warning and uses original cfg."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    import strategy.kill_switch_v2_shadow as sh
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    from strategy import kill_switch_v2
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated regime failure")
+    monkeypatch.setattr(kill_switch_v2, "apply_regime_adjustment", _boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, regime_score=75.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    assert any(
+        "B3 regime adjustment failed" in rec.getMessage() for rec in caplog.records
+    )

@@ -211,22 +211,37 @@ def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],
+    regime_score: float | None = None,
     now_price_by_symbol: dict[str, float] | None = None,
 ) -> None:
     """Compute portfolio tier, write a v2_shadow row to the decision log.
 
     Uses the module-level price cache for MTM. Callers can pass additional
-    prices via now_price_by_symbol; they're merged in. Fail-open: any
-    exception is caught and logged with full traceback.
+    prices via now_price_by_symbol; they're merged in. If regime_score is
+    provided, B3 regime-aware adjustment is applied to the slider before
+    threshold computation. Fail-open: any exception is caught and logged
+    with full traceback.
     """
     from strategy.kill_switch_v2 import (
         compute_portfolio_equity_curve,
         compute_portfolio_dd,
         evaluate_portfolio_tier,
+        classify_regime,
     )
+    from strategy import kill_switch_v2 as _ks_v2
     import observability
 
     try:
+        # B3: apply regime-aware adjustment to cfg (fail-safe: fall back to original)
+        try:
+            cfg_eff = _ks_v2.apply_regime_adjustment(cfg, regime_score)
+        except Exception as _re:
+            log.warning(
+                "B3 regime adjustment failed for %s: %s",
+                symbol, _re, exc_info=True,
+            )
+            cfg_eff = cfg
+
         capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
         closed = _load_closed_trades()
         opens = _load_open_positions()
@@ -246,15 +261,23 @@ def emit_shadow_decision(
         portfolio = evaluate_portfolio_tier(
             portfolio_dd=portfolio_dd,
             concurrent_failures=concurrent,
-            cfg=cfg,
+            cfg=cfg_eff,
         )
 
-        v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
-        slider = float(v2_cfg.get("aggressiveness", 50.0))
+        # Slider values for telemetry
+        v2_base = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+        v2_eff = (cfg_eff.get("kill_switch", {}) or {}).get("v2", {}) or {}
+        slider_base = float(v2_base.get("aggressiveness", 50.0))
+        slider_effective = float(v2_eff.get("aggressiveness", slider_base))
+        regime_enabled = bool(
+            (v2_base.get("advanced_overrides", {}) or {}).get(
+                "regime_adjustment_enabled", True
+            )
+        )
 
         # B1 velocity triggers — fail-open; defaults to False if anything raises.
         try:
-            velocity_active = _evaluate_velocity(symbol, cfg)
+            velocity_active = _evaluate_velocity(symbol, cfg_eff)
         except Exception as _ve:
             log.warning(
                 "B1 velocity eval failed for %s: %s", symbol, _ve, exc_info=True,
@@ -273,9 +296,17 @@ def emit_shadow_decision(
                 "reduced_threshold": portfolio["reduced_threshold"],
                 "frozen_threshold": portfolio["frozen_threshold"],
                 "concurrent_failures": concurrent,
+                "regime": {
+                    "score": regime_score,
+                    "label": classify_regime(regime_score),
+                    "slider_base": slider_base,
+                    "slider_effective": slider_effective,
+                    "adjustment": slider_effective - slider_base,
+                    "enabled": regime_enabled,
+                },
             },
             scan_id=None,
-            slider_value=slider,
+            slider_value=slider_effective,
             velocity_active=velocity_active,
         )
     except Exception as e:
