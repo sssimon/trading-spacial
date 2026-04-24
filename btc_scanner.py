@@ -946,8 +946,9 @@ def scan(symbol: str = None):
                     _regime_score = float(_score)
         except Exception as _rs_err:
             log.warning(
-                "kill_switch_v2_shadow: regime score lookup failed for %s: %s",
-                symbol, _rs_err,
+                "kill_switch_v2_shadow: regime score lookup failed for %s: %s "
+                "— falling back to NEUTRAL default (no regime adjustment applied)",
+                symbol, _rs_err, exc_info=True,
             )
         emit_shadow_decision(
             symbol=symbol,

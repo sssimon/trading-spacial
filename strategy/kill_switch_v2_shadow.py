@@ -233,6 +233,7 @@ def emit_shadow_decision(
 
     try:
         # B3: apply regime-aware adjustment to cfg (fail-safe: fall back to original)
+        _regime_adjustment_status = "ok"
         try:
             cfg_eff = _ks_v2.apply_regime_adjustment(cfg, regime_score)
         except Exception as _re:
@@ -240,7 +241,14 @@ def emit_shadow_decision(
                 "B3 regime adjustment failed for %s: %s",
                 symbol, _re, exc_info=True,
             )
-            cfg_eff = cfg
+            # Deepcopy on fallback for symmetry — success path returns a new dict
+            # so downstream consumers never share mutable state with the caller.
+            import copy as _copy
+            try:
+                cfg_eff = _copy.deepcopy(cfg)
+            except Exception:
+                cfg_eff = cfg if isinstance(cfg, dict) else {}
+            _regime_adjustment_status = "failed"
 
         capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
         closed = _load_closed_trades()
@@ -303,6 +311,7 @@ def emit_shadow_decision(
                     "slider_effective": slider_effective,
                     "adjustment": slider_effective - slider_base,
                     "enabled": regime_enabled,
+                    "adjustment_status": _regime_adjustment_status,
                 },
             },
             scan_id=None,
