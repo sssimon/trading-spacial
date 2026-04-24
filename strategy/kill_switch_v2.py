@@ -18,6 +18,9 @@ from typing import Any
 _DEFAULT_AGGRESSIVENESS = 50.0
 _DEFAULT_DD_REDUCED = {"min": -0.08, "max": -0.03}
 _DEFAULT_DD_FROZEN = {"min": -0.15, "max": -0.06}
+_DEFAULT_VELOCITY_SL_COUNT = {"min": 10, "max": 3}
+_DEFAULT_VELOCITY_WINDOW_HOURS = {"min": 24, "max": 6}
+_DEFAULT_VELOCITY_COOLDOWN_HOURS = 4.0
 
 
 def interpolate_threshold(slider: float, t_min: float, t_max: float) -> float:
@@ -53,6 +56,41 @@ def get_portfolio_thresholds(cfg: dict[str, Any]) -> dict[str, float]:
         "frozen_dd": interpolate_threshold(
             slider, frozen_range["min"], frozen_range["max"]
         ),
+    }
+
+
+def get_velocity_thresholds(cfg: dict[str, Any]) -> dict[str, float]:
+    """Extract slider-adjusted velocity trigger thresholds.
+
+    Returns:
+        {"sl_count": int, "window_hours": float, "cooldown_hours": float}
+
+    sl_count is rounded to nearest int (half-up); window_hours stays float for
+    granularity. cooldown_hours is a fixed value (not interpolated).
+    """
+    import math
+    v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+    slider = v2_cfg.get("aggressiveness", _DEFAULT_AGGRESSIVENESS)
+    thresholds_cfg = v2_cfg.get("thresholds", {}) or {}
+
+    sl_count_range = thresholds_cfg.get("velocity_sl_count") or _DEFAULT_VELOCITY_SL_COUNT
+    window_range = thresholds_cfg.get("velocity_window_hours") or _DEFAULT_VELOCITY_WINDOW_HOURS
+    cooldown_hours = float(
+        v2_cfg.get("velocity_cooldown_hours", _DEFAULT_VELOCITY_COOLDOWN_HOURS)
+    )
+
+    sl_count_raw = interpolate_threshold(
+        slider, sl_count_range["min"], sl_count_range["max"],
+    )
+    # Half-up rounding so slider=50 on (10→3) → 6.5 → 7 (not 6 via banker's rounding)
+    sl_count = int(math.floor(sl_count_raw + 0.5))
+
+    return {
+        "sl_count": sl_count,
+        "window_hours": float(
+            interpolate_threshold(slider, window_range["min"], window_range["max"])
+        ),
+        "cooldown_hours": cooldown_hours,
     }
 
 

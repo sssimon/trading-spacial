@@ -514,3 +514,62 @@ def test_init_db_creates_kill_switch_v2_state_table(tmp_path, monkeypatch):
     assert "velocity_cooldown_until" in cols
     assert "velocity_last_trigger_ts" in cols
     assert "updated_at" in cols
+
+
+# ── B1: get_velocity_thresholds ─────────────────────────────────────────────
+
+
+def test_get_velocity_thresholds_slider_0_laxo():
+    from strategy.kill_switch_v2 import get_velocity_thresholds
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 0,
+        "thresholds": {
+            "velocity_sl_count":     {"min": 10, "max": 3},
+            "velocity_window_hours": {"min": 24, "max": 6},
+        },
+        "velocity_cooldown_hours": 4,
+    }}}
+    thr = get_velocity_thresholds(cfg)
+    assert thr["sl_count"] == 10
+    assert thr["window_hours"] == pytest.approx(24.0)
+    assert thr["cooldown_hours"] == pytest.approx(4.0)
+
+
+def test_get_velocity_thresholds_slider_100_paranoid():
+    from strategy.kill_switch_v2 import get_velocity_thresholds
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 100,
+        "thresholds": {
+            "velocity_sl_count":     {"min": 10, "max": 3},
+            "velocity_window_hours": {"min": 24, "max": 6},
+        },
+        "velocity_cooldown_hours": 4,
+    }}}
+    thr = get_velocity_thresholds(cfg)
+    assert thr["sl_count"] == 3
+    assert thr["window_hours"] == pytest.approx(6.0)
+
+
+def test_get_velocity_thresholds_slider_50_midpoint_rounds_sl_count():
+    from strategy.kill_switch_v2 import get_velocity_thresholds
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "velocity_sl_count":     {"min": 10, "max": 3},
+            "velocity_window_hours": {"min": 24, "max": 6},
+        },
+        "velocity_cooldown_hours": 4,
+    }}}
+    thr = get_velocity_thresholds(cfg)
+    # 10 + 0.5*(3-10) = 6.5 → round to 7 (round-half-to-even or plain round; pick one)
+    assert thr["sl_count"] == 7
+    assert thr["window_hours"] == pytest.approx(15.0)
+
+
+def test_get_velocity_thresholds_missing_config_uses_defaults():
+    from strategy.kill_switch_v2 import get_velocity_thresholds
+    thr = get_velocity_thresholds({})
+    # Defaults (slider=50, sl_count range 10→3, window 24→6, cooldown=4)
+    assert thr["sl_count"] == 7
+    assert thr["window_hours"] == pytest.approx(15.0)
+    assert thr["cooldown_hours"] == pytest.approx(4.0)
