@@ -1018,6 +1018,14 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_ks_decisions_symbol_ts
             ON kill_switch_decisions(symbol, ts)
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS kill_switch_v2_state (
+            symbol                    TEXT PRIMARY KEY,
+            velocity_cooldown_until   TEXT,
+            velocity_last_trigger_ts  TEXT,
+            updated_at                TEXT NOT NULL
+        )
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")

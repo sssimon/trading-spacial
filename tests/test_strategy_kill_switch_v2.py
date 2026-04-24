@@ -488,3 +488,29 @@ def test_emit_shadow_warning_includes_traceback(tmp_path, monkeypatch, caplog, _
 
     # At least one record has exc_info (traceback) attached
     assert any(rec.exc_info is not None for rec in caplog.records)
+
+
+# ── B1: schema smoke test ───────────────────────────────────────────────────
+
+
+def test_init_db_creates_kill_switch_v2_state_table(tmp_path, monkeypatch):
+    """init_db must create kill_switch_v2_state with the expected columns."""
+    import btc_api
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(kill_switch_v2_state)"
+        ).fetchall()]
+    finally:
+        conn.close()
+
+    assert "symbol" in cols
+    assert "velocity_cooldown_until" in cols
+    assert "velocity_last_trigger_ts" in cols
+    assert "updated_at" in cols
