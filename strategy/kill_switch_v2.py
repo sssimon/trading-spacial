@@ -108,3 +108,61 @@ def compute_portfolio_equity_curve(
         curve.append({"ts": "now_mtm", "equity": current_equity + mtm_total})
 
     return curve
+
+
+def compute_portfolio_dd(equity_curve: list[dict[str, Any]]) -> float:
+    """Peak-to-current drawdown % from an equity curve.
+
+    Returns negative value if in drawdown; 0.0 otherwise.
+    """
+    if not equity_curve:
+        return 0.0
+    peak = equity_curve[0]["equity"]
+    current = peak
+    for point in equity_curve:
+        eq = float(point["equity"])
+        if eq > peak:
+            peak = eq
+        current = eq
+    if peak <= 0:
+        return 0.0
+    return (current - peak) / peak
+
+
+def evaluate_portfolio_tier(
+    portfolio_dd: float,
+    concurrent_failures: int,
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Compose portfolio tier from DD + concurrent failure count.
+
+    Tier precedence (most severe wins):
+        FROZEN > REDUCED > WARNED > NORMAL
+
+    Returns:
+        {"tier": str, "dd": float, "concurrent_failures": int,
+         "reduced_threshold": float, "frozen_threshold": float}
+    """
+    thresholds = get_portfolio_thresholds(cfg)
+    v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+    concurrent_alert_threshold = int(
+        v2_cfg.get("concurrent_alert_threshold", 3)
+    )
+
+    # FROZEN check (most severe)
+    if portfolio_dd <= thresholds["frozen_dd"]:
+        tier = "FROZEN"
+    elif portfolio_dd <= thresholds["reduced_dd"]:
+        tier = "REDUCED"
+    elif concurrent_failures >= concurrent_alert_threshold:
+        tier = "WARNED"
+    else:
+        tier = "NORMAL"
+
+    return {
+        "tier": tier,
+        "dd": portfolio_dd,
+        "concurrent_failures": concurrent_failures,
+        "reduced_threshold": thresholds["reduced_dd"],
+        "frozen_threshold": thresholds["frozen_dd"],
+    }

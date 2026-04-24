@@ -176,3 +176,145 @@ def test_compute_portfolio_equity_curve_missing_price_skips_mtm():
     # Only the start point remains (no MTM applied)
     assert len(curve) == 1
     assert curve[0]["equity"] == pytest.approx(100_000.0)
+
+
+def test_compute_portfolio_dd_from_flat_curve():
+    from strategy.kill_switch_v2 import compute_portfolio_dd
+    curve = [
+        {"ts": "a", "equity": 100_000.0},
+        {"ts": "b", "equity": 100_000.0},
+    ]
+    assert compute_portfolio_dd(curve) == pytest.approx(0.0)
+
+
+def test_compute_portfolio_dd_only_gains():
+    from strategy.kill_switch_v2 import compute_portfolio_dd
+    curve = [
+        {"ts": "a", "equity": 100_000.0},
+        {"ts": "b", "equity": 105_000.0},
+        {"ts": "c", "equity": 110_000.0},
+    ]
+    assert compute_portfolio_dd(curve) == pytest.approx(0.0)
+
+
+def test_compute_portfolio_dd_drawdown_from_peak():
+    from strategy.kill_switch_v2 import compute_portfolio_dd
+    # Peak 110k, valley 99k → DD = (99-110)/110 = -0.10
+    curve = [
+        {"ts": "a", "equity": 100_000.0},
+        {"ts": "b", "equity": 110_000.0},
+        {"ts": "c", "equity": 105_000.0},
+        {"ts": "d", "equity": 99_000.0},
+    ]
+    assert compute_portfolio_dd(curve) == pytest.approx(-0.10)
+
+
+def test_compute_portfolio_dd_current_at_peak_zero_dd():
+    from strategy.kill_switch_v2 import compute_portfolio_dd
+    # Went down then back up to peak
+    curve = [
+        {"ts": "a", "equity": 100_000.0},
+        {"ts": "b", "equity": 110_000.0},
+        {"ts": "c", "equity": 95_000.0},
+        {"ts": "d", "equity": 110_000.0},
+    ]
+    # DD is measured at LAST point vs running peak. Last == peak → 0.
+    assert compute_portfolio_dd(curve) == pytest.approx(0.0)
+
+
+def test_compute_portfolio_dd_empty_curve():
+    from strategy.kill_switch_v2 import compute_portfolio_dd
+    assert compute_portfolio_dd([]) == 0.0
+
+
+def test_evaluate_portfolio_tier_normal():
+    from strategy.kill_switch_v2 import evaluate_portfolio_tier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "portfolio_dd_reduced": {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen": {"min": -0.15, "max": -0.06},
+        },
+    }}}
+    # DD -0.01 → well above -0.055 reduced threshold → NORMAL
+    result = evaluate_portfolio_tier(
+        portfolio_dd=-0.01,
+        concurrent_failures=0,
+        cfg=cfg,
+    )
+    assert result["tier"] == "NORMAL"
+    assert result["dd"] == pytest.approx(-0.01)
+
+
+def test_evaluate_portfolio_tier_warned_by_concurrent_failures():
+    from strategy.kill_switch_v2 import evaluate_portfolio_tier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "concurrent_alert_threshold": 3,
+        "thresholds": {
+            "portfolio_dd_reduced": {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen": {"min": -0.15, "max": -0.06},
+        },
+    }}}
+    # DD safe, but 3 concurrent failures → WARNED
+    result = evaluate_portfolio_tier(
+        portfolio_dd=-0.01,
+        concurrent_failures=3,
+        cfg=cfg,
+    )
+    assert result["tier"] == "WARNED"
+
+
+def test_evaluate_portfolio_tier_reduced_by_dd():
+    from strategy.kill_switch_v2 import evaluate_portfolio_tier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "portfolio_dd_reduced": {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen": {"min": -0.15, "max": -0.06},
+        },
+    }}}
+    # DD -0.07 crosses reduced threshold -0.055 → REDUCED
+    result = evaluate_portfolio_tier(
+        portfolio_dd=-0.07,
+        concurrent_failures=0,
+        cfg=cfg,
+    )
+    assert result["tier"] == "REDUCED"
+
+
+def test_evaluate_portfolio_tier_frozen_by_dd():
+    from strategy.kill_switch_v2 import evaluate_portfolio_tier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "portfolio_dd_reduced": {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen": {"min": -0.15, "max": -0.06},
+        },
+    }}}
+    # DD -0.12 crosses frozen threshold -0.105 → FROZEN
+    result = evaluate_portfolio_tier(
+        portfolio_dd=-0.12,
+        concurrent_failures=0,
+        cfg=cfg,
+    )
+    assert result["tier"] == "FROZEN"
+
+
+def test_evaluate_portfolio_tier_frozen_takes_priority_over_concurrent():
+    from strategy.kill_switch_v2 import evaluate_portfolio_tier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "concurrent_alert_threshold": 3,
+        "thresholds": {
+            "portfolio_dd_reduced": {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen": {"min": -0.15, "max": -0.06},
+        },
+    }}}
+    result = evaluate_portfolio_tier(
+        portfolio_dd=-0.15,
+        concurrent_failures=5,  # also WARNED eligible
+        cfg=cfg,
+    )
+    # FROZEN is the most severe; takes priority
+    assert result["tier"] == "FROZEN"
