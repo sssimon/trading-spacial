@@ -1554,3 +1554,63 @@ def test_emit_shadow_regime_adjustment_failure_falls_back_to_original_cfg(
     assert any(
         "B3 regime adjustment failed" in rec.getMessage() for rec in caplog.records
     )
+
+
+# ── B3: end-to-end tier-flip via regime adjustment ──────────────────────────
+
+
+def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """
+    DD=-0.052 on $1000 capital (= -$52 PnL):
+    - slider=50 (NEUTRAL): reduced_dd = (-0.08 + -0.03)/2 = -0.055 → DD=-0.052 is NORMAL.
+    - slider=60 (BULL bonus): reduced_dd = -0.08 + 0.6*(-0.03 - -0.08) = -0.05 → REDUCED.
+    Same DB state, only regime_score differs.
+    """
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -52.0)",
+            ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "portfolio_dd_reduced":  {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen":   {"min": -0.15, "max": -0.06},
+        },
+        "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+        "advanced_overrides": {"regime_adjustment_enabled": True},
+    }}}
+
+    # First scan: NEUTRAL (score=50) → slider stays 50 → DD=-0.052 is NORMAL.
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=50.0)
+
+    # Second scan (same state): BULL (score=75) → slider=60 → reduced_dd=-0.05 → REDUCED.
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    # Rows ordered ts DESC (latest first)
+    assert len(rows) == 2
+    assert rows[0]["portfolio_tier"] == "REDUCED"  # BULL scan
+    assert rows[1]["portfolio_tier"] == "NORMAL"   # NEUTRAL scan
