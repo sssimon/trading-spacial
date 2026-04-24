@@ -934,7 +934,26 @@ def scan(symbol: str = None):
         from strategy.kill_switch_v2_shadow import emit_shadow_decision, update_price
         if not df1h.empty:
             update_price(symbol, float(df1h["close"].iloc[-1]))
-        emit_shadow_decision(symbol=symbol, cfg=_cfg if _cfg else {})
+        # B3: read the global regime cache for regime-aware adjustment.
+        # Cache is daily; this is a cheap dict lookup once warm. If cache is
+        # empty (first ever run), _regime_score stays None → NEUTRAL default.
+        _regime_score = None
+        try:
+            _cached = get_cached_regime()
+            if _cached and isinstance(_cached, dict):
+                _score = _cached.get("score")
+                if _score is not None:
+                    _regime_score = float(_score)
+        except Exception as _rs_err:
+            log.warning(
+                "kill_switch_v2_shadow: regime score lookup failed for %s: %s",
+                symbol, _rs_err,
+            )
+        emit_shadow_decision(
+            symbol=symbol,
+            cfg=_cfg if _cfg else {},
+            regime_score=_regime_score,
+        )
     except Exception as _shadow_err:
         log.warning("kill_switch_v2_shadow emission failed for %s: %s", symbol, _shadow_err)
 

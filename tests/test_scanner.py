@@ -1509,3 +1509,12 @@ class TestScanEmitsV2ShadowDecision:
         )
         # B1: velocity_active is always a bool (False when no SLs / no trigger)
         assert shadow_rows[0]["velocity_active"] is False
+        # B3: regime telemetry block exists in reasons_json
+        import json
+        reasons = json.loads(shadow_rows[0]["reasons_json"])
+        assert "regime" in reasons, "reasons.regime block must be present"
+        regime = reasons["regime"]
+        assert regime["score"] is None or (0 <= regime["score"] <= 100)
+        assert regime["label"] in ("BULL", "NEUTRAL", "BEAR", "UNKNOWN")
+        # slider_value column must equal slider_effective from reasons
+        assert shadow_rows[0]["slider_value"] == regime["slider_effective"]
