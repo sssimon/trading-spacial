@@ -245,6 +245,24 @@ def _regime_at_time(
     )
 
 
+def _ensure_tz_aware(ts) -> datetime:
+    """Return a tz-aware UTC datetime from a pandas Timestamp / datetime.
+
+    `compute_rolling_metrics_from_trades` (via `health._months_negative_consecutive`
+    and `cutoff_30d`) compares `now` to dates parsed from ISO strings — mixing
+    tz-naive and tz-aware raises. The backtest's bar_time is tz-naive (the
+    cache strips tz), so we normalize to tz-aware here.
+    """
+    if ts is None:
+        return datetime.now(timezone.utc)
+    if hasattr(ts, "tz_localize"):
+        # pandas Timestamp
+        return (ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")).to_pydatetime()
+    if getattr(ts, "tzinfo", None) is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
 def _close_position(position: dict, exit_price: float, exit_time, exit_reason: str,
                     capital: float) -> dict:
     """Compute P&L + trade dict for closing `position` at exit_price.
@@ -296,13 +314,30 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       df1d_btc: pd.DataFrame = None,     # NEW (#152)
                       apply_kill_switch: bool = False,   # NEW (#138 PR 3)
                       kill_switch_cfg: dict | None = None,  # NEW (#138 PR 3)
+                      shared_simulator=None,             # NEW (#186 A6)
+                      cfg: dict | None = None,           # NEW (#186 A6)
                       ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy.
 
     Kill switch (#138): disabled by default to preserve backtest reproducibility.
     Pass apply_kill_switch=True + kill_switch_cfg to simulate production behavior
     where REDUCED symbols use size_mult × reduce_size_factor.
+
+    #186 A6 — when apply_kill_switch=True, prefer `shared_simulator` (a
+    `KillSwitchSimulator` instance) for in-memory tier tracking that updates
+    bar-by-bar from the trades generated in THIS run. If no simulator is
+    passed, one is created internally. Falls back to `health.apply_reduce_factor`
+    (DB-backed, static during a backtest) only when `shared_simulator is None`
+    AND caller explicitly passes `kill_switch_cfg` without opting into the
+    simulator — legacy path preserved for callers that rely on it.
+
+    `cfg` is the merged config dict (`btc_api.load_config()` shape); used for
+    the KillSwitchSimulator bootstrap when `shared_simulator` is not supplied.
     """
+    # #186 A6: lazy imports keep backtest.py importable even when `strategy/`
+    # or `backtest_kill_switch` has its own transient import issues.
+    from backtest_kill_switch import KillSwitchSimulator
+
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
@@ -313,6 +348,31 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     _sl_m = atr_sl_mult if atr_sl_mult is not None else ATR_SL_MULT
     _tp_m = atr_tp_mult if atr_tp_mult is not None else ATR_TP_MULT
     _be_m = atr_be_mult if atr_be_mult is not None else ATR_BE_MULT
+
+    # ─────────────────────────────────────────────────────────────────────
+    # #186 A6 — KillSwitchSimulator wiring.
+    #
+    # When apply_kill_switch=True:
+    #   - If shared_simulator is passed, use it (lets caller share state across
+    #     multiple simulate_strategy calls — e.g., a portfolio-level driver).
+    #   - Else, auto-construct one. This replaces the static DB lookup
+    #     `health.apply_reduce_factor` used for tier detection below.
+    #
+    # When apply_kill_switch=False: no simulator is active; behavior is
+    # byte-identical to the pre-A6 version.
+    # ─────────────────────────────────────────────────────────────────────
+    _simulator: "KillSwitchSimulator | None" = None
+    if apply_kill_switch:
+        if shared_simulator is not None:
+            _simulator = shared_simulator
+        else:
+            _ks_cfg_payload: dict = {}
+            if cfg is not None:
+                _ks_cfg_payload = cfg
+            elif kill_switch_cfg is not None:
+                # kill_switch_cfg is the INNER dict; wrap for KillSwitchSimulator
+                _ks_cfg_payload = {"kill_switch": kill_switch_cfg}
+            _simulator = KillSwitchSimulator(_ks_cfg_payload)
 
     # Need at least LRC_PERIOD bars of warmup
     warmup = max(LRC_PERIOD, 100) + 10
@@ -373,6 +433,25 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 capital += trade["pnl_usd"]
                 position = None
                 last_exit_time = bar_time
+                # #186 A6: feed the simulator so tier can evolve mid-backtest.
+                # Safe: _simulator is only non-None when apply_kill_switch=True.
+                if _simulator is not None:
+                    try:
+                        # Always produce a tz-aware ISO string — health.py's pure
+                        # metrics function compares parsed timestamps to a tz-aware
+                        # `now`, and mixing naive/aware raises TypeError inside the
+                        # loop (the except guards only ValueError/AttributeError).
+                        _bt_aware = _ensure_tz_aware(bar_time)
+                        _simulator.on_trade_close(
+                            symbol, _bt_aware.isoformat(),
+                            float(trade["pnl_usd"]),
+                            _bt_aware,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "simulate_strategy: simulator.on_trade_close failed for "
+                            "%s @ %s: %s", symbol, bar_time, e,
+                        )
 
         # Record equity
         equity_curve.append({"time": bar_time, "equity": capital})
@@ -499,13 +578,29 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         # Kill switch #138 PR 3: optionally halve size for REDUCED symbols.
         # Gated behind apply_kill_switch flag — defaults off in backtests
         # to preserve reproducibility; enable when simulating production.
-        if apply_kill_switch and kill_switch_cfg is not None:
+        #
+        # #186 A6: the in-memory `_simulator` replaces the DB-backed
+        # `health.apply_reduce_factor` used in PR 3. The simulator's tier
+        # evolves as the backtest generates trades, giving faithful
+        # kill-switch behavior instead of reading the static prod DB.
+        if apply_kill_switch and _simulator is not None:
             try:
-                from health import apply_reduce_factor
-                size_mult = apply_reduce_factor(size_mult, symbol,
-                                                {"kill_switch": kill_switch_cfg})
-            except Exception:
-                pass  # fail-open; trading decision proceeds at full size
+                tier = _simulator.get_tier(symbol)
+                if tier == "PAUSED":
+                    continue  # skip opening; matches compute_size → 0 semantics
+                if tier in ("REDUCED", "PROBATION"):
+                    ks_block = (
+                        (cfg or {}).get("kill_switch", {})
+                        if cfg is not None
+                        else (kill_switch_cfg or {})
+                    )
+                    factor = float(ks_block.get("reduce_size_factor", 0.5))
+                    size_mult *= factor
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "simulate_strategy: simulator.get_tier failed for %s: %s",
+                    symbol, e,
+                )
 
         # ── Open position ─────────────────────────────────────────────────
         if sl_mode == "atr":
