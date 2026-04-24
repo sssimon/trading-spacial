@@ -292,3 +292,20 @@ def compute_velocity_state(
         "velocity_cooldown_until": new_until,
         "velocity_last_trigger_ts": now.isoformat(),
     }
+
+
+def classify_regime(regime_score: float | None) -> str:
+    """Classify a regime score into a textual label.
+
+    >= 60 → BULL
+    40 <= score < 60 → NEUTRAL
+    < 40 → BEAR
+    None → UNKNOWN (fail-safe default)
+    """
+    if regime_score is None:
+        return "UNKNOWN"
+    if regime_score >= 60:
+        return "BULL"
+    if regime_score < 40:
+        return "BEAR"
+    return "NEUTRAL"

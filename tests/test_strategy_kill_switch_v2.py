@@ -1262,3 +1262,32 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
         "emit_shadow_decision failed" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+# ── B3: classify_regime ─────────────────────────────────────────────────────
+
+
+def test_classify_regime_bull_at_60():
+    from strategy.kill_switch_v2 import classify_regime
+    assert classify_regime(60) == "BULL"
+    assert classify_regime(75) == "BULL"
+    assert classify_regime(100) == "BULL"
+
+
+def test_classify_regime_bear_below_40():
+    from strategy.kill_switch_v2 import classify_regime
+    assert classify_regime(0) == "BEAR"
+    assert classify_regime(25) == "BEAR"
+    assert classify_regime(39.999) == "BEAR"
+
+
+def test_classify_regime_neutral_between_40_and_60():
+    from strategy.kill_switch_v2 import classify_regime
+    assert classify_regime(40) == "NEUTRAL"
+    assert classify_regime(50) == "NEUTRAL"
+    assert classify_regime(59.999) == "NEUTRAL"
+
+
+def test_classify_regime_none_returns_unknown():
+    from strategy.kill_switch_v2 import classify_regime
+    assert classify_regime(None) == "UNKNOWN"
