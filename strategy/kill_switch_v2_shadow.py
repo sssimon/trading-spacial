@@ -25,6 +25,12 @@ _DEFAULT_CAPITAL_USD = 1000.0
 _PRICE_CACHE: dict[str, float] = {}
 
 
+def _now():
+    """Indirection seam so tests can monkeypatch the current time."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
 def update_price(symbol: str, price: float) -> None:
     """Record the latest scanned price so MTM can see every open symbol."""
     _PRICE_CACHE[symbol] = float(price)
@@ -157,6 +163,51 @@ def _upsert_v2_state(symbol: str, state: dict[str, Any], now) -> None:
         conn.close()
 
 
+def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
+    """Evaluate B1 velocity triggers for a symbol.
+
+    Loads recent SLs, reads/updates v2 state, returns whether the cooldown
+    is currently active. Caller is responsible for fail-open wrapping; this
+    function may raise.
+    """
+    from strategy.kill_switch_v2 import (
+        get_velocity_thresholds,
+        detect_velocity_trigger,
+        compute_velocity_state,
+    )
+    from datetime import datetime, timezone
+
+    now = _now()
+    thresholds = get_velocity_thresholds(cfg)
+
+    sl_timestamps = _load_recent_sl_timestamps(
+        symbol, now=now, window_hours=thresholds["window_hours"],
+    )
+    current_state = _load_v2_state(symbol)
+    triggered = detect_velocity_trigger(
+        sl_timestamps, now,
+        sl_count=thresholds["sl_count"],
+        window_hours=thresholds["window_hours"],
+    )
+    new_state = compute_velocity_state(
+        current_state, triggered=triggered, now=now,
+        cooldown_hours=thresholds["cooldown_hours"],
+    )
+    if new_state != current_state:
+        _upsert_v2_state(symbol, new_state, now=now)
+
+    cooldown = new_state.get("velocity_cooldown_until")
+    if not cooldown:
+        return False
+    try:
+        parsed = datetime.fromisoformat(cooldown)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed > now
+    except (TypeError, ValueError):
+        return False
+
+
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],
@@ -201,6 +252,15 @@ def emit_shadow_decision(
         v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
         slider = float(v2_cfg.get("aggressiveness", 50.0))
 
+        # B1 velocity triggers — fail-open; defaults to False if anything raises.
+        try:
+            velocity_active = _evaluate_velocity(symbol, cfg)
+        except Exception as _ve:
+            log.warning(
+                "B1 velocity eval failed for %s: %s", symbol, _ve, exc_info=True,
+            )
+            velocity_active = False
+
         observability.record_decision(
             symbol=symbol,
             engine="v2_shadow",
@@ -216,7 +276,7 @@ def emit_shadow_decision(
             },
             scan_id=None,
             slider_value=slider,
-            velocity_active=False,
+            velocity_active=velocity_active,
         )
     except Exception as e:
         log.warning(
