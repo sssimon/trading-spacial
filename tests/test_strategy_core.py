@@ -434,3 +434,227 @@ def test_evaluate_signal_score_matches_scanner_logic_short():
     if sma10_1h < sma20_1h: expected_score += 1      # C7
 
     assert decision.score == expected_score
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Commit D — entry/SL/TP, is_signal/is_setup, estado, symbol gating
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_evaluate_signal_entry_sl_tp_computed_for_long():
+    """LONG direction → entry=price, SL=price-atr*sl_mult, TP=price+atr*tp_mult."""
+    from strategy.core import evaluate_signal
+    df1h = _downtrend_ohlcv(n=250, seed=600, start=100.0)
+    df4h = _downtrend_ohlcv(n=200, seed=601, start=100.0)
+    df5m = _downtrend_ohlcv(n=250, seed=602, start=100.0)
+    df1d = _downtrend_ohlcv(n=100, seed=603, start=100.0)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={},
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    assert decision.direction == "LONG"
+    price = decision.indicators["price"]
+    atr = decision.indicators["atr_1h"]
+    # Defaults: SL = 1.0x ATR, TP = 4.0x ATR (from strategy.core module constants)
+    assert decision.entry_price == pytest.approx(round(price, 2), abs=1e-9)
+    assert decision.sl_price == pytest.approx(round(price - atr * 1.0, 2), abs=1e-9)
+    assert decision.tp_price == pytest.approx(round(price + atr * 4.0, 2), abs=1e-9)
+    # SL must be below entry, TP above entry for LONG
+    assert decision.sl_price < decision.entry_price
+    assert decision.tp_price > decision.entry_price
+
+
+def test_evaluate_signal_entry_sl_tp_computed_for_short():
+    """SHORT direction → SL above entry, TP below entry."""
+    from strategy.core import evaluate_signal
+    df1h = _uptrend_ohlcv(n=250, seed=700, start=100.0)
+    df4h = _uptrend_ohlcv(n=200, seed=701, start=100.0)
+    df5m = _uptrend_ohlcv(n=250, seed=702, start=100.0)
+    df1d = _uptrend_ohlcv(n=100, seed=703, start=100.0)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={},
+        regime={"regime": "BEAR", "score": 20, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    assert decision.direction == "SHORT"
+    price = decision.indicators["price"]
+    atr = decision.indicators["atr_1h"]
+    assert decision.entry_price == pytest.approx(round(price, 2), abs=1e-9)
+    assert decision.sl_price == pytest.approx(round(price + atr * 1.0, 2), abs=1e-9)
+    assert decision.tp_price == pytest.approx(round(price - atr * 4.0, 2), abs=1e-9)
+    # SL must be above entry, TP below entry for SHORT
+    assert decision.sl_price > decision.entry_price
+    assert decision.tp_price < decision.entry_price
+
+
+def test_evaluate_signal_entry_sl_tp_none_for_direction_none():
+    """Direction NONE → entry/SL/TP must be None."""
+    from strategy.core import evaluate_signal
+    df1h = _flat_ohlcv(n=250, seed=800)
+    df4h = _flat_ohlcv(n=200, seed=801)
+    df5m = _flat_ohlcv(n=250, seed=802)
+    df1d = _flat_ohlcv(n=100, seed=803)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={},
+        regime={"regime": "NEUTRAL", "score": 50, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    if decision.direction == "NONE":
+        assert decision.entry_price is None
+        assert decision.sl_price is None
+        assert decision.tp_price is None
+        assert decision.is_signal is False
+
+
+def test_evaluate_signal_honors_symbol_disabled_false():
+    """cfg['symbol_overrides'][symbol] == False → estado reports deshabilitado."""
+    from strategy.core import evaluate_signal
+    df1h = _downtrend_ohlcv(n=250, seed=900, start=100.0)
+    df4h = _downtrend_ohlcv(n=200, seed=901, start=100.0)
+    df5m = _downtrend_ohlcv(n=250, seed=902, start=100.0)
+    df1d = _downtrend_ohlcv(n=100, seed=903, start=100.0)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={"symbol_overrides": {"BTCUSDT": False}},
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    assert decision.is_signal is False
+    assert "deshabilitado en config" in decision.estado
+    assert decision.reasons.get("symbol_disabled") is True
+
+
+def test_evaluate_signal_honors_direction_disabled():
+    """cfg['symbol_overrides'][symbol]['long'] == None → LONG disabled."""
+    from strategy.core import evaluate_signal
+    df1h = _downtrend_ohlcv(n=250, seed=1000, start=100.0)
+    df4h = _downtrend_ohlcv(n=200, seed=1001, start=100.0)
+    df5m = _downtrend_ohlcv(n=250, seed=1002, start=100.0)
+    df1d = _downtrend_ohlcv(n=100, seed=1003, start=100.0)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={"symbol_overrides": {"BTCUSDT": {"long": None}}},
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    # Direction is chosen LONG before config override check, then blocked.
+    assert decision.direction == "LONG"
+    assert decision.is_signal is False
+    assert "deshabilitado" in decision.estado
+    assert decision.reasons.get("direction_disabled") is True
+
+
+def test_evaluate_signal_honors_per_symbol_atr_multipliers():
+    """cfg['symbol_overrides'] with custom atr_sl_mult / atr_tp_mult changes SL/TP."""
+    from strategy.core import evaluate_signal
+    df1h = _downtrend_ohlcv(n=250, seed=1100, start=100.0)
+    df4h = _downtrend_ohlcv(n=200, seed=1101, start=100.0)
+    df5m = _downtrend_ohlcv(n=250, seed=1102, start=100.0)
+    df1d = _downtrend_ohlcv(n=100, seed=1103, start=100.0)
+    cfg = {
+        "symbol_overrides": {
+            "BTCUSDT": {"atr_sl_mult": 2.5, "atr_tp_mult": 6.0, "atr_be_mult": 2.0}
+        }
+    }
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg=cfg,
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    assert decision.direction == "LONG"
+    price = decision.indicators["price"]
+    atr = decision.indicators["atr_1h"]
+    assert decision.sl_price == pytest.approx(round(price - atr * 2.5, 2), abs=1e-9)
+    assert decision.tp_price == pytest.approx(round(price + atr * 6.0, 2), abs=1e-9)
+    assert decision.reasons["atr_sl_mult"] == 2.5
+    assert decision.reasons["atr_tp_mult"] == 6.0
+    assert decision.reasons["atr_be_mult"] == 2.0
+
+
+def test_evaluate_signal_estado_contains_direction_when_setup():
+    """Spanish estado string must mention direction for a valid setup."""
+    from strategy.core import evaluate_signal
+    df1h = _downtrend_ohlcv(n=250, seed=1200, start=100.0)
+    df4h = _downtrend_ohlcv(n=200, seed=1201, start=100.0)
+    df5m = _downtrend_ohlcv(n=250, seed=1202, start=100.0)
+    df1d = _downtrend_ohlcv(n=100, seed=1203, start=100.0)
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={},
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+    assert decision.direction == "LONG"
+    assert "LONG" in decision.estado or "SIN SETUP" in decision.estado
+
+
+def test_evaluate_signal_parity_full_fields_against_scan_snapshot():
+    """Parity: evaluate_signal output matches scan()'s report fields on real data.
+
+    Skips when cached OHLCV is unavailable in the workspace.
+    """
+    import os
+    if not os.path.exists("data/ohlcv.db"):
+        pytest.skip("requires cached market data (data/ohlcv.db)")
+
+    import btc_scanner
+    from strategy.core import evaluate_signal
+    try:
+        from backtest import get_cached_data
+    except Exception:
+        pytest.skip("backtest.get_cached_data unavailable")
+
+    symbol = "BTCUSDT"
+    rep = btc_scanner.scan(symbol)
+
+    data_start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    df1h = get_cached_data(symbol, "1h", start_date=data_start)
+    df4h = get_cached_data(symbol, "4h", start_date=data_start)
+    df5m = get_cached_data(symbol, "5m", start_date=data_start)
+    df1d = get_cached_data(symbol, "1d", start_date=data_start)
+    if df1h is None or df4h is None or df1h.empty or df4h.empty:
+        pytest.skip("cached data insufficient for parity test")
+
+    cfg = {}  # scan() loads config.json — use empty cfg to keep test deterministic
+    # Rebuild regime dict in the shape evaluate_signal expects:
+    regime = {
+        "regime": rep.get("regime"),
+        "score": rep.get("regime_score"),
+        "details": rep.get("regime_details") or {},
+    }
+
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol=symbol, cfg=cfg,
+        regime=regime, health_state="NORMAL",
+        now=datetime.now(timezone.utc),
+    )
+
+    # Score / is_signal / LRC parity (the subset that doesn't depend on scan()'s
+    # extra I/O like health state / reduce factor).
+    scan_lrc = (rep.get("lrc_1h") or {}).get("pct")
+    if scan_lrc is not None:
+        assert decision.indicators["lrc_pct"] == pytest.approx(scan_lrc, rel=1e-6)
+    # Score and direction should agree (modulo disabled paths where scan() bails early)
+    if rep.get("direction") is not None and "deshabilitado" not in rep.get("estado", ""):
+        assert decision.score == rep.get("score", 0)
+        assert decision.direction == rep.get("direction")

@@ -149,6 +149,85 @@ def _regime_to_direction_token(regime_label: str | None) -> str:
     return "LONG"
 
 
+def _resolve_direction_params(
+    overrides: dict | None,
+    symbol: str,
+    direction: str,
+) -> dict | None:
+    """Resolve {atr_sl_mult, atr_tp_mult, atr_be_mult} for (symbol, direction).
+
+    Mirrors `btc_scanner.resolve_direction_params` byte-for-byte. Pulled into
+    strategy/core to keep the pure kernel self-contained. See spec §6.
+
+    Returns None if the direction is disabled for the symbol (`"short": null`).
+    """
+    defaults = {
+        "atr_sl_mult": ATR_SL_MULT_DEFAULT,
+        "atr_tp_mult": ATR_TP_MULT_DEFAULT,
+        "atr_be_mult": ATR_BE_MULT_DEFAULT,
+    }
+
+    if direction is None or direction == "NONE":
+        return defaults
+    if not isinstance(overrides, dict):
+        return defaults
+
+    entry = overrides.get(symbol, {})
+    if not isinstance(entry, dict):
+        return defaults
+
+    sentinel = object()
+    dir_key = direction.lower()
+    dir_block = entry.get(dir_key, sentinel)
+
+    if dir_block is None:
+        return None  # direction disabled
+
+    if isinstance(dir_block, dict):
+        return {
+            "atr_sl_mult": dir_block.get("atr_sl_mult",
+                                          entry.get("atr_sl_mult", defaults["atr_sl_mult"])),
+            "atr_tp_mult": dir_block.get("atr_tp_mult",
+                                          entry.get("atr_tp_mult", defaults["atr_tp_mult"])),
+            "atr_be_mult": dir_block.get("atr_be_mult",
+                                          entry.get("atr_be_mult", defaults["atr_be_mult"])),
+        }
+
+    return {
+        "atr_sl_mult": entry.get("atr_sl_mult", defaults["atr_sl_mult"]),
+        "atr_tp_mult": entry.get("atr_tp_mult", defaults["atr_tp_mult"]),
+        "atr_be_mult": entry.get("atr_be_mult", defaults["atr_be_mult"]),
+    }
+
+
+def _check_trigger_5m_long(df5: pd.DataFrame) -> bool:
+    """5-minute bullish trigger: bullish candle AND RSI recovering.
+
+    Mirrors `btc_scanner.check_trigger_5m` (returns only the boolean).
+    """
+    if len(df5) < 3:
+        return False
+    rsi5 = calc_rsi(df5["close"], RSI_PERIOD)
+    cur = df5.iloc[-1]
+    bullish_candle = bool(cur["close"] > cur["open"])
+    rsi_recovering = bool(rsi5.iloc[-1] > rsi5.iloc[-2])
+    return bullish_candle and rsi_recovering
+
+
+def _check_trigger_5m_short(df5: pd.DataFrame) -> bool:
+    """5-minute bearish trigger: bearish candle AND RSI falling.
+
+    Mirrors `btc_scanner.check_trigger_5m_short` (returns only the boolean).
+    """
+    if len(df5) < 3:
+        return False
+    rsi5 = calc_rsi(df5["close"], RSI_PERIOD)
+    cur = df5.iloc[-1]
+    bearish_candle = bool(cur["close"] < cur["open"])
+    rsi_falling = bool(rsi5.iloc[-1] < rsi5.iloc[-2])
+    return bearish_candle and rsi_falling
+
+
 @dataclass
 class SignalDecision:
     """Return shape of `evaluate_signal()`.
@@ -293,6 +372,20 @@ def evaluate_signal(
 
     decision.direction = direction
 
+    # ── Exclusion / block detection (engulfings + divergences) ─────────────
+    bull_eng = _detect_bull_engulfing(df1h)
+    bear_eng = _detect_bear_engulfing(df1h)
+    blocks_long: list[str] = []
+    if bull_eng:
+        blocks_long.append("E1: BullEngulfing activo — posible micro-techo")
+    if bear_div:
+        blocks_long.append("E6: Divergencia bajista RSI (1H) — agotamiento alcista")
+    blocks_short: list[str] = []
+    if bear_eng:
+        blocks_short.append("E1S: BearEngulfing activo — posible micro-suelo")
+    if bull_div:
+        blocks_short.append("E6S: Divergencia alcista RSI (1H) — agotamiento bajista")
+
     # ── Score (Spot V6 0-9) — mirrors btc_scanner.scan() C1-C7 ─────────────
     score = 0
     if direction == "SHORT":
@@ -345,5 +438,111 @@ def evaluate_signal(
 
     decision.score = int(score)
     decision.score_label = _score_label(score)
+
+    # ── Symbol / direction gating via config overrides ─────────────────────
+    sym_overrides = (cfg or {}).get("symbol_overrides", {}) if isinstance(cfg, dict) else {}
+    so_entry = sym_overrides.get(symbol, {}) if isinstance(sym_overrides, dict) else {}
+
+    if so_entry is False:
+        # Symbol disabled in config — same shape as scan() early return.
+        decision.direction = "NONE"
+        decision.score = 0
+        decision.score_label = _score_label(0)
+        decision.is_signal = False
+        decision.is_setup = False
+        decision.estado = f"\u26d4 {symbol} deshabilitado en config"
+        decision.reasons = {"symbol_disabled": True}
+        return decision
+
+    # If we picked a direction, check it's not disabled for this symbol.
+    if direction != "NONE":
+        resolved = _resolve_direction_params(sym_overrides, symbol, direction)
+        if resolved is None:
+            # Direction disabled for this (symbol, direction) pair.
+            decision.is_signal = False
+            decision.is_setup = False
+            decision.estado = f"\u26d4 {direction} deshabilitado para {symbol}"
+            decision.reasons = {
+                "direction_disabled": True,
+                "direction": direction,
+            }
+            return decision
+    else:
+        resolved = _resolve_direction_params(sym_overrides, symbol, direction)
+
+    sl_mult = resolved["atr_sl_mult"]
+    tp_mult = resolved["atr_tp_mult"]
+    be_mult = resolved["atr_be_mult"]
+
+    # ── SL / TP prices (ATR-based) ─────────────────────────────────────────
+    sl_dist = atr_val * sl_mult
+    tp_dist = atr_val * tp_mult
+
+    if direction == "NONE":
+        entry_price = None
+        sl_price = None
+        tp_price = None
+    else:
+        entry_price = round(price, 2)
+        if direction == "SHORT":
+            sl_price = round(price + sl_dist, 2)   # SL above for SHORT
+            tp_price = round(price - tp_dist, 2)   # TP below for SHORT
+        else:  # LONG
+            sl_price = round(price - sl_dist, 2)
+            tp_price = round(price + tp_dist, 2)
+
+    decision.entry_price = entry_price
+    decision.sl_price = sl_price
+    decision.tp_price = tp_price
+
+    # ── Macro check & 5M trigger ───────────────────────────────────────────
+    macro_ok = (
+        price_above_4h if direction == "LONG"
+        else (not price_above_4h) if direction == "SHORT"
+        else False
+    )
+    if direction == "SHORT":
+        trigger_active = _check_trigger_5m_short(df5m)
+    elif direction == "LONG":
+        trigger_active = _check_trigger_5m_long(df5m)
+    else:
+        trigger_active = False
+
+    blocks = blocks_long if direction == "LONG" else blocks_short if direction == "SHORT" else []
+
+    # ── Veredicto (Spanish human-readable estado) ──────────────────────────
+    if direction == "NONE":
+        estado = "\u23f3 SIN SETUP \u2014 LRC% fuera de zona (25%-75%)"
+        is_signal = False
+        is_setup = False
+    elif blocks:
+        estado = f"\U0001f6ab BLOQUEADA {direction} \u2014 {len(blocks)} exclusi\u00f3n(es) autom\u00e1tica"
+        is_signal = False
+        is_setup = False
+    elif not macro_ok:
+        macro_desc = "precio < SMA100 4H" if direction == "LONG" else "precio > SMA100 4H"
+        estado = f"\u26a0\ufe0f  SETUP {direction} \u2014 Macro 4H adversa ({macro_desc})"
+        is_signal = False
+        is_setup = False
+    elif not trigger_active:
+        estado = f"\U0001f550 SETUP {direction} V\u00c1LIDO \u2014 Esperando gatillo 5M"
+        is_signal = False
+        is_setup = True
+    else:
+        estado = f"\u2705 SE\u00d1AL {direction} + GATILLO CONFIRMADOS \u2014 Calidad: {_score_label(score)}"
+        is_signal = True
+        is_setup = True
+
+    decision.is_signal = is_signal
+    decision.is_setup = is_setup
+    decision.estado = estado
+    decision.reasons = {
+        "blocks": blocks,
+        "macro_ok": macro_ok,
+        "trigger_active": trigger_active,
+        "atr_sl_mult": sl_mult,
+        "atr_tp_mult": tp_mult,
+        "atr_be_mult": be_mult,
+    }
 
     return decision
