@@ -1507,3 +1507,5 @@ class TestScanEmitsV2ShadowDecision:
         assert shadow_rows[0]["portfolio_tier"] in (
             "NORMAL", "WARNED", "REDUCED", "FROZEN",
         )
+        # B1: velocity_active is always a bool (False when no SLs / no trigger)
+        assert shadow_rows[0]["velocity_active"] is False
