@@ -712,3 +712,109 @@ def test_compute_velocity_state_handles_malformed_cooldown_as_expired():
     new = compute_velocity_state(current, triggered=True, now=now, cooldown_hours=4.0)
     expected_until = (now + timedelta(hours=4)).isoformat()
     assert new["velocity_cooldown_until"] == expected_until
+
+
+# ── B1: shadow DB glue ──────────────────────────────────────────────────────
+
+
+def test_load_recent_sl_timestamps_filters_by_symbol_and_reason(tmp_path, monkeypatch):
+    """Only closed positions with exit_reason='SL' for the target symbol within window."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _load_recent_sl_timestamps
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    inside1 = (now - timedelta(hours=1)).isoformat()
+    inside2 = (now - timedelta(hours=3)).isoformat()
+    outside = (now - timedelta(hours=10)).isoformat()
+
+    conn = btc_api.get_db()
+    try:
+        # BTC SL inside window — should count
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            (inside1, inside1),
+        )
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            (inside2, inside2),
+        )
+        # BTC SL outside window — skip
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            (outside, outside),
+        )
+        # BTC TP inside window — skip (wrong exit_reason)
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 30.0)",
+            (inside1, inside1),
+        )
+        # ETH SL inside window — skip (wrong symbol)
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', ?, ?, 'SL', -20.0)",
+            (inside1, inside1),
+        )
+        # BTC still-open — skip (status != closed)
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?)",
+            (inside1,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = _load_recent_sl_timestamps("BTCUSDT", now=now, window_hours=6.0)
+    assert len(result) == 2
+    assert set(result) == {inside1, inside2}
+
+
+def test_load_and_upsert_v2_state_roundtrip(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _load_v2_state, _upsert_v2_state
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_v2_state("BTCUSDT") == {
+        "velocity_cooldown_until": None,
+        "velocity_last_trigger_ts": None,
+    }
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+    _upsert_v2_state("BTCUSDT", {
+        "velocity_cooldown_until": "2026-04-24T16:00:00+00:00",
+        "velocity_last_trigger_ts": "2026-04-24T12:00:00+00:00",
+    }, now=now)
+
+    reloaded = _load_v2_state("BTCUSDT")
+    assert reloaded["velocity_cooldown_until"] == "2026-04-24T16:00:00+00:00"
+    assert reloaded["velocity_last_trigger_ts"] == "2026-04-24T12:00:00+00:00"
+
+    _upsert_v2_state("BTCUSDT", {
+        "velocity_cooldown_until": "2026-04-24T20:00:00+00:00",
+        "velocity_last_trigger_ts": "2026-04-24T16:00:00+00:00",
+    }, now=now)
+
+    reloaded2 = _load_v2_state("BTCUSDT")
+    assert reloaded2["velocity_cooldown_until"] == "2026-04-24T20:00:00+00:00"

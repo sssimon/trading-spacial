@@ -84,6 +84,79 @@ def _count_concurrent_failures() -> int:
     return int(portfolio.get("concurrent_failures", 0))
 
 
+def _load_recent_sl_timestamps(
+    symbol: str, now, window_hours: float
+) -> list[str]:
+    """Load exit_ts of closed positions with exit_reason='SL' for a symbol within window."""
+    from datetime import timedelta
+    import btc_api
+    cutoff = (now - timedelta(hours=float(window_hours))).isoformat()
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            """SELECT exit_ts
+               FROM positions
+               WHERE symbol = ?
+                 AND status = 'closed'
+                 AND exit_reason = 'SL'
+                 AND exit_ts IS NOT NULL
+                 AND exit_ts >= ?""",
+            (symbol, cutoff),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows if r[0]]
+
+
+def _load_v2_state(symbol: str) -> dict[str, Any]:
+    """Load per-symbol v2 state. Returns keys with None defaults if row missing."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT velocity_cooldown_until, velocity_last_trigger_ts
+               FROM kill_switch_v2_state
+               WHERE symbol = ?""",
+            (symbol,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return {
+            "velocity_cooldown_until": None,
+            "velocity_last_trigger_ts": None,
+        }
+    return {
+        "velocity_cooldown_until": row[0],
+        "velocity_last_trigger_ts": row[1],
+    }
+
+
+def _upsert_v2_state(symbol: str, state: dict[str, Any], now) -> None:
+    """Upsert v2 state for a symbol. updated_at is set to now.isoformat()."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO kill_switch_v2_state
+                 (symbol, velocity_cooldown_until, velocity_last_trigger_ts, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 velocity_cooldown_until = excluded.velocity_cooldown_until,
+                 velocity_last_trigger_ts = excluded.velocity_last_trigger_ts,
+                 updated_at = excluded.updated_at""",
+            (
+                symbol,
+                state.get("velocity_cooldown_until"),
+                state.get("velocity_last_trigger_ts"),
+                now.isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],
