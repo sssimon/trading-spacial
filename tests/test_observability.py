@@ -181,3 +181,26 @@ def test_get_current_state_filters_by_engine(tmp_db):
     state_v2 = get_current_state(engine="v2_shadow")
     assert state_v1["symbols"]["BTCUSDT"]["per_symbol_tier"] == "NORMAL"
     assert state_v2["symbols"]["BTCUSDT"]["per_symbol_tier"] == "ALERT"
+
+
+def test_get_current_state_engine_v2_shadow(tmp_db):
+    from observability import record_decision, get_current_state
+    record_decision(
+        symbol="BTCUSDT", engine="v1",
+        per_symbol_tier="NORMAL", portfolio_tier="NORMAL",
+        size_factor=1.0, skip=False, reasons={},
+        scan_id=None, slider_value=None, velocity_active=False,
+    )
+    record_decision(
+        symbol="BTCUSDT", engine="v2_shadow",
+        per_symbol_tier="NORMAL", portfolio_tier="REDUCED",
+        size_factor=1.0, skip=False,
+        reasons={"portfolio_dd": -0.06},
+        scan_id=None, slider_value=50.0, velocity_active=False,
+    )
+
+    v1_state = get_current_state(engine="v1")
+    shadow_state = get_current_state(engine="v2_shadow")
+
+    assert v1_state["symbols"]["BTCUSDT"]["portfolio_tier"] == "NORMAL"
+    assert shadow_state["symbols"]["BTCUSDT"]["portfolio_tier"] == "REDUCED"
