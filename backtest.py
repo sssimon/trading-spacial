@@ -470,104 +470,51 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             if hours_since < COOLDOWN_H:
                 continue
 
-        # ── Evaluate entry signal ─────────────────────────────────────────
-        window_1h = df1h.iloc[max(0, i - 209):i + 1]
-        if len(window_1h) < LRC_PERIOD:
+        # ── Evaluate entry signal via strategy.core.evaluate_signal (#186 A6) ─
+        # Replace the ~130-line inline decision block (LRC zone / regime /
+        # 4H macro / exclusions / 5M trigger / score) with a single call to
+        # the shared pure kernel. Windowed df slices match btc_scanner.scan()
+        # exactly (limits 210/150/210/250 for 1h/4h/5m/1d).
+        from strategy.core import evaluate_signal
+
+        slice_1h = df1h.loc[:bar_time].tail(210)
+        slice_4h = df4h.loc[:bar_time].tail(150)
+        slice_5m = df5m.loc[:bar_time].tail(210)
+        slice_1d = df1d.loc[:bar_time].tail(250) if df1d is not None else slice_1h
+
+        if len(slice_1h) < LRC_PERIOD:
             continue
 
-        close_1h = window_1h["close"]
-        price = float(close_1h.iloc[-1])
-
-        # LRC — determine direction
-        lrc_pct, lrc_up, lrc_dn, lrc_mid = calc_lrc(close_1h, LRC_PERIOD, LRC_STDEV)
-        if lrc_pct is None:
-            continue
-
-        from btc_scanner import LRC_SHORT_MIN, detect_bear_engulfing, check_trigger_5m_short
-
-        # Regime detection via _regime_at_time helper (#152)
+        # Regime detection via _regime_at_time helper (#152) — kept as
+        # backtest-local because scan() fetches its regime from a cache /
+        # per-symbol detector, not the bar-aligned helper used here.
         regime_info = _regime_at_time(
             bar_time, symbol, df1d, df_fng, df_funding,
             regime_mode=regime_mode, df1d_btc=df1d_btc,
         )
-        _r = regime_info["regime"]
-        regime = "LONG" if _r == "BULL" else "SHORT" if _r == "BEAR" else "LONG"
 
-        # Direction based on regime + LRC zone
-        if lrc_pct <= LRC_LONG_MAX and regime == "LONG":
-            trade_dir = "LONG"
-        elif lrc_pct >= LRC_SHORT_MIN and regime == "SHORT":
-            trade_dir = "SHORT"
-        else:
+        # Merge `symbol_overrides` (legacy kwarg) into cfg so evaluate_signal
+        # can resolve per-direction ATR mults via its built-in resolver.
+        # When legacy atr_* kwargs are also set, we override SL/TP below so
+        # legacy kwargs retain precedence (matches pre-refactor semantics).
+        _cfg_for_eval = dict(cfg) if isinstance(cfg, dict) else {}
+        if symbol_overrides is not None:
+            _cfg_for_eval["symbol_overrides"] = symbol_overrides
+
+        decision = evaluate_signal(
+            slice_1h, slice_4h, slice_5m, slice_1d,
+            symbol=symbol, cfg=_cfg_for_eval, regime=regime_info,
+            health_state="NORMAL", now=bar_time,
+        )
+
+        if not decision.is_signal or decision.direction == "NONE":
             continue
 
-        # Macro 4H: SMA100
-        mask_4h = df4h.index <= bar_time
-        window_4h = df4h.loc[mask_4h].iloc[-100:]
-        if len(window_4h) < 100:
-            continue
-        sma100_4h = calc_sma(window_4h["close"], 100).iloc[-1]
-        if pd.isna(sma100_4h):
-            continue
-        if trade_dir == "LONG" and price <= sma100_4h:
-            continue
-        if trade_dir == "SHORT" and price >= sma100_4h:
-            continue
+        trade_dir = decision.direction
+        price = float(decision.entry_price)
+        score = int(decision.score)
 
-        # Exclusions (direction-aware)
-        rsi1h = calc_rsi(close_1h, RSI_PERIOD)
-        rsi_divs = detect_rsi_divergence(close_1h, rsi1h, window=72)
-
-        if trade_dir == "LONG":
-            if detect_bull_engulfing(window_1h):
-                continue
-            if rsi_divs["bear"]:
-                continue
-        else:  # SHORT
-            if detect_bear_engulfing(window_1h):
-                continue
-            if rsi_divs["bull"]:
-                continue
-
-        # 5M trigger (direction-aware)
-        mask_5m = (df5m.index <= bar_time) & (df5m.index > bar_time - timedelta(hours=1))
-        window_5m = df5m.loc[mask_5m]
-        if len(window_5m) < 3:
-            continue
-        if trade_dir == "LONG":
-            trigger_active, _ = check_trigger_5m(window_5m)
-        else:
-            trigger_active, _ = check_trigger_5m_short(window_5m)
-        if not trigger_active:
-            continue
-
-        # ── Compute score (direction-aware) ───────────────────────────────
-        score = 0
-        cur_rsi1h = float(rsi1h.iloc[-1])
-        bb_up, _, bb_dn = calc_bb(close_1h, BB_PERIOD, BB_STDEV)
-        vol_avg = window_1h["volume"].rolling(VOL_PERIOD).mean().iloc[-1]
-        cvd = calc_cvd_delta(window_1h, n=3)
-        sma10 = calc_sma(close_1h, 10).iloc[-1]
-        sma20 = calc_sma(close_1h, 20).iloc[-1]
-
-        if trade_dir == "LONG":
-            if cur_rsi1h < 40: score += 2
-            if rsi_divs["bull"]: score += 2
-            if lrc_dn and abs(price - lrc_dn) / price * 100 <= 1.5: score += 1
-            if price <= bb_dn.iloc[-1]: score += 1
-            if window_1h["volume"].iloc[-1] >= vol_avg: score += 1
-            if cvd > 0: score += 1
-            if sma10 > sma20: score += 1
-        else:  # SHORT
-            if cur_rsi1h > 60: score += 2
-            if rsi_divs["bear"]: score += 2
-            if lrc_up and abs(price - lrc_up) / price * 100 <= 1.5: score += 1
-            if price >= bb_up.iloc[-1]: score += 1
-            if window_1h["volume"].iloc[-1] >= vol_avg: score += 1
-            if cvd < 0: score += 1
-            if sma10 < sma20: score += 1
-
-        # Size multiplier
+        # Size multiplier (mirrors legacy tiering)
         if score >= SCORE_PREMIUM:
             size_mult = 1.5
         elif score >= SCORE_STANDARD:
@@ -603,36 +550,46 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 )
 
         # ── Open position ─────────────────────────────────────────────────
-        if sl_mode == "atr":
-            atr_series = calc_atr(window_1h, ATR_PERIOD)
-            atr_val = float(atr_series.iloc[-1])
-            if pd.isna(atr_val) or atr_val <= 0:
-                continue
+        # Legacy atr_* kwargs retain precedence over symbol_overrides — the
+        # existing contract (test_simulate_strategy_legacy_kwargs_win_over_overrides).
+        legacy_override_active = (
+            (atr_sl_mult is not None)
+            or (atr_tp_mult is not None)
+            or (atr_be_mult is not None)
+        )
 
-            # Per-direction resolver (only when caller explicitly passed symbol_overrides
-            # AND legacy kwargs were NOT set — legacy kwargs retain precedence).
-            legacy_override_active = (atr_sl_mult is not None) or (atr_tp_mult is not None) or (atr_be_mult is not None)
-            if symbol_overrides is not None and not legacy_override_active:
-                resolved = resolve_direction_params(symbol_overrides, symbol, trade_dir)
-                if resolved is None:
-                    # Direction disabled for this symbol — skip opening the position.
+        if sl_mode == "atr":
+            if legacy_override_active:
+                # Legacy path: compute ATR + SL/TP inline using legacy kwargs.
+                atr_series = calc_atr(slice_1h, ATR_PERIOD)
+                atr_val = float(atr_series.iloc[-1])
+                if pd.isna(atr_val) or atr_val <= 0:
                     continue
-                _sl_m_use = resolved["atr_sl_mult"]
-                _tp_m_use = resolved["atr_tp_mult"]
-                _be_m_use = resolved["atr_be_mult"]
-            else:
                 _sl_m_use = _sl_m
                 _tp_m_use = _tp_m
                 _be_m_use = _be_m
-
-            if trade_dir == "SHORT":
-                sl_price = round(price + atr_val * _sl_m_use, 2)
-                tp_price = round(price - atr_val * _tp_m_use, 2)
-                be_threshold = price - atr_val * _be_m_use
+                if trade_dir == "SHORT":
+                    sl_price = round(price + atr_val * _sl_m_use, 2)
+                    tp_price = round(price - atr_val * _tp_m_use, 2)
+                    be_threshold = price - atr_val * _be_m_use
+                else:
+                    sl_price = round(price - atr_val * _sl_m_use, 2)
+                    tp_price = round(price + atr_val * _tp_m_use, 2)
+                    be_threshold = price + atr_val * _be_m_use
             else:
-                sl_price = round(price - atr_val * _sl_m_use, 2)
-                tp_price = round(price + atr_val * _tp_m_use, 2)
-                be_threshold = price + atr_val * _be_m_use
+                # Use decision's SL/TP (already resolved via cfg.symbol_overrides).
+                atr_val = float(decision.indicators.get("atr_1h") or 0.0)
+                if pd.isna(atr_val) or atr_val <= 0:
+                    continue
+                sl_price = float(decision.sl_price)
+                tp_price = float(decision.tp_price)
+                _sl_m_use = float(decision.reasons.get("atr_sl_mult"))
+                _tp_m_use = float(decision.reasons.get("atr_tp_mult"))
+                _be_m_use = float(decision.reasons.get("atr_be_mult"))
+                if trade_dir == "SHORT":
+                    be_threshold = price - atr_val * _be_m_use
+                else:
+                    be_threshold = price + atr_val * _be_m_use
         else:
             _sl_m_use = _sl_m
             _tp_m_use = _tp_m
