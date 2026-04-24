@@ -11,7 +11,10 @@ under kill_switch.v2.thresholds.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger("kill_switch_v2")
 
 
 # Defaults (match config.defaults.json). Used as fallback when config is incomplete.
@@ -214,8 +217,9 @@ def detect_velocity_trigger(
 ) -> bool:
     """True if at least `sl_count` SLs fall within `window_hours` before `now`.
 
-    Malformed timestamps (not ISO-parseable) are silently skipped.
-    The window boundary is inclusive: an SL exactly `window_hours` ago counts.
+    Malformed timestamps (not ISO-parseable) are skipped; a single aggregated
+    warning is logged per call if any were skipped. The window boundary is
+    inclusive: an SL exactly `window_hours` ago counts.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -223,18 +227,25 @@ def detect_velocity_trigger(
         return False
     cutoff = now - timedelta(hours=float(window_hours))
     count = 0
+    skipped = 0
     for ts in sl_timestamps:
         try:
             parsed = datetime.fromisoformat(ts)
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
         except (TypeError, ValueError):
+            skipped += 1
             continue
         if cutoff <= parsed <= now:
             count += 1
             if count >= sl_count:
-                return True
-    return False
+                break
+    if skipped:
+        log.warning(
+            "detect_velocity_trigger skipped %d malformed timestamp(s) "
+            "during the velocity check", skipped,
+        )
+    return count >= sl_count
 
 
 def compute_velocity_state(
@@ -266,6 +277,11 @@ def compute_velocity_state(
                 parsed = parsed.replace(tzinfo=timezone.utc)
             cooldown_active = parsed > now
         except (TypeError, ValueError):
+            log.warning(
+                "compute_velocity_state: malformed velocity_cooldown_until=%r "
+                "(last_trigger=%r); treating as expired and resetting",
+                cur_until, cur_last,
+            )
             cooldown_active = False
 
     if cooldown_active:
