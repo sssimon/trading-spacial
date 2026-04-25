@@ -198,3 +198,148 @@ def test_replay_with_slider_peak_then_drawdown():
     assert result["pnl"] == pytest.approx(-20.0)
     expected_dd = (980 - 1080) / 1080
     assert result["dd"] == pytest.approx(expected_dd)
+
+
+# ── B4b.2: run_optimization_v2 ──────────────────────────────────────────────
+
+
+def test_run_optimization_v2_empty_db_returns_pending_zero(tmp_path, monkeypatch):
+    """Empty positions table → all sliders pnl=0,dd=0 → feasible (dd>=target) → status='pending'."""
+    import btc_api
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    cfg = _basic_optimizer_cfg()
+    cfg["kill_switch"]["v2"]["auto_calibrator"] = {
+        "backtest_window_days": 365, "dd_target": -0.10,
+    }
+    result = run_optimization_v2(cfg, regime_score=None)
+    assert result["status"] == "pending"
+    assert result["projected_pnl"] == pytest.approx(0.0)
+    assert result["projected_dd"] == pytest.approx(0.0)
+    assert isinstance(result["slider_value"], int)
+    assert "grid" in result["report"]
+    assert result["report"]["stub"] is False
+    assert result["report"]["trades_in_window"] == 0
+
+
+def test_run_optimization_v2_no_feasible_when_all_blow_target(tmp_path, monkeypatch):
+    """All-losing trades large enough to violate dd_target=-0.01 → no_feasible."""
+    import btc_api
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Insert a single -200 USD trade (DD = -0.20, blows -0.01 target)
+    now = datetime.now(tz=timezone.utc)
+    ts = (now - timedelta(days=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -200.0)",
+            (ts, ts),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = _basic_optimizer_cfg()
+    cfg["kill_switch"]["v2"]["auto_calibrator"] = {
+        "backtest_window_days": 365, "dd_target": -0.01,
+    }
+    result = run_optimization_v2(cfg, regime_score=None)
+    assert result["status"] == "no_feasible"
+    assert result["slider_value"] is None
+    assert "reason" in result["report"]
+    assert result["report"]["trades_in_window"] == 1
+
+
+def test_run_optimization_v2_picks_max_pnl_among_feasible(tmp_path, monkeypatch):
+    """With a profitable trade, all sliders are feasible; pnl is positive."""
+    import btc_api
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime.now(tz=timezone.utc)
+    ts = (now - timedelta(days=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            (ts, ts),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = _basic_optimizer_cfg()
+    cfg["kill_switch"]["v2"]["auto_calibrator"] = {
+        "backtest_window_days": 365, "dd_target": -0.10,
+    }
+    result = run_optimization_v2(cfg, regime_score=None)
+    assert result["status"] == "pending"
+    assert result["projected_pnl"] == pytest.approx(50.0)
+
+
+def test_run_optimization_v2_report_includes_grid(tmp_path, monkeypatch):
+    """Report payload includes per-slider {pnl, dd} grid."""
+    import btc_api
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    cfg = _basic_optimizer_cfg()
+    cfg["kill_switch"]["v2"]["auto_calibrator"] = {
+        "backtest_window_days": 365, "dd_target": -0.10,
+    }
+    result = run_optimization_v2(cfg, regime_score=None)
+    grid = result["report"]["grid"]
+    # 21 sliders: 0, 5, 10, ..., 100
+    assert len(grid) == 21
+    for slider in (0, 5, 50, 100):
+        assert str(slider) in grid
+        assert "pnl" in grid[str(slider)]
+        assert "dd" in grid[str(slider)]
+
+
+def test_run_optimization_v2_passes_regime_score_to_simulator(tmp_path, monkeypatch):
+    """regime_score is included in report for traceability."""
+    import btc_api
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    cfg = _basic_optimizer_cfg()
+    cfg["kill_switch"]["v2"]["auto_calibrator"] = {
+        "backtest_window_days": 365, "dd_target": -0.10,
+    }
+    result = run_optimization_v2(cfg, regime_score=72.5)
+    assert result["report"]["regime_score"] == 72.5

@@ -101,3 +101,79 @@ def _replay_with_slider(
         )
 
     return {"pnl": equity - capital_base, "dd": max_dd}
+
+
+def run_optimization_v2(
+    cfg: dict[str, Any], regime_score: float | None = None,
+) -> dict[str, Any]:
+    """Real grid optimization replacing run_optimization_stub from B4b.1.
+
+    Loads closed trades from the configured backtest window, replays each
+    across 21 slider candidates [0..100, step 5] using V2KillSwitchSimulator,
+    picks the slider with max PnL subject to dd_target constraint.
+
+    Returns same shape as run_optimization_stub:
+        {"status": str, "slider_value": int|None, "projected_pnl": float|None,
+         "projected_dd": float|None, "report": dict}
+
+    status values:
+        "pending"     — feasible slider found, recommendation ready for review.
+        "no_feasible" — all sliders blow dd_target; report includes the grid.
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(tz=timezone.utc)
+    v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+    auto_cal = v2_cfg.get("auto_calibrator", {}) or {}
+    window_days = float(auto_cal.get(
+        "backtest_window_days", _DEFAULT_BACKTEST_WINDOW_DAYS,
+    ))
+    dd_target = float(auto_cal.get("dd_target", _DEFAULT_DD_TARGET))
+    capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
+
+    closed = _load_closed_positions_window(window_days, now)
+
+    grid_results: dict[int, dict[str, float]] = {}
+    for slider in range(0, 101, _GRID_STEP):
+        cfg_eff = _override_slider(cfg, slider)
+        result = _replay_with_slider(closed, cfg_eff, regime_score, capital_base)
+        grid_results[slider] = result
+
+    # Feasibility: dd is negative; constraint dd >= dd_target
+    feasible = {s: r for s, r in grid_results.items() if r["dd"] >= dd_target}
+
+    report_payload = {
+        "ts": now.isoformat(),
+        "window_days": window_days,
+        "dd_target": dd_target,
+        "capital_base": capital_base,
+        "trades_in_window": len(closed),
+        "regime_score": regime_score,
+        "grid": {
+            str(s): {"pnl": r["pnl"], "dd": r["dd"]}
+            for s, r in grid_results.items()
+        },
+        "stub": False,
+    }
+
+    if not feasible:
+        nearest = max(grid_results, key=lambda s: grid_results[s]["dd"])
+        report_payload["reason"] = (
+            f"all sliders blow dd_target={dd_target}; nearest_slider={nearest}"
+        )
+        return {
+            "status": "no_feasible",
+            "slider_value": None,
+            "projected_pnl": grid_results[nearest]["pnl"],
+            "projected_dd": grid_results[nearest]["dd"],
+            "report": report_payload,
+        }
+
+    best = max(feasible, key=lambda s: feasible[s]["pnl"])
+    return {
+        "status": "pending",
+        "slider_value": best,
+        "projected_pnl": feasible[best]["pnl"],
+        "projected_dd": feasible[best]["dd"],
+        "report": report_payload,
+    }
