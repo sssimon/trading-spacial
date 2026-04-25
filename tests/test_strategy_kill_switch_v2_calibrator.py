@@ -79,3 +79,39 @@ def test_should_run_safety_net_future_timestamp_returns_true():
     now = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
     future = (now + timedelta(days=1)).isoformat()
     assert should_run_safety_net(future, now, safety_net_days=30) is True
+
+
+# ── B4b.1: build_no_feasible_report ─────────────────────────────────────────
+
+
+def test_build_no_feasible_report_shape():
+    from strategy.kill_switch_v2_calibrator import build_no_feasible_report
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    report = build_no_feasible_report(reason="test reason", now=now)
+    assert report["status"] == "no_feasible"
+    assert report["reason"] == "test reason"
+    assert report["ts"] == now.isoformat()
+    assert report["stub"] is True
+
+
+# ── B4b.1: run_optimization_stub ────────────────────────────────────────────
+
+
+def test_run_optimization_stub_returns_no_feasible_for_empty_cfg():
+    from strategy.kill_switch_v2_calibrator import run_optimization_stub
+    result = run_optimization_stub({})
+    assert result["status"] == "no_feasible"
+    assert result["slider_value"] is None
+    assert result["projected_pnl"] is None
+    assert result["projected_dd"] is None
+    assert result["report"]["stub"] is True
+
+
+def test_run_optimization_stub_returns_no_feasible_for_full_cfg():
+    """Stub ignores cfg contents; always returns no_feasible."""
+    from strategy.kill_switch_v2_calibrator import run_optimization_stub
+    cfg = {"kill_switch": {"v2": {"aggressiveness": 75}}}
+    result = run_optimization_stub(cfg)
+    assert result["status"] == "no_feasible"
+    assert "v2 backtest pending B4b.2" in result["report"]["reason"]

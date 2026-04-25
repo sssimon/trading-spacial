@@ -45,3 +45,48 @@ def should_run_safety_net(
     if parsed > now:
         return True
     return (now - parsed) > timedelta(days=float(safety_net_days))
+
+
+def build_no_feasible_report(reason: str, now) -> dict[str, Any]:
+    """Construct the report payload for stub no_feasible runs.
+
+    The `stub: True` flag is a sentinel for the dashboard / future B4b.2
+    code: stubs can be filtered out of the "real" recommendation list.
+    """
+    return {
+        "status": "no_feasible",
+        "reason": reason,
+        "ts": now.isoformat(),
+        "stub": True,
+    }
+
+
+def run_optimization_stub(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Stub fitness for B4b.1. Always returns no_feasible.
+
+    Will be replaced by run_optimization_v2 in B4b.2 (#216) which performs
+    grid optimization over slider 0..100 with a v2-aware backtest.
+
+    Args:
+        cfg: ignored (signature preserved for forward compatibility).
+
+    Returns:
+        {
+            "status": "no_feasible",
+            "slider_value": None,
+            "projected_pnl": None,
+            "projected_dd": None,
+            "report": {<no_feasible_report>},
+        }
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(tz=timezone.utc)
+    return {
+        "status": "no_feasible",
+        "slider_value": None,
+        "projected_pnl": None,
+        "projected_dd": None,
+        "report": build_no_feasible_report(
+            reason="v2 backtest pending B4b.2", now=now,
+        ),
+    }
