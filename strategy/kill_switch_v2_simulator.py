@@ -67,3 +67,13 @@ class V2KillSwitchSimulator:
             return parsed > now
         except (TypeError, ValueError):
             return False
+
+    def _count_concurrent_failures(self, now) -> int:
+        """Count symbols with active velocity cooldowns at `now`.
+
+        Used as proxy for B2 portfolio's concurrent_failures input.
+        """
+        return sum(
+            1 for sym in self._velocity_state
+            if self._is_velocity_active(sym, now)
+        )

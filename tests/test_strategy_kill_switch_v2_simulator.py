@@ -114,3 +114,36 @@ def test_simulator_velocity_active_malformed_treated_inactive():
     }
     # Malformed → treat as not active (conservative for backtest replay)
     assert sim._is_velocity_active("BTC", now) is False
+
+
+# ── B4b.2: concurrent failures count ────────────────────────────────────────
+
+
+def test_simulator_concurrent_failures_empty():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert sim._count_concurrent_failures(now) == 0
+
+
+def test_simulator_concurrent_failures_counts_active_velocities():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone, timedelta
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    sim._velocity_state["BTC"] = {
+        "velocity_cooldown_until": (now + timedelta(hours=1)).isoformat(),
+        "velocity_last_trigger_ts": now.isoformat(),
+    }
+    sim._velocity_state["ETH"] = {
+        "velocity_cooldown_until": (now + timedelta(hours=3)).isoformat(),
+        "velocity_last_trigger_ts": now.isoformat(),
+    }
+    sim._velocity_state["ADA"] = {
+        "velocity_cooldown_until": (now - timedelta(hours=1)).isoformat(),
+        "velocity_last_trigger_ts": now.isoformat(),
+    }
+    assert sim._count_concurrent_failures(now) == 2
