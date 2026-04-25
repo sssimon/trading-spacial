@@ -2029,3 +2029,127 @@ def test_evaluate_per_symbol_tier_paranoid_slider_triggers_easier():
     )
     assert tier_default == "NORMAL"
     assert tier_paranoid == "ALERT"
+
+
+# ── B4a: shadow DB glue ─────────────────────────────────────────────────────
+
+
+def test_load_closed_trades_for_symbol_filters_by_symbol_and_status(tmp_path, monkeypatch):
+    """Returns only closed trades for the target symbol with non-NULL exit_ts."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _load_closed_trades_for_symbol
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 10.0)",
+        )
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+            "'2026-04-20T10:00:00+00:00', -5.0)",
+        )
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'open', "
+            "'2026-04-20T10:00:00+00:00')",
+        )
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', "
+            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 20.0)",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = _load_closed_trades_for_symbol("BTCUSDT")
+    assert len(rows) == 1
+    assert rows[0]["pnl_usd"] == pytest.approx(10.0)
+    assert rows[0]["exit_ts"] == "2026-04-20T12:00:00+00:00"
+
+
+def test_load_baseline_returns_none_when_missing(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _load_baseline
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_baseline("BTCUSDT") is None
+
+
+def test_load_and_upsert_baseline_roundtrip(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _load_baseline, _upsert_baseline
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    _upsert_baseline("BTCUSDT", {"wr": 0.55, "sigma": 0.497, "count": 150}, now=now)
+
+    loaded = _load_baseline("BTCUSDT")
+    assert loaded is not None
+    assert loaded["wr"] == pytest.approx(0.55)
+    assert loaded["sigma"] == pytest.approx(0.497)
+    assert loaded["count"] == 150
+    assert loaded["computed_at"] == now.isoformat()
+
+    _upsert_baseline(
+        "BTCUSDT", {"wr": 0.60, "sigma": 0.490, "count": 200},
+        now=datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc),
+    )
+    loaded2 = _load_baseline("BTCUSDT")
+    assert loaded2["wr"] == pytest.approx(0.60)
+    assert loaded2["count"] == 200
+    assert loaded2["computed_at"] == "2026-04-26T12:00:00+00:00"
+
+
+def test_is_baseline_stale_none_computed_at_returns_true():
+    from strategy.kill_switch_v2_shadow import _is_baseline_stale
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert _is_baseline_stale(None, stale_days=7, now=now) is True
+
+
+def test_is_baseline_stale_malformed_returns_true():
+    from strategy.kill_switch_v2_shadow import _is_baseline_stale
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert _is_baseline_stale("garbage", stale_days=7, now=now) is True
+
+
+def test_is_baseline_stale_fresh_returns_false():
+    from strategy.kill_switch_v2_shadow import _is_baseline_stale
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=3)).isoformat()
+    assert _is_baseline_stale(fresh, stale_days=7, now=now) is False
+
+
+def test_is_baseline_stale_old_returns_true():
+    from strategy.kill_switch_v2_shadow import _is_baseline_stale
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    old = (now - timedelta(days=10)).isoformat()
+    assert _is_baseline_stale(old, stale_days=7, now=now) is True

@@ -208,6 +208,92 @@ def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
         return False
 
 
+def _load_closed_trades_for_symbol(symbol: str) -> list[dict[str, Any]]:
+    """Load closed positions for a symbol with non-NULL exit_ts."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            """SELECT exit_ts, pnl_usd
+               FROM positions
+               WHERE symbol = ?
+                 AND status = 'closed'
+                 AND exit_ts IS NOT NULL
+               ORDER BY exit_ts""",
+            (symbol,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"exit_ts": r[0], "pnl_usd": r[1]} for r in rows]
+
+
+def _load_baseline(symbol: str) -> dict[str, Any] | None:
+    """Load per-symbol baseline. Returns None if no row exists."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT baseline_wr, baseline_sigma, trades_count, computed_at
+               FROM kill_switch_v2_baseline
+               WHERE symbol = ?""",
+            (symbol,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "wr": row[0],
+        "sigma": row[1],
+        "count": row[2],
+        "computed_at": row[3],
+    }
+
+
+def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
+    """Upsert per-symbol baseline. computed_at is set to now.isoformat()."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO kill_switch_v2_baseline
+                 (symbol, baseline_wr, baseline_sigma, trades_count, computed_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 baseline_wr = excluded.baseline_wr,
+                 baseline_sigma = excluded.baseline_sigma,
+                 trades_count = excluded.trades_count,
+                 computed_at = excluded.computed_at""",
+            (
+                symbol,
+                float(baseline.get("wr", 0.0)),
+                float(baseline.get("sigma", 0.0)),
+                int(baseline.get("count", 0)),
+                now.isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _is_baseline_stale(
+    computed_at: str | None, stale_days: float, now,
+) -> bool:
+    """Return True if the baseline is missing, malformed, or older than stale_days."""
+    from datetime import datetime, timedelta, timezone
+
+    if not computed_at:
+        return True
+    try:
+        parsed = datetime.fromisoformat(computed_at)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return (now - parsed) > timedelta(days=float(stale_days))
+
+
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],
