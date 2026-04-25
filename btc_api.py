@@ -1026,6 +1026,15 @@ def init_db():
             updated_at                TEXT NOT NULL
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS kill_switch_v2_baseline (
+            symbol         TEXT PRIMARY KEY,
+            baseline_wr    REAL NOT NULL,
+            baseline_sigma REAL NOT NULL,
+            trades_count   INTEGER NOT NULL,
+            computed_at    TEXT NOT NULL
+        )
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
