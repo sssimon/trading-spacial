@@ -16,7 +16,12 @@
     "reduce_pnl_window_days": 14,
     "reduce_size_factor": 0.5,
     "pause_months_consecutive": 2,
-    "auto_recovery_enabled": true
+    "auto_recovery_enabled": true,
+    "v2": {
+      "auto_calibrator": {
+        "safety_net_days": 30
+      }
+    }
   },
   "symbol_overrides": {
     "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5 },

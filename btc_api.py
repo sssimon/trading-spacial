@@ -1035,6 +1035,24 @@ def init_db():
             computed_at    TEXT NOT NULL
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS kill_switch_recommendations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              TEXT NOT NULL,
+            triggered_by    TEXT NOT NULL,
+            slider_value    REAL,
+            projected_pnl   REAL,
+            projected_dd    REAL,
+            status          TEXT NOT NULL,
+            applied_ts      TEXT,
+            applied_by      TEXT,
+            report_json     TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_recommendations_ts
+            ON kill_switch_recommendations(ts)
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
@@ -1522,6 +1540,17 @@ def start_scanner_thread():
     )
     health_thread.start()
     log.info("Health monitor thread started (daily @ 00:00 UTC)")
+
+    # Kill switch v2 auto-calibrator (#214 B4b.1)
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    calibrator_thread = threading.Thread(
+        target=kill_switch_calibrator_loop,
+        args=(lambda: load_config(),),
+        daemon=True,
+        name="kill-switch-calibrator",
+    )
+    calibrator_thread.start()
+    log.info("Kill switch v2 calibrator thread started (daily @ 00:00 UTC)")
     return t
 
 
@@ -1624,6 +1653,118 @@ def force_scan(
     symbols = [symbol.upper()] if symbol else get_active_symbols(cfg.get("num_symbols", 20))
     results = [execute_scan_for_symbol(sym, cfg) for sym in symbols]
     return {"scanned": len(results), "results": results}
+
+
+@app.post(
+    "/kill_switch/recalibrate",
+    summary="Manually trigger an auto-calibrator recommendation",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_recalibrate():
+    """Manually trigger the auto-calibrator (#187 B4b.1).
+
+    In B4b.1 this returns no_feasible (stub fitness). B4b.2 (#216) will
+    replace the stub with v2-aware backtest grid optimization.
+    """
+    from strategy.kill_switch_v2_calibrator import (
+        run_optimization_stub, _persist_recommendation,
+    )
+    from datetime import datetime, timezone
+
+    try:
+        cfg = load_config()
+        result = run_optimization_stub(cfg)
+        now = datetime.now(tz=timezone.utc)
+        rec_id = _persist_recommendation(
+            triggered_by=["manual"], result=result, now=now,
+        )
+    except Exception as e:
+        log.error(
+            "POST /kill_switch/recalibrate failed: %s", e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"recalibrate failed: {type(e).__name__}: {e}",
+        )
+
+    log.warning(
+        "Kill switch v2: recomendación id=%d (status=%s, triggered_by=manual). "
+        "Telegram pendiente B4b.3.",
+        rec_id, result["status"],
+    )
+    return {"recommendation_id": rec_id, "status": result["status"]}
+
+
+@app.get(
+    "/kill_switch/recommendations",
+    summary="List auto-calibrator recommendations",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_list_recommendations(
+    since: Optional[str] = Query(
+        None, description="ISO timestamp; only rows with ts >= since",
+    ),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status (pending, applied, ignored, "
+                    "superseded, no_feasible)",
+    ),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """List auto-calibrator recommendations, latest first."""
+    import json as _json
+
+    conn = get_db()
+    try:
+        sql = (
+            "SELECT id, ts, triggered_by, slider_value, projected_pnl, "
+            "projected_dd, status, applied_ts, applied_by, report_json "
+            "FROM kill_switch_recommendations WHERE 1=1"
+        )
+        params: list = []
+        if since:
+            sql += " AND ts >= ?"
+            params.append(since)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(int(limit))
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for r in rows:
+        d = {
+            "id": r[0],
+            "ts": r[1],
+            "triggered_by": r[2],
+            "slider_value": r[3],
+            "projected_pnl": r[4],
+            "projected_dd": r[5],
+            "status": r[6],
+            "applied_ts": r[7],
+            "applied_by": r[8],
+            "report": None,
+        }
+        try:
+            d["triggered_by"] = _json.loads(d["triggered_by"])
+        except (TypeError, ValueError) as e:
+            log.warning(
+                "Corrupted recommendation row id=%s: triggered_by JSON "
+                "parse failed (%s); raw=%r", r[0], e, r[2],
+            )
+        try:
+            d["report"] = _json.loads(r[9])
+        except (TypeError, ValueError) as e:
+            log.warning(
+                "Corrupted recommendation row id=%s: report_json parse "
+                "failed (%s); raw=%r", r[0], e, r[9],
+            )
+            d["report"] = None
+        result.append(d)
+    return result
 
 
 @app.get("/signals", summary="Historial de escaneos / señales")
