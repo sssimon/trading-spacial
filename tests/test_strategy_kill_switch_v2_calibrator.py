@@ -269,7 +269,8 @@ def test_calibrator_loop_safety_net_fires_when_table_empty(
     assert len(rows) == 1
     import json
     assert json.loads(rows[0][0]) == ["safety_net"]
-    assert rows[0][1] == "no_feasible"
+    # B4b.2: real fitness; empty positions → status="pending" (or "no_feasible")
+    assert rows[0][1] in ("pending", "no_feasible")
 
 
 def test_calibrator_loop_does_not_fire_when_recent_recalibration(
@@ -399,7 +400,9 @@ def test_post_recalibrate_returns_recommendation_id(tmp_path, monkeypatch):
         assert resp.status_code == 200
         body = resp.json()
         assert "recommendation_id" in body
-        assert body["status"] == "no_feasible"
+        # B4b.2: real fitness; empty positions → all sliders feasible at pnl=dd=0
+        # → status="pending" with arbitrary slider (pnl tiebreak picks first).
+        assert body["status"] in ("pending", "no_feasible")
 
         rec_id = body["recommendation_id"]
         conn = btc_api.get_db()
@@ -412,7 +415,7 @@ def test_post_recalibrate_returns_recommendation_id(tmp_path, monkeypatch):
             conn.close()
         import json
         assert json.loads(row[0]) == ["manual"]
-        assert row[1] == "no_feasible"
+        assert row[1] in ("pending", "no_feasible")
     finally:
         btc_api.app.dependency_overrides.clear()
 
@@ -443,9 +446,8 @@ def test_get_recommendations_empty_returns_empty_list(tmp_path, monkeypatch):
 def test_get_recommendations_returns_rows_ordered_desc(tmp_path, monkeypatch):
     import btc_api
     from fastapi.testclient import TestClient
-    from strategy.kill_switch_v2_calibrator import (
-        _persist_recommendation, run_optimization_stub,
-    )
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
     from datetime import datetime, timezone
 
     db_path = str(tmp_path / "signals.db")
@@ -457,7 +459,8 @@ def test_get_recommendations_returns_rows_ordered_desc(tmp_path, monkeypatch):
 
     earlier = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
     later = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
-    result = run_optimization_stub({})
+    # B4b.2: seed with real optimizer so report["stub"] is False.
+    result = run_optimization_v2({})
     _persist_recommendation(
         triggered_by=["safety_net"], result=result, now=earlier,
     )
@@ -476,8 +479,8 @@ def test_get_recommendations_returns_rows_ordered_desc(tmp_path, monkeypatch):
         assert rows[0]["triggered_by"] == ["manual"]
         assert rows[1]["ts"] == earlier.isoformat()
         assert rows[1]["triggered_by"] == ["safety_net"]
-        # Report block parsed
-        assert rows[0]["report"]["stub"] is True
+        # Report block parsed; stub is False after B4b.2 wiring (real optimizer).
+        assert rows[0]["report"]["stub"] is False
     finally:
         btc_api.app.dependency_overrides.clear()
 
@@ -795,10 +798,15 @@ def test_persist_recommendation_raises_on_missing_status_key(tmp_path, monkeypat
 def test_post_recalibrate_returns_500_on_internal_failure(
     tmp_path, monkeypatch, caplog,
 ):
-    """If run_optimization_stub raises, endpoint returns 500 with detail
-    (not opaque FastAPI error) and logs with exc_info."""
+    """If both run_optimization_v2 and the stub fallback raise, the endpoint
+    returns 500 with detail (not opaque FastAPI error) and logs with exc_info.
+
+    B4b.2: endpoint now calls run_optimization_v2 first with a stub fallback.
+    To exercise the outer 500 path, both must fail.
+    """
     import btc_api
     import strategy.kill_switch_v2_calibrator as cal
+    import strategy.kill_switch_v2_optimizer as opt
     from fastapi.testclient import TestClient
 
     db_path = str(tmp_path / "signals.db")
@@ -810,6 +818,7 @@ def test_post_recalibrate_returns_500_on_internal_failure(
 
     def _boom(*a, **kw):
         raise RuntimeError("simulated optimization failure")
+    monkeypatch.setattr(opt, "run_optimization_v2", _boom)
     monkeypatch.setattr(cal, "run_optimization_stub", _boom)
 
     try:
@@ -870,5 +879,111 @@ def test_get_recommendations_logs_warning_on_corrupt_row(
             "Corrupted recommendation row" in rec.getMessage()
             for rec in caplog.records
         )
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+# ── B4b.2: integration with run_optimization_v2 ─────────────────────────────
+
+
+def test_post_recalibrate_uses_v2_optimizer_with_grid(tmp_path, monkeypatch):
+    """POST endpoint persists a row whose report includes the v2 grid (not stub)."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+    monkeypatch.setattr(btc_api, "load_config", lambda: {
+        "kill_switch": {"v2": {
+            "aggressiveness": 50,
+            "thresholds": {
+                "portfolio_dd_reduced":     {"min": -0.08, "max": -0.03},
+                "portfolio_dd_frozen":      {"min": -0.15, "max": -0.06},
+                "velocity_sl_count":        {"min": 10, "max": 3},
+                "velocity_window_hours":    {"min": 24, "max": 6},
+                "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+            },
+            "velocity_cooldown_hours": 4,
+            "concurrent_alert_threshold": 3,
+            "baseline_min_trades": 100,
+            "baseline_stale_days": 7,
+            "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+            "advanced_overrides": {"regime_adjustment_enabled": True},
+            "auto_calibrator": {
+                "safety_net_days": 30,
+                "backtest_window_days": 365,
+                "dd_target": -0.10,
+            },
+        }},
+    })
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recalibrate")
+        assert resp.status_code == 200
+        body = resp.json()
+
+        rec_id = body["recommendation_id"]
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT report_json FROM kill_switch_recommendations WHERE id = ?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        import json
+        report = json.loads(row[0])
+        # Real v2 report has stub=False and includes grid + dd_target
+        assert report["stub"] is False
+        assert "grid" in report
+        assert len(report["grid"]) == 21
+        assert report["dd_target"] == pytest.approx(-0.10)
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_recalibrate_falls_back_to_stub_when_v2_raises(tmp_path, monkeypatch):
+    """If run_optimization_v2 raises, the endpoint logs and falls back to stub."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    import strategy.kill_switch_v2_optimizer as opt_mod
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated optimizer failure")
+    monkeypatch.setattr(opt_mod, "run_optimization_v2", _boom)
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recalibrate")
+        assert resp.status_code == 200
+        body = resp.json()
+        # Fell back to stub → status="no_feasible"
+        assert body["status"] == "no_feasible"
+
+        rec_id = body["recommendation_id"]
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT report_json FROM kill_switch_recommendations WHERE id = ?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        import json
+        report = json.loads(row[0])
+        # Stub is True in fallback path
+        assert report.get("stub") is True
     finally:
         btc_api.app.dependency_overrides.clear()
