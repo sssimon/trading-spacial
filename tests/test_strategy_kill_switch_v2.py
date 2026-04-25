@@ -2383,3 +2383,174 @@ def test_evaluate_per_symbol_tier_with_telemetry_recomputes_when_stale(
     assert telemetry["trades_count"] == 100
     persisted = _load_baseline("BTCUSDT")
     assert persisted["computed_at"] == now.isoformat()
+
+
+# ── B4a: emit_shadow_decision threads per_symbol_tier ───────────────────────
+
+
+def test_emit_shadow_writes_per_symbol_tier_normal_when_no_history(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """No closed trades → per_symbol_tier=NORMAL, reasons.per_symbol populated."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
+
+    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    assert rows[0]["per_symbol_tier"] == "NORMAL"
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert "per_symbol" in reasons
+    assert reasons["per_symbol"]["tier"] == "NORMAL"
+    assert reasons["per_symbol"]["status"] == "ok"
+    assert reasons["per_symbol"]["trades_count"] == 0
+
+
+def test_emit_shadow_writes_per_symbol_tier_alert_when_baseline_breaks(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """Per-symbol ALERT propagates to per_symbol_tier column AND reasons."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
+
+    conn = btc_api.get_db()
+    try:
+        for _ in range(50):
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0)",
+            )
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0)",
+            )
+        for i in range(20):
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-04-20T10:00:00+00:00', ?, -5.0)",
+                (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert rows[0]["per_symbol_tier"] == "ALERT"
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["per_symbol"]["tier"] == "ALERT"
+    assert reasons["per_symbol"]["rolling_wr_20"] == pytest.approx(0.0)
+    assert reasons["per_symbol"]["trades_count"] >= 100
+
+
+def test_emit_shadow_per_symbol_fail_open_returns_normal_with_status_failed(
+    tmp_path, monkeypatch, caplog, _clean_shadow_cache,
+):
+    """If _evaluate_per_symbol_tier_with_telemetry raises, tier=NORMAL + status=failed."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    import strategy.kill_switch_v2_shadow as sh
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated per-symbol eval failure")
+    monkeypatch.setattr(sh, "_evaluate_per_symbol_tier_with_telemetry", _boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
+        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    assert rows[0]["per_symbol_tier"] == "NORMAL"
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert reasons["per_symbol"]["tier"] == "NORMAL"
+    assert reasons["per_symbol"]["status"] == "failed"
+    assert any(
+        "B4a per-symbol tier eval failed" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_emit_shadow_backwards_compat_b1_b2_b3_still_pass(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """The B4a additions don't break B1/B2/B3 behavior in a fresh DB."""
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "portfolio_dd_reduced":  {"min": -0.08, "max": -0.03},
+            "portfolio_dd_frozen":   {"min": -0.15, "max": -0.06},
+            "velocity_sl_count":     {"min": 10, "max": 3},
+            "velocity_window_hours": {"min": 24, "max": 6},
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+        "advanced_overrides": {"regime_adjustment_enabled": True},
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    assert len(rows) == 1
+    import json
+    reasons = json.loads(rows[0]["reasons_json"])
+    assert "portfolio_dd" in reasons
+    assert "regime" in reasons
+    assert "per_symbol" in reasons
+    assert reasons["regime"]["label"] == "BULL"
+    assert reasons["per_symbol"]["tier"] == "NORMAL"
+    assert rows[0]["velocity_active"] is False

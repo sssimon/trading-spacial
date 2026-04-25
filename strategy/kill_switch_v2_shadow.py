@@ -451,10 +451,32 @@ def emit_shadow_decision(
             )
             velocity_active = False
 
+        # B4a per-symbol tier — fail-open; defaults to NORMAL with status=failed.
+        try:
+            per_symbol_tier, per_symbol_telemetry = (
+                _evaluate_per_symbol_tier_with_telemetry(symbol, cfg_eff)
+            )
+        except Exception as _pe:
+            log.warning(
+                "B4a per-symbol tier eval failed for %s: %s",
+                symbol, _pe, exc_info=True,
+            )
+            per_symbol_tier = "NORMAL"
+            per_symbol_telemetry = {
+                "tier": "NORMAL",
+                "status": "failed",
+                "baseline_wr": None,
+                "baseline_sigma": None,
+                "rolling_wr_20": None,
+                "sigma_multiplier": None,
+                "trades_count": 0,
+                "baseline_stale": None,
+            }
+
         observability.record_decision(
             symbol=symbol,
             engine="v2_shadow",
-            per_symbol_tier="NORMAL",
+            per_symbol_tier=per_symbol_tier,
             portfolio_tier=portfolio["tier"],
             size_factor=1.0,
             skip=False,
@@ -472,6 +494,7 @@ def emit_shadow_decision(
                     "enabled": regime_enabled,
                     "adjustment_status": _regime_adjustment_status,
                 },
+                "per_symbol": per_symbol_telemetry,
             },
             scan_id=None,
             slider_value=slider_effective,
