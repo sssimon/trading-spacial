@@ -224,3 +224,155 @@ def test_load_last_recalibration_ts_returns_max_ts(tmp_path, monkeypatch):
     )
 
     assert _load_last_recalibration_ts() == later.isoformat()
+
+
+# ── B4b.1: kill_switch_calibrator_loop ──────────────────────────────────────
+
+
+def test_calibrator_loop_safety_net_fires_when_table_empty(
+    tmp_path, monkeypatch,
+):
+    """First-ever tick with empty table → safety_net fires + persists row."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    stop_event = threading.Event()
+    call_count = {"n": 0}
+
+    def fake_wait(seconds):
+        call_count["n"] += 1
+        stop_event.set()
+        return True
+
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {
+        "kill_switch": {"v2": {"auto_calibrator": {"safety_net_days": 30}}}
+    }
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    assert call_count["n"] == 1
+
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT triggered_by, status FROM kill_switch_recommendations"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    import json
+    assert json.loads(rows[0][0]) == ["safety_net"]
+    assert rows[0][1] == "no_feasible"
+
+
+def test_calibrator_loop_does_not_fire_when_recent_recalibration(
+    tmp_path, monkeypatch,
+):
+    """If last recalibration was <30d ago, loop iteration skips persistence."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import (
+        kill_switch_calibrator_loop, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime.now(tz=timezone.utc)
+    recent = now - timedelta(days=5)
+    _persist_recommendation(
+        triggered_by=["safety_net"],
+        result=run_optimization_stub({}),
+        now=recent,
+    )
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {
+        "kill_switch": {"v2": {"auto_calibrator": {"safety_net_days": 30}}}
+    }
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    conn = btc_api.get_db()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM kill_switch_recommendations"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+def test_calibrator_loop_exits_cleanly_when_stop_event_set(
+    tmp_path, monkeypatch,
+):
+    """stop_event.set() before loop start → loop exits without doing work."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    stop_event = threading.Event()
+    stop_event.set()
+
+    cfg_fn = lambda: {}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    conn = btc_api.get_db()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM kill_switch_recommendations"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0
+
+
+def test_calibrator_loop_iteration_failure_is_logged_not_propagated(
+    tmp_path, monkeypatch, caplog,
+):
+    """Exception in iteration body → logged with exc_info, loop continues."""
+    import btc_api, threading
+    import strategy.kill_switch_v2_calibrator as cal
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated cfg lookup failure")
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        cal.kill_switch_calibrator_loop(_boom, stop_event=stop_event)
+
+    assert any(
+        "kill_switch_calibrator_loop iteration failed" in rec.getMessage()
+        for rec in caplog.records
+    )

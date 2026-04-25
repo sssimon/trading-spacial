@@ -135,3 +135,60 @@ def _load_last_recalibration_ts() -> str | None:
     finally:
         conn.close()
     return row[0] if row and row[0] else None
+
+
+def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
+    """Daily auto-calibrator loop.
+
+    Pattern mirrors health_monitor_loop. Wakes once per day, evaluates the
+    safety_net trigger, persists a stub recommendation if fired. Manual
+    triggers come through the FastAPI endpoint, not via this loop.
+
+    Fail-open: any exception inside an iteration is logged with exc_info;
+    the loop continues. stop_event.set() exits the loop cleanly.
+    """
+    import threading
+    from datetime import datetime, timedelta, timezone
+
+    if stop_event is None:
+        stop_event = threading.Event()
+
+    while not stop_event.is_set():
+        try:
+            cfg = cfg_fn()
+            v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+            auto_cal_cfg = v2_cfg.get("auto_calibrator", {}) or {}
+            safety_net_days = int(
+                auto_cal_cfg.get("safety_net_days", _DEFAULT_SAFETY_NET_DAYS)
+            )
+
+            now = datetime.now(tz=timezone.utc)
+            last_ts = _load_last_recalibration_ts()
+
+            if should_run_safety_net(last_ts, now, safety_net_days):
+                result = run_optimization_stub(cfg)
+                rec_id = _persist_recommendation(
+                    triggered_by=["safety_net"], result=result, now=now,
+                )
+                # Stub notification — real Telegram lands in B4b.3 (#217)
+                log.warning(
+                    "Kill switch v2: recomendación id=%d (status=%s, "
+                    "triggered_by=safety_net). Telegram pendiente B4b.3.",
+                    rec_id, result["status"],
+                )
+        except Exception as e:
+            log.warning(
+                "kill_switch_calibrator_loop iteration failed: %s",
+                e, exc_info=True,
+            )
+
+        # Sleep until next midnight UTC (or until stop_event is set)
+        now = datetime.now(tz=timezone.utc)
+        next_midnight = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        seconds = max(60.0, (next_midnight - now).total_seconds())
+        if stop_event.wait(seconds):
+            break
+
+    log.info("kill_switch_calibrator_loop exiting cleanly")
