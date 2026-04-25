@@ -62,3 +62,55 @@ def test_simulator_current_portfolio_dd_peak_then_drop():
     )
     expected = (950 - 1150) / 1150
     assert sim._current_portfolio_dd() == pytest.approx(expected)
+
+
+# ── B4b.2: velocity active check ────────────────────────────────────────────
+
+
+def test_simulator_velocity_active_no_state():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert sim._is_velocity_active("BTC", now) is False
+
+
+def test_simulator_velocity_active_during_cooldown():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone, timedelta
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    sim._velocity_state["BTC"] = {
+        "velocity_cooldown_until": (now + timedelta(hours=2)).isoformat(),
+        "velocity_last_trigger_ts": (now - timedelta(hours=2)).isoformat(),
+    }
+    assert sim._is_velocity_active("BTC", now) is True
+
+
+def test_simulator_velocity_active_after_cooldown_expired():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone, timedelta
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    sim._velocity_state["BTC"] = {
+        "velocity_cooldown_until": (now - timedelta(hours=1)).isoformat(),
+        "velocity_last_trigger_ts": (now - timedelta(hours=5)).isoformat(),
+    }
+    assert sim._is_velocity_active("BTC", now) is False
+
+
+def test_simulator_velocity_active_malformed_treated_inactive():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+    from datetime import datetime, timezone
+
+    sim = V2KillSwitchSimulator({}, regime_score=None, capital_base=1000.0)
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    sim._velocity_state["BTC"] = {
+        "velocity_cooldown_until": "garbage",
+        "velocity_last_trigger_ts": None,
+    }
+    # Malformed → treat as not active (conservative for backtest replay)
+    assert sim._is_velocity_active("BTC", now) is False

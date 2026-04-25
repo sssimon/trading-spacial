@@ -51,3 +51,19 @@ class V2KillSwitchSimulator:
         if peak <= 0:
             return 0.0
         return (equity - peak) / peak
+
+    def _is_velocity_active(self, symbol: str, now) -> bool:
+        """Check if velocity cooldown is still active for symbol at `now`."""
+        from datetime import datetime, timezone
+
+        state = self._velocity_state.get(symbol, {})
+        cooldown = state.get("velocity_cooldown_until")
+        if not cooldown:
+            return False
+        try:
+            parsed = datetime.fromisoformat(cooldown)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed > now
+        except (TypeError, ValueError):
+            return False
