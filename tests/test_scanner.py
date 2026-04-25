@@ -1518,3 +1518,10 @@ class TestScanEmitsV2ShadowDecision:
         assert regime["label"] in ("BULL", "NEUTRAL", "BEAR", "UNKNOWN")
         # slider_value column must equal slider_effective from reasons
         assert shadow_rows[0]["slider_value"] == regime["slider_effective"]
+        # B4a: per-symbol tier block exists in reasons_json
+        assert "per_symbol" in reasons, "reasons.per_symbol block must be present"
+        per_symbol = reasons["per_symbol"]
+        assert per_symbol["tier"] in ("NORMAL", "ALERT")
+        assert per_symbol["status"] in ("ok", "failed")
+        # per_symbol_tier column must equal tier in reasons
+        assert shadow_rows[0]["per_symbol_tier"] == per_symbol["tier"]
