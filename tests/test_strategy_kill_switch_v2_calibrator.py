@@ -115,3 +115,112 @@ def test_run_optimization_stub_returns_no_feasible_for_full_cfg():
     result = run_optimization_stub(cfg)
     assert result["status"] == "no_feasible"
     assert "v2 backtest pending B4b.2" in result["report"]["reason"]
+
+
+# ── B4b.1: DB glue ──────────────────────────────────────────────────────────
+
+
+def test_persist_recommendation_inserts_row(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+    import json
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"], result=result, now=now,
+    )
+    assert isinstance(rec_id, int)
+    assert rec_id > 0
+
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            "SELECT ts, triggered_by, slider_value, projected_pnl, "
+            "projected_dd, status, report_json "
+            "FROM kill_switch_recommendations WHERE id = ?",
+            (rec_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == now.isoformat()
+    assert json.loads(row[1]) == ["manual"]
+    assert row[2] is None
+    assert row[3] is None
+    assert row[4] is None
+    assert row[5] == "no_feasible"
+    parsed_report = json.loads(row[6])
+    assert parsed_report["status"] == "no_feasible"
+    assert parsed_report["stub"] is True
+
+
+def test_persist_recommendation_returns_distinct_ids(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    id1 = _persist_recommendation(
+        triggered_by=["safety_net"], result=result, now=now,
+    )
+    id2 = _persist_recommendation(
+        triggered_by=["manual"], result=result, now=now,
+    )
+    assert id2 > id1
+
+
+def test_load_last_recalibration_ts_empty_table(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_recalibration_ts
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_last_recalibration_ts() is None
+
+
+def test_load_last_recalibration_ts_returns_max_ts(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, _load_last_recalibration_ts, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    earlier = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    _persist_recommendation(
+        triggered_by=["safety_net"], result=result, now=earlier,
+    )
+    _persist_recommendation(
+        triggered_by=["manual"], result=result, now=later,
+    )
+
+    assert _load_last_recalibration_ts() == later.isoformat()

@@ -90,3 +90,48 @@ def run_optimization_stub(cfg: dict[str, Any]) -> dict[str, Any]:
             reason="v2 backtest pending B4b.2", now=now,
         ),
     }
+
+
+def _persist_recommendation(
+    triggered_by: list[str],
+    result: dict[str, Any],
+    now,
+) -> int:
+    """Insert a recommendation row. Returns the new row id."""
+    import json
+    import btc_api
+
+    conn = btc_api.get_db()
+    try:
+        cursor = conn.execute(
+            """INSERT INTO kill_switch_recommendations
+                 (ts, triggered_by, slider_value, projected_pnl, projected_dd,
+                  status, applied_ts, applied_by, report_json)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)""",
+            (
+                now.isoformat(),
+                json.dumps(triggered_by),
+                result.get("slider_value"),
+                result.get("projected_pnl"),
+                result.get("projected_dd"),
+                result["status"],
+                json.dumps(result.get("report", {})),
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def _load_last_recalibration_ts() -> str | None:
+    """Return the latest ts from kill_switch_recommendations, or None."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            "SELECT MAX(ts) FROM kill_switch_recommendations",
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row and row[0] else None
