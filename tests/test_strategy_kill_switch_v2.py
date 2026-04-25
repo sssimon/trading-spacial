@@ -1945,3 +1945,87 @@ def test_get_baseline_sigma_multiplier_missing_cfg_uses_defaults():
     from strategy.kill_switch_v2 import get_baseline_sigma_multiplier
     # Empty cfg → defaults (slider=50, range 3.0..1.0) → 2.0
     assert get_baseline_sigma_multiplier({}) == pytest.approx(2.0)
+
+
+# ── B4a: evaluate_per_symbol_tier ───────────────────────────────────────────
+
+
+def test_evaluate_per_symbol_tier_below_min_trades_returns_normal():
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 50}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=0.0, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=50, min_trades=100,
+    )
+    assert tier == "NORMAL"
+
+
+def test_evaluate_per_symbol_tier_rolling_none_returns_normal():
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 200}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=None, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier == "NORMAL"
+
+
+def test_evaluate_per_symbol_tier_well_above_threshold_returns_normal():
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 200}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=0.50, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier == "NORMAL"
+
+
+def test_evaluate_per_symbol_tier_below_threshold_returns_alert():
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 200}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=0.20, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier == "ALERT"
+
+
+def test_evaluate_per_symbol_tier_strict_less_than_at_boundary_normal():
+    """rolling_wr exactly at threshold should be NORMAL (strict `<` semantics)."""
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    import math
+    threshold = 0.5 - 2.0 * (0.5 / math.sqrt(20))
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 200}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=threshold, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier == "NORMAL"
+
+
+def test_evaluate_per_symbol_tier_sigma_zero_any_below_baseline_alerts():
+    """If baseline.sigma=0, threshold collapses to baseline.wr — any decrease triggers."""
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 1.0, "sigma": 0.0, "count": 200}
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=0.99, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier == "ALERT"
+
+
+def test_evaluate_per_symbol_tier_paranoid_slider_triggers_easier():
+    """N=1 (slider=100) makes the threshold higher, easier to trigger ALERT."""
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 200}
+
+    tier_default = evaluate_per_symbol_tier(
+        rolling_wr_20=0.30, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=200, min_trades=100,
+    )
+    tier_paranoid = evaluate_per_symbol_tier(
+        rolling_wr_20=0.30, baseline=baseline, sigma_multiplier=1.0,
+        trades_count=200, min_trades=100,
+    )
+    assert tier_default == "NORMAL"
+    assert tier_paranoid == "ALERT"

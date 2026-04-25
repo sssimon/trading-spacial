@@ -405,3 +405,44 @@ def get_baseline_sigma_multiplier(cfg: dict[str, Any]) -> float:
         or _DEFAULT_BASELINE_SIGMA_MULTIPLIER
     )
     return interpolate_threshold(slider, sigma_range["min"], sigma_range["max"])
+
+
+def evaluate_per_symbol_tier(
+    rolling_wr_20: float | None,
+    baseline: dict[str, Any],
+    sigma_multiplier: float,
+    trades_count: int,
+    min_trades: int,
+) -> str:
+    """Decide per-symbol tier from baseline + recent performance.
+
+    Returns "NORMAL" or "ALERT".
+
+    Rules (in priority order):
+    1. trades_count < min_trades → "NORMAL" (insufficient evidence to calibrate).
+    2. rolling_wr_20 is None → "NORMAL" (no recent activity).
+    3. rolling_wr_20 < baseline.wr - sigma_multiplier * (baseline.sigma / sqrt(20))
+       → "ALERT".
+    4. else → "NORMAL".
+
+    The denominator sqrt(20) converts per-trade σ to the std dev of a
+    20-trade rolling-mean estimator (central limit theorem).
+
+    Boundary semantics: rolling_wr exactly equal to the threshold is NORMAL
+    (strict `<` triggers ALERT).
+    """
+    import math
+
+    if trades_count < min_trades:
+        return "NORMAL"
+    if rolling_wr_20 is None:
+        return "NORMAL"
+
+    baseline_wr = float(baseline.get("wr", 0.0))
+    baseline_sigma = float(baseline.get("sigma", 0.0))
+    window_sigma = baseline_sigma / math.sqrt(20)
+    threshold = baseline_wr - float(sigma_multiplier) * window_sigma
+
+    if rolling_wr_20 < threshold:
+        return "ALERT"
+    return "NORMAL"
