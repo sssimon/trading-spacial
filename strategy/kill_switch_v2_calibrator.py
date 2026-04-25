@@ -97,9 +97,21 @@ def _persist_recommendation(
     result: dict[str, Any],
     now,
 ) -> int:
-    """Insert a recommendation row. Returns the new row id."""
+    """Insert a recommendation row. Returns the new row id.
+
+    Validates that result has the required keys (status, report); raises
+    KeyError on missing keys instead of silently coercing report to {}.
+    Same pattern as B4a's _upsert_baseline guard — masks an upstream bug
+    producing malformed result dicts otherwise.
+    """
     import json
     import btc_api
+
+    missing = [k for k in ("status", "report") if k not in result]
+    if missing:
+        raise KeyError(
+            f"_persist_recommendation: result dict missing required keys: {missing}"
+        )
 
     conn = btc_api.get_db()
     try:
@@ -115,7 +127,7 @@ def _persist_recommendation(
                 result.get("projected_pnl"),
                 result.get("projected_dd"),
                 result["status"],
-                json.dumps(result.get("report", {})),
+                json.dumps(result["report"]),
             ),
         )
         conn.commit()

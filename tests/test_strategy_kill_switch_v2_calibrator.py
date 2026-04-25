@@ -543,3 +543,332 @@ def test_start_scanner_thread_launches_calibrator_thread(monkeypatch):
     btc_api.start_scanner_thread()
 
     assert "kill-switch-calibrator" in captured_threads
+
+
+# ── B4b.1: review follow-ups — hardening tests ──────────────────────────────
+
+
+def test_start_scanner_thread_starts_calibrator_target_callable(monkeypatch):
+    """Pin the contract: thread is constructed AND .start() is invoked AND
+    target is kill_switch_calibrator_loop.
+
+    Replaces the brittle __init__ patch with a FakeThread that records
+    construction args + start() calls. Pins what matters behaviorally.
+    """
+    import btc_api, threading
+    from strategy import kill_switch_v2_calibrator
+
+    captured = []
+    original_thread = threading.Thread
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=None, name=None, **kwargs):
+            captured.append({
+                "target": target,
+                "args": args,
+                "daemon": daemon,
+                "name": name,
+            })
+            self._started = False
+            self.name = name
+
+        def start(self):
+            self._started = True
+
+    monkeypatch.setattr(threading, "Thread", FakeThread)
+
+    btc_api.start_scanner_thread()
+
+    # Find the calibrator thread
+    calibrator = next(
+        (c for c in captured if c["name"] == "kill-switch-calibrator"), None,
+    )
+    assert calibrator is not None, "kill-switch-calibrator thread must be constructed"
+    assert calibrator["target"] is kill_switch_v2_calibrator.kill_switch_calibrator_loop, (
+        "target must be kill_switch_calibrator_loop"
+    )
+    assert calibrator["daemon"] is True, "must be daemon=True"
+    # args is (cfg_fn,) — the lambda captures load_config
+    assert callable(calibrator["args"][0]), "first arg must be a cfg callable"
+
+
+def test_post_recalibrate_unauthenticated_rejected_when_api_key_configured(
+    tmp_path, monkeypatch,
+):
+    """When api_key is configured, POST without X-API-Key returns 401.
+
+    The API has backwards-compatible "no api_key configured = open access"
+    semantics (see verify_api_key in btc_api.py); this test forces a key
+    via load_config monkeypatch to validate the auth path actually rejects.
+    """
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+
+    client = TestClient(btc_api.app)
+    # No X-API-Key header → 401
+    resp = client.post("/kill_switch/recalibrate")
+    assert resp.status_code == 401
+
+    # Wrong key → 401
+    resp_wrong = client.post(
+        "/kill_switch/recalibrate", headers={"X-API-Key": "wrong-key"},
+    )
+    assert resp_wrong.status_code == 401
+
+    # Correct key → 200
+    resp_ok = client.post(
+        "/kill_switch/recalibrate", headers={"X-API-Key": "test-secret"},
+    )
+    assert resp_ok.status_code == 200
+
+
+def test_get_recommendations_unauthenticated_rejected_when_api_key_configured(
+    tmp_path, monkeypatch,
+):
+    """When api_key is configured, GET without X-API-Key returns 401."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+
+    client = TestClient(btc_api.app)
+    resp = client.get("/kill_switch/recommendations")
+    assert resp.status_code == 401
+
+
+def test_get_recommendations_filter_by_since(tmp_path, monkeypatch):
+    """`since` filter returns only rows with ts >= since (boundary inclusive)."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    earlier = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    middle = datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    _persist_recommendation(triggered_by=["safety_net"], result=result, now=earlier)
+    _persist_recommendation(triggered_by=["manual"], result=result, now=middle)
+    _persist_recommendation(triggered_by=["safety_net"], result=result, now=later)
+
+    try:
+        client = TestClient(btc_api.app)
+        # since=middle → returns middle + later (boundary inclusive via >=)
+        resp = client.get(
+            f"/kill_switch/recommendations?since={middle.isoformat()}",
+        )
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 2
+        ts_returned = sorted(r["ts"] for r in rows)
+        assert ts_returned == sorted([middle.isoformat(), later.isoformat()])
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_get_recommendations_limit_caps_results(tmp_path, monkeypatch):
+    """`limit` parameter caps the number of returned rows."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    base = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    for i in range(5):
+        _persist_recommendation(
+            triggered_by=["manual"], result=result,
+            now=base + timedelta(minutes=i),
+        )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.get("/kill_switch/recommendations?limit=2")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_calibrator_loop_persist_failure_logged_with_exc_info(
+    tmp_path, monkeypatch, caplog,
+):
+    """Mid-iteration failure in _persist_recommendation is logged with exc_info
+    via the outer try/except. Loop continues (next iteration would retry)."""
+    import btc_api, threading
+    import strategy.kill_switch_v2_calibrator as cal
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    def _boom_persist(*a, **kw):
+        raise RuntimeError("simulated DB persist failure")
+
+    monkeypatch.setattr(cal, "_persist_recommendation", _boom_persist)
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {
+        "kill_switch": {"v2": {"auto_calibrator": {"safety_net_days": 30}}}
+    }
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        cal.kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Outer try/except catches RuntimeError and logs it
+    matching = [
+        rec for rec in caplog.records
+        if "kill_switch_calibrator_loop iteration failed" in rec.getMessage()
+    ]
+    assert len(matching) >= 1
+    # Verify exc_info attached (traceback captured)
+    assert any(rec.exc_info is not None for rec in matching)
+
+
+def test_persist_recommendation_raises_on_missing_status_key(tmp_path, monkeypatch):
+    """_persist_recommendation raises KeyError if result dict missing 'status'."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(KeyError, match="missing required keys"):
+        _persist_recommendation(
+            triggered_by=["manual"],
+            result={"report": {}},  # missing "status"
+            now=now,
+        )
+
+    with pytest.raises(KeyError, match="missing required keys"):
+        _persist_recommendation(
+            triggered_by=["manual"],
+            result={"status": "no_feasible"},  # missing "report"
+            now=now,
+        )
+
+
+def test_post_recalibrate_returns_500_on_internal_failure(
+    tmp_path, monkeypatch, caplog,
+):
+    """If run_optimization_stub raises, endpoint returns 500 with detail
+    (not opaque FastAPI error) and logs with exc_info."""
+    import btc_api
+    import strategy.kill_switch_v2_calibrator as cal
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated optimization failure")
+    monkeypatch.setattr(cal, "run_optimization_stub", _boom)
+
+    try:
+        import logging
+        with caplog.at_level(logging.ERROR, logger=btc_api.log.name):
+            client = TestClient(btc_api.app, raise_server_exceptions=False)
+            resp = client.post("/kill_switch/recalibrate")
+
+        assert resp.status_code == 500
+        body = resp.json()
+        assert "recalibrate failed" in body.get("detail", "")
+        assert "RuntimeError" in body.get("detail", "")
+        # log.error captured with exc_info
+        assert any(
+            "POST /kill_switch/recalibrate failed" in rec.getMessage()
+            and rec.exc_info is not None
+            for rec in caplog.records
+        )
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_get_recommendations_logs_warning_on_corrupt_row(
+    tmp_path, monkeypatch, caplog,
+):
+    """If a row has corrupted triggered_by JSON, GET logs a warning with row id
+    and returns the raw value (does not silently discard)."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Insert a row with corrupted triggered_by (not valid JSON)
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, report_json) VALUES (?, ?, ?, ?)",
+            ("2026-04-25T12:00:00+00:00", "not-valid-json", "no_feasible", "{}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        import logging
+        with caplog.at_level(logging.WARNING, logger=btc_api.log.name):
+            client = TestClient(btc_api.app)
+            resp = client.get("/kill_switch/recommendations")
+
+        assert resp.status_code == 200
+        assert any(
+            "Corrupted recommendation row" in rec.getMessage()
+            for rec in caplog.records
+        )
+    finally:
+        btc_api.app.dependency_overrides.clear()

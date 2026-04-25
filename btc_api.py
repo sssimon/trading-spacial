@@ -1671,12 +1671,22 @@ def kill_switch_recalibrate():
     )
     from datetime import datetime, timezone
 
-    cfg = load_config()
-    result = run_optimization_stub(cfg)
-    now = datetime.now(tz=timezone.utc)
-    rec_id = _persist_recommendation(
-        triggered_by=["manual"], result=result, now=now,
-    )
+    try:
+        cfg = load_config()
+        result = run_optimization_stub(cfg)
+        now = datetime.now(tz=timezone.utc)
+        rec_id = _persist_recommendation(
+            triggered_by=["manual"], result=result, now=now,
+        )
+    except Exception as e:
+        log.error(
+            "POST /kill_switch/recalibrate failed: %s", e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"recalibrate failed: {type(e).__name__}: {e}",
+        )
+
     log.warning(
         "Kill switch v2: recomendación id=%d (status=%s, triggered_by=manual). "
         "Telegram pendiente B4b.3.",
@@ -1740,11 +1750,18 @@ def kill_switch_list_recommendations(
         }
         try:
             d["triggered_by"] = _json.loads(d["triggered_by"])
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            log.warning(
+                "Corrupted recommendation row id=%s: triggered_by JSON "
+                "parse failed (%s); raw=%r", r[0], e, r[2],
+            )
         try:
             d["report"] = _json.loads(r[9])
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
+            log.warning(
+                "Corrupted recommendation row id=%s: report_json parse "
+                "failed (%s); raw=%r", r[0], e, r[9],
+            )
             d["report"] = None
         result.append(d)
     return result
