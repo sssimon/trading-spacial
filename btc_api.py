@@ -1644,6 +1644,36 @@ def force_scan(
     return {"scanned": len(results), "results": results}
 
 
+@app.post(
+    "/kill_switch/recalibrate",
+    summary="Manually trigger an auto-calibrator recommendation",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_recalibrate():
+    """Manually trigger the auto-calibrator (#187 B4b.1).
+
+    In B4b.1 this returns no_feasible (stub fitness). B4b.2 (#216) will
+    replace the stub with v2-aware backtest grid optimization.
+    """
+    from strategy.kill_switch_v2_calibrator import (
+        run_optimization_stub, _persist_recommendation,
+    )
+    from datetime import datetime, timezone
+
+    cfg = load_config()
+    result = run_optimization_stub(cfg)
+    now = datetime.now(tz=timezone.utc)
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"], result=result, now=now,
+    )
+    log.warning(
+        "Kill switch v2: recomendación id=%d (status=%s, triggered_by=manual). "
+        "Telegram pendiente B4b.3.",
+        rec_id, result["status"],
+    )
+    return {"recommendation_id": rec_id, "status": result["status"]}
+
+
 @app.get("/signals", summary="Historial de escaneos / señales")
 def list_signals(
     limit:        int             = Query(50,    ge=1, le=500),

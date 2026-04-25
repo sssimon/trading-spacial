@@ -376,3 +376,42 @@ def test_calibrator_loop_iteration_failure_is_logged_not_propagated(
         "kill_switch_calibrator_loop iteration failed" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+# ── B4b.1: POST /kill_switch/recalibrate ────────────────────────────────────
+
+
+def test_post_recalibrate_returns_recommendation_id(tmp_path, monkeypatch):
+    """POST /kill_switch/recalibrate creates a row + returns id + status."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recalibrate")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "recommendation_id" in body
+        assert body["status"] == "no_feasible"
+
+        rec_id = body["recommendation_id"]
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT triggered_by, status FROM kill_switch_recommendations "
+                "WHERE id = ?", (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        import json
+        assert json.loads(row[0]) == ["manual"]
+        assert row[1] == "no_feasible"
+    finally:
+        btc_api.app.dependency_overrides.clear()
