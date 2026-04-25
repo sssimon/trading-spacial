@@ -519,3 +519,27 @@ def test_get_recommendations_filter_by_status(tmp_path, monkeypatch):
         assert resp_other.json() == []
     finally:
         btc_api.app.dependency_overrides.clear()
+
+
+# ── B4b.1: daemon launch ────────────────────────────────────────────────────
+
+
+def test_start_scanner_thread_launches_calibrator_thread(monkeypatch):
+    """start_scanner_thread spawns a thread named 'kill-switch-calibrator'."""
+    import btc_api, threading
+
+    captured_threads = []
+    real_thread_init = threading.Thread.__init__
+
+    def capture_init(self, *args, **kwargs):
+        captured_threads.append(kwargs.get("name", "<unnamed>"))
+        # Don't actually start anything destructive
+        kwargs["target"] = lambda *a, **kw: None
+        kwargs.pop("args", None)
+        return real_thread_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(threading.Thread, "__init__", capture_init)
+
+    btc_api.start_scanner_thread()
+
+    assert "kill-switch-calibrator" in captured_threads

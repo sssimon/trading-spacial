@@ -1540,6 +1540,17 @@ def start_scanner_thread():
     )
     health_thread.start()
     log.info("Health monitor thread started (daily @ 00:00 UTC)")
+
+    # Kill switch v2 auto-calibrator (#214 B4b.1)
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    calibrator_thread = threading.Thread(
+        target=kill_switch_calibrator_loop,
+        args=(lambda: load_config(),),
+        daemon=True,
+        name="kill-switch-calibrator",
+    )
+    calibrator_thread.start()
+    log.info("Kill switch v2 calibrator thread started (daily @ 00:00 UTC)")
     return t
 
 
