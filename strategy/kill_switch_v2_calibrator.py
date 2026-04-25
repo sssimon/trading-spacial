@@ -178,7 +178,16 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
             last_ts = _load_last_recalibration_ts()
 
             if should_run_safety_net(last_ts, now, safety_net_days):
-                result = run_optimization_stub(cfg)
+                # B4b.2: real fitness via grid optimization (was stub in B4b.1)
+                from strategy.kill_switch_v2_optimizer import run_optimization_v2
+                try:
+                    result = run_optimization_v2(cfg)
+                except Exception as opt_err:
+                    log.warning(
+                        "run_optimization_v2 failed; falling back to stub: %s",
+                        opt_err, exc_info=True,
+                    )
+                    result = run_optimization_stub(cfg)
                 rec_id = _persist_recommendation(
                     triggered_by=["safety_net"], result=result, now=now,
                 )

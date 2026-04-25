@@ -1669,11 +1669,19 @@ def kill_switch_recalibrate():
     from strategy.kill_switch_v2_calibrator import (
         run_optimization_stub, _persist_recommendation,
     )
+    from strategy.kill_switch_v2_optimizer import run_optimization_v2
     from datetime import datetime, timezone
 
     try:
         cfg = load_config()
-        result = run_optimization_stub(cfg)
+        try:
+            result = run_optimization_v2(cfg)
+        except Exception as opt_err:
+            log.warning(
+                "run_optimization_v2 failed; falling back to stub: %s",
+                opt_err, exc_info=True,
+            )
+            result = run_optimization_stub(cfg)
         now = datetime.now(tz=timezone.utc)
         rec_id = _persist_recommendation(
             triggered_by=["manual"], result=result, now=now,
