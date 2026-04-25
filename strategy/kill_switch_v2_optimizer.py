@@ -56,3 +56,48 @@ def _override_slider(cfg: dict[str, Any], slider: int) -> dict[str, Any]:
     v2 = ks.setdefault("v2", {})
     v2["aggressiveness"] = slider
     return cfg_copy
+
+
+def _replay_with_slider(
+    closed_trades: list[dict[str, Any]],
+    cfg_with_slider: dict[str, Any],
+    regime_score: float | None,
+    capital_base: float,
+) -> dict[str, float]:
+    """Replay trades through V2KillSwitchSimulator. Returns {pnl, dd}.
+
+    For each trade:
+      1. Ask simulator: would v2 take this trade? size_factor?
+      2. PnL contribution = 0 if skip else trade.pnl_usd * size_factor.
+      3. Update equity, track peak, compute running dd.
+      4. Feed close back to simulator (updates state for future trades).
+
+    pnl = final_equity - capital_base.
+    dd = max drawdown over the equity curve (most negative value).
+    """
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+
+    sim = V2KillSwitchSimulator(cfg_with_slider, regime_score, capital_base)
+    equity = capital_base
+    peak = capital_base
+    max_dd = 0.0
+
+    for trade in closed_trades:
+        skip, size_factor = sim.should_skip_or_reduce(
+            symbol=trade["symbol"], entry_ts=trade["entry_ts"],
+        )
+        raw_pnl = float(trade.get("pnl_usd") or 0)
+        pnl_contrib = 0.0 if skip else raw_pnl * size_factor
+
+        equity += pnl_contrib
+        peak = max(peak, equity)
+        if peak > 0:
+            dd = (equity - peak) / peak
+            max_dd = min(max_dd, dd)
+
+        sim.on_trade_close(
+            symbol=trade["symbol"], exit_ts=trade["exit_ts"],
+            pnl_usd=pnl_contrib, exit_reason=trade.get("exit_reason") or "",
+        )
+
+    return {"pnl": equity - capital_base, "dd": max_dd}
