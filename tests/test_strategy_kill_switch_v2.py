@@ -1841,3 +1841,65 @@ def test_init_db_creates_kill_switch_v2_baseline_table(tmp_path, monkeypatch):
     assert "baseline_sigma" in cols
     assert "trades_count" in cols
     assert "computed_at" in cols
+
+
+# ── B4a: compute_baseline_metrics ───────────────────────────────────────────
+
+
+def test_compute_baseline_metrics_empty_trades():
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    result = compute_baseline_metrics([])
+    assert result == {"wr": 0.0, "sigma": 0.0, "count": 0}
+
+
+def test_compute_baseline_metrics_all_wins():
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    trades = [{"pnl_usd": 10.0}, {"pnl_usd": 5.0}, {"pnl_usd": 1.0}]
+    result = compute_baseline_metrics(trades)
+    assert result["wr"] == pytest.approx(1.0)
+    assert result["sigma"] == pytest.approx(0.0)
+    assert result["count"] == 3
+
+
+def test_compute_baseline_metrics_all_losses():
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    trades = [{"pnl_usd": -10.0}, {"pnl_usd": -5.0}]
+    result = compute_baseline_metrics(trades)
+    assert result["wr"] == pytest.approx(0.0)
+    assert result["sigma"] == pytest.approx(0.0)
+    assert result["count"] == 2
+
+
+def test_compute_baseline_metrics_mixed_60_40():
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    import math
+    trades = (
+        [{"pnl_usd": 10.0}] * 6
+        + [{"pnl_usd": -5.0}] * 4
+    )
+    result = compute_baseline_metrics(trades)
+    assert result["wr"] == pytest.approx(0.6)
+    assert result["sigma"] == pytest.approx(math.sqrt(0.24))
+    assert result["count"] == 10
+
+
+def test_compute_baseline_metrics_skips_none_pnl():
+    """Trades with pnl_usd=None are excluded from the count."""
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    trades = [
+        {"pnl_usd": 10.0},
+        {"pnl_usd": None},
+        {"pnl_usd": -5.0},
+    ]
+    result = compute_baseline_metrics(trades)
+    assert result["wr"] == pytest.approx(0.5)
+    assert result["count"] == 2
+
+
+def test_compute_baseline_metrics_treats_zero_as_loss():
+    """Breakeven (pnl_usd=0.0) counts as a loss."""
+    from strategy.kill_switch_v2 import compute_baseline_metrics
+    trades = [{"pnl_usd": 10.0}, {"pnl_usd": 0.0}]
+    result = compute_baseline_metrics(trades)
+    assert result["wr"] == pytest.approx(0.5)
+    assert result["count"] == 2
