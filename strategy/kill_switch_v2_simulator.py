@@ -141,3 +141,51 @@ class V2KillSwitchSimulator:
 
         size_factor = portfolio_factor * per_symbol_factor * velocity_factor
         return (size_factor == 0.0, size_factor)
+
+    def on_trade_close(
+        self, symbol: str, exit_ts: str, pnl_usd: float, exit_reason: str,
+    ) -> None:
+        """Feed a closed trade back; updates baseline + velocity state."""
+        from datetime import datetime, timezone
+        from strategy.kill_switch_v2 import (
+            compute_baseline_metrics, detect_velocity_trigger,
+            compute_velocity_state, get_velocity_thresholds,
+        )
+
+        trade = {
+            "symbol": symbol, "exit_ts": exit_ts,
+            "pnl_usd": pnl_usd, "exit_reason": exit_reason,
+        }
+        self._all_trades.append(trade)
+        self._symbol_trades.setdefault(symbol, []).append(trade)
+
+        # Refresh baseline (deterministic during replay; no stale check needed)
+        self._baselines[symbol] = compute_baseline_metrics(self._symbol_trades[symbol])
+
+        # B1 velocity: only SL exits count toward the trigger
+        if exit_reason == "SL":
+            try:
+                now = datetime.fromisoformat(exit_ts)
+                if now.tzinfo is None:
+                    now = now.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                return  # Malformed timestamp; skip velocity update for this trade
+
+            sl_timestamps = [
+                t["exit_ts"] for t in self._symbol_trades[symbol]
+                if t.get("exit_reason") == "SL"
+            ]
+            thresholds = get_velocity_thresholds(self.cfg_eff)
+            triggered = detect_velocity_trigger(
+                sl_timestamps, now,
+                sl_count=thresholds["sl_count"],
+                window_hours=thresholds["window_hours"],
+            )
+            current_state = self._velocity_state.get(symbol, {
+                "velocity_cooldown_until": None,
+                "velocity_last_trigger_ts": None,
+            })
+            self._velocity_state[symbol] = compute_velocity_state(
+                current_state, triggered=triggered, now=now,
+                cooldown_hours=thresholds["cooldown_hours"],
+            )

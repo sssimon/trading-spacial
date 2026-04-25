@@ -329,3 +329,77 @@ def test_should_skip_or_reduce_composition_reduced_alert_quarter():
     # REDUCED portfolio (0.5) × ALERT per-symbol (0.5) × no velocity = 0.25
     assert skip is False
     assert factor == pytest.approx(0.25)
+
+
+# ── B4b.2: on_trade_close updates state ─────────────────────────────────────
+
+
+def test_on_trade_close_appends_trade_to_all_and_per_symbol():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+
+    sim = V2KillSwitchSimulator(_basic_cfg(), regime_score=None, capital_base=1000.0)
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T12:00:00+00:00",
+        pnl_usd=10.0, exit_reason="TP",
+    )
+    assert len(sim._all_trades) == 1
+    assert sim._all_trades[0]["pnl_usd"] == 10.0
+    assert len(sim._symbol_trades["BTCUSDT"]) == 1
+
+
+def test_on_trade_close_updates_baseline_for_symbol():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+
+    sim = V2KillSwitchSimulator(_basic_cfg(), regime_score=None, capital_base=1000.0)
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T12:00:00+00:00",
+        pnl_usd=10.0, exit_reason="TP",
+    )
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T13:00:00+00:00",
+        pnl_usd=-5.0, exit_reason="SL",
+    )
+    # 1 win, 1 loss → wr=0.5, count=2
+    assert sim._baselines["BTCUSDT"]["wr"] == pytest.approx(0.5)
+    assert sim._baselines["BTCUSDT"]["count"] == 2
+
+
+def test_on_trade_close_sl_triggers_velocity_when_threshold_met():
+    """3 SLs within 6h at slider=100 → velocity cooldown set."""
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+
+    cfg = _basic_cfg()
+    cfg["kill_switch"]["v2"]["aggressiveness"] = 100  # paranoid: sl_count=3, window=6h
+    sim = V2KillSwitchSimulator(cfg, regime_score=None, capital_base=1000.0)
+
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T10:00:00+00:00",
+        pnl_usd=-5.0, exit_reason="SL",
+    )
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T11:00:00+00:00",
+        pnl_usd=-5.0, exit_reason="SL",
+    )
+    sim.on_trade_close(
+        symbol="BTCUSDT", exit_ts="2026-04-25T12:00:00+00:00",
+        pnl_usd=-5.0, exit_reason="SL",
+    )
+    # Cooldown should be set
+    state = sim._velocity_state.get("BTCUSDT", {})
+    assert state.get("velocity_cooldown_until") is not None
+
+
+def test_on_trade_close_tp_does_not_set_velocity():
+    from strategy.kill_switch_v2_simulator import V2KillSwitchSimulator
+
+    cfg = _basic_cfg()
+    cfg["kill_switch"]["v2"]["aggressiveness"] = 100
+    sim = V2KillSwitchSimulator(cfg, regime_score=None, capital_base=1000.0)
+    # Three TPs (not SLs) → no velocity trigger regardless
+    for i in range(3):
+        sim.on_trade_close(
+            symbol="BTCUSDT",
+            exit_ts=f"2026-04-25T{10+i:02d}:00:00+00:00",
+            pnl_usd=5.0, exit_reason="TP",
+        )
+    assert "BTCUSDT" not in sim._velocity_state or not sim._velocity_state["BTCUSDT"].get("velocity_cooldown_until")
