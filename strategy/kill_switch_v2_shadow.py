@@ -294,6 +294,79 @@ def _is_baseline_stale(
     return (now - parsed) > timedelta(days=float(stale_days))
 
 
+def _evaluate_per_symbol_tier_with_telemetry(
+    symbol: str, cfg: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Evaluate B4a per-symbol tier (NORMAL or ALERT) with full telemetry.
+
+    Lazy-refresh logic: if the cached baseline is missing or older than
+    `baseline_stale_days`, recompute from positions and upsert. If fresh,
+    reuse cached.
+
+    Returns:
+        (tier, telemetry) where telemetry contains the inputs the dashboard
+        needs to explain the decision (baseline_wr, sigma, rolling_wr,
+        sigma_multiplier, trades_count, baseline_stale, status="ok").
+
+    This function may raise on DB errors / malformed data — caller is
+    responsible for fail-open wrapping.
+    """
+    from strategy.kill_switch_v2 import (
+        compute_baseline_metrics,
+        evaluate_per_symbol_tier,
+        get_baseline_sigma_multiplier,
+    )
+    from health import compute_rolling_metrics_from_trades
+
+    now = _now()
+
+    v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+    min_trades = int(v2_cfg.get("baseline_min_trades", 100))
+    stale_days = float(v2_cfg.get("baseline_stale_days", 7))
+
+    closed_trades = _load_closed_trades_for_symbol(symbol)
+
+    cached = _load_baseline(symbol)
+    baseline_was_stale = cached is None or _is_baseline_stale(
+        cached.get("computed_at") if cached else None, stale_days, now,
+    )
+
+    if baseline_was_stale:
+        baseline = compute_baseline_metrics(closed_trades)
+        _upsert_baseline(symbol, baseline, now=now)
+    else:
+        baseline = {
+            "wr": cached["wr"],
+            "sigma": cached["sigma"],
+            "count": cached["count"],
+        }
+
+    rolling = compute_rolling_metrics_from_trades(closed_trades, now=now)
+    rolling_wr_20 = rolling.get("win_rate_20_trades")
+
+    sigma_multiplier = get_baseline_sigma_multiplier(cfg)
+
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=rolling_wr_20,
+        baseline=baseline,
+        sigma_multiplier=sigma_multiplier,
+        trades_count=baseline["count"],
+        min_trades=min_trades,
+    )
+
+    telemetry = {
+        "tier": tier,
+        "status": "ok",
+        "baseline_wr": baseline["wr"],
+        "baseline_sigma": baseline["sigma"],
+        "rolling_wr_20": rolling_wr_20,
+        "sigma_multiplier": sigma_multiplier,
+        "trades_count": baseline["count"],
+        "baseline_stale": baseline_was_stale,
+    }
+    return tier, telemetry
+
+
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],

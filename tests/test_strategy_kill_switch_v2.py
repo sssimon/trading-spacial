@@ -2153,3 +2153,233 @@ def test_is_baseline_stale_old_returns_true():
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
     old = (now - timedelta(days=10)).isoformat()
     assert _is_baseline_stale(old, stale_days=7, now=now) is True
+
+
+# ── B4a: orchestration helper ───────────────────────────────────────────────
+
+
+def _seed_n_closed_trades(conn, symbol: str, n: int, win_rate: float):
+    """Helper: insert N closed trades with a target win rate."""
+    wins = int(round(n * win_rate))
+    losses = n - wins
+    for i in range(wins):
+        ts = f"2026-04-{(i % 28) + 1:02d}T12:00:00+00:00"
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, 10.0)",
+            (symbol, ts, ts),
+        )
+    for i in range(losses):
+        ts = f"2026-04-{(i % 28) + 1:02d}T13:00:00+00:00"
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0)",
+            (symbol, ts, ts),
+        )
+
+
+def test_evaluate_per_symbol_tier_with_telemetry_below_min_trades(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """count<100 → NORMAL; baseline still computed and persisted; status=ok."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import (
+        _evaluate_per_symbol_tier_with_telemetry, _load_baseline,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sh, "_now", lambda: now)
+
+    conn = btc_api.get_db()
+    try:
+        _seed_n_closed_trades(conn, "BTCUSDT", n=50, win_rate=0.5)
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    tier, telemetry = _evaluate_per_symbol_tier_with_telemetry("BTCUSDT", cfg)
+
+    assert tier == "NORMAL"
+    assert telemetry["status"] == "ok"
+    assert telemetry["trades_count"] == 50
+    persisted = _load_baseline("BTCUSDT")
+    assert persisted is not None
+    assert persisted["count"] == 50
+
+
+def test_evaluate_per_symbol_tier_with_telemetry_alert_fires(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """120 trades historically wr=0.5; rolling_20 wr=0.0 → ALERT at slider=50 (N=2)."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _evaluate_per_symbol_tier_with_telemetry
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sh, "_now", lambda: now)
+
+    conn = btc_api.get_db()
+    try:
+        # 100 historical trades at WR=0.5 in March (so they don't dominate rolling-20)
+        for _ in range(50):
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0)",
+            )
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0)",
+            )
+        # Last 20 trades all losses (rolling_wr=0.0). Use a later date so they slice.
+        for i in range(20):
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-04-20T10:00:00+00:00', ?, -5.0)",
+                (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    tier, telemetry = _evaluate_per_symbol_tier_with_telemetry("BTCUSDT", cfg)
+
+    assert tier == "ALERT"
+    assert telemetry["status"] == "ok"
+    assert telemetry["rolling_wr_20"] == pytest.approx(0.0)
+    assert telemetry["trades_count"] >= 100
+
+
+def test_evaluate_per_symbol_tier_with_telemetry_uses_cached_baseline_when_fresh(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """Fresh baseline (≤7d old) is reused; trades_count reflects the cache, not a recompute."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import (
+        _evaluate_per_symbol_tier_with_telemetry, _upsert_baseline,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sh, "_now", lambda: now)
+
+    _upsert_baseline(
+        "BTCUSDT",
+        {"wr": 0.7, "sigma": 0.458, "count": 150},
+        now=now - timedelta(days=1),
+    )
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    tier, telemetry = _evaluate_per_symbol_tier_with_telemetry("BTCUSDT", cfg)
+
+    assert tier == "NORMAL"
+    assert telemetry["baseline_stale"] is False
+    assert telemetry["trades_count"] == 150
+    assert telemetry["status"] == "ok"
+
+
+def test_evaluate_per_symbol_tier_with_telemetry_recomputes_when_stale(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """Stale baseline (>7d old) triggers recompute; computed_at moves forward."""
+    import btc_api
+    from strategy.kill_switch_v2_shadow import (
+        _evaluate_per_symbol_tier_with_telemetry, _load_baseline, _upsert_baseline,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sh, "_now", lambda: now)
+
+    _upsert_baseline(
+        "BTCUSDT",
+        {"wr": 0.5, "sigma": 0.5, "count": 50},
+        now=now - timedelta(days=10),
+    )
+    conn = btc_api.get_db()
+    try:
+        for i in range(100):
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
+                "'2026-04-20T10:00:00+00:00', ?, 10.0)",
+                (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    tier, telemetry = _evaluate_per_symbol_tier_with_telemetry("BTCUSDT", cfg)
+
+    assert telemetry["baseline_stale"] is True
+    assert telemetry["baseline_wr"] == pytest.approx(1.0)
+    assert telemetry["trades_count"] == 100
+    persisted = _load_baseline("BTCUSDT")
+    assert persisted["computed_at"] == now.isoformat()
