@@ -19,7 +19,9 @@
     "auto_recovery_enabled": true,
     "v2": {
       "auto_calibrator": {
-        "safety_net_days": 30
+        "safety_net_days": 30,
+        "backtest_window_days": 365,
+        "dd_target": -0.10
       }
     }
   },
