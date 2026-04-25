@@ -31,6 +31,7 @@ def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any
                FROM positions
                WHERE status = 'closed'
                  AND exit_ts IS NOT NULL
+                 AND pnl_usd IS NOT NULL
                  AND exit_ts >= ?
                ORDER BY entry_ts""",
             (cutoff,),
@@ -129,6 +130,15 @@ def run_optimization_v2(
         "backtest_window_days", _DEFAULT_BACKTEST_WINDOW_DAYS,
     ))
     dd_target = float(auto_cal.get("dd_target", _DEFAULT_DD_TARGET))
+    if dd_target > 0:
+        # DD is always negative or zero; a positive target makes every slider
+        # trivially feasible and would silently approve recommendations that
+        # blow any meaningful drawdown limit. Reject explicitly so a config
+        # typo (sign error) doesn't render the optimizer unsafe.
+        raise ValueError(
+            f"dd_target must be <= 0 (got {dd_target}); "
+            "fix kill_switch.v2.auto_calibrator.dd_target in config",
+        )
     capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
 
     closed = _load_closed_positions_window(window_days, now)

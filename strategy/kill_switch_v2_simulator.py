@@ -10,7 +10,10 @@ interpolations.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger("kill_switch_v2_simulator")
 
 
 class V2KillSwitchSimulator:
@@ -99,7 +102,13 @@ class V2KillSwitchSimulator:
         try:
             now = datetime.fromisoformat(entry_ts)
         except (TypeError, ValueError):
-            # Conservative: malformed entry_ts → treat as skip
+            # Conservative: malformed entry_ts → treat as skip. Logged so a
+            # systemic data-corruption issue doesn't masquerade as "no
+            # opportunities" silently across an entire backtest replay.
+            log.warning(
+                "V2 simulator: skipping trade for symbol=%s due to malformed "
+                "entry_ts=%r (treated as skip)", symbol, entry_ts,
+            )
             return (True, 0.0)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
@@ -169,7 +178,14 @@ class V2KillSwitchSimulator:
                 if now.tzinfo is None:
                     now = now.replace(tzinfo=timezone.utc)
             except (TypeError, ValueError):
-                return  # Malformed timestamp; skip velocity update for this trade
+                # Malformed exit_ts on an SL trade silently masks every
+                # velocity trigger that depends on it. Log so systemic format
+                # drift doesn't hide all velocity cooldowns silently.
+                log.warning(
+                    "V2 simulator: skipping velocity update for symbol=%s due "
+                    "to malformed SL exit_ts=%r", symbol, exit_ts,
+                )
+                return
 
             sl_timestamps = [
                 t["exit_ts"] for t in self._symbol_trades[symbol]
