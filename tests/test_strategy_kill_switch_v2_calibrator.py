@@ -415,3 +415,107 @@ def test_post_recalibrate_returns_recommendation_id(tmp_path, monkeypatch):
         assert row[1] == "no_feasible"
     finally:
         btc_api.app.dependency_overrides.clear()
+
+
+# ── B4b.1: GET /kill_switch/recommendations ─────────────────────────────────
+
+
+def test_get_recommendations_empty_returns_empty_list(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.get("/kill_switch/recommendations")
+        assert resp.status_code == 200
+        assert resp.json() == []
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_get_recommendations_returns_rows_ordered_desc(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    earlier = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    _persist_recommendation(
+        triggered_by=["safety_net"], result=result, now=earlier,
+    )
+    _persist_recommendation(
+        triggered_by=["manual"], result=result, now=later,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.get("/kill_switch/recommendations")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 2
+        # Latest first
+        assert rows[0]["ts"] == later.isoformat()
+        assert rows[0]["triggered_by"] == ["manual"]
+        assert rows[1]["ts"] == earlier.isoformat()
+        assert rows[1]["triggered_by"] == ["safety_net"]
+        # Report block parsed
+        assert rows[0]["report"]["stub"] is True
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_get_recommendations_filter_by_status(tmp_path, monkeypatch):
+    """status=no_feasible filter returns only matching rows."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import (
+        _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    result = run_optimization_stub({})
+    _persist_recommendation(
+        triggered_by=["manual"], result=result, now=now,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp_match = client.get(
+            "/kill_switch/recommendations?status=no_feasible",
+        )
+        assert resp_match.status_code == 200
+        assert len(resp_match.json()) == 1
+
+        resp_other = client.get(
+            "/kill_switch/recommendations?status=applied",
+        )
+        assert resp_other.status_code == 200
+        assert resp_other.json() == []
+    finally:
+        btc_api.app.dependency_overrides.clear()

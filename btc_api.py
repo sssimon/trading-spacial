@@ -1674,6 +1674,71 @@ def kill_switch_recalibrate():
     return {"recommendation_id": rec_id, "status": result["status"]}
 
 
+@app.get(
+    "/kill_switch/recommendations",
+    summary="List auto-calibrator recommendations",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_list_recommendations(
+    since: Optional[str] = Query(
+        None, description="ISO timestamp; only rows with ts >= since",
+    ),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status (pending, applied, ignored, "
+                    "superseded, no_feasible)",
+    ),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """List auto-calibrator recommendations, latest first."""
+    import json as _json
+
+    conn = get_db()
+    try:
+        sql = (
+            "SELECT id, ts, triggered_by, slider_value, projected_pnl, "
+            "projected_dd, status, applied_ts, applied_by, report_json "
+            "FROM kill_switch_recommendations WHERE 1=1"
+        )
+        params: list = []
+        if since:
+            sql += " AND ts >= ?"
+            params.append(since)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(int(limit))
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for r in rows:
+        d = {
+            "id": r[0],
+            "ts": r[1],
+            "triggered_by": r[2],
+            "slider_value": r[3],
+            "projected_pnl": r[4],
+            "projected_dd": r[5],
+            "status": r[6],
+            "applied_ts": r[7],
+            "applied_by": r[8],
+            "report": None,
+        }
+        try:
+            d["triggered_by"] = _json.loads(d["triggered_by"])
+        except (TypeError, ValueError):
+            pass
+        try:
+            d["report"] = _json.loads(r[9])
+        except (TypeError, ValueError):
+            d["report"] = None
+        result.append(d)
+    return result
+
+
 @app.get("/signals", summary="Historial de escaneos / señales")
 def list_signals(
     limit:        int             = Query(50,    ge=1, le=500),
