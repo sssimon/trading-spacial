@@ -2554,3 +2554,167 @@ def test_emit_shadow_backwards_compat_b1_b2_b3_still_pass(
     assert reasons["regime"]["label"] == "BULL"
     assert reasons["per_symbol"]["tier"] == "NORMAL"
     assert rows[0]["velocity_active"] is False
+
+
+# ── B4a: review follow-ups — hardening tests ────────────────────────────────
+
+
+def test_evaluate_per_symbol_tier_at_exact_min_trades_boundary_is_alert_eligible():
+    """trades_count == min_trades is NOT below min — strict `<` semantics.
+
+    Pins the boundary: a symbol with exactly 100 trades enters the baseline
+    path (not the fallback). If a future refactor changes `<` to `<=`, this
+    test fails.
+    """
+    from strategy.kill_switch_v2 import evaluate_per_symbol_tier
+    baseline = {"wr": 0.5, "sigma": 0.5, "count": 100}
+    # rolling_wr=0.0 → well below threshold → ALERT (not blocked by fallback)
+    tier = evaluate_per_symbol_tier(
+        rolling_wr_20=0.0, baseline=baseline, sigma_multiplier=2.0,
+        trades_count=100, min_trades=100,
+    )
+    assert tier == "ALERT"
+
+
+def test_evaluate_per_symbol_tier_with_telemetry_cached_count_gates_decision(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """Cached baseline count<100 gates the tier even if live closed_trades>=100.
+
+    Pins the semantic that `_evaluate_per_symbol_tier_with_telemetry` passes
+    `baseline["count"]` (cached) — not the live `len(closed_trades)` — into
+    `evaluate_per_symbol_tier`. A future refactor to use live count would
+    silently shift tiering behavior.
+    """
+    import btc_api
+    from strategy.kill_switch_v2_shadow import (
+        _evaluate_per_symbol_tier_with_telemetry, _upsert_baseline,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    import strategy.kill_switch_v2_shadow as sh
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sh, "_now", lambda: now)
+
+    # Seed cached baseline with count=50 (below min) but FRESH (1 day ago)
+    _upsert_baseline(
+        "BTCUSDT",
+        {"wr": 0.5, "sigma": 0.5, "count": 50},
+        now=now - timedelta(days=1),
+    )
+
+    # Insert 200 live closed trades — enough that a recompute would give count>=100
+    conn = btc_api.get_db()
+    try:
+        for i in range(200):
+            ts_h = i % 24
+            ts = f"2026-04-20T{ts_h:02d}:00:00+00:00"
+            conn.execute(
+                "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0)",
+                (ts, ts),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+        "baseline_min_trades": 100,
+        "baseline_stale_days": 7,
+    }}}
+    tier, telemetry = _evaluate_per_symbol_tier_with_telemetry("BTCUSDT", cfg)
+
+    # Cached count=50 < min_trades=100 → fallback to NORMAL even though
+    # rolling_wr_20=0 is far below baseline_wr=0.5.
+    assert tier == "NORMAL"
+    assert telemetry["trades_count"] == 50, "cached count must gate the decision"
+    assert telemetry["baseline_stale"] is False
+
+
+def test_emit_shadow_per_symbol_fail_open_telemetry_keys_match_success_path(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """The fail-open telemetry sentinel must have the exact same key set as
+    the success-path telemetry. A dropped key would break dashboard joins.
+    """
+    import btc_api, observability
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+    import strategy.kill_switch_v2_shadow as sh
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
+
+    # Capture success-path keys via a normal call
+    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
+    import json
+    success_keys = set(json.loads(rows[0]["reasons_json"])["per_symbol"].keys())
+
+    # Reset DB to capture fail-open keys
+    btc_api.init_db()
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated per-symbol eval failure")
+    monkeypatch.setattr(sh, "_evaluate_per_symbol_tier_with_telemetry", _boom)
+
+    emit_shadow_decision(symbol="ETHUSDT", cfg={})
+    rows2 = observability.query_decisions(symbol="ETHUSDT", engine="v2_shadow")
+    fail_keys = set(json.loads(rows2[0]["reasons_json"])["per_symbol"].keys())
+
+    assert success_keys == fail_keys, (
+        f"fail-open sentinel keys {fail_keys} must equal success keys {success_keys}"
+    )
+
+
+def test_upsert_baseline_raises_on_missing_keys(tmp_path, monkeypatch):
+    """_upsert_baseline must raise (not silently coerce) when required keys missing.
+
+    Guards against an upstream bug producing {} silently persisting (0.0, 0.0, 0).
+    """
+    import btc_api
+    from strategy.kill_switch_v2_shadow import _upsert_baseline
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(KeyError, match="missing required keys"):
+        _upsert_baseline("BTCUSDT", {}, now=now)
+
+    with pytest.raises(KeyError, match="missing required keys"):
+        _upsert_baseline("BTCUSDT", {"wr": 0.5}, now=now)
+
+
+def test_is_baseline_stale_future_timestamp_returns_true():
+    """A future computed_at is treated as stale to guard against clock skew."""
+    from strategy.kill_switch_v2_shadow import _is_baseline_stale
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    future = (now + timedelta(days=1)).isoformat()
+    assert _is_baseline_stale(future, stale_days=7, now=now) is True

@@ -251,8 +251,20 @@ def _load_baseline(symbol: str) -> dict[str, Any] | None:
 
 
 def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
-    """Upsert per-symbol baseline. computed_at is set to now.isoformat()."""
+    """Upsert per-symbol baseline. computed_at is set to now.isoformat().
+
+    Validates that baseline has the three required keys; raises KeyError on
+    missing keys instead of silently coercing to 0.0 (which would mask an
+    upstream bug producing an empty baseline dict).
+    """
     import btc_api
+
+    missing = [k for k in ("wr", "sigma", "count") if k not in baseline]
+    if missing:
+        raise KeyError(
+            f"_upsert_baseline: baseline dict missing required keys: {missing}"
+        )
+
     conn = btc_api.get_db()
     try:
         conn.execute(
@@ -266,9 +278,9 @@ def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
                  computed_at = excluded.computed_at""",
             (
                 symbol,
-                float(baseline.get("wr", 0.0)),
-                float(baseline.get("sigma", 0.0)),
-                int(baseline.get("count", 0)),
+                float(baseline["wr"]),
+                float(baseline["sigma"]),
+                int(baseline["count"]),
                 now.isoformat(),
             ),
         )
@@ -280,7 +292,13 @@ def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
 def _is_baseline_stale(
     computed_at: str | None, stale_days: float, now,
 ) -> bool:
-    """Return True if the baseline is missing, malformed, or older than stale_days."""
+    """Return True if the baseline is missing, malformed, in the future, or
+    older than stale_days.
+
+    A future timestamp (parsed > now) is treated as stale to guard against
+    clock skew or a buggy writer; otherwise the bogus future timestamp would
+    suppress recompute indefinitely.
+    """
     from datetime import datetime, timedelta, timezone
 
     if not computed_at:
@@ -290,6 +308,8 @@ def _is_baseline_stale(
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
+        return True
+    if parsed > now:
         return True
     return (now - parsed) > timedelta(days=float(stale_days))
 
