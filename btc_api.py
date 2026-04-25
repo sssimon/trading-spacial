@@ -1035,6 +1035,24 @@ def init_db():
             computed_at    TEXT NOT NULL
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS kill_switch_recommendations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              TEXT NOT NULL,
+            triggered_by    TEXT NOT NULL,
+            slider_value    REAL,
+            projected_pnl   REAL,
+            projected_dd    REAL,
+            status          TEXT NOT NULL,
+            applied_ts      TEXT,
+            applied_by      TEXT,
+            report_json     TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_recommendations_ts
+            ON kill_switch_recommendations(ts)
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
