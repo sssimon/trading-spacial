@@ -27,6 +27,9 @@ _DEFAULT_VELOCITY_COOLDOWN_HOURS = 4.0
 _DEFAULT_REGIME_BULL_BONUS = 10.0
 _DEFAULT_REGIME_BEAR_PENALTY = 10.0
 _DEFAULT_REGIME_ADJUSTMENT_ENABLED = True
+_DEFAULT_BASELINE_SIGMA_MULTIPLIER = {"min": 3.0, "max": 1.0}
+_DEFAULT_BASELINE_MIN_TRADES = 100
+_DEFAULT_BASELINE_STALE_DAYS = 7
 
 
 def interpolate_threshold(slider: float, t_min: float, t_max: float) -> float:
@@ -384,3 +387,21 @@ def compute_baseline_metrics(closed_trades: list[dict[str, Any]]) -> dict[str, A
     wr = wins / count
     sigma = math.sqrt(wr * (1.0 - wr))
     return {"wr": wr, "sigma": sigma, "count": count}
+
+
+def get_baseline_sigma_multiplier(cfg: dict[str, Any]) -> float:
+    """Slider-derived sigma multiplier (N) for ALERT threshold.
+
+    Reuses interpolate_threshold; range default {min: 3.0, max: 1.0}.
+    slider=0   → 3.0 (laxo, only extreme events trigger ALERT).
+    slider=50  → 2.0 (default 2-sigma, 95% CI).
+    slider=100 → 1.0 (paranoid, mild deviation triggers).
+    """
+    v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+    slider = v2_cfg.get("aggressiveness", _DEFAULT_AGGRESSIVENESS)
+    thresholds_cfg = v2_cfg.get("thresholds", {}) or {}
+    sigma_range = (
+        thresholds_cfg.get("baseline_sigma_multiplier")
+        or _DEFAULT_BASELINE_SIGMA_MULTIPLIER
+    )
+    return interpolate_threshold(slider, sigma_range["min"], sigma_range["max"])

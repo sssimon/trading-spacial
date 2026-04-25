@@ -1903,3 +1903,45 @@ def test_compute_baseline_metrics_treats_zero_as_loss():
     result = compute_baseline_metrics(trades)
     assert result["wr"] == pytest.approx(0.5)
     assert result["count"] == 2
+
+
+# ── B4a: get_baseline_sigma_multiplier ──────────────────────────────────────
+
+
+def test_get_baseline_sigma_multiplier_slider_0_laxo():
+    from strategy.kill_switch_v2 import get_baseline_sigma_multiplier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 0,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+    }}}
+    assert get_baseline_sigma_multiplier(cfg) == pytest.approx(3.0)
+
+
+def test_get_baseline_sigma_multiplier_slider_50_default():
+    from strategy.kill_switch_v2 import get_baseline_sigma_multiplier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 50,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+    }}}
+    assert get_baseline_sigma_multiplier(cfg) == pytest.approx(2.0)
+
+
+def test_get_baseline_sigma_multiplier_slider_100_paranoid():
+    from strategy.kill_switch_v2 import get_baseline_sigma_multiplier
+    cfg = {"kill_switch": {"v2": {
+        "aggressiveness": 100,
+        "thresholds": {
+            "baseline_sigma_multiplier": {"min": 3.0, "max": 1.0},
+        },
+    }}}
+    assert get_baseline_sigma_multiplier(cfg) == pytest.approx(1.0)
+
+
+def test_get_baseline_sigma_multiplier_missing_cfg_uses_defaults():
+    from strategy.kill_switch_v2 import get_baseline_sigma_multiplier
+    # Empty cfg → defaults (slider=50, range 3.0..1.0) → 2.0
+    assert get_baseline_sigma_multiplier({}) == pytest.approx(2.0)
