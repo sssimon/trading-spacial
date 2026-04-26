@@ -614,18 +614,6 @@ def reactivate_symbol(
 #  ORCHESTRATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_manual_override(symbol: str) -> bool:
-    conn = _conn()
-    try:
-        row = conn.execute(
-            "SELECT manual_override FROM symbol_health WHERE symbol=?",
-            (symbol,),
-        ).fetchone()
-    finally:
-        conn.close()
-    return bool(row[0]) if row else False
-
-
 def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None = None) -> str:
     """Compute metrics + evaluate state + persist. Returns the resulting state."""
     ks_cfg = (cfg.get("kill_switch") or {})
@@ -698,12 +686,18 @@ def evaluate_all_symbols(cfg: dict[str, Any], now: datetime | None = None) -> di
 
 
 def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
-    """Return `size` scaled by `reduce_size_factor` if the symbol is in REDUCED state.
+    """Return `size` scaled by the kill-switch tier factor.
 
-    Returns `size` unchanged for NORMAL/ALERT/PAUSED states, or if kill_switch is
-    disabled. Callers should use this at position-open time (btc_scanner.scan)
-    or at backtest-sim time (backtest.simulate_strategy) to halve risk on
-    symbols that have recent losses.
+    Scaling rules:
+      - REDUCED → size * `kill_switch.reduce_size_factor` (default 0.5)
+      - PROBATION → size * `kill_switch.v2.probation.size_factor`
+        (default 0.5; falls back to `reduce_size_factor` if absent)
+      - NORMAL/ALERT/PAUSED → size unchanged
+      - kill_switch.enabled=False → size unchanged
+
+    Callers should use this at position-open time (btc_scanner.scan) or at
+    backtest-sim time (backtest.simulate_strategy) to halve risk on symbols
+    that are in a degraded tier.
 
     Safe on any failure: swallows exceptions (returns original size). The
     kill-switch must never block a trade by raising in this hot path.
