@@ -116,3 +116,95 @@ def test_kill_switch_disabled_in_config_skips_evaluation(tmp_db, monkeypatch):
     finally:
         conn.close()
     assert rows[0] == 0
+
+
+# ── B5 full lifecycle: PAUSED → PROBATION → NORMAL ──────────────────────────
+
+
+def test_paused_reactivate_to_probation_then_complete_after_n_trades(tmp_db):
+    """End-to-end: reactivate → PROBATION (13 trades) → 13 wins → NORMAL."""
+    from datetime import datetime, timezone, timedelta
+    import btc_api
+    from health import (
+        reactivate_symbol, trigger_health_evaluation, get_symbol_state,
+    )
+
+    # Seed 25 closed losing trades (so total >= min_trades_for_eval and pnl_30d > 0
+    # via subsequent wins). Using losses dated > 30 days ago to keep pnl_30d clean.
+    conn = btc_api.get_db()
+    try:
+        for i in range(25):
+            ts = (datetime.now(timezone.utc) - timedelta(days=180 + i)).isoformat()
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 95.0, ?, 'SL', -5.0, -0.05)""",
+                (ts, ts),
+            )
+        # Insert PAUSED row for BTC, set 15 days ago
+        state_since = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json)
+               VALUES ('BTC', 'PAUSED', ?, ?, '{}')""",
+            (state_since, state_since),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {
+        "enabled": True, "min_trades_for_eval": 20,
+        "alert_win_rate_threshold": 0.15, "reduce_size_factor": 0.5,
+        "pause_months_consecutive": 3, "auto_recovery_enabled": True,
+        "v2": {"probation": {
+            "trades_base": 10, "trades_per_pause_day": 0.2,
+            "regression_wr_threshold": 0.10, "regression_window_trades": 10,
+            "paused_to_probation_days": 14, "size_factor": 0.5,
+        }},
+    }}
+
+    # Manual reactivate → PROBATION with trades_remaining=13 (15 days * 0.2 + 10)
+    reactivate_symbol("BTC", reason="manual", cfg=cfg)
+    assert get_symbol_state("BTC") == "PROBATION"
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            "SELECT probation_trades_remaining FROM symbol_health WHERE symbol='BTC'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == 13
+
+    # Simulate 13 winning closed trades + trade hook each time.
+    # After the 13th, counter hits 0 → next eval transitions to NORMAL.
+    for i in range(13):
+        ts = (datetime.now(timezone.utc) - timedelta(hours=24 - i)).isoformat()
+        conn = btc_api.get_db()
+        try:
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                (ts, ts),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        trigger_health_evaluation("BTC", cfg)
+
+    # After 13 wins, state must be NORMAL and probation columns NULL
+    assert get_symbol_state("BTC") == "NORMAL"
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT probation_trades_remaining, probation_started_at,
+                      paused_days_at_entry FROM symbol_health WHERE symbol='BTC'"""
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] is None
+    assert row[1] is None
+    assert row[2] is None
