@@ -106,6 +106,49 @@ def should_run_event_cascade(
     return symbols_in_alert_count >= threshold
 
 
+def is_rate_limit_ok(
+    last_run_ts: str | None,
+    now,
+    max_per_day_count: int,
+    today_count: int,
+    min_cooldown_hours: float,
+    trigger_kind: str,
+) -> bool:
+    """Whether a recalibration may run.
+
+    Bypass for trigger_kind in {"manual", "safety_net"}: always True.
+    Otherwise:
+      - last_run_ts None → True (no prior run)
+      - elapsed < cooldown_hours → False
+      - today_count >= max_per_day_count → False
+      - else → True
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if trigger_kind in ("manual", "safety_net"):
+        return True
+
+    if not last_run_ts:
+        return True
+
+    try:
+        parsed = datetime.fromisoformat(last_run_ts)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        # Malformed ts → treat as no prior run (conservative for rate limit)
+        return True
+
+    elapsed = now - parsed
+    if elapsed < timedelta(hours=float(min_cooldown_hours)):
+        return False
+
+    if today_count >= int(max_per_day_count):
+        return False
+
+    return True
+
+
 def build_no_feasible_report(reason: str, now) -> dict[str, Any]:
     """Construct the report payload for stub no_feasible runs.
 

@@ -1089,3 +1089,81 @@ def test_should_run_event_cascade_at_threshold_returns_true():
 def test_should_run_event_cascade_above_threshold_returns_true():
     from strategy.kill_switch_v2_calibrator import should_run_event_cascade
     assert should_run_event_cascade(symbols_in_alert_count=5, threshold=3) is True
+
+
+# ── B4b.3: is_rate_limit_ok ─────────────────────────────────────────────────
+
+
+def test_is_rate_limit_ok_manual_bypasses():
+    """Manual trigger always passes regardless of cooldown / max_per_day."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now).isoformat()  # just ran
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=5,
+        min_cooldown_hours=6.0, trigger_kind="manual",
+    ) is True
+
+
+def test_is_rate_limit_ok_safety_net_bypasses():
+    """safety_net guarantees a tick — bypasses cooldown."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert is_rate_limit_ok(
+        last_run_ts=now.isoformat(), now=now,
+        max_per_day_count=1, today_count=5,
+        min_cooldown_hours=6.0, trigger_kind="safety_net",
+    ) is True
+
+
+def test_is_rate_limit_ok_no_prior_run_returns_true():
+    """First-ever run for non-bypass trigger → True."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert is_rate_limit_ok(
+        last_run_ts=None, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is True
+
+
+def test_is_rate_limit_ok_within_cooldown_returns_false():
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    # 2h ago < 6h cooldown
+    last_run = (now - timedelta(hours=2)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is False
+
+
+def test_is_rate_limit_ok_after_cooldown_returns_true():
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now - timedelta(hours=7)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is True
+
+
+def test_is_rate_limit_ok_max_per_day_reached_returns_false():
+    """Even after cooldown elapsed, today_count >= max_per_day blocks."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now - timedelta(hours=10)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=1,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is False
