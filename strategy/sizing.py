@@ -20,13 +20,24 @@ def _score_multiplier(score: int) -> float:
 def _health_multiplier(health_tier: str, cfg: dict[str, Any]) -> float:
     """Returns multiplier based on kill switch tier.
 
-    PAUSED -> 0 (no trade). REDUCED/PROBATION -> configured factor. NORMAL/ALERT -> 1.0.
+    PAUSED -> 0 (no trade). REDUCED -> reduce_size_factor.
+    PROBATION -> v2.probation.size_factor (falls back to reduce_size_factor).
+    NORMAL/ALERT -> 1.0.
     """
     if health_tier == "PAUSED":
         return 0.0
-    if health_tier in ("REDUCED", "PROBATION"):
+    if health_tier == "REDUCED":
         ks_cfg = cfg.get("kill_switch", {})
         return float(ks_cfg.get("reduce_size_factor", 0.5))
+    if health_tier == "PROBATION":
+        # Mirrors apply_reduce_factor's lookup order in health.py.
+        ks_cfg = cfg.get("kill_switch", {})
+        v2_cfg = (ks_cfg.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        return float(prob_cfg.get(
+            "size_factor",
+            ks_cfg.get("reduce_size_factor", 0.5),
+        ))
     return 1.0
 
 

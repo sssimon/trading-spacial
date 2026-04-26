@@ -176,3 +176,49 @@ def test_current_month_in_progress_is_excluded_from_streak(tmp_db):
     finally:
         conn.close()
     assert metrics["months_negative_consecutive"] == 3  # not 4
+
+
+# ── B5: win_rate_10_trades ──────────────────────────────────────────────────
+
+
+def test_win_rate_10_trades_empty():
+    """No trades → win_rate_10_trades is None (mirrors win_rate_20_trades semantics)."""
+    from datetime import datetime, timezone
+    from health import compute_rolling_metrics_from_trades
+    metrics = compute_rolling_metrics_from_trades([], now=datetime(2026, 6, 15, tzinfo=timezone.utc))
+    assert metrics["win_rate_10_trades"] is None
+
+
+def test_win_rate_10_trades_uses_last_ten():
+    """win_rate_10_trades = winners in last 10 trades / 10."""
+    from datetime import datetime, timezone
+    from health import compute_rolling_metrics_from_trades
+    # 12 trades total: first 2 wins, last 10 = 3 wins / 7 losses → 0.3
+    trades = []
+    for i in range(2):
+        trades.append({"exit_ts": f"2026-04-{1+i:02d}T12:00:00+00:00", "pnl_usd": 50.0})
+    for i in range(10):
+        pnl = 50.0 if i < 3 else -10.0
+        trades.append({"exit_ts": f"2026-05-{1+i:02d}T12:00:00+00:00", "pnl_usd": pnl})
+    metrics = compute_rolling_metrics_from_trades(
+        trades, now=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    assert metrics["win_rate_10_trades"] == 0.3
+
+
+def test_win_rate_10_trades_dbwrapper_coerces_none_to_zero(tmp_path, monkeypatch):
+    """compute_rolling_metrics (DB wrapper) coerces None → 0.0 same as for win_rate_20_trades."""
+    import btc_api
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    from datetime import datetime, timezone
+    from health import compute_rolling_metrics
+    conn = btc_api.get_db()
+    try:
+        metrics = compute_rolling_metrics("BTC", conn, now=datetime(2026, 6, 15, tzinfo=timezone.utc))
+    finally:
+        conn.close()
+    assert metrics["win_rate_10_trades"] == 0.0

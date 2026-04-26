@@ -48,7 +48,7 @@ def test_cli_imports_and_runs(tmp_db):
     rc = mod.main()
 
     assert rc == 0
-    assert get_symbol_state("BTC") == "NORMAL"
+    assert get_symbol_state("BTC") == "PROBATION"
 
 
 def test_cli_accepts_lowercase_symbol(tmp_db):
@@ -68,4 +68,4 @@ def test_cli_accepts_lowercase_symbol(tmp_db):
     rc = mod.main()
 
     assert rc == 0
-    assert get_symbol_state("JUP") == "NORMAL"
+    assert get_symbol_state("JUP") == "PROBATION"

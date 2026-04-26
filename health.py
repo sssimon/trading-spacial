@@ -70,12 +70,13 @@ def compute_rolling_metrics_from_trades(
     Returns a dict with:
       - trades_count_total (int)
       - win_rate_20_trades (float | None) — None when no trades with exit_ts exist
+      - win_rate_10_trades (float | None) — None when no trades with exit_ts exist
       - pnl_30d (float)
       - pnl_by_month (dict "YYYY-MM" -> float)
       - months_negative_consecutive (int)
 
     Note: the DB-backed wrapper `compute_rolling_metrics` coerces None → 0.0
-    on win_rate_20_trades to preserve its historical contract.
+    on win_rate_20_trades and win_rate_10_trades to preserve its historical contract.
     """
     if now is None:
         now = datetime.now(tz=timezone.utc)
@@ -103,6 +104,17 @@ def compute_rolling_metrics_from_trades(
         win_rate_20_trades: float | None = wins / len(last_20)
     else:
         win_rate_20_trades = None
+
+    # Last 10 trades win rate (B5: PROBATION regression check uses this)
+    last_10 = trades_with_exit[-10:]
+    if len(last_10) > 0:
+        wins_10 = sum(
+            1 for t in last_10
+            if t.get("pnl_usd") is not None and t["pnl_usd"] > 0
+        )
+        win_rate_10_trades: float | None = wins_10 / len(last_10)
+    else:
+        win_rate_10_trades = None
 
     # Last 30 days PnL
     cutoff_30d = now - timedelta(days=30)
@@ -136,6 +148,7 @@ def compute_rolling_metrics_from_trades(
     return {
         "trades_count_total": trades_count_total,
         "win_rate_20_trades": win_rate_20_trades,
+        "win_rate_10_trades": win_rate_10_trades,
         "pnl_30d": pnl_30d,
         "pnl_by_month": pnl_by_month,
         "months_negative_consecutive": months_negative_consecutive,
@@ -182,14 +195,40 @@ def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> d
         metrics["win_rate_20_trades"] = 0.0
     else:
         metrics["win_rate_20_trades"] = float(metrics["win_rate_20_trades"])
+    if metrics["win_rate_10_trades"] is None:
+        metrics["win_rate_10_trades"] = 0.0
+    else:
+        metrics["win_rate_10_trades"] = float(metrics["win_rate_10_trades"])
     return metrics
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  B5 PROBATION TIER (pure)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def compute_probation_trades_remaining(
+    days_paused: int,
+    trades_base: int = 10,
+    per_pause_day: float = 0.2,
+) -> int:
+    """Initial probation_trades_remaining when reactivating from PAUSED.
+
+    Formula: round(trades_base + per_pause_day * days_paused).
+    Example: 15 days paused → 10 + 0.2*15 = 13.
+
+    days_paused <= 0 returns `trades_base` unchanged (clock skew defensive).
+    """
+    if days_paused <= 0:
+        return int(trades_base)
+    return int(round(trades_base + per_pause_day * days_paused))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  STATE MACHINE (pure)
 # ─────────────────────────────────────────────────────────────────────────────
 
-VALID_STATES = ("NORMAL", "ALERT", "REDUCED", "PAUSED")
+VALID_STATES = ("NORMAL", "ALERT", "REDUCED", "PAUSED", "PROBATION")
 
 
 def evaluate_state(
@@ -202,6 +241,13 @@ def evaluate_state(
 
     Rule precedence (most severe wins):
       1. insufficient_data → hold current state
+      1b. PROBATION branch (only when current_state == PROBATION):
+            - WR_10 < regression_wr_threshold AND trades >= regression_window → PAUSED
+            - probation_trades_remaining (NULL/0) → NORMAL (probation_complete)
+            - else → hold PROBATION (probation_in_progress)
+          Severe regression is the ONLY downward path from PROBATION; the months-
+          negative cascade below is intentionally bypassed (a freshly reactivated
+          symbol still carries its past PAUSED months).
       2. months_negative_consecutive >= pause_months_consecutive → PAUSED
       3. pnl_30d < 0 → REDUCED
       4. win_rate_20_trades < alert_win_rate_threshold → ALERT
@@ -217,6 +263,27 @@ def evaluate_state(
     min_trades = int(config.get("min_trades_for_eval", 20))
     if metrics.get("trades_count_total", 0) < min_trades:
         return current_state, "insufficient_data"
+
+    # B5 PROBATION branch — only fires when current_state is already PROBATION.
+    # Read v2.probation sub-config (defaults match spec).
+    if current_state == "PROBATION":
+        v2_cfg = (config.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        regression_wr = float(prob_cfg.get("regression_wr_threshold", 0.10))
+        regression_window = int(prob_cfg.get("regression_window_trades", 10))
+
+        wr_10 = metrics.get("win_rate_10_trades", 0.0) or 0.0
+        if (
+            metrics.get("trades_count_total", 0) >= regression_window
+            and wr_10 < regression_wr
+        ):
+            return "PAUSED", "regression_severe"
+
+        trades_remaining = metrics.get("probation_trades_remaining")
+        if trades_remaining is None or int(trades_remaining) <= 0:
+            return "NORMAL", "probation_complete"
+
+        return "PROBATION", "probation_in_progress"
 
     pause_threshold = int(config.get("pause_months_consecutive", 3))
     if metrics.get("months_negative_consecutive", 0) >= pause_threshold:
@@ -241,6 +308,94 @@ def evaluate_state(
 # ─────────────────────────────────────────────────────────────────────────────
 #  PERSISTENCE
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _decrement_probation_counter(symbol: str) -> None:
+    """Atomically decrement probation_trades_remaining if the symbol is in PROBATION.
+
+    Floored at 0. No-op if the symbol is not in PROBATION (uses a state-guarded
+    UPDATE so we don't accidentally write to non-PROBATION rows).
+    """
+    conn = _conn()
+    try:
+        conn.execute(
+            """UPDATE symbol_health
+               SET probation_trades_remaining = MAX(
+                     COALESCE(probation_trades_remaining, 0) - 1, 0
+               )
+               WHERE symbol = ? AND state = 'PROBATION'""",
+            (symbol,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
+    """Return True if portfolio aggregate tier is NORMAL.
+
+    Reuses kill_switch_v2 helpers. Defensive: any failure → False (block
+    auto-recovery in unclear state).
+    """
+    try:
+        from strategy.kill_switch_v2 import evaluate_portfolio_tier
+        from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+        portfolio_dd = _compute_current_portfolio_dd(cfg)
+        # Concurrent failures count: use existing health rows.
+        conn = _conn()
+        try:
+            n_failures = conn.execute(
+                """SELECT COUNT(*) FROM symbol_health
+                   WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        portfolio = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
+        return portfolio.get("tier") == "NORMAL"
+    except Exception as e:  # noqa: BLE001
+        log.warning("_is_portfolio_normal failed: %s — treating as not-normal", e)
+        return False
+
+
+def _maybe_auto_reactivate(
+    symbol: str,
+    threshold_days: int,
+    cfg: dict[str, Any],
+) -> None:
+    """B5 daily-cron hook: PAUSED ≥ threshold days + portfolio NORMAL → PROBATION.
+
+    No-op when:
+      - symbol is not currently PAUSED
+      - paused-duration < threshold_days
+      - portfolio aggregate tier ≠ NORMAL
+    """
+    row = _get_symbol_health_row(symbol)
+    if row is None or row["state"] != "PAUSED":
+        return
+
+    state_since_iso = row["state_since"]
+    if not state_since_iso:
+        return
+    try:
+        state_since_dt = datetime.fromisoformat(state_since_iso.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return
+    days_paused = (datetime.now(timezone.utc) - state_since_dt).days
+    if days_paused < int(threshold_days):
+        return
+
+    if not _is_portfolio_normal(cfg):
+        log.info(
+            "_maybe_auto_reactivate(%s): portfolio gate blocks (not NORMAL); skipping",
+            symbol,
+        )
+        return
+
+    log.info(
+        "_maybe_auto_reactivate(%s): %d days in PAUSED, portfolio NORMAL → PROBATION",
+        symbol, days_paused,
+    )
+    reactivate_symbol(symbol, reason="auto_recovery", cfg=cfg)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -306,6 +461,18 @@ def apply_transition(
         extra_sets = ""
         if manual_override is not None:
             extra_sets = ", manual_override = excluded.manual_override"
+
+        # B5: clear probation columns when transitioning OUT of PROBATION.
+        # When new_state == PROBATION, reactivate_symbol writes the columns
+        # explicitly via a separate path (see Task 5).
+        probation_reset = ""
+        if new_state != "PROBATION":
+            probation_reset = (
+                ", probation_trades_remaining = NULL"
+                ", probation_started_at = NULL"
+                ", paused_days_at_entry = NULL"
+            )
+
         # state_since must only advance when the state actually changes. A stale
         # from_state passed by a caller (or a concurrent write) that happens to match
         # the stored state would otherwise silently reset "time in state".
@@ -321,7 +488,8 @@ def apply_transition(
                   END,
                   last_evaluated_at = excluded.last_evaluated_at,
                   last_metrics_json = excluded.last_metrics_json
-                  {extra_sets}""",
+                  {extra_sets}
+                  {probation_reset}""",
             (symbol, new_state, now, now, metrics_json,
              int(manual_override) if manual_override is not None else 0),
         )
@@ -338,31 +506,143 @@ def apply_transition(
         conn.close()
 
 
-def reactivate_symbol(symbol: str, reason: str = "manual") -> None:
-    """Manually reset a symbol to NORMAL with manual_override=1."""
-    current = get_symbol_state(symbol)
-    metrics = {"reactivation_reason": reason}
-    apply_transition(
-        symbol, new_state="NORMAL", reason="manual_override",
-        metrics=metrics, from_state=current, manual_override=1,
+def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
+    """Return the symbol_health row for `symbol`, or None if absent.
+
+    Selected columns: state, state_since, manual_override,
+    probation_trades_remaining, probation_started_at, paused_days_at_entry.
+    """
+    conn = _conn()
+    try:
+        row = conn.execute(
+            """SELECT state, state_since, manual_override,
+                      probation_trades_remaining, probation_started_at,
+                      paused_days_at_entry
+               FROM symbol_health WHERE symbol=?""",
+            (symbol,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "state": row[0],
+        "state_since": row[1],
+        "manual_override": int(row[2] or 0),
+        "probation_trades_remaining": row[3],
+        "probation_started_at": row[4],
+        "paused_days_at_entry": row[5],
+    }
+
+
+def reactivate_symbol(
+    symbol: str,
+    reason: str = "manual",
+    cfg: dict[str, Any] | None = None,
+) -> None:
+    """Transition a PAUSED symbol → PROBATION (B5 #199).
+
+    `reason='manual'` sets manual_override=1; any other reason (e.g.
+    'auto_recovery') sets it to 0. Reads probation params from
+    cfg['kill_switch']['v2']['probation'] when provided; otherwise uses
+    spec defaults (trades_base=10, per_pause_day=0.2).
+
+    No-ops with a warning when the symbol is not currently PAUSED.
+    """
+    row = _get_symbol_health_row(symbol)
+    current = row["state"] if row else "NORMAL"
+
+    if current != "PAUSED":
+        log.warning(
+            "reactivate_symbol(%s): symbol is not in PAUSED (current=%s); skipping",
+            symbol, current,
+        )
+        return
+
+    # Compute days_paused from the PAUSED row's state_since.
+    state_since_iso = row["state_since"] if row else None
+    days_paused = 0
+    if state_since_iso:
+        try:
+            state_since_dt = datetime.fromisoformat(state_since_iso.replace("Z", "+00:00"))
+            days_paused = max(0, int((datetime.now(timezone.utc) - state_since_dt).days))
+        except (ValueError, AttributeError):
+            log.warning(
+                "reactivate_symbol(%s): invalid state_since=%r; treating days_paused=0",
+                symbol, state_since_iso,
+            )
+
+    # Pull probation params (with defaults).
+    prob_cfg = (((cfg or {}).get("kill_switch") or {}).get("v2") or {}).get("probation") or {}
+    trades_base = int(prob_cfg.get("trades_base", 10))
+    per_pause_day = float(prob_cfg.get("trades_per_pause_day", 0.2))
+    trades_remaining = compute_probation_trades_remaining(
+        days_paused, trades_base=trades_base, per_pause_day=per_pause_day,
     )
+
+    metrics = {
+        "reactivation_reason": reason,
+        "days_paused": days_paused,
+        "probation_trades_remaining": trades_remaining,
+    }
+    manual_override = 1 if reason == "manual" else 0
+    metrics_json = json.dumps(metrics, default=str)
+    now_iso = _now_iso()
+
+    # B5 C2 fix: single atomic transaction (state + probation columns + event row)
+    # to close the race window where a concurrent trigger_health_evaluation could
+    # read NULL counter and silently revert state to NORMAL between two writes.
+    conn = _conn()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                manual_override, probation_trades_remaining,
+                probation_started_at, paused_days_at_entry)
+               VALUES (?, 'PROBATION', ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 state = 'PROBATION',
+                 state_since = CASE
+                   WHEN symbol_health.state != 'PROBATION' THEN excluded.state_since
+                   ELSE symbol_health.state_since
+                 END,
+                 last_evaluated_at = excluded.last_evaluated_at,
+                 last_metrics_json = excluded.last_metrics_json,
+                 manual_override = excluded.manual_override,
+                 probation_trades_remaining = excluded.probation_trades_remaining,
+                 probation_started_at = excluded.probation_started_at,
+                 paused_days_at_entry = excluded.paused_days_at_entry""",
+            (symbol, now_iso, now_iso, metrics_json, manual_override,
+             trades_remaining, now_iso, days_paused),
+        )
+        conn.execute(
+            """INSERT INTO symbol_health_events
+               (symbol, from_state, to_state, trigger_reason, metrics_json, ts)
+               VALUES (?, ?, 'PROBATION', ?, ?, ?)""",
+            (symbol, current, f"reactivated_{reason}", metrics_json, now_iso),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # B5 C1 fix: notify on PROBATION entry (auto + manual reactivations).
+    # Previously dead code in evaluate_and_record (which never returns
+    # PROBATION from a non-PROBATION current state).
+    if notify is not None and HealthEvent is not None:
+        try:
+            notify(
+                HealthEvent(symbol=symbol, from_state=current,
+                            to_state="PROBATION", reason=f"reactivated_{reason}",
+                            metrics=metrics),
+                cfg=cfg or {},
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("health: PROBATION notify failed for %s: %s", symbol, e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  ORCHESTRATION
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _get_manual_override(symbol: str) -> bool:
-    conn = _conn()
-    try:
-        row = conn.execute(
-            "SELECT manual_override FROM symbol_health WHERE symbol=?",
-            (symbol,),
-        ).fetchone()
-    finally:
-        conn.close()
-    return bool(row[0]) if row else False
-
 
 def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None = None) -> str:
     """Compute metrics + evaluate state + persist. Returns the resulting state."""
@@ -379,15 +659,23 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
     finally:
         conn.close()
 
-    current = get_symbol_state(symbol)
-    override = _get_manual_override(symbol)
+    # B5: inject current probation_trades_remaining into metrics so evaluate_state
+    # can apply the PROBATION branch. Read from the symbol_health row.
+    row = _get_symbol_health_row(symbol)
+    current = row["state"] if row else "NORMAL"
+    override = bool(row["manual_override"]) if row else False
+    if row is not None:
+        metrics["probation_trades_remaining"] = row["probation_trades_remaining"]
+
     new_state, reason = evaluate_state(metrics, current, override, ks_cfg)
 
     if new_state != current:
         apply_transition(symbol, new_state=new_state, reason=reason,
                          metrics=metrics, from_state=current)
         # One-shot notify on transitions into tiered states.
-        # PR 2 (#138): ALERT; PR 3 (#138): REDUCED; PR 4 (#138): PAUSED.
+        # PROBATION is intentionally NOT in this set: evaluate_state never
+        # returns PROBATION from a non-PROBATION current state, so the only
+        # entry path is reactivate_symbol (which fires its own notify).
         notify_on_states = {"ALERT", "REDUCED", "PAUSED"}
         if new_state in notify_on_states and notify is not None and HealthEvent is not None:
             try:
@@ -406,27 +694,42 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
 def evaluate_all_symbols(cfg: dict[str, Any], now: datetime | None = None) -> dict[str, str]:
     """Evaluate every symbol in btc_scanner.DEFAULT_SYMBOLS. Returns {symbol: state}.
 
-    If kill_switch.enabled is False, returns {} without touching the DB.
-
-    Fail-fast semantics: if any per-symbol evaluation raises (e.g. a DB lock),
-    the exception propagates and later symbols are NOT evaluated. Callers that
-    want best-effort behavior (e.g. the daily cron in Task 6) should wrap this
-    in try/except and log partial-failure explicitly.
+    B5: before evaluating each symbol's metrics, runs auto-reactivation check
+    so a PAUSED symbol that crossed the cooldown threshold transitions to
+    PROBATION first, then gets evaluated as PROBATION on the same sweep.
     """
     ks_cfg = (cfg.get("kill_switch") or {})
     if not ks_cfg.get("enabled", True):
         return {}
     from btc_scanner import DEFAULT_SYMBOLS
-    return {sym: evaluate_and_record(sym, cfg, now=now) for sym in DEFAULT_SYMBOLS}
+
+    v2_cfg = (ks_cfg.get("v2") or {})
+    prob_cfg = (v2_cfg.get("probation") or {})
+    threshold_days = int(prob_cfg.get("paused_to_probation_days", 14))
+
+    out: dict[str, str] = {}
+    for sym in DEFAULT_SYMBOLS:
+        try:
+            _maybe_auto_reactivate(sym, threshold_days, cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("auto_reactivate(%s) failed: %s", sym, e, exc_info=True)
+        out[sym] = evaluate_and_record(sym, cfg, now=now)
+    return out
 
 
 def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
-    """Return `size` scaled by `reduce_size_factor` if the symbol is in REDUCED state.
+    """Return `size` scaled by the kill-switch tier factor.
 
-    Returns `size` unchanged for NORMAL/ALERT/PAUSED states, or if kill_switch is
-    disabled. Callers should use this at position-open time (btc_scanner.scan)
-    or at backtest-sim time (backtest.simulate_strategy) to halve risk on
-    symbols that have recent losses.
+    Scaling rules:
+      - REDUCED → size * `kill_switch.reduce_size_factor` (default 0.5)
+      - PROBATION → size * `kill_switch.v2.probation.size_factor`
+        (default 0.5; falls back to `reduce_size_factor` if absent)
+      - NORMAL/ALERT/PAUSED → size unchanged
+      - kill_switch.enabled=False → size unchanged
+
+    Callers should use this at position-open time (btc_scanner.scan) or at
+    backtest-sim time (backtest.simulate_strategy) to halve risk on symbols
+    that are in a degraded tier.
 
     Safe on any failure: swallows exceptions (returns original size). The
     kill-switch must never block a trade by raising in this hot path.
@@ -442,6 +745,15 @@ def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
     if state == "REDUCED":
         factor = float(ks_cfg.get("reduce_size_factor", 0.5))
         return size * factor
+    if state == "PROBATION":
+        # Prefer v2.probation.size_factor; fall back to v1's reduce_size_factor.
+        v2_cfg = (ks_cfg.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        factor = float(prob_cfg.get(
+            "size_factor",
+            ks_cfg.get("reduce_size_factor", 0.5),
+        ))
+        return size * factor
     return size
 
 
@@ -452,11 +764,17 @@ def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
 
 def trigger_health_evaluation(symbol: str, cfg: dict[str, Any]) -> None:
     """Fire-and-forget health evaluation for a single symbol.
-    Swallows exceptions so callers (e.g. db_close_position) never crash."""
+    Swallows exceptions so callers (e.g. db_close_position) never crash.
+
+    B5: decrements probation_trades_remaining before evaluation when symbol
+    is in PROBATION (so the regression/completion check sees the post-trade
+    counter value).
+    """
     ks_cfg = (cfg.get("kill_switch") or {})
     if not ks_cfg.get("enabled", True):
         return
     try:
+        _decrement_probation_counter(symbol)
         evaluate_and_record(symbol, cfg)
     except Exception as e:  # noqa: BLE001
         log.error("health trigger failed for %s: %s", symbol, e, exc_info=True)

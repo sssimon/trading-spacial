@@ -54,20 +54,41 @@ def test_get_health_events_returns_history(client):
 
 
 def test_post_health_reactivate_sets_manual_override(client):
+    """B5: PAUSED → PROBATION (was → NORMAL). manual_override=1 for reason='manual'."""
     from health import apply_transition
     metrics = {"trades_count_total": 50, "win_rate_20_trades": 0.5,
                 "pnl_30d": 0.0, "pnl_by_month": {},
-                "months_negative_consecutive": 0}
+                "months_negative_consecutive": 0,
+                "win_rate_10_trades": 0.5}
     apply_transition("JUP", "PAUSED", "3mo_consec_neg", metrics, "REDUCED")
 
-    resp = client.post("/health/reactivate/JUP", json={"reason": "backtest_ok"})
+    resp = client.post("/health/reactivate/JUP", json={"reason": "manual"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
-    assert data["state"] == "NORMAL"
+    assert data["state"] == "PROBATION"
 
     # GET again and verify
     resp = client.get("/health/symbols")
     rows = {r["symbol"]: r for r in resp.json()["symbols"]}
-    assert rows["JUP"]["state"] == "NORMAL"
+    assert rows["JUP"]["state"] == "PROBATION"
     assert rows["JUP"]["manual_override"] == 1
+
+
+def test_post_health_reactivate_auto_recovery_no_manual_override(client):
+    """reason='auto_recovery' returns PROBATION but does NOT set manual_override."""
+    from health import apply_transition
+    metrics = {"trades_count_total": 50, "win_rate_20_trades": 0.5,
+                "pnl_30d": 0.0, "pnl_by_month": {},
+                "months_negative_consecutive": 0,
+                "win_rate_10_trades": 0.5}
+    apply_transition("UNI", "PAUSED", "3mo_consec_neg", metrics, "REDUCED")
+
+    resp = client.post("/health/reactivate/UNI", json={"reason": "auto_recovery"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "PROBATION"
+
+    resp = client.get("/health/symbols")
+    rows = {r["symbol"]: r for r in resp.json()["symbols"]}
+    assert rows["UNI"]["state"] == "PROBATION"
+    assert rows["UNI"]["manual_override"] == 0

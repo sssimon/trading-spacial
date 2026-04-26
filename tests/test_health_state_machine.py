@@ -127,3 +127,96 @@ def test_invalid_current_state_raises_value_error():
     from health import evaluate_state
     with pytest.raises(ValueError, match="unknown current_state"):
         evaluate_state(_metrics(), "DISABLED", False, CFG)
+
+
+# ── B5: PROBATION branch ───────────────────────────────────────────────────
+
+
+CFG_PROB = {
+    "min_trades_for_eval": 20,
+    "alert_win_rate_threshold": 0.15,
+    "reduce_pnl_window_days": 30,
+    "reduce_size_factor": 0.5,
+    "pause_months_consecutive": 3,
+    "auto_recovery_enabled": True,
+    "v2": {
+        "probation": {
+            "regression_wr_threshold": 0.10,
+            "regression_window_trades": 10,
+        },
+    },
+}
+
+
+def _metrics_prob(total=50, wr20=0.5, wr10=0.5, pnl_30d=500.0,
+                   months_neg=0, trades_remaining=5):
+    return {
+        "trades_count_total": total,
+        "win_rate_20_trades": wr20,
+        "win_rate_10_trades": wr10,
+        "pnl_30d": pnl_30d,
+        "pnl_by_month": {},
+        "months_negative_consecutive": months_neg,
+        "probation_trades_remaining": trades_remaining,
+    }
+
+
+def test_probation_severe_regression_returns_to_paused():
+    """In PROBATION + WR<10% in last 10 trades + ≥10 closed → PAUSED."""
+    from health import evaluate_state
+    new, reason = evaluate_state(
+        _metrics_prob(total=50, wr10=0.05, trades_remaining=8),
+        "PROBATION", False, CFG_PROB,
+    )
+    assert new == "PAUSED"
+    assert reason == "regression_severe"
+
+
+def test_probation_completes_when_counter_zero():
+    """In PROBATION + counter == 0 + healthy WR → NORMAL."""
+    from health import evaluate_state
+    new, reason = evaluate_state(
+        _metrics_prob(total=50, wr10=0.5, trades_remaining=0),
+        "PROBATION", False, CFG_PROB,
+    )
+    assert new == "NORMAL"
+    assert reason == "probation_complete"
+
+
+def test_probation_holds_when_in_progress():
+    """In PROBATION + counter > 0 + healthy → hold PROBATION."""
+    from health import evaluate_state
+    new, reason = evaluate_state(
+        _metrics_prob(total=50, wr10=0.5, trades_remaining=5),
+        "PROBATION", False, CFG_PROB,
+    )
+    assert new == "PROBATION"
+    assert reason == "probation_in_progress"
+
+
+def test_probation_skips_regression_check_with_few_trades():
+    """In PROBATION + WR<10% but < 10 trades → skip regression check (insufficient evidence)."""
+    from health import evaluate_state
+    new, reason = evaluate_state(
+        _metrics_prob(total=5, wr10=0.0, trades_remaining=10),
+        "PROBATION", False, CFG_PROB,
+    )
+    # Insufficient data branch fires first (total < min_trades_for_eval=20)
+    assert new == "PROBATION"
+    assert reason == "insufficient_data"
+
+
+def test_probation_corrupt_null_counter_treated_as_zero():
+    """If probation_trades_remaining is missing (corrupt row), exit to NORMAL on next eval."""
+    from health import evaluate_state
+    metrics = _metrics_prob(total=50, wr10=0.5, trades_remaining=5)
+    metrics.pop("probation_trades_remaining")
+    new, reason = evaluate_state(metrics, "PROBATION", False, CFG_PROB)
+    assert new == "NORMAL"
+    assert reason == "probation_complete"
+
+
+def test_valid_states_includes_probation():
+    """VALID_STATES tuple now includes PROBATION."""
+    from health import VALID_STATES
+    assert "PROBATION" in VALID_STATES
