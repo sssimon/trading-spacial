@@ -987,3 +987,42 @@ def test_post_recalibrate_falls_back_to_stub_when_v2_raises(tmp_path, monkeypatc
         assert report.get("stub") is True
     finally:
         btc_api.app.dependency_overrides.clear()
+
+
+# ── B4b.3: should_run_regime_change ─────────────────────────────────────────
+
+
+def test_should_run_regime_change_first_call_returns_false():
+    """No baseline yet (last_calib_score=None) → False (no crossing to compare)."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(None, 75.0) is False
+
+
+def test_should_run_regime_change_current_none_returns_false():
+    """No current data (e.g., regime cache empty) → False."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(50.0, None) is False
+
+
+def test_should_run_regime_change_same_band_returns_false():
+    """Both in NEUTRAL band [40, 60) → no crossing."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(45.0, 55.0) is False
+
+
+def test_should_run_regime_change_neutral_to_bull_crosses_60_returns_true():
+    """45 (NEUTRAL) → 70 (BULL) → crossed 60 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(45.0, 70.0) is True
+
+
+def test_should_run_regime_change_neutral_to_bear_crosses_40_returns_true():
+    """50 (NEUTRAL) → 30 (BEAR) → crossed 40 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(50.0, 30.0) is True
+
+
+def test_should_run_regime_change_bull_to_bear_crosses_both_returns_true():
+    """75 → 25 → crossed both 60 and 40 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(75.0, 25.0) is True

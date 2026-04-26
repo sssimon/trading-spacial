@@ -47,6 +47,35 @@ def should_run_safety_net(
     return (now - parsed) > timedelta(days=float(safety_net_days))
 
 
+def _classify_regime_band(score: float) -> str:
+    """Helper: which band does this score fall into?
+
+    >= 60 → BULL, < 40 → BEAR, else NEUTRAL.
+    """
+    if score >= 60:
+        return "BULL"
+    if score < 40:
+        return "BEAR"
+    return "NEUTRAL"
+
+
+def should_run_regime_change(
+    last_calibration_regime_score: float | None,
+    current_regime_score: float | None,
+) -> bool:
+    """Fire if regime band changed since last calibration.
+
+    Returns False if either score is None (no baseline OR no current data).
+    Bands: <40 BEAR, 40-60 NEUTRAL, >=60 BULL.
+    """
+    if last_calibration_regime_score is None or current_regime_score is None:
+        return False
+    return (
+        _classify_regime_band(last_calibration_regime_score)
+        != _classify_regime_band(current_regime_score)
+    )
+
+
 def build_no_feasible_report(reason: str, now) -> dict[str, Any]:
     """Construct the report payload for stub no_feasible runs.
 
