@@ -330,6 +330,73 @@ def _decrement_probation_counter(symbol: str) -> None:
         conn.close()
 
 
+def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
+    """Return True if portfolio aggregate tier is NORMAL.
+
+    Reuses kill_switch_v2 helpers. Defensive: any failure → False (block
+    auto-recovery in unclear state).
+    """
+    try:
+        from strategy.kill_switch_v2 import evaluate_portfolio_tier
+        from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+        portfolio_dd = _compute_current_portfolio_dd(cfg)
+        # Concurrent failures count: use existing health rows.
+        conn = _conn()
+        try:
+            n_failures = conn.execute(
+                """SELECT COUNT(*) FROM symbol_health
+                   WHERE state IN ('ALERT', 'REDUCED', 'PAUSED')"""
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        portfolio = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
+        return portfolio.get("tier") == "NORMAL"
+    except Exception as e:  # noqa: BLE001
+        log.warning("_is_portfolio_normal failed: %s — treating as not-normal", e)
+        return False
+
+
+def _maybe_auto_reactivate(
+    symbol: str,
+    threshold_days: int,
+    cfg: dict[str, Any],
+) -> None:
+    """B5 daily-cron hook: PAUSED ≥ threshold days + portfolio NORMAL → PROBATION.
+
+    No-op when:
+      - symbol is not currently PAUSED
+      - paused-duration < threshold_days
+      - portfolio aggregate tier ≠ NORMAL
+    """
+    row = _get_symbol_health_row(symbol)
+    if row is None or row["state"] != "PAUSED":
+        return
+
+    state_since_iso = row["state_since"]
+    if not state_since_iso:
+        return
+    try:
+        state_since_dt = datetime.fromisoformat(state_since_iso.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return
+    days_paused = (datetime.now(timezone.utc) - state_since_dt).days
+    if days_paused < int(threshold_days):
+        return
+
+    if not _is_portfolio_normal(cfg):
+        log.info(
+            "_maybe_auto_reactivate(%s): portfolio gate blocks (not NORMAL); skipping",
+            symbol,
+        )
+        return
+
+    log.info(
+        "_maybe_auto_reactivate(%s): %d days in PAUSED, portfolio NORMAL → PROBATION",
+        symbol, days_paused,
+    )
+    reactivate_symbol(symbol, reason="auto_recovery", cfg=cfg)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -607,18 +674,27 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
 def evaluate_all_symbols(cfg: dict[str, Any], now: datetime | None = None) -> dict[str, str]:
     """Evaluate every symbol in btc_scanner.DEFAULT_SYMBOLS. Returns {symbol: state}.
 
-    If kill_switch.enabled is False, returns {} without touching the DB.
-
-    Fail-fast semantics: if any per-symbol evaluation raises (e.g. a DB lock),
-    the exception propagates and later symbols are NOT evaluated. Callers that
-    want best-effort behavior (e.g. the daily cron in Task 6) should wrap this
-    in try/except and log partial-failure explicitly.
+    B5: before evaluating each symbol's metrics, runs auto-reactivation check
+    so a PAUSED symbol that crossed the cooldown threshold transitions to
+    PROBATION first, then gets evaluated as PROBATION on the same sweep.
     """
     ks_cfg = (cfg.get("kill_switch") or {})
     if not ks_cfg.get("enabled", True):
         return {}
     from btc_scanner import DEFAULT_SYMBOLS
-    return {sym: evaluate_and_record(sym, cfg, now=now) for sym in DEFAULT_SYMBOLS}
+
+    v2_cfg = (ks_cfg.get("v2") or {})
+    prob_cfg = (v2_cfg.get("probation") or {})
+    threshold_days = int(prob_cfg.get("paused_to_probation_days", 14))
+
+    out: dict[str, str] = {}
+    for sym in DEFAULT_SYMBOLS:
+        try:
+            _maybe_auto_reactivate(sym, threshold_days, cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("auto_reactivate(%s) failed: %s", sym, e, exc_info=True)
+        out[sym] = evaluate_and_record(sym, cfg, now=now)
+    return out
 
 
 def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:

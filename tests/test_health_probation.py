@@ -293,3 +293,75 @@ def test_daily_cron_eval_does_not_decrement_probation(tmp_db):
     row = _read_health_row("BTC")
     assert row[0] == "PROBATION"  # still in PROBATION
     assert row[1] == 5             # counter NOT decremented
+
+
+# ── Auto-reactivation in daily cron ─────────────────────────────────────────
+
+
+def test_auto_reactivate_paused_15d_portfolio_normal_promotes_to_probation(tmp_db):
+    """PAUSED 15 days + portfolio NORMAL → auto-promotes to PROBATION."""
+    from unittest.mock import patch
+    from health import _maybe_auto_reactivate, get_symbol_state
+    _seed_paused("BTC", days_ago=15)
+    cfg = {"kill_switch": {"enabled": True, "v2": {"probation": {
+        "paused_to_probation_days": 14, "trades_base": 10, "trades_per_pause_day": 0.2,
+    }}}}
+    with patch("health._is_portfolio_normal", return_value=True):
+        _maybe_auto_reactivate("BTC", threshold_days=14, cfg=cfg)
+    assert get_symbol_state("BTC") == "PROBATION"
+    row = _read_health_row("BTC")
+    assert row[1] == 13  # 10 + round(0.2*15)
+    assert row[4] == 0   # auto_recovery → manual_override=0
+
+
+def test_auto_reactivate_paused_below_threshold_stays_paused(tmp_db):
+    """PAUSED 10 days (< 14 threshold) → stays PAUSED."""
+    from unittest.mock import patch
+    from health import _maybe_auto_reactivate, get_symbol_state
+    _seed_paused("BTC", days_ago=10)
+    cfg = {"kill_switch": {"enabled": True, "v2": {"probation": {"paused_to_probation_days": 14}}}}
+    with patch("health._is_portfolio_normal", return_value=True):
+        _maybe_auto_reactivate("BTC", threshold_days=14, cfg=cfg)
+    assert get_symbol_state("BTC") == "PAUSED"
+
+
+def test_auto_reactivate_paused_15d_portfolio_reduced_stays_paused(tmp_db):
+    """PAUSED 15 days but portfolio REDUCED → portfolio gate blocks."""
+    from unittest.mock import patch
+    from health import _maybe_auto_reactivate, get_symbol_state
+    _seed_paused("BTC", days_ago=15)
+    cfg = {"kill_switch": {"enabled": True, "v2": {"probation": {"paused_to_probation_days": 14}}}}
+    with patch("health._is_portfolio_normal", return_value=False):
+        _maybe_auto_reactivate("BTC", threshold_days=14, cfg=cfg)
+    assert get_symbol_state("BTC") == "PAUSED"
+
+
+def test_auto_reactivate_threshold_exact_boundary_fires(tmp_db):
+    """PAUSED for exactly threshold_days → fires (>= semantics, per spec boundary)."""
+    from unittest.mock import patch
+    from health import _maybe_auto_reactivate, get_symbol_state
+    _seed_paused("BTC", days_ago=14)
+    cfg = {"kill_switch": {"enabled": True, "v2": {"probation": {"paused_to_probation_days": 14}}}}
+    with patch("health._is_portfolio_normal", return_value=True):
+        _maybe_auto_reactivate("BTC", threshold_days=14, cfg=cfg)
+    assert get_symbol_state("BTC") == "PROBATION"
+
+
+def test_evaluate_all_symbols_runs_auto_reactivate_for_each(tmp_db, monkeypatch):
+    """evaluate_all_symbols invokes auto-reactivation per symbol before metric eval."""
+    from unittest.mock import patch
+    from health import evaluate_all_symbols
+    cfg = {"kill_switch": {"enabled": True, "v2": {"probation": {"paused_to_probation_days": 14}}}}
+    # DEFAULT_SYMBOLS is an actual list; just monkeypatch it to a tiny set
+    import btc_scanner
+    monkeypatch.setattr(btc_scanner, "DEFAULT_SYMBOLS", ["AAA", "BBB"])
+    calls = []
+
+    def fake_maybe(symbol, threshold_days, cfg):
+        calls.append(symbol)
+
+    with patch("health._maybe_auto_reactivate", side_effect=fake_maybe), \
+         patch("health.evaluate_and_record", return_value="NORMAL"):
+        evaluate_all_symbols(cfg)
+
+    assert calls == ["AAA", "BBB"]
