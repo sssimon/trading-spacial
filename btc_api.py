@@ -1073,6 +1073,23 @@ def init_db():
     except Exception as e:
         log.warning(f"DB migration check: {e}")
 
+    # B5 PROBATION migration: add 3 columns to symbol_health if missing (#199)
+    try:
+        con_mig2 = get_db()
+        cols2 = [r[1] for r in con_mig2.execute("PRAGMA table_info(symbol_health)").fetchall()]
+        for col, ddl in (
+            ("probation_trades_remaining", "INTEGER"),
+            ("probation_started_at", "TEXT"),
+            ("paused_days_at_entry", "INTEGER"),
+        ):
+            if col not in cols2:
+                con_mig2.execute(f"ALTER TABLE symbol_health ADD COLUMN {col} {ddl}")
+                con_mig2.commit()
+                log.info(f"DB migration: added {col} column to symbol_health")
+        con_mig2.close()
+    except Exception as e:
+        log.warning(f"DB migration B5 PROBATION: {e}")
+
 
 def save_scan(rep: dict) -> int:
     symbol  = rep.get("symbol", "BTCUSDT")

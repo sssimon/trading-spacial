@@ -268,3 +268,78 @@ def test_compute_rolling_metrics_from_trades_win_rate_last_20():
     result = compute_rolling_metrics_from_trades(trades, now=now)
     # Last 20 have 4 wins / 20 = 0.20
     assert result["win_rate_20_trades"] == pytest.approx(0.20)
+
+
+# ── B5: PROBATION schema migration ──────────────────────────────────────────
+
+
+def test_init_db_adds_probation_columns(tmp_db):
+    """init_db must add probation_trades_remaining/started_at/paused_days_at_entry."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(symbol_health)").fetchall()}
+    finally:
+        conn.close()
+    assert "probation_trades_remaining" in cols
+    assert "probation_started_at" in cols
+    assert "paused_days_at_entry" in cols
+
+
+def test_init_db_migration_idempotent(tmp_path, monkeypatch):
+    """Re-running init_db on a DB that already has probation columns must not raise."""
+    import btc_api
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.init_db()  # second call must be a no-op
+    conn = btc_api.get_db()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(symbol_health)").fetchall()}
+    finally:
+        conn.close()
+    assert {"probation_trades_remaining", "probation_started_at", "paused_days_at_entry"} <= cols
+
+
+def test_apply_transition_clears_probation_columns_on_exit(tmp_db):
+    """When transitioning out of PROBATION, the 3 probation columns are reset to NULL."""
+    import btc_api
+    from health import apply_transition
+
+    metrics = {"trades_count_total": 50, "win_rate_20_trades": 0.5,
+               "pnl_30d": 0.0, "pnl_by_month": {},
+               "months_negative_consecutive": 0,
+               "win_rate_10_trades": 0.6}
+
+    # Seed PROBATION row with non-NULL probation columns
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                probation_trades_remaining, probation_started_at, paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Transition out of PROBATION
+    apply_transition("BTC", new_state="NORMAL", reason="probation_complete",
+                     metrics=metrics, from_state="PROBATION")
+
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT state, probation_trades_remaining, probation_started_at,
+                      paused_days_at_entry FROM symbol_health WHERE symbol='BTC'"""
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "NORMAL"
+    assert row[1] is None
+    assert row[2] is None
+    assert row[3] is None

@@ -345,6 +345,18 @@ def apply_transition(
         extra_sets = ""
         if manual_override is not None:
             extra_sets = ", manual_override = excluded.manual_override"
+
+        # B5: clear probation columns when transitioning OUT of PROBATION.
+        # When new_state == PROBATION, reactivate_symbol writes the columns
+        # explicitly via a separate path (see Task 5).
+        probation_reset = ""
+        if new_state != "PROBATION":
+            probation_reset = (
+                ", probation_trades_remaining = NULL"
+                ", probation_started_at = NULL"
+                ", paused_days_at_entry = NULL"
+            )
+
         # state_since must only advance when the state actually changes. A stale
         # from_state passed by a caller (or a concurrent write) that happens to match
         # the stored state would otherwise silently reset "time in state".
@@ -360,7 +372,8 @@ def apply_transition(
                   END,
                   last_evaluated_at = excluded.last_evaluated_at,
                   last_metrics_json = excluded.last_metrics_json
-                  {extra_sets}""",
+                  {extra_sets}
+                  {probation_reset}""",
             (symbol, new_state, now, now, metrics_json,
              int(manual_override) if manual_override is not None else 0),
         )
