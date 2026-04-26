@@ -492,6 +492,113 @@ def get_symbol_state(symbol: str) -> str:
     return row[0] if row else "NORMAL"
 
 
+def sparkline_for_symbol(symbol: str, conn, n: int = 20) -> list[str | None]:
+    """B6: Last n trade outcomes for `symbol`, oldest→newest, padded with None.
+
+    'W' if pnl_usd > 0, 'L' otherwise. Breakeven (pnl=0) counts as L.
+    Returns a list of length exactly n.
+    """
+    cursor = conn.execute(
+        """SELECT pnl_usd FROM positions
+           WHERE symbol = ? AND status = 'closed' AND exit_ts IS NOT NULL
+           ORDER BY exit_ts DESC LIMIT ?""",
+        (symbol, n),
+    )
+    raw = [row[0] for row in cursor.fetchall()]
+    raw.reverse()  # newest-first → oldest-first
+
+    outcomes: list[str | None] = []
+    for pnl in raw:
+        if pnl is not None and pnl > 0:
+            outcomes.append('W')
+        else:
+            outcomes.append('L')
+
+    # Pad with leading None until length == n
+    while len(outcomes) < n:
+        outcomes.insert(0, None)
+    return outcomes
+
+
+def summarize_recent_alerts(
+    conn=None,
+    window_hours: int = 24,
+) -> dict[str, Any]:
+    """B6: Aggregated 24h alert summary for the dashboard alerts strip.
+
+    Reads `symbol_health_events` for `symbol_failures` and `auto_reactivation`,
+    `kill_switch_decisions` for `velocity_burst`. Returns {"items": [...]}
+    where each item has kind/text/severity/ts.
+    """
+    if conn is None:
+        conn = _conn()
+        owns_conn = True
+    else:
+        owns_conn = False
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    items: list[dict[str, Any]] = []
+
+    try:
+        # symbol_failures: distinct symbols entering ALERT/REDUCED/PAUSED
+        rows = conn.execute(
+            """SELECT DISTINCT symbol, MAX(ts) AS latest
+               FROM symbol_health_events
+               WHERE ts >= ? AND to_state IN ('ALERT', 'REDUCED', 'PAUSED')
+               GROUP BY symbol""",
+            (cutoff,),
+        ).fetchall()
+        if rows:
+            n = len(rows)
+            latest_ts = max(r[1] for r in rows)
+            severity = "warning" if n >= 3 else "info"
+            items.append({
+                "kind": "symbol_failures",
+                "text": f"{n} símbolo(s) entraron en ALERT/REDUCED/PAUSED en últimas {window_hours}h",
+                "severity": severity,
+                "ts": latest_ts,
+            })
+
+        # auto_reactivation: PROBATION transitions with reason starting "reactivated_auto"
+        rows = conn.execute(
+            """SELECT COUNT(*) AS n, MAX(ts) AS latest
+               FROM symbol_health_events
+               WHERE ts >= ? AND to_state = 'PROBATION'
+                 AND trigger_reason LIKE 'reactivated_auto%'""",
+            (cutoff,),
+        ).fetchone()
+        if rows and rows[0] > 0:
+            items.append({
+                "kind": "auto_reactivation",
+                "text": f"{rows[0]} símbolo(s) auto-reactivados a PROBATION en últimas {window_hours}h",
+                "severity": "info",
+                "ts": rows[1],
+            })
+
+        # velocity_burst: count of decisions with velocity_active=1
+        rows = conn.execute(
+            """SELECT COUNT(*) AS n, MAX(ts) AS latest
+               FROM kill_switch_decisions
+               WHERE ts >= ? AND velocity_active = 1""",
+            (cutoff,),
+        ).fetchone()
+        if rows and rows[0] > 0:
+            items.append({
+                "kind": "velocity_burst",
+                "text": f"Velocity trigger fired {rows[0]} veces en últimas {window_hours}h",
+                "severity": "info",
+                "ts": rows[1],
+            })
+
+        # Sort newest-first
+        items.sort(key=lambda x: x["ts"], reverse=True)
+    finally:
+        if owns_conn:
+            conn.close()
+
+    return {"items": items}
+
+
 def _record_evaluation(symbol: str, metrics: dict[str, Any], new_state: str) -> None:
     """Update last_evaluated_at + last_metrics_json without changing state.
     Creates the row if it doesn't exist. No event is emitted."""

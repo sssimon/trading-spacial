@@ -78,3 +78,149 @@ def test_next_conditions_probation_text_includes_trades_remaining():
     )
     assert "8" in text
     assert "trades" in text.lower() or "PROBATION" in text or "NORMAL" in text
+
+
+# ── sparkline_for_symbol ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def tmp_db(tmp_path, monkeypatch):
+    import btc_api
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    yield db_path
+
+
+def _insert_closed_position(conn, symbol, pnl, exit_ts):
+    conn.execute(
+        """INSERT INTO positions
+           (symbol, direction, status, entry_price, entry_ts,
+            exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', ?, ?)""",
+        (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
+    )
+
+
+def test_sparkline_empty_returns_20_nones(tmp_db):
+    import btc_api
+    from health import sparkline_for_symbol
+    conn = btc_api.get_db()
+    try:
+        result = sparkline_for_symbol("BTC", conn)
+    finally:
+        conn.close()
+    assert len(result) == 20
+    assert all(x is None for x in result)
+
+
+def test_sparkline_3_wins_pads_with_leading_nones(tmp_db):
+    """3 wins → [None, None, ..., 'W', 'W', 'W'] in chronological order."""
+    import btc_api
+    from health import sparkline_for_symbol
+    conn = btc_api.get_db()
+    try:
+        for i in range(3):
+            _insert_closed_position(conn, "BTC", 10.0, f"2026-04-{1+i:02d}T12:00:00+00:00")
+        conn.commit()
+        result = sparkline_for_symbol("BTC", conn)
+    finally:
+        conn.close()
+    assert len(result) == 20
+    assert result[-3:] == ['W', 'W', 'W']
+    assert all(x is None for x in result[:-3])
+
+
+def test_sparkline_mixed_wins_losses(tmp_db):
+    """W/L based on pnl_usd>0."""
+    import btc_api
+    from health import sparkline_for_symbol
+    conn = btc_api.get_db()
+    try:
+        _insert_closed_position(conn, "BTC", 10.0, "2026-04-01T12:00:00+00:00")
+        _insert_closed_position(conn, "BTC", -5.0, "2026-04-02T12:00:00+00:00")
+        _insert_closed_position(conn, "BTC", 0.0, "2026-04-03T12:00:00+00:00")  # breakeven = L
+        conn.commit()
+        result = sparkline_for_symbol("BTC", conn)
+    finally:
+        conn.close()
+    assert result[-3:] == ['W', 'L', 'L']
+
+
+def test_sparkline_caps_at_20(tmp_db):
+    import btc_api
+    from health import sparkline_for_symbol
+    conn = btc_api.get_db()
+    try:
+        for i in range(25):
+            _insert_closed_position(conn, "BTC", 10.0, f"2026-04-{1+i%28:02d}T{i%24:02d}:00:00+00:00")
+        conn.commit()
+        result = sparkline_for_symbol("BTC", conn)
+    finally:
+        conn.close()
+    assert len(result) == 20
+    assert all(x == 'W' for x in result)
+
+
+# ── summarize_recent_alerts ─────────────────────────────────────────────────
+
+
+def _insert_health_event(conn, symbol, from_state, to_state, reason, ts):
+    conn.execute(
+        """INSERT INTO symbol_health_events
+           (symbol, from_state, to_state, trigger_reason, metrics_json, ts)
+           VALUES (?, ?, ?, ?, '{}', ?)""",
+        (symbol, from_state, to_state, reason, ts),
+    )
+
+
+def test_summarize_recent_alerts_empty_returns_empty_items(tmp_db):
+    import btc_api
+    from health import summarize_recent_alerts
+    conn = btc_api.get_db()
+    try:
+        result = summarize_recent_alerts(conn=conn, window_hours=24)
+    finally:
+        conn.close()
+    assert result["items"] == []
+
+
+def test_summarize_recent_alerts_3_alerts_emits_warning(tmp_db):
+    """3 distinct symbols entered ALERT → emits symbol_failures warning."""
+    from datetime import datetime, timezone, timedelta
+    import btc_api
+    from health import summarize_recent_alerts
+    now = datetime.now(timezone.utc)
+    recent_ts = (now - timedelta(hours=2)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        _insert_health_event(conn, "BTC", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
+        _insert_health_event(conn, "ETH", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
+        _insert_health_event(conn, "DOGE", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
+        conn.commit()
+        result = summarize_recent_alerts(conn=conn, window_hours=24)
+    finally:
+        conn.close()
+    items = result["items"]
+    assert any(i["kind"] == "symbol_failures" for i in items)
+    failure_item = next(i for i in items if i["kind"] == "symbol_failures")
+    assert "3" in failure_item["text"]
+    assert failure_item["severity"] == "warning"
+
+
+def test_summarize_recent_alerts_excludes_events_outside_window(tmp_db):
+    from datetime import datetime, timezone, timedelta
+    import btc_api
+    from health import summarize_recent_alerts
+    now = datetime.now(timezone.utc)
+    old_ts = (now - timedelta(hours=48)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        _insert_health_event(conn, "BTC", "NORMAL", "ALERT", "wr_below_threshold", old_ts)
+        conn.commit()
+        result = summarize_recent_alerts(conn=conn, window_hours=24)
+    finally:
+        conn.close()
+    assert result["items"] == []
