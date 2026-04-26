@@ -2529,9 +2529,10 @@ def get_kill_switch_current_state(engine: str = "v1"):
 
 @app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
-    """Manually reset a symbol to NORMAL with manual_override=1."""
+    """Manually reactivate a PAUSED symbol — transitions PAUSED → PROBATION (B5 #199)."""
     from health import reactivate_symbol, get_symbol_state
-    reactivate_symbol(symbol.upper(), reason=body.reason)
+    cfg = load_config()
+    reactivate_symbol(symbol.upper(), reason=body.reason, cfg=cfg)
     return {"ok": True, "symbol": symbol.upper(), "state": get_symbol_state(symbol.upper())}
 
 

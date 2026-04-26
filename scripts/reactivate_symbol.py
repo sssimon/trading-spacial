@@ -41,7 +41,8 @@ def main() -> int:
     if before != "PAUSED":
         print(f"Note: {symbol} is not in PAUSED (current={before}). reactivate_symbol will no-op + warn.")
 
-    reactivate_symbol(symbol, reason=args.reason)
+    cfg = btc_api.load_config()
+    reactivate_symbol(symbol, reason=args.reason, cfg=cfg)
 
     after = get_symbol_state(symbol)
     print(f"State after:  {after}")

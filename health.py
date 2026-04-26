@@ -345,7 +345,7 @@ def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
         try:
             n_failures = conn.execute(
                 """SELECT COUNT(*) FROM symbol_health
-                   WHERE state IN ('ALERT', 'REDUCED', 'PAUSED')"""
+                   WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
             ).fetchone()[0]
         finally:
             conn.close()
@@ -586,28 +586,58 @@ def reactivate_symbol(
         "probation_trades_remaining": trades_remaining,
     }
     manual_override = 1 if reason == "manual" else 0
+    metrics_json = json.dumps(metrics, default=str)
+    now_iso = _now_iso()
 
-    apply_transition(
-        symbol, new_state="PROBATION", reason=f"reactivated_{reason}",
-        metrics=metrics, from_state=current, manual_override=manual_override,
-    )
-
-    # apply_transition does NOT touch probation_* columns when entering PROBATION
-    # (it only resets them on exit). Write them here.
-    started_at = _now_iso()
+    # B5 C2 fix: single atomic transaction (state + probation columns + event row)
+    # to close the race window where a concurrent trigger_health_evaluation could
+    # read NULL counter and silently revert state to NORMAL between two writes.
     conn = _conn()
     try:
         conn.execute(
-            """UPDATE symbol_health
-               SET probation_trades_remaining = ?,
-                   probation_started_at = ?,
-                   paused_days_at_entry = ?
-               WHERE symbol = ?""",
-            (trades_remaining, started_at, days_paused, symbol),
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                manual_override, probation_trades_remaining,
+                probation_started_at, paused_days_at_entry)
+               VALUES (?, 'PROBATION', ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 state = 'PROBATION',
+                 state_since = CASE
+                   WHEN symbol_health.state != 'PROBATION' THEN excluded.state_since
+                   ELSE symbol_health.state_since
+                 END,
+                 last_evaluated_at = excluded.last_evaluated_at,
+                 last_metrics_json = excluded.last_metrics_json,
+                 manual_override = excluded.manual_override,
+                 probation_trades_remaining = excluded.probation_trades_remaining,
+                 probation_started_at = excluded.probation_started_at,
+                 paused_days_at_entry = excluded.paused_days_at_entry""",
+            (symbol, now_iso, now_iso, metrics_json, manual_override,
+             trades_remaining, now_iso, days_paused),
+        )
+        conn.execute(
+            """INSERT INTO symbol_health_events
+               (symbol, from_state, to_state, trigger_reason, metrics_json, ts)
+               VALUES (?, ?, 'PROBATION', ?, ?, ?)""",
+            (symbol, current, f"reactivated_{reason}", metrics_json, now_iso),
         )
         conn.commit()
     finally:
         conn.close()
+
+    # B5 C1 fix: notify on PROBATION entry (auto + manual reactivations).
+    # Previously dead code in evaluate_and_record (which never returns
+    # PROBATION from a non-PROBATION current state).
+    if notify is not None and HealthEvent is not None:
+        try:
+            notify(
+                HealthEvent(symbol=symbol, from_state=current,
+                            to_state="PROBATION", reason=f"reactivated_{reason}",
+                            metrics=metrics),
+                cfg=cfg or {},
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("health: PROBATION notify failed for %s: %s", symbol, e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -643,8 +673,10 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
         apply_transition(symbol, new_state=new_state, reason=reason,
                          metrics=metrics, from_state=current)
         # One-shot notify on transitions into tiered states.
-        # B5: also notify on PROBATION entry so operators see auto-reactivations.
-        notify_on_states = {"ALERT", "REDUCED", "PAUSED", "PROBATION"}
+        # PROBATION is intentionally NOT in this set: evaluate_state never
+        # returns PROBATION from a non-PROBATION current state, so the only
+        # entry path is reactivate_symbol (which fires its own notify).
+        notify_on_states = {"ALERT", "REDUCED", "PAUSED"}
         if new_state in notify_on_states and notify is not None and HealthEvent is not None:
             try:
                 notify(
