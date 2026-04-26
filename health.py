@@ -228,7 +228,7 @@ def compute_probation_trades_remaining(
 #  STATE MACHINE (pure)
 # ─────────────────────────────────────────────────────────────────────────────
 
-VALID_STATES = ("NORMAL", "ALERT", "REDUCED", "PAUSED")
+VALID_STATES = ("NORMAL", "ALERT", "REDUCED", "PAUSED", "PROBATION")
 
 
 def evaluate_state(
@@ -241,6 +241,13 @@ def evaluate_state(
 
     Rule precedence (most severe wins):
       1. insufficient_data → hold current state
+      1b. PROBATION branch (only when current_state == PROBATION):
+            - WR_10 < regression_wr_threshold AND trades >= regression_window → PAUSED
+            - probation_trades_remaining (NULL/0) → NORMAL (probation_complete)
+            - else → hold PROBATION (probation_in_progress)
+          Severe regression is the ONLY downward path from PROBATION; the months-
+          negative cascade below is intentionally bypassed (a freshly reactivated
+          symbol still carries its past PAUSED months).
       2. months_negative_consecutive >= pause_months_consecutive → PAUSED
       3. pnl_30d < 0 → REDUCED
       4. win_rate_20_trades < alert_win_rate_threshold → ALERT
@@ -256,6 +263,27 @@ def evaluate_state(
     min_trades = int(config.get("min_trades_for_eval", 20))
     if metrics.get("trades_count_total", 0) < min_trades:
         return current_state, "insufficient_data"
+
+    # B5 PROBATION branch — only fires when current_state is already PROBATION.
+    # Read v2.probation sub-config (defaults match spec).
+    if current_state == "PROBATION":
+        v2_cfg = (config.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        regression_wr = float(prob_cfg.get("regression_wr_threshold", 0.10))
+        regression_window = int(prob_cfg.get("regression_window_trades", 10))
+
+        wr_10 = metrics.get("win_rate_10_trades", 0.0) or 0.0
+        if (
+            metrics.get("trades_count_total", 0) >= regression_window
+            and wr_10 < regression_wr
+        ):
+            return "PAUSED", "regression_severe"
+
+        trades_remaining = metrics.get("probation_trades_remaining")
+        if trades_remaining is None or int(trades_remaining) <= 0:
+            return "NORMAL", "probation_complete"
+
+        return "PROBATION", "probation_in_progress"
 
     pause_threshold = int(config.get("pause_months_consecutive", 3))
     if metrics.get("months_negative_consecutive", 0) >= pause_threshold:
