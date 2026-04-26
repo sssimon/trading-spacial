@@ -186,6 +186,28 @@ def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> d
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  B5 PROBATION TIER (pure)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def compute_probation_trades_remaining(
+    days_paused: int,
+    trades_base: int = 10,
+    per_pause_day: float = 0.2,
+) -> int:
+    """Initial probation_trades_remaining when reactivating from PAUSED.
+
+    Formula: round(trades_base + per_pause_day * days_paused).
+    Example: 15 days paused → 10 + 0.2*15 = 13.
+
+    days_paused <= 0 returns `trades_base` unchanged (clock skew defensive).
+    """
+    if days_paused <= 0:
+        return int(trades_base)
+    return int(round(trades_base + per_pause_day * days_paused))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  STATE MACHINE (pure)
 # ─────────────────────────────────────────────────────────────────────────────
 
