@@ -279,3 +279,87 @@ def test_recent_portfolio_transitions_returns_last_5(tmp_db):
     # Newest first
     assert transitions[0]["reason"] == "reason_6"
     assert transitions[4]["reason"] == "reason_2"
+
+
+# ── GET /health/dashboard endpoint ─────────────────────────────────────────
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    return TestClient(btc_api.app)
+
+
+def test_get_health_dashboard_empty_db_returns_default_shape(client):
+    """Empty DB → portfolio NORMAL + symbols=[] (or all DEFAULT_SYMBOLS as NORMAL placeholders) + alerts.items=[]."""
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "symbols" in data
+    assert "portfolio" in data
+    assert "alerts" in data
+    assert "generated_at" in data
+    assert isinstance(data["symbols"], list)
+    assert data["alerts"]["items"] == []
+    assert data["portfolio"]["tier"] == "NORMAL"
+
+
+def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
+    """One PROBATION symbol seeded → response includes all the fields."""
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        # Seed PROBATION row + 5 wins
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                manual_override, probation_trades_remaining, probation_started_at,
+                paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-20T00:00:00+00:00',
+                       '2026-04-26T00:00:00+00:00', '{}', 1,
+                       8, '2026-04-20T00:00:00+00:00', 15)"""
+        )
+        for i in range(5):
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                (f"2026-04-2{1+i}T12:00:00+00:00", f"2026-04-2{1+i}T13:00:00+00:00"),
+            )
+        # Seed an event
+        conn.execute(
+            """INSERT INTO symbol_health_events
+               (symbol, from_state, to_state, trigger_reason, metrics_json, ts)
+               VALUES ('BTC', 'PAUSED', 'PROBATION', 'reactivated_manual',
+                       '{}', '2026-04-20T00:00:00+00:00')"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    btc = next(s for s in data["symbols"] if s["symbol"] == "BTC")
+    assert btc["state"] == "PROBATION"
+    assert btc["metrics"]["probation_trades_remaining"] == 8
+    assert len(btc["sparkline_20"]) == 20
+    assert btc["sparkline_20"][-5:] == ['W', 'W', 'W', 'W', 'W']
+    assert btc["last_transition"]["reason"] == "reactivated_manual"
+    assert "PROBATION" in btc["next_conditions"] or "trades" in btc["next_conditions"].lower()
+
+
+def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeypatch):
+    """Even with kill_switch.enabled=False, the dashboard still serves a snapshot
+    (read-only — useful for post-mortems)."""
+    import btc_api
+    monkeypatch.setattr(btc_api, "load_config", lambda: {"kill_switch": {"enabled": False}})
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200

@@ -1034,3 +1034,151 @@ def recent_portfolio_transitions(limit: int = 5) -> list[dict[str, Any]]:
         }
         for r in rows
     ]
+
+
+def get_dashboard_state(cfg: dict[str, Any]) -> dict[str, Any]:
+    """B6 orchestrator: assemble per-symbol + portfolio + alerts response.
+
+    Reads from DB; computes next_conditions; builds the full DashboardResponse
+    shape consumed by the frontend.
+    """
+    from btc_scanner import DEFAULT_SYMBOLS
+
+    ks_cfg = (cfg.get("kill_switch") or {})
+    now = datetime.now(timezone.utc)
+
+    conn = _conn()
+    try:
+        # Build symbol list: union of DEFAULT_SYMBOLS + any DB rows. This way
+        # the dashboard always shows the curated 10 (as NORMAL placeholders if
+        # not yet evaluated) AND any historical/legacy rows in symbol_health.
+        db_symbols = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT symbol FROM symbol_health"
+            ).fetchall()
+        ]
+        seen: set[str] = set()
+        symbols_iter: list[str] = []
+        for sym in list(DEFAULT_SYMBOLS) + db_symbols:
+            if sym not in seen:
+                seen.add(sym)
+                symbols_iter.append(sym)
+
+        # Symbols
+        symbols_out: list[dict[str, Any]] = []
+        for sym in symbols_iter:
+            row = _get_symbol_health_row(sym)  # opens its own conn
+            if row is None:
+                # No row → NORMAL placeholder, empty metrics
+                state = "NORMAL"
+                state_since_iso = None
+                manual_override = False
+                metrics = {
+                    "trades_count_total": 0,
+                    "win_rate_20_trades": 0.0,
+                    "win_rate_10_trades": 0.0,
+                    "pnl_30d": 0.0,
+                    "months_negative_consecutive": 0,
+                    "probation_trades_remaining": None,
+                    "paused_days_at_entry": None,
+                }
+                last_transition = None
+            else:
+                state = row["state"]
+                state_since_iso = row.get("state_since")
+                manual_override = bool(row["manual_override"])
+                metrics = compute_rolling_metrics(sym, conn, now=now)
+                metrics["probation_trades_remaining"] = row.get("probation_trades_remaining")
+                metrics["paused_days_at_entry"] = row.get("paused_days_at_entry")
+                # last transition
+                lt_row = conn.execute(
+                    """SELECT from_state, to_state, trigger_reason, ts
+                       FROM symbol_health_events
+                       WHERE symbol = ? ORDER BY ts DESC LIMIT 1""",
+                    (sym,),
+                ).fetchone()
+                if lt_row is not None:
+                    last_transition = {
+                        "from_state": lt_row[0],
+                        "to_state": lt_row[1],
+                        "reason": lt_row[2],
+                        "ts": lt_row[3],
+                    }
+                else:
+                    last_transition = None
+
+            # days_in_paused — for next_conditions PAUSED branch
+            days_in_paused = 0
+            if state == "PAUSED" and state_since_iso:
+                try:
+                    state_since_dt = datetime.fromisoformat(
+                        state_since_iso.replace("Z", "+00:00")
+                    )
+                    days_in_paused = max(0, int((now - state_since_dt).days))
+                except (ValueError, AttributeError):
+                    days_in_paused = 0
+
+            sparkline = sparkline_for_symbol(sym, conn, n=20)
+            next_conditions = compute_next_conditions(
+                state, metrics, manual_override, ks_cfg, days_in_paused,
+            )
+
+            symbols_out.append({
+                "symbol": sym,
+                "state": state,
+                "state_since": state_since_iso,
+                "manual_override": manual_override,
+                "metrics": metrics,
+                "last_transition": last_transition,
+                "sparkline_20": sparkline,
+                "next_conditions": next_conditions,
+            })
+
+        # Portfolio
+        try:
+            from strategy.kill_switch_v2 import evaluate_portfolio_tier
+            from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+            portfolio_dd = _compute_current_portfolio_dd(cfg)
+            n_failures = conn.execute(
+                """SELECT COUNT(*) FROM symbol_health
+                   WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
+            ).fetchone()[0]
+            portfolio_tier = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
+            current_equity = float(cfg.get("capital_usd", 1000.0)) * (1.0 + portfolio_dd)
+            peak_equity = float(cfg.get("capital_usd", 1000.0))
+        except Exception:
+            log.warning("get_dashboard_state portfolio computation failed", exc_info=True)
+            portfolio_tier = {"tier": "NORMAL", "dd": 0.0, "concurrent_failures": 0}
+            portfolio_dd = 0.0
+            n_failures = 0
+            current_equity = float(cfg.get("capital_usd", 1000.0))
+            peak_equity = current_equity
+
+        portfolio_out = {
+            "tier": portfolio_tier["tier"],
+            "dd_pct": float(portfolio_dd),
+            "peak_equity": peak_equity,
+            "current_equity": current_equity,
+            "concurrent_failures": int(n_failures),
+            "recent_transitions": recent_portfolio_transitions(limit=5),
+        }
+
+        # Alerts (24h window) — append portfolio_dd item if non-NORMAL
+        alerts = summarize_recent_alerts(conn=conn, window_hours=24)
+        if portfolio_tier["tier"] != "NORMAL":
+            severity = "critical" if portfolio_tier["tier"] == "FROZEN" else "warning"
+            alerts["items"].insert(0, {
+                "kind": "portfolio_dd",
+                "text": f"Portfolio DD {portfolio_dd:.1%} — tier {portfolio_tier['tier']} activo",
+                "severity": severity,
+                "ts": now.isoformat(),
+            })
+    finally:
+        conn.close()
+
+    return {
+        "symbols": symbols_out,
+        "portfolio": portfolio_out,
+        "alerts": alerts,
+        "generated_at": now.isoformat(),
+    }

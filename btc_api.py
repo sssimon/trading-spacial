@@ -2542,6 +2542,19 @@ def get_kill_switch_current_state(engine: str = "v1"):
     return observability.get_current_state(engine=engine)
 
 
+@app.get("/health/dashboard", dependencies=[Depends(verify_api_key)])
+def get_health_dashboard():
+    """B6: single-shot consolidated state for the kill switch dashboard.
+
+    Returns per-symbol full state + portfolio aggregate + 24h alert summary.
+    Read-only; safe even when kill_switch.enabled=False (returns last-evaluated
+    snapshot).
+    """
+    from health import get_dashboard_state
+    cfg = load_config()
+    return get_dashboard_state(cfg)
+
+
 @app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
     """Manually reactivate a PAUSED symbol — transitions PAUSED → PROBATION (B5 #199)."""
