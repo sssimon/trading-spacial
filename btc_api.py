@@ -1053,6 +1053,21 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_recommendations_ts
             ON kill_switch_recommendations(ts)
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_health_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_tier       TEXT NOT NULL,
+            to_tier         TEXT NOT NULL,
+            reason          TEXT NOT NULL,
+            dd_pct          REAL,
+            concurrent      INTEGER,
+            ts              TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_portfolio_events_ts
+            ON portfolio_health_events(ts DESC)
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")

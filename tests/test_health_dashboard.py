@@ -224,3 +224,58 @@ def test_summarize_recent_alerts_excludes_events_outside_window(tmp_db):
     finally:
         conn.close()
     assert result["items"] == []
+
+
+# ── portfolio_health_events ────────────────────────────────────────────────
+
+
+def test_init_db_creates_portfolio_health_events_table(tmp_db):
+    import btc_api
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type='table' AND name='portfolio_health_events'"""
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+
+
+def test_record_portfolio_transition_inserts_row(tmp_db):
+    import btc_api
+    from health import record_portfolio_transition
+    record_portfolio_transition(
+        from_tier="NORMAL", to_tier="WARNED",
+        reason="3_concurrent_failures", dd_pct=-0.02, concurrent=3,
+    )
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT from_tier, to_tier, reason, dd_pct, concurrent
+               FROM portfolio_health_events ORDER BY ts DESC LIMIT 1"""
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "NORMAL"
+    assert row[1] == "WARNED"
+    assert row[2] == "3_concurrent_failures"
+    assert row[3] == -0.02
+    assert row[4] == 3
+
+
+def test_recent_portfolio_transitions_returns_last_5(tmp_db):
+    """Helper to fetch last 5 transitions for the dashboard panel."""
+    import btc_api
+    from health import record_portfolio_transition, recent_portfolio_transitions
+    for i in range(7):
+        record_portfolio_transition(
+            from_tier="NORMAL" if i % 2 else "WARNED",
+            to_tier="WARNED" if i % 2 else "NORMAL",
+            reason=f"reason_{i}", dd_pct=0.0, concurrent=i,
+        )
+    transitions = recent_portfolio_transitions(limit=5)
+    assert len(transitions) == 5
+    # Newest first
+    assert transitions[0]["reason"] == "reason_6"
+    assert transitions[4]["reason"] == "reason_2"

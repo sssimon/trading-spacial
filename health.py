@@ -986,3 +986,51 @@ def health_monitor_loop(cfg_fn, stop_event=None) -> None:
             log.info("health_monitor_loop: daily sweep complete")
         except Exception as e:  # noqa: BLE001
             log.error("health_monitor_loop sweep failed: %s", e, exc_info=True)
+
+
+def record_portfolio_transition(
+    from_tier: str,
+    to_tier: str,
+    reason: str,
+    dd_pct: float = 0.0,
+    concurrent: int = 0,
+) -> None:
+    """B6: Append a portfolio-tier transition row.
+
+    Idempotency / dedup is the caller's responsibility — fires only when a
+    transition actually happens (from_tier != to_tier).
+    """
+    if from_tier == to_tier:
+        return
+    conn = _conn()
+    try:
+        conn.execute(
+            """INSERT INTO portfolio_health_events
+               (from_tier, to_tier, reason, dd_pct, concurrent, ts)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (from_tier, to_tier, reason, float(dd_pct), int(concurrent), _now_iso()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recent_portfolio_transitions(limit: int = 5) -> list[dict[str, Any]]:
+    """B6: Last N portfolio-tier transitions, newest first."""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            """SELECT from_tier, to_tier, reason, dd_pct, concurrent, ts
+               FROM portfolio_health_events
+               ORDER BY ts DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "from_tier": r[0], "to_tier": r[1], "reason": r[2],
+            "dd_pct": r[3], "concurrent": r[4], "ts": r[5],
+        }
+        for r in rows
+    ]
