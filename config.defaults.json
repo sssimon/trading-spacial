@@ -21,7 +21,12 @@
       "auto_calibrator": {
         "safety_net_days": 30,
         "backtest_window_days": 365,
-        "dd_target": -0.10
+        "dd_target": -0.10,
+        "max_per_day": 1,
+        "min_cooldown_hours": 6,
+        "event_cascade_window_hours": 72,
+        "event_cascade_min_symbols": 3,
+        "portfolio_dd_degradation_multiplier": 1.5
       }
     }
   },

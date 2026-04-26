@@ -987,3 +987,1302 @@ def test_post_recalibrate_falls_back_to_stub_when_v2_raises(tmp_path, monkeypatc
         assert report.get("stub") is True
     finally:
         btc_api.app.dependency_overrides.clear()
+
+
+# ── B4b.3: should_run_regime_change ─────────────────────────────────────────
+
+
+def test_should_run_regime_change_first_call_returns_false():
+    """No baseline yet (last_calib_score=None) → False (no crossing to compare)."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(None, 75.0) is False
+
+
+def test_should_run_regime_change_current_none_returns_false():
+    """No current data (e.g., regime cache empty) → False."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(50.0, None) is False
+
+
+def test_should_run_regime_change_same_band_returns_false():
+    """Both in NEUTRAL band [40, 60) → no crossing."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(45.0, 55.0) is False
+
+
+def test_should_run_regime_change_neutral_to_bull_crosses_60_returns_true():
+    """45 (NEUTRAL) → 70 (BULL) → crossed 60 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(45.0, 70.0) is True
+
+
+def test_should_run_regime_change_neutral_to_bear_crosses_40_returns_true():
+    """50 (NEUTRAL) → 30 (BEAR) → crossed 40 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(50.0, 30.0) is True
+
+
+def test_should_run_regime_change_bull_to_bear_crosses_both_returns_true():
+    """75 → 25 → crossed both 60 and 40 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_regime_change
+    assert should_run_regime_change(75.0, 25.0) is True
+
+
+# ── B4b.3: should_run_portfolio_dd_degradation ──────────────────────────────
+
+
+def test_should_run_portfolio_dd_degradation_no_baseline_returns_false():
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.10, last_applied_projected_dd=None, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_above_threshold_returns_false():
+    """current_dd=-0.04, baseline=-0.05, threshold=1.5*-0.05=-0.075. -0.04 > -0.075 → False."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.04, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_at_threshold_returns_false():
+    """Strict `<`: equal threshold doesn't fire."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    # current=-0.075, baseline=-0.05, threshold=-0.075 exact
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.075, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_below_threshold_returns_true():
+    """current_dd=-0.10, baseline=-0.05, threshold=-0.075. -0.10 < -0.075 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.10, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is True
+
+
+def test_should_run_portfolio_dd_degradation_zero_baseline_returns_false():
+    """If baseline DD=0 (no historical drawdown), threshold is 0. Any negative current
+    crosses, but this is an edge case — treat as False (no meaningful baseline)."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.05, last_applied_projected_dd=0.0, multiplier=1.5,
+    ) is False
+
+
+# ── B4b.3: should_run_event_cascade ─────────────────────────────────────────
+
+
+def test_should_run_event_cascade_below_threshold_returns_false():
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=2, threshold=3) is False
+
+
+def test_should_run_event_cascade_at_threshold_returns_true():
+    """Boundary: count == threshold → True (>= semantics)."""
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=3, threshold=3) is True
+
+
+def test_should_run_event_cascade_above_threshold_returns_true():
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=5, threshold=3) is True
+
+
+# ── B4b.3: is_rate_limit_ok ─────────────────────────────────────────────────
+
+
+def test_is_rate_limit_ok_manual_bypasses():
+    """Manual trigger always passes regardless of cooldown / max_per_day."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now).isoformat()  # just ran
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=5,
+        min_cooldown_hours=6.0, trigger_kind="manual",
+    ) is True
+
+
+def test_is_rate_limit_ok_safety_net_bypasses():
+    """safety_net guarantees a tick — bypasses cooldown."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert is_rate_limit_ok(
+        last_run_ts=now.isoformat(), now=now,
+        max_per_day_count=1, today_count=5,
+        min_cooldown_hours=6.0, trigger_kind="safety_net",
+    ) is True
+
+
+def test_is_rate_limit_ok_no_prior_run_returns_true():
+    """First-ever run for non-bypass trigger → True."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert is_rate_limit_ok(
+        last_run_ts=None, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is True
+
+
+def test_is_rate_limit_ok_within_cooldown_returns_false():
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    # 2h ago < 6h cooldown
+    last_run = (now - timedelta(hours=2)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is False
+
+
+def test_is_rate_limit_ok_after_cooldown_returns_true():
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now - timedelta(hours=7)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=0,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is True
+
+
+def test_is_rate_limit_ok_max_per_day_reached_returns_false():
+    """Even after cooldown elapsed, today_count >= max_per_day blocks."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    last_run = (now - timedelta(hours=10)).isoformat()
+    assert is_rate_limit_ok(
+        last_run_ts=last_run, now=now,
+        max_per_day_count=1, today_count=1,
+        min_cooldown_hours=6.0, trigger_kind="auto",
+    ) is False
+
+
+# ── B4b.3: DB glue ──────────────────────────────────────────────────────────
+
+
+def test_count_recalibrations_today_empty_returns_zero(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_recalibrations_today
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert _count_recalibrations_today(now) == 0
+
+
+def test_count_recalibrations_today_counts_only_today_utc(tmp_path, monkeypatch):
+    """Rows with ts on different UTC days are NOT counted."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _count_recalibrations_today, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    today = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    yesterday = today - timedelta(days=1)
+    same_day_earlier = datetime(2026, 4, 25, 1, 0, tzinfo=timezone.utc)
+
+    result = run_optimization_stub({})
+    _persist_recommendation(triggered_by=["manual"], result=result, now=yesterday)
+    _persist_recommendation(triggered_by=["manual"], result=result, now=same_day_earlier)
+    _persist_recommendation(triggered_by=["manual"], result=result, now=today)
+
+    # 2 rows on 2026-04-25 UTC, 1 on 2026-04-24
+    assert _count_recalibrations_today(today) == 2
+
+
+def test_load_last_applied_recommendation_empty_returns_none(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_applied_recommendation
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_last_applied_recommendation() is None
+
+
+def test_load_last_applied_recommendation_returns_latest_applied(tmp_path, monkeypatch):
+    """Returns the most recent row with status='applied'; ignores pending/ignored."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _load_last_applied_recommendation,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    conn = btc_api.get_db()
+    try:
+        # pending row
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 50, 100.0, -0.05, 'pending', '{}')",
+            ("2026-04-20T10:00:00+00:00",),
+        )
+        # applied row earlier
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 60, 200.0, -0.04, 'applied', '{}')",
+            ("2026-04-22T10:00:00+00:00",),
+        )
+        # applied row later — this is what we want returned
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 70, 300.0, -0.03, 'applied', '{}')",
+            ("2026-04-24T10:00:00+00:00",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    row = _load_last_applied_recommendation()
+    assert row is not None
+    assert row["slider_value"] == 70
+    assert row["projected_dd"] == pytest.approx(-0.03)
+
+
+def test_load_last_calibration_regime_score_empty_returns_none(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_last_calibration_regime_score() is None
+
+
+def test_load_last_calibration_regime_score_extracts_from_report_json(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+    import json
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES (?, '[\"safety_net\"]', NULL, 'no_feasible', ?)",
+            (
+                "2026-04-25T10:00:00+00:00",
+                json.dumps({"regime_score": 72.5, "stub": False}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _load_last_calibration_regime_score() == pytest.approx(72.5)
+
+
+def test_load_last_calibration_regime_score_handles_missing_field(tmp_path, monkeypatch):
+    """If report_json lacks regime_score (or is malformed), return None."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES (?, '[\"safety_net\"]', NULL, 'no_feasible', '{}')",
+            ("2026-04-25T10:00:00+00:00",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _load_last_calibration_regime_score() is None
+
+
+# ── B4b.3: DB glue (continued) ──────────────────────────────────────────────
+
+
+def test_count_symbols_with_recent_alerts_empty_returns_zero(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_symbols_with_recent_alerts
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _count_symbols_with_recent_alerts(window_hours=72.0) == 0
+
+
+def test_count_symbols_with_recent_alerts_counts_distinct_symbols(tmp_path, monkeypatch):
+    """Distinct ALERT/REDUCED/FROZEN symbols within window — multiple rows per symbol = 1."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_symbols_with_recent_alerts
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=10)).isoformat()
+    outside = (now - timedelta(hours=100)).isoformat()
+
+    conn = btc_api.get_db()
+    try:
+        # BTC ALERT (inside)
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'BTCUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            (inside,),
+        )
+        # BTC ALERT again (inside) — should still count as 1 distinct symbol
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'BTCUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            ((now - timedelta(hours=5)).isoformat(),),
+        )
+        # ETH portfolio REDUCED (inside) — counts
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'ETHUSDT', 'v2_shadow', 'NORMAL', 'REDUCED', 0.5, 0)",
+            (inside,),
+        )
+        # ADA NORMAL/NORMAL (inside) — does NOT count
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'ADAUSDT', 'v2_shadow', 'NORMAL', 'NORMAL', 1.0, 0)",
+            (inside,),
+        )
+        # SOL ALERT (outside window) — does NOT count
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'SOLUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            (outside,),
+        )
+        # XRP FROZEN (inside) — counts
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'XRPUSDT', 'v2_shadow', 'NORMAL', 'FROZEN', 0.0, 1)",
+            (inside,),
+        )
+        # v1 engine ALERT (inside) — does NOT count (only v2_shadow)
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'DOGEUSDT', 'v1', 'ALERT', 'NORMAL', 0.5, 0)",
+            (inside,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Distinct: BTC, ETH, XRP = 3
+    assert _count_symbols_with_recent_alerts(window_hours=72.0) == 3
+
+
+def test_mark_prior_pending_as_superseded_only_pending(tmp_path, monkeypatch):
+    """Only prior 'pending' rows get marked superseded; applied/ignored stay."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _mark_prior_pending_as_superseded
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        # 3 rows: pending(id=1), applied(id=2), pending(id=3 — the "new" one)
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, report_json) "
+            "VALUES ('2026-04-20T10:00:00+00:00', '[]', 'pending', '{}')",
+        )
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, applied_ts, applied_by, report_json) "
+            "VALUES ('2026-04-21T10:00:00+00:00', '[]', 'applied', "
+            "'2026-04-21T11:00:00+00:00', 'operator', '{}')",
+        )
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, report_json) "
+            "VALUES ('2026-04-25T10:00:00+00:00', '[]', 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Mark prior pending as superseded; new id is 3
+    _mark_prior_pending_as_superseded(new_id=3)
+
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    statuses = {r[0]: r[1] for r in rows}
+    assert statuses[1] == "superseded"
+    assert statuses[2] == "applied"   # untouched
+    assert statuses[3] == "pending"    # the new one stays
+
+
+# ── B4b.3: Telegram wrapper ─────────────────────────────────────────────────
+
+
+def test_send_telegram_recommendation_calls_notifier_with_system_event(monkeypatch):
+    """Wrapper invokes notifier.notify with a SystemEvent."""
+    from strategy.kill_switch_v2_calibrator import _send_telegram_recommendation
+    from notifier.events import SystemEvent
+
+    captured = {}
+
+    def fake_notify(event, cfg):
+        captured["event"] = event
+        captured["cfg"] = cfg
+        return []
+
+    import notifier as notifier_module
+    monkeypatch.setattr(notifier_module, "notify", fake_notify)
+
+    result = {
+        "slider_value": 65,
+        "projected_pnl": 123.4,
+        "projected_dd": -0.06,
+    }
+    _send_telegram_recommendation(
+        rec_id=42, result=result, triggered_by=["safety_net"],
+        cfg={"notifier": {}},
+    )
+    assert isinstance(captured["event"], SystemEvent)
+    assert captured["event"].kind == "kill_switch_v2_recommendation"
+    assert "id=42" in captured["event"].message
+    assert "65%" in captured["event"].message
+    assert "safety_net" in captured["event"].message
+
+
+def test_send_telegram_recommendation_swallows_notifier_errors(monkeypatch, caplog):
+    """If notifier.notify raises, log warning + don't propagate."""
+    from strategy.kill_switch_v2_calibrator import _send_telegram_recommendation
+    import notifier as notifier_module
+
+    def boom(event, cfg):
+        raise RuntimeError("simulated notifier failure")
+    monkeypatch.setattr(notifier_module, "notify", boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        # Should NOT raise
+        _send_telegram_recommendation(
+            rec_id=42,
+            result={"slider_value": 50, "projected_pnl": 0.0, "projected_dd": 0.0},
+            triggered_by=["manual"],
+            cfg={},
+        )
+    assert any(
+        "Telegram notification failed" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+# ── B4b.3: daemon iteration with full triggers ──────────────────────────────
+
+
+def test_calibrator_loop_uses_hourly_sleep(tmp_path, monkeypatch):
+    """Loop now sleeps until next_hour (was next_midnight in B4b.1)."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    captured_sleeps = []
+    stop_event = threading.Event()
+
+    def fake_wait(seconds):
+        captured_sleeps.append(seconds)
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {"safety_net_days": 30},
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Sleep should be < 1 hour (3600s); we slept toward "next hour"
+    assert len(captured_sleeps) == 1
+    assert captured_sleeps[0] <= 3600.0
+    assert captured_sleeps[0] >= 60.0  # min floor
+
+
+def test_calibrator_loop_rate_limit_blocks_repeated_auto_trigger(tmp_path, monkeypatch):
+    """Two iterations within cooldown: first persists, second is blocked."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import (
+        kill_switch_calibrator_loop, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Pre-seed a recent (manual, 1h ago) recalibration so cooldown blocks auto triggers
+    one_hour_ago = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+    _persist_recommendation(
+        triggered_by=["manual"],
+        result=run_optimization_stub({}),
+        now=one_hour_ago,
+    )
+
+    # Force an event_cascade by seeding ALERTs
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=2)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Should have only the seed row — second persist blocked by cooldown
+    conn = btc_api.get_db()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM kill_switch_recommendations"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+def test_calibrator_loop_event_cascade_fires_when_3_alerts_in_window(
+    tmp_path, monkeypatch,
+):
+    """3 distinct symbols in ALERT in last 72h → event_cascade fires + persists."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed 3 ALERT decisions for distinct symbols (within 72h)
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Should have persisted with event_cascade in triggered_by
+    import json
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT triggered_by, status FROM kill_switch_recommendations"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    triggered = json.loads(rows[0][0])
+    # event_cascade triggered alongside any other firing trigger (e.g., safety_net)
+    assert "event_cascade" in triggered
+
+
+def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
+    tmp_path, monkeypatch,
+):
+    """When a new pending recommendation persists, prior pending become superseded."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import (
+        kill_switch_calibrator_loop, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Pre-seed a pending row from "yesterday"
+    yesterday = datetime.now(tz=timezone.utc) - timedelta(days=2)
+    pending_result = {
+        "status": "pending",
+        "slider_value": 60,
+        "projected_pnl": 100.0,
+        "projected_dd": -0.05,
+        "report": {"stub": False, "ts": yesterday.isoformat()},
+    }
+    _persist_recommendation(
+        triggered_by=["safety_net"], result=pending_result, now=yesterday,
+    )
+
+    # Add a profitable trade so v2 grid produces a new pending
+    inside = (datetime.now(tz=timezone.utc) - timedelta(days=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            (inside, inside),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    # safety_net 30d + last persist 2d ago → safety_net WON'T fire
+    # But we also seeded the cascade so let's keep cascade firing the new pending
+    inside_alert = (datetime.now(tz=timezone.utc) - timedelta(hours=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside_alert, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 5,        # generous so cooldown doesn't block
+            "min_cooldown_hours": 1,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    statuses = {r[0]: r[1] for r in rows}
+    # Original pending (id=1) → superseded
+    assert statuses[1] == "superseded"
+    # New pending (id=2) → pending
+    assert statuses.get(2) == "pending"
+
+
+def test_calibrator_loop_pending_sends_telegram_notification(
+    tmp_path, monkeypatch,
+):
+    """When new pending persisted, _send_telegram_recommendation is called."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed cascade trigger
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=5)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        # Seed a profitable trade so v2 returns pending
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            (inside, inside),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    captured = []
+    import strategy.kill_switch_v2_calibrator as cal_mod
+
+    def fake_send(rec_id, result, triggered_by, cfg):
+        captured.append({"rec_id": rec_id, "status": result["status"]})
+
+    monkeypatch.setattr(cal_mod, "_send_telegram_recommendation", fake_send)
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    assert len(captured) == 1
+    assert captured[0]["status"] == "pending"
+
+
+# ── B4b.3: apply / ignore endpoints ─────────────────────────────────────────
+
+
+def test_post_apply_recommendation_marks_applied_and_writes_config(
+    tmp_path, monkeypatch,
+):
+    """POST /apply transitions pending → applied, writes config override."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Capture save_config calls
+    captured_updates = []
+    def fake_save_config(updates):
+        captured_updates.append(updates)
+        return updates
+    monkeypatch.setattr(btc_api, "save_config", fake_save_config)
+
+    # Seed a pending recommendation
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    pending_result = {
+        "status": "pending", "slider_value": 65,
+        "projected_pnl": 123.4, "projected_dd": -0.06,
+        "report": {"stub": False},
+    }
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"], result=pending_result, now=now,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/apply")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "applied"
+        assert body["applied_by"] == "operator"
+
+        # save_config called with kill_switch.v2.aggressiveness=65
+        assert len(captured_updates) == 1
+        ks_v2 = captured_updates[0].get("kill_switch", {}).get("v2", {})
+        assert ks_v2.get("aggressiveness") == 65
+
+        # DB row updated
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "applied"
+        assert row[1] == "operator"
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_404_when_missing(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/999/apply")
+        assert resp.status_code == 404
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_400_when_already_applied(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+    monkeypatch.setattr(btc_api, "save_config", lambda updates: updates)
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, applied_ts, applied_by, report_json) "
+            "VALUES ('2026-04-25T10:00:00+00:00', '[\"manual\"]', 65, 'applied', "
+            "'2026-04-25T11:00:00+00:00', 'operator', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "already" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_ignore_recommendation_marks_ignored(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"],
+        result={
+            "status": "pending", "slider_value": 65,
+            "projected_pnl": 100.0, "projected_dd": -0.05,
+            "report": {"stub": False},
+        },
+        now=now,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/ignore")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ignored"
+
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "ignored"
+        assert row[1] == "operator"
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_auth_required(tmp_path, monkeypatch):
+    """Without dependency_overrides + with api_key configured → 401."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+
+    client = TestClient(btc_api.app)
+    resp = client.post("/kill_switch/recommendations/1/apply")
+    assert resp.status_code == 401
+
+
+# ── B4b.3: review follow-ups — hardening tests ──────────────────────────────
+
+
+def test_apply_endpoint_preserves_other_v2_keys_in_config(tmp_path, monkeypatch):
+    """Apply should NOT clobber auto_calibrator/thresholds/regime_adjustments etc.
+
+    save_config has shallow merge at kill_switch level — naive
+    {"kill_switch":{"v2":{"aggressiveness":N}}} would replace entire v2.
+    Apply endpoint reads existing v2, merges only aggressiveness, writes back.
+    """
+    import btc_api, json
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Create a real config.json with full v2 block
+    cfg_path = str(tmp_path / "config.json")
+    full_cfg = {
+        "kill_switch": {
+            "v2": {
+                "aggressiveness": 50,
+                "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+                "auto_calibrator": {
+                    "safety_net_days": 30,
+                    "max_per_day": 1,
+                },
+                "thresholds": {"baseline_sigma_multiplier": {"min": 3.0, "max": 1.0}},
+            },
+        },
+    }
+    with open(cfg_path, "w") as f:
+        json.dump(full_cfg, f)
+    monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Seed pending rec with slider=65
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"],
+        result={
+            "status": "pending", "slider_value": 65,
+            "projected_pnl": 100.0, "projected_dd": -0.05,
+            "report": {"stub": False},
+        },
+        now=datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc),
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/apply")
+        assert resp.status_code == 200
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+    # Read config.json back — verify other v2 keys survived
+    with open(cfg_path) as f:
+        result_cfg = json.load(f)
+    v2 = result_cfg["kill_switch"]["v2"]
+    assert v2["aggressiveness"] == 65  # changed
+    # All other keys preserved (regression: bug clobbered them)
+    assert "regime_adjustments" in v2
+    assert v2["regime_adjustments"]["bull_bonus"] == 10
+    assert "auto_calibrator" in v2
+    assert v2["auto_calibrator"]["safety_net_days"] == 30
+    assert "thresholds" in v2
+
+
+def test_apply_endpoint_rejects_out_of_range_slider(tmp_path, monkeypatch):
+    """Slider must be in [0, 100]; corrupt rows with garbage values get 400."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Insert a row with slider=150 directly
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', 150, 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "out-of-range" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_apply_endpoint_rejects_no_feasible_with_null_slider(tmp_path, monkeypatch):
+    """no_feasible recs are persisted with slider_value=NULL; cannot be applied."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Insert pending row with NULL slider (corrupt — would normally be no_feasible)
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', NULL, 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "no slider_value" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_is_rate_limit_ok_logs_warning_on_malformed_ts(caplog):
+    """Malformed last_run_ts logs a warning before allowing the run."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    import logging
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        result = is_rate_limit_ok(
+            last_run_ts="not-a-timestamp", now=now,
+            max_per_day_count=1, today_count=0,
+            min_cooldown_hours=6.0, trigger_kind="auto",
+        )
+    assert result is True
+    assert any(
+        "malformed last_run_ts" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_load_current_regime_score_logs_warning_on_btc_scanner_failure(
+    monkeypatch, caplog,
+):
+    """If get_cached_regime raises, log a warning instead of silently failing."""
+    from strategy.kill_switch_v2_calibrator import _load_current_regime_score
+    import logging
+
+    # Make get_cached_regime raise
+    import btc_scanner
+    def boom():
+        raise RuntimeError("simulated regime cache failure")
+    monkeypatch.setattr(btc_scanner, "get_cached_regime", boom)
+
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        result = _load_current_regime_score()
+
+    assert result is None
+    assert any(
+        "get_cached_regime() raised" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_calibrator_loop_no_telegram_for_no_feasible(tmp_path, monkeypatch):
+    """no_feasible recommendations do NOT trigger Telegram (less noisy)."""
+    import btc_api, threading
+    import strategy.kill_switch_v2_calibrator as cal
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    captured = []
+    def fake_send(rec_id, result, triggered_by, cfg):
+        captured.append({"rec_id": rec_id, "status": result["status"]})
+    monkeypatch.setattr(cal, "_send_telegram_recommendation", fake_send)
+
+    # Force run_optimization_v2 to return no_feasible
+    import strategy.kill_switch_v2_optimizer as opt_mod
+    def fake_v2(cfg, regime_score=None):
+        return {
+            "status": "no_feasible", "slider_value": None,
+            "projected_pnl": None, "projected_dd": None,
+            "report": {"stub": False, "reason": "test"},
+        }
+    monkeypatch.setattr(opt_mod, "run_optimization_v2", fake_v2)
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,  # safety_net fires (no prior runs)
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+        },
+    }}}
+    cal.kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Persisted, but Telegram NOT called for no_feasible
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT status FROM kill_switch_recommendations"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == "no_feasible"
+    assert captured == []  # No Telegram for no_feasible
