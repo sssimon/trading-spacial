@@ -76,6 +76,25 @@ def should_run_regime_change(
     )
 
 
+def should_run_portfolio_dd_degradation(
+    current_dd: float,
+    last_applied_projected_dd: float | None,
+    multiplier: float = 1.5,
+) -> bool:
+    """Fire if current DD is degrading vs the projected baseline.
+
+    Both args are negative (drawdowns). "Degradation" = more negative.
+    Threshold = multiplier * last_applied_projected_dd. Strict `<`.
+
+    Returns False if no applied recommendation exists yet, OR if the baseline
+    DD is 0/positive (no meaningful historical drawdown to amplify).
+    """
+    if last_applied_projected_dd is None or last_applied_projected_dd >= 0:
+        return False
+    threshold = multiplier * last_applied_projected_dd
+    return current_dd < threshold
+
+
 def build_no_feasible_report(reason: str, now) -> dict[str, Any]:
     """Construct the report payload for stub no_feasible runs.
 

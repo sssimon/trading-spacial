@@ -1026,3 +1026,47 @@ def test_should_run_regime_change_bull_to_bear_crosses_both_returns_true():
     """75 → 25 → crossed both 60 and 40 → True."""
     from strategy.kill_switch_v2_calibrator import should_run_regime_change
     assert should_run_regime_change(75.0, 25.0) is True
+
+
+# ── B4b.3: should_run_portfolio_dd_degradation ──────────────────────────────
+
+
+def test_should_run_portfolio_dd_degradation_no_baseline_returns_false():
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.10, last_applied_projected_dd=None, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_above_threshold_returns_false():
+    """current_dd=-0.04, baseline=-0.05, threshold=1.5*-0.05=-0.075. -0.04 > -0.075 → False."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.04, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_at_threshold_returns_false():
+    """Strict `<`: equal threshold doesn't fire."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    # current=-0.075, baseline=-0.05, threshold=-0.075 exact
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.075, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is False
+
+
+def test_should_run_portfolio_dd_degradation_below_threshold_returns_true():
+    """current_dd=-0.10, baseline=-0.05, threshold=-0.075. -0.10 < -0.075 → True."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.10, last_applied_projected_dd=-0.05, multiplier=1.5,
+    ) is True
+
+
+def test_should_run_portfolio_dd_degradation_zero_baseline_returns_false():
+    """If baseline DD=0 (no historical drawdown), threshold is 0. Any negative current
+    crosses, but this is an edge case — treat as False (no meaningful baseline)."""
+    from strategy.kill_switch_v2_calibrator import should_run_portfolio_dd_degradation
+    assert should_run_portfolio_dd_degradation(
+        current_dd=-0.05, last_applied_projected_dd=0.0, multiplier=1.5,
+    ) is False
