@@ -1869,3 +1869,181 @@ def test_calibrator_loop_pending_sends_telegram_notification(
 
     assert len(captured) == 1
     assert captured[0]["status"] == "pending"
+
+
+# ── B4b.3: apply / ignore endpoints ─────────────────────────────────────────
+
+
+def test_post_apply_recommendation_marks_applied_and_writes_config(
+    tmp_path, monkeypatch,
+):
+    """POST /apply transitions pending → applied, writes config override."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Capture save_config calls
+    captured_updates = []
+    def fake_save_config(updates):
+        captured_updates.append(updates)
+        return updates
+    monkeypatch.setattr(btc_api, "save_config", fake_save_config)
+
+    # Seed a pending recommendation
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    pending_result = {
+        "status": "pending", "slider_value": 65,
+        "projected_pnl": 123.4, "projected_dd": -0.06,
+        "report": {"stub": False},
+    }
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"], result=pending_result, now=now,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/apply")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "applied"
+        assert body["applied_by"] == "operator"
+
+        # save_config called with kill_switch.v2.aggressiveness=65
+        assert len(captured_updates) == 1
+        ks_v2 = captured_updates[0].get("kill_switch", {}).get("v2", {})
+        assert ks_v2.get("aggressiveness") == 65
+
+        # DB row updated
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "applied"
+        assert row[1] == "operator"
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_404_when_missing(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/999/apply")
+        assert resp.status_code == 404
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_400_when_already_applied(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+    monkeypatch.setattr(btc_api, "save_config", lambda updates: updates)
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, applied_ts, applied_by, report_json) "
+            "VALUES ('2026-04-25T10:00:00+00:00', '[\"manual\"]', 65, 'applied', "
+            "'2026-04-25T11:00:00+00:00', 'operator', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "already" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_ignore_recommendation_marks_ignored(tmp_path, monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"],
+        result={
+            "status": "pending", "slider_value": 65,
+            "projected_pnl": 100.0, "projected_dd": -0.05,
+            "report": {"stub": False},
+        },
+        now=now,
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/ignore")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ignored"
+
+        conn = btc_api.get_db()
+        try:
+            row = conn.execute(
+                "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "ignored"
+        assert row[1] == "operator"
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_post_apply_recommendation_auth_required(tmp_path, monkeypatch):
+    """Without dependency_overrides + with api_key configured → 401."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+
+    client = TestClient(btc_api.app)
+    resp = client.post("/kill_switch/recommendations/1/apply")
+    assert resp.status_code == 401

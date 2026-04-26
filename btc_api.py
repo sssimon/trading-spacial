@@ -1775,6 +1775,162 @@ def kill_switch_list_recommendations(
     return result
 
 
+@app.post(
+    "/kill_switch/recommendations/{rec_id}/apply",
+    summary="Apply a pending recommendation (operator action)",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_apply_recommendation(rec_id: int):
+    """Apply a pending recommendation: write config override + mark applied.
+
+    Returns the updated row. 404 if not found, 400 if not pending.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                """SELECT id, status, slider_value
+                   FROM kill_switch_recommendations WHERE id = ?""",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"recommendation {rec_id} not found")
+        if row[1] != "pending":
+            raise HTTPException(
+                status_code=400,
+                detail=f"recommendation {rec_id} is already {row[1]}",
+            )
+        slider_value = row[2]
+        if slider_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"recommendation {rec_id} has no slider_value to apply",
+            )
+
+        # Write config override
+        save_config({"kill_switch": {"v2": {"aggressiveness": int(slider_value)}}})
+
+        # Update DB row
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        conn = get_db()
+        try:
+            conn.execute(
+                """UPDATE kill_switch_recommendations
+                   SET status = 'applied', applied_ts = ?, applied_by = 'operator'
+                   WHERE id = ?""",
+                (now_iso, rec_id),
+            )
+            conn.commit()
+            updated = conn.execute(
+                """SELECT id, ts, triggered_by, slider_value, projected_pnl,
+                          projected_dd, status, applied_ts, applied_by, report_json
+                   FROM kill_switch_recommendations WHERE id = ?""",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        log.warning(
+            "Kill switch v2: operator applied recomendación id=%d slider=%d",
+            rec_id, int(slider_value),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(
+            "POST /kill_switch/recommendations/%d/apply failed: %s",
+            rec_id, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"apply failed: {type(e).__name__}: {e}",
+        )
+
+    return {
+        "id": updated[0], "ts": updated[1], "triggered_by": updated[2],
+        "slider_value": updated[3], "projected_pnl": updated[4],
+        "projected_dd": updated[5], "status": updated[6],
+        "applied_ts": updated[7], "applied_by": updated[8],
+    }
+
+
+@app.post(
+    "/kill_switch/recommendations/{rec_id}/ignore",
+    summary="Ignore a pending recommendation (operator action)",
+    dependencies=[Depends(verify_api_key)],
+)
+def kill_switch_ignore_recommendation(rec_id: int):
+    """Mark a pending recommendation as ignored (no config change).
+
+    404 if not found, 400 if not pending.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                """SELECT id, status FROM kill_switch_recommendations WHERE id = ?""",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"recommendation {rec_id} not found")
+        if row[1] != "pending":
+            raise HTTPException(
+                status_code=400,
+                detail=f"recommendation {rec_id} is already {row[1]}",
+            )
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        conn = get_db()
+        try:
+            conn.execute(
+                """UPDATE kill_switch_recommendations
+                   SET status = 'ignored', applied_ts = ?, applied_by = 'operator'
+                   WHERE id = ?""",
+                (now_iso, rec_id),
+            )
+            conn.commit()
+            updated = conn.execute(
+                """SELECT id, ts, triggered_by, slider_value, projected_pnl,
+                          projected_dd, status, applied_ts, applied_by, report_json
+                   FROM kill_switch_recommendations WHERE id = ?""",
+                (rec_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        log.warning(
+            "Kill switch v2: operator ignored recomendación id=%d", rec_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(
+            "POST /kill_switch/recommendations/%d/ignore failed: %s",
+            rec_id, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"ignore failed: {type(e).__name__}: {e}",
+        )
+
+    return {
+        "id": updated[0], "ts": updated[1], "triggered_by": updated[2],
+        "slider_value": updated[3], "projected_pnl": updated[4],
+        "projected_dd": updated[5], "status": updated[6],
+        "applied_ts": updated[7], "applied_by": updated[8],
+    }
+
+
 @app.get("/signals", summary="Historial de escaneos / señales")
 def list_signals(
     limit:        int             = Query(50,    ge=1, le=500),
