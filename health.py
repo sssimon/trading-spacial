@@ -418,14 +418,108 @@ def apply_transition(
         conn.close()
 
 
-def reactivate_symbol(symbol: str, reason: str = "manual") -> None:
-    """Manually reset a symbol to NORMAL with manual_override=1."""
-    current = get_symbol_state(symbol)
-    metrics = {"reactivation_reason": reason}
-    apply_transition(
-        symbol, new_state="NORMAL", reason="manual_override",
-        metrics=metrics, from_state=current, manual_override=1,
+def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
+    """Return the symbol_health row for `symbol`, or None if absent.
+
+    Selected columns: state, state_since, manual_override,
+    probation_trades_remaining, probation_started_at, paused_days_at_entry.
+    """
+    conn = _conn()
+    try:
+        row = conn.execute(
+            """SELECT state, state_since, manual_override,
+                      probation_trades_remaining, probation_started_at,
+                      paused_days_at_entry
+               FROM symbol_health WHERE symbol=?""",
+            (symbol,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "state": row[0],
+        "state_since": row[1],
+        "manual_override": int(row[2] or 0),
+        "probation_trades_remaining": row[3],
+        "probation_started_at": row[4],
+        "paused_days_at_entry": row[5],
+    }
+
+
+def reactivate_symbol(
+    symbol: str,
+    reason: str = "manual",
+    cfg: dict[str, Any] | None = None,
+) -> None:
+    """Transition a PAUSED symbol → PROBATION (B5 #199).
+
+    `reason='manual'` sets manual_override=1; any other reason (e.g.
+    'auto_recovery') sets it to 0. Reads probation params from
+    cfg['kill_switch']['v2']['probation'] when provided; otherwise uses
+    spec defaults (trades_base=10, per_pause_day=0.2).
+
+    No-ops with a warning when the symbol is not currently PAUSED.
+    """
+    row = _get_symbol_health_row(symbol)
+    current = row["state"] if row else "NORMAL"
+
+    if current != "PAUSED":
+        log.warning(
+            "reactivate_symbol(%s): symbol is not in PAUSED (current=%s); skipping",
+            symbol, current,
+        )
+        return
+
+    # Compute days_paused from the PAUSED row's state_since.
+    state_since_iso = row["state_since"] if row else None
+    days_paused = 0
+    if state_since_iso:
+        try:
+            state_since_dt = datetime.fromisoformat(state_since_iso.replace("Z", "+00:00"))
+            days_paused = max(0, int((datetime.now(timezone.utc) - state_since_dt).days))
+        except (ValueError, AttributeError):
+            log.warning(
+                "reactivate_symbol(%s): invalid state_since=%r; treating days_paused=0",
+                symbol, state_since_iso,
+            )
+
+    # Pull probation params (with defaults).
+    prob_cfg = (((cfg or {}).get("kill_switch") or {}).get("v2") or {}).get("probation") or {}
+    trades_base = int(prob_cfg.get("trades_base", 10))
+    per_pause_day = float(prob_cfg.get("trades_per_pause_day", 0.2))
+    trades_remaining = compute_probation_trades_remaining(
+        days_paused, trades_base=trades_base, per_pause_day=per_pause_day,
     )
+
+    metrics = {
+        "reactivation_reason": reason,
+        "days_paused": days_paused,
+        "probation_trades_remaining": trades_remaining,
+    }
+    manual_override = 1 if reason == "manual" else 0
+
+    apply_transition(
+        symbol, new_state="PROBATION", reason=f"reactivated_{reason}",
+        metrics=metrics, from_state=current, manual_override=manual_override,
+    )
+
+    # apply_transition does NOT touch probation_* columns when entering PROBATION
+    # (it only resets them on exit). Write them here.
+    started_at = _now_iso()
+    conn = _conn()
+    try:
+        conn.execute(
+            """UPDATE symbol_health
+               SET probation_trades_remaining = ?,
+                   probation_started_at = ?,
+                   paused_days_at_entry = ?
+               WHERE symbol = ?""",
+            (trades_remaining, started_at, days_paused, symbol),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
