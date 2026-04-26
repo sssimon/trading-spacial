@@ -309,6 +309,27 @@ def evaluate_state(
 #  PERSISTENCE
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _decrement_probation_counter(symbol: str) -> None:
+    """Atomically decrement probation_trades_remaining if the symbol is in PROBATION.
+
+    Floored at 0. No-op if the symbol is not in PROBATION (uses a state-guarded
+    UPDATE so we don't accidentally write to non-PROBATION rows).
+    """
+    conn = _conn()
+    try:
+        conn.execute(
+            """UPDATE symbol_health
+               SET probation_trades_remaining = MAX(
+                     COALESCE(probation_trades_remaining, 0) - 1, 0
+               )
+               WHERE symbol = ? AND state = 'PROBATION'""",
+            (symbol,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -553,16 +574,22 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
     finally:
         conn.close()
 
-    current = get_symbol_state(symbol)
-    override = _get_manual_override(symbol)
+    # B5: inject current probation_trades_remaining into metrics so evaluate_state
+    # can apply the PROBATION branch. Read from the symbol_health row.
+    row = _get_symbol_health_row(symbol)
+    current = row["state"] if row else "NORMAL"
+    override = bool(row["manual_override"]) if row else False
+    if row is not None:
+        metrics["probation_trades_remaining"] = row["probation_trades_remaining"]
+
     new_state, reason = evaluate_state(metrics, current, override, ks_cfg)
 
     if new_state != current:
         apply_transition(symbol, new_state=new_state, reason=reason,
                          metrics=metrics, from_state=current)
         # One-shot notify on transitions into tiered states.
-        # PR 2 (#138): ALERT; PR 3 (#138): REDUCED; PR 4 (#138): PAUSED.
-        notify_on_states = {"ALERT", "REDUCED", "PAUSED"}
+        # B5: also notify on PROBATION entry so operators see auto-reactivations.
+        notify_on_states = {"ALERT", "REDUCED", "PAUSED", "PROBATION"}
         if new_state in notify_on_states and notify is not None and HealthEvent is not None:
             try:
                 notify(
@@ -635,11 +662,17 @@ def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
 
 def trigger_health_evaluation(symbol: str, cfg: dict[str, Any]) -> None:
     """Fire-and-forget health evaluation for a single symbol.
-    Swallows exceptions so callers (e.g. db_close_position) never crash."""
+    Swallows exceptions so callers (e.g. db_close_position) never crash.
+
+    B5: decrements probation_trades_remaining before evaluation when symbol
+    is in PROBATION (so the regression/completion check sees the post-trade
+    counter value).
+    """
     ks_cfg = (cfg.get("kill_switch") or {})
     if not ks_cfg.get("enabled", True):
         return
     try:
+        _decrement_probation_counter(symbol)
         evaluate_and_record(symbol, cfg)
     except Exception as e:  # noqa: BLE001
         log.error("health trigger failed for %s: %s", symbol, e, exc_info=True)

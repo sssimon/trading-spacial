@@ -148,3 +148,148 @@ def test_reactivate_symbol_noop_when_not_paused(tmp_db, caplog):
     # Warning logged
     assert any("not in PAUSED" in r.message or "not paused" in r.message.lower()
                for r in caplog.records)
+
+
+# ── Trade lifecycle hook ────────────────────────────────────────────────────
+
+
+def test_decrement_probation_counter_decreases_value(tmp_db):
+    """_decrement_probation_counter drops trades_remaining by 1."""
+    import btc_api
+    from health import _decrement_probation_counter
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                probation_trades_remaining, probation_started_at, paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _decrement_probation_counter("BTC")
+    row = _read_health_row("BTC")
+    assert row[1] == 12
+
+
+def test_decrement_probation_counter_noop_when_not_probation(tmp_db):
+    """When state is NOT PROBATION, decrement is a no-op (no row mutation)."""
+    import btc_api
+    from health import _decrement_probation_counter
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health (symbol, state, state_since, last_evaluated_at, last_metrics_json)
+               VALUES ('BTC', 'NORMAL', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}')"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _decrement_probation_counter("BTC")  # must not raise, must not change anything
+    row = _read_health_row("BTC")
+    assert row[0] == "NORMAL"
+    assert row[1] is None  # was NULL, stays NULL
+
+
+def test_decrement_probation_counter_floors_at_zero(tmp_db):
+    """When counter is 0, decrement does not go negative."""
+    import btc_api
+    from health import _decrement_probation_counter
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                probation_trades_remaining, probation_started_at, paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}', 0, '2026-04-01T00:00:00+00:00', 15)"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _decrement_probation_counter("BTC")
+    row = _read_health_row("BTC")
+    assert row[1] == 0
+
+
+def test_trigger_health_evaluation_decrements_then_evaluates(tmp_db):
+    """trigger_health_evaluation on a PROBATION symbol decrements counter THEN evals."""
+    import btc_api
+    from health import trigger_health_evaluation, get_symbol_state
+
+    # Seed PROBATION with counter=1 — after decrement, counter=0 → evaluate_state sees
+    # 0 and returns NORMAL with reason="probation_complete".
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                probation_trades_remaining, probation_started_at, paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}', 1, '2026-04-01T00:00:00+00:00', 15)"""
+        )
+        # Add 25 winning closed trades so trades_count_total >= min_trades_for_eval
+        for i in range(25):
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = {"kill_switch": {
+        "enabled": True, "min_trades_for_eval": 20,
+        "alert_win_rate_threshold": 0.15, "reduce_size_factor": 0.5,
+        "pause_months_consecutive": 3, "auto_recovery_enabled": True,
+        "v2": {"probation": {
+            "regression_wr_threshold": 0.10, "regression_window_trades": 10,
+        }},
+    }}
+    trigger_health_evaluation("BTC", cfg)
+    assert get_symbol_state("BTC") == "NORMAL"
+
+
+def test_daily_cron_eval_does_not_decrement_probation(tmp_db):
+    """evaluate_and_record (daily cron path) does NOT decrement probation counter."""
+    import btc_api
+    from health import evaluate_and_record
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO symbol_health
+               (symbol, state, state_since, last_evaluated_at, last_metrics_json,
+                probation_trades_remaining, probation_started_at, paused_days_at_entry)
+               VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
+                       '2026-04-01T00:00:00+00:00', '{}', 5, '2026-04-01T00:00:00+00:00', 15)"""
+        )
+        # 25 winning trades — enough for eval but no regression
+        for i in range(25):
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    cfg = {"kill_switch": {
+        "enabled": True, "min_trades_for_eval": 20,
+        "alert_win_rate_threshold": 0.15, "reduce_size_factor": 0.5,
+        "pause_months_consecutive": 3, "auto_recovery_enabled": True,
+        "v2": {"probation": {
+            "regression_wr_threshold": 0.10, "regression_window_trades": 10,
+        }},
+    }}
+    evaluate_and_record("BTC", cfg)
+    row = _read_health_row("BTC")
+    assert row[0] == "PROBATION"  # still in PROBATION
+    assert row[1] == 5             # counter NOT decremented
