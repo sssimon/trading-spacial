@@ -616,6 +616,15 @@ def apply_reduce_factor(size: float, symbol: str, cfg: dict[str, Any]) -> float:
     if state == "REDUCED":
         factor = float(ks_cfg.get("reduce_size_factor", 0.5))
         return size * factor
+    if state == "PROBATION":
+        # Prefer v2.probation.size_factor; fall back to v1's reduce_size_factor.
+        v2_cfg = (ks_cfg.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        factor = float(prob_cfg.get(
+            "size_factor",
+            ks_cfg.get("reduce_size_factor", 0.5),
+        ))
+        return size * factor
     return size
 
 
