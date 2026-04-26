@@ -136,7 +136,13 @@ def is_rate_limit_ok(
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
-        # Malformed ts → treat as no prior run (conservative for rate limit)
+        # Malformed ts → treat as no prior run. Logged so DB corruption or
+        # writer-format drift in kill_switch_recommendations.ts doesn't
+        # silently disable rate limiting.
+        log.warning(
+            "is_rate_limit_ok: malformed last_run_ts=%r — treating as no "
+            "prior run (allowing %s trigger)", last_run_ts, trigger_kind,
+        )
         return True
 
     elapsed = now - parsed
@@ -523,15 +529,25 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
 def _load_current_regime_score() -> float | None:
     """Read the current regime score from the cached daily detector.
 
-    Returns None if cache is empty / missing / malformed.
+    Returns None if cache is empty / missing / malformed. Errors are logged
+    so an import or runtime failure doesn't silently disable the
+    regime_change trigger forever.
     """
     try:
         from btc_scanner import get_cached_regime
-    except Exception:
+    except Exception as e:
+        log.warning(
+            "_load_current_regime_score: btc_scanner import failed: %s",
+            e, exc_info=True,
+        )
         return None
     try:
         cached = get_cached_regime()
-    except Exception:
+    except Exception as e:
+        log.warning(
+            "_load_current_regime_score: get_cached_regime() raised: %s",
+            e, exc_info=True,
+        )
         return None
     if not cached or not isinstance(cached, dict):
         return None
@@ -541,6 +557,10 @@ def _load_current_regime_score() -> float | None:
     try:
         return float(score)
     except (TypeError, ValueError):
+        log.warning(
+            "_load_current_regime_score: cached score is non-numeric: %r",
+            score,
+        )
         return None
 
 

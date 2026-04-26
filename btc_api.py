@@ -1811,9 +1811,23 @@ def kill_switch_apply_recommendation(rec_id: int):
                 status_code=400,
                 detail=f"recommendation {rec_id} has no slider_value to apply",
             )
+        slider_int = int(slider_value)
+        if not (0 <= slider_int <= 100):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"recommendation {rec_id} has out-of-range slider_value="
+                    f"{slider_int} (must be 0..100)"
+                ),
+            )
 
-        # Write config override
-        save_config({"kill_switch": {"v2": {"aggressiveness": int(slider_value)}}})
+        # Write config override. save_config only merges at kill_switch level
+        # (it replaces the entire v2 sub-dict), so do read-modify-write here to
+        # preserve other v2 keys (auto_calibrator, regime_adjustments, etc).
+        existing_cfg = load_config()
+        existing_v2 = (existing_cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+        merged_v2 = {**existing_v2, "aggressiveness": slider_int}
+        save_config({"kill_switch": {"v2": merged_v2}})
 
         # Update DB row
         now_iso = datetime.now(tz=timezone.utc).isoformat()

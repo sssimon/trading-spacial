@@ -2047,3 +2047,242 @@ def test_post_apply_recommendation_auth_required(tmp_path, monkeypatch):
     client = TestClient(btc_api.app)
     resp = client.post("/kill_switch/recommendations/1/apply")
     assert resp.status_code == 401
+
+
+# ── B4b.3: review follow-ups — hardening tests ──────────────────────────────
+
+
+def test_apply_endpoint_preserves_other_v2_keys_in_config(tmp_path, monkeypatch):
+    """Apply should NOT clobber auto_calibrator/thresholds/regime_adjustments etc.
+
+    save_config has shallow merge at kill_switch level — naive
+    {"kill_switch":{"v2":{"aggressiveness":N}}} would replace entire v2.
+    Apply endpoint reads existing v2, merges only aggressiveness, writes back.
+    """
+    import btc_api, json
+    from fastapi.testclient import TestClient
+    from strategy.kill_switch_v2_calibrator import _persist_recommendation
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Create a real config.json with full v2 block
+    cfg_path = str(tmp_path / "config.json")
+    full_cfg = {
+        "kill_switch": {
+            "v2": {
+                "aggressiveness": 50,
+                "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
+                "auto_calibrator": {
+                    "safety_net_days": 30,
+                    "max_per_day": 1,
+                },
+                "thresholds": {"baseline_sigma_multiplier": {"min": 3.0, "max": 1.0}},
+            },
+        },
+    }
+    with open(cfg_path, "w") as f:
+        json.dump(full_cfg, f)
+    monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Seed pending rec with slider=65
+    rec_id = _persist_recommendation(
+        triggered_by=["manual"],
+        result={
+            "status": "pending", "slider_value": 65,
+            "projected_pnl": 100.0, "projected_dd": -0.05,
+            "report": {"stub": False},
+        },
+        now=datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc),
+    )
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post(f"/kill_switch/recommendations/{rec_id}/apply")
+        assert resp.status_code == 200
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+    # Read config.json back — verify other v2 keys survived
+    with open(cfg_path) as f:
+        result_cfg = json.load(f)
+    v2 = result_cfg["kill_switch"]["v2"]
+    assert v2["aggressiveness"] == 65  # changed
+    # All other keys preserved (regression: bug clobbered them)
+    assert "regime_adjustments" in v2
+    assert v2["regime_adjustments"]["bull_bonus"] == 10
+    assert "auto_calibrator" in v2
+    assert v2["auto_calibrator"]["safety_net_days"] == 30
+    assert "thresholds" in v2
+
+
+def test_apply_endpoint_rejects_out_of_range_slider(tmp_path, monkeypatch):
+    """Slider must be in [0, 100]; corrupt rows with garbage values get 400."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Insert a row with slider=150 directly
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', 150, 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "out-of-range" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_apply_endpoint_rejects_no_feasible_with_null_slider(tmp_path, monkeypatch):
+    """no_feasible recs are persisted with slider_value=NULL; cannot be applied."""
+    import btc_api
+    from fastapi.testclient import TestClient
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+    btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
+
+    # Insert pending row with NULL slider (corrupt — would normally be no_feasible)
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', NULL, 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        client = TestClient(btc_api.app)
+        resp = client.post("/kill_switch/recommendations/1/apply")
+        assert resp.status_code == 400
+        assert "no slider_value" in resp.json().get("detail", "").lower()
+    finally:
+        btc_api.app.dependency_overrides.clear()
+
+
+def test_is_rate_limit_ok_logs_warning_on_malformed_ts(caplog):
+    """Malformed last_run_ts logs a warning before allowing the run."""
+    from strategy.kill_switch_v2_calibrator import is_rate_limit_ok
+    from datetime import datetime, timezone
+    import logging
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        result = is_rate_limit_ok(
+            last_run_ts="not-a-timestamp", now=now,
+            max_per_day_count=1, today_count=0,
+            min_cooldown_hours=6.0, trigger_kind="auto",
+        )
+    assert result is True
+    assert any(
+        "malformed last_run_ts" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_load_current_regime_score_logs_warning_on_btc_scanner_failure(
+    monkeypatch, caplog,
+):
+    """If get_cached_regime raises, log a warning instead of silently failing."""
+    from strategy.kill_switch_v2_calibrator import _load_current_regime_score
+    import logging
+
+    # Make get_cached_regime raise
+    import btc_scanner
+    def boom():
+        raise RuntimeError("simulated regime cache failure")
+    monkeypatch.setattr(btc_scanner, "get_cached_regime", boom)
+
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        result = _load_current_regime_score()
+
+    assert result is None
+    assert any(
+        "get_cached_regime() raised" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_calibrator_loop_no_telegram_for_no_feasible(tmp_path, monkeypatch):
+    """no_feasible recommendations do NOT trigger Telegram (less noisy)."""
+    import btc_api, threading
+    import strategy.kill_switch_v2_calibrator as cal
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    captured = []
+    def fake_send(rec_id, result, triggered_by, cfg):
+        captured.append({"rec_id": rec_id, "status": result["status"]})
+    monkeypatch.setattr(cal, "_send_telegram_recommendation", fake_send)
+
+    # Force run_optimization_v2 to return no_feasible
+    import strategy.kill_switch_v2_optimizer as opt_mod
+    def fake_v2(cfg, regime_score=None):
+        return {
+            "status": "no_feasible", "slider_value": None,
+            "projected_pnl": None, "projected_dd": None,
+            "report": {"stub": False, "reason": "test"},
+        }
+    monkeypatch.setattr(opt_mod, "run_optimization_v2", fake_v2)
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,  # safety_net fires (no prior runs)
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+        },
+    }}}
+    cal.kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Persisted, but Telegram NOT called for no_feasible
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT status FROM kill_switch_recommendations"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == "no_feasible"
+    assert captured == []  # No Telegram for no_feasible
