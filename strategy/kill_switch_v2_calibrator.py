@@ -367,6 +367,46 @@ def _mark_prior_pending_as_superseded(new_id: int) -> None:
         conn.close()
 
 
+def _send_telegram_recommendation(
+    rec_id: int,
+    result: dict[str, Any],
+    triggered_by: list[str],
+    cfg: dict[str, Any],
+) -> None:
+    """Send a Telegram notification for a pending recommendation.
+
+    Wraps notifier.notify(SystemEvent(...), cfg). Fails open: any exception
+    is logged and swallowed so notifier failure doesn't break the daemon
+    or endpoint.
+    """
+    import notifier
+    from notifier.events import SystemEvent
+
+    try:
+        slider = result.get("slider_value")
+        pnl = result.get("projected_pnl")
+        dd = result.get("projected_dd")
+        slider_str = f"{slider}%" if slider is not None else "N/A"
+        pnl_str = f"+${pnl:.0f}" if isinstance(pnl, (int, float)) else "N/A"
+        dd_str = f"{dd:.2%}" if isinstance(dd, (int, float)) else "N/A"
+
+        message = (
+            f"Kill switch v2: nueva recomendación id={rec_id}. "
+            f"Slider {slider_str}, {pnl_str} proyectado, DD {dd_str}. "
+            f"Triggered by {triggered_by}. Ver dashboard."
+        )
+
+        notifier.notify(
+            SystemEvent(kind="kill_switch_v2_recommendation", message=message),
+            cfg=cfg,
+        )
+    except Exception as e:
+        log.warning(
+            "Telegram notification failed for rec_id=%s: %s",
+            rec_id, e, exc_info=True,
+        )
+
+
 def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
     """Daily auto-calibrator loop.
 

@@ -1482,3 +1482,61 @@ def test_mark_prior_pending_as_superseded_only_pending(tmp_path, monkeypatch):
     assert statuses[1] == "superseded"
     assert statuses[2] == "applied"   # untouched
     assert statuses[3] == "pending"    # the new one stays
+
+
+# ── B4b.3: Telegram wrapper ─────────────────────────────────────────────────
+
+
+def test_send_telegram_recommendation_calls_notifier_with_system_event(monkeypatch):
+    """Wrapper invokes notifier.notify with a SystemEvent."""
+    from strategy.kill_switch_v2_calibrator import _send_telegram_recommendation
+    from notifier.events import SystemEvent
+
+    captured = {}
+
+    def fake_notify(event, cfg):
+        captured["event"] = event
+        captured["cfg"] = cfg
+        return []
+
+    import notifier as notifier_module
+    monkeypatch.setattr(notifier_module, "notify", fake_notify)
+
+    result = {
+        "slider_value": 65,
+        "projected_pnl": 123.4,
+        "projected_dd": -0.06,
+    }
+    _send_telegram_recommendation(
+        rec_id=42, result=result, triggered_by=["safety_net"],
+        cfg={"notifier": {}},
+    )
+    assert isinstance(captured["event"], SystemEvent)
+    assert captured["event"].kind == "kill_switch_v2_recommendation"
+    assert "id=42" in captured["event"].message
+    assert "65%" in captured["event"].message
+    assert "safety_net" in captured["event"].message
+
+
+def test_send_telegram_recommendation_swallows_notifier_errors(monkeypatch, caplog):
+    """If notifier.notify raises, log warning + don't propagate."""
+    from strategy.kill_switch_v2_calibrator import _send_telegram_recommendation
+    import notifier as notifier_module
+
+    def boom(event, cfg):
+        raise RuntimeError("simulated notifier failure")
+    monkeypatch.setattr(notifier_module, "notify", boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        # Should NOT raise
+        _send_telegram_recommendation(
+            rec_id=42,
+            result={"slider_value": 50, "projected_pnl": 0.0, "projected_dd": 0.0},
+            triggered_by=["manual"],
+            cfg={},
+        )
+    assert any(
+        "Telegram notification failed" in rec.getMessage()
+        for rec in caplog.records
+    )
