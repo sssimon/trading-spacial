@@ -224,6 +224,79 @@ def compute_probation_trades_remaining(
     return int(round(trades_base + per_pause_day * days_paused))
 
 
+def compute_next_conditions(
+    state: str,
+    metrics: dict[str, Any],
+    manual_override: bool,
+    cfg: dict[str, Any],
+    days_in_paused: int = 0,
+) -> str:
+    """B6: Spanish text describing the gap to next tier change.
+
+    Pure function. Uses cfg thresholds + current metrics to phrase what
+    the operator should expect ("para salir de ALERT: WR>0.20 sobre 8 trades").
+
+    Args:
+        state: current per-symbol tier ("NORMAL"|"ALERT"|"REDUCED"|"PAUSED"|"PROBATION").
+        metrics: rolling metrics dict (output of compute_rolling_metrics).
+        manual_override: whether the symbol has manual_override=1.
+        cfg: kill_switch sub-config (already unwrapped).
+        days_in_paused: how many days the symbol has been in PAUSED (used for
+            auto-recovery countdown).
+
+    Returns: Spanish text, never None.
+    """
+    if state == "NORMAL":
+        return "Saludable — sin alertas activas."
+
+    if state == "ALERT":
+        threshold = float(cfg.get("alert_win_rate_threshold", 0.15))
+        wr20 = float(metrics.get("win_rate_20_trades", 0.0) or 0.0)
+        # wins needed = ceil(threshold * 20 - current_wins). current_wins = wr20*20.
+        import math
+        current_wins = int(round(wr20 * 20))
+        wins_needed = max(0, int(math.ceil(threshold * 20 - current_wins)))
+        return (
+            f"Para salir: WR>{threshold:.2f} sobre próximos 20 trades. "
+            f"Actual: WR={wr20:.2f} ({current_wins}/20 wins), faltan {wins_needed} wins."
+        )
+
+    if state == "REDUCED":
+        pnl_30d = float(metrics.get("pnl_30d", 0.0) or 0.0)
+        gap = max(0.0, -pnl_30d)
+        return (
+            f"Para salir: pnl_30d ≥ 0. Actual: ${pnl_30d:.2f}, "
+            f"faltan ${gap:.2f}."
+        )
+
+    if state == "PAUSED":
+        if manual_override:
+            return "Reactivación manual disponible vía POST /health/reactivate/{symbol}."
+        v2_cfg = (cfg.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        threshold_days = int(prob_cfg.get("paused_to_probation_days", 14))
+        days_remaining = max(0, threshold_days - int(days_in_paused))
+        return (
+            f"Auto-recovery: en {days_remaining} días + portfolio NORMAL → PROBATION. "
+            f"Días en PAUSED: {days_in_paused}/{threshold_days}."
+        )
+
+    if state == "PROBATION":
+        trades_remaining = metrics.get("probation_trades_remaining")
+        wr10 = float(metrics.get("win_rate_10_trades", 0.0) or 0.0)
+        v2_cfg = (cfg.get("v2") or {})
+        prob_cfg = (v2_cfg.get("probation") or {})
+        regression_wr = float(prob_cfg.get("regression_wr_threshold", 0.10))
+        if trades_remaining is None:
+            return f"En PROBATION (sin contador). WR_10={wr10:.2f}."
+        return (
+            f"En PROBATION: {int(trades_remaining)} trades restantes (al llegar a 0 → NORMAL). "
+            f"Riesgo regresión: WR_10={wr10:.2f}, threshold={regression_wr:.2f}."
+        )
+
+    return f"Estado desconocido: {state}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  STATE MACHINE (pure)
 # ─────────────────────────────────────────────────────────────────────────────
