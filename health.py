@@ -70,12 +70,13 @@ def compute_rolling_metrics_from_trades(
     Returns a dict with:
       - trades_count_total (int)
       - win_rate_20_trades (float | None) — None when no trades with exit_ts exist
+      - win_rate_10_trades (float | None) — None when no trades with exit_ts exist
       - pnl_30d (float)
       - pnl_by_month (dict "YYYY-MM" -> float)
       - months_negative_consecutive (int)
 
     Note: the DB-backed wrapper `compute_rolling_metrics` coerces None → 0.0
-    on win_rate_20_trades to preserve its historical contract.
+    on win_rate_20_trades and win_rate_10_trades to preserve its historical contract.
     """
     if now is None:
         now = datetime.now(tz=timezone.utc)
@@ -103,6 +104,17 @@ def compute_rolling_metrics_from_trades(
         win_rate_20_trades: float | None = wins / len(last_20)
     else:
         win_rate_20_trades = None
+
+    # Last 10 trades win rate (B5: PROBATION regression check uses this)
+    last_10 = trades_with_exit[-10:]
+    if len(last_10) > 0:
+        wins_10 = sum(
+            1 for t in last_10
+            if t.get("pnl_usd") is not None and t["pnl_usd"] > 0
+        )
+        win_rate_10_trades: float | None = wins_10 / len(last_10)
+    else:
+        win_rate_10_trades = None
 
     # Last 30 days PnL
     cutoff_30d = now - timedelta(days=30)
@@ -136,6 +148,7 @@ def compute_rolling_metrics_from_trades(
     return {
         "trades_count_total": trades_count_total,
         "win_rate_20_trades": win_rate_20_trades,
+        "win_rate_10_trades": win_rate_10_trades,
         "pnl_30d": pnl_30d,
         "pnl_by_month": pnl_by_month,
         "months_negative_consecutive": months_negative_consecutive,
@@ -182,6 +195,10 @@ def compute_rolling_metrics(symbol: str, conn, now: datetime | None = None) -> d
         metrics["win_rate_20_trades"] = 0.0
     else:
         metrics["win_rate_20_trades"] = float(metrics["win_rate_20_trades"])
+    if metrics["win_rate_10_trades"] is None:
+        metrics["win_rate_10_trades"] = 0.0
+    else:
+        metrics["win_rate_10_trades"] = float(metrics["win_rate_10_trades"])
     return metrics
 
 
