@@ -408,14 +408,20 @@ def _send_telegram_recommendation(
 
 
 def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
-    """Daily auto-calibrator loop.
+    """Hourly auto-calibrator loop (#187 #217 B4b.3).
 
-    Pattern mirrors health_monitor_loop. Wakes once per day, evaluates the
-    safety_net trigger, persists a stub recommendation if fired. Manual
-    triggers come through the FastAPI endpoint, not via this loop.
+    Evaluates 4 triggers each iteration: safety_net, regime_change,
+    portfolio_dd_degradation, event_cascade. When any fires AND rate limit
+    passes, runs run_optimization_v2 (with stub fallback), persists the
+    recommendation, marks prior pending as superseded if status='pending',
+    and sends Telegram notification.
 
-    Fail-open: any exception inside an iteration is logged with exc_info;
-    the loop continues. stop_event.set() exits the loop cleanly.
+    Manual triggers come through the FastAPI endpoint (not via this loop).
+    Rate limit: max_per_day=1 + min_cooldown_hours=6 by default.
+    Bypasses: safety_net + manual.
+
+    Fail-open: any iteration exception is logged with exc_info; loop continues.
+    stop_event.set() exits the loop cleanly.
     """
     import threading
     from datetime import datetime, timedelta, timezone
@@ -427,47 +433,141 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
         try:
             cfg = cfg_fn()
             v2_cfg = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
-            auto_cal_cfg = v2_cfg.get("auto_calibrator", {}) or {}
-            safety_net_days = int(
-                auto_cal_cfg.get("safety_net_days", _DEFAULT_SAFETY_NET_DAYS)
-            )
+            auto_cal = v2_cfg.get("auto_calibrator", {}) or {}
 
             now = datetime.now(tz=timezone.utc)
-            last_ts = _load_last_recalibration_ts()
+            last_run_ts = _load_last_recalibration_ts()
+            today_count = _count_recalibrations_today(now)
+            max_per_day = int(auto_cal.get("max_per_day", 1))
+            cooldown_h = float(auto_cal.get("min_cooldown_hours", 6))
 
-            if should_run_safety_net(last_ts, now, safety_net_days):
-                # B4b.2: real fitness via grid optimization (was stub in B4b.1)
-                from strategy.kill_switch_v2_optimizer import run_optimization_v2
-                try:
-                    result = run_optimization_v2(cfg)
-                except Exception as opt_err:
-                    log.warning(
-                        "run_optimization_v2 failed; falling back to stub: %s",
-                        opt_err, exc_info=True,
+            # Evaluate all 4 triggers
+            triggers_fired: list[str] = []
+
+            # safety_net (daily threshold)
+            safety_net_days = int(auto_cal.get("safety_net_days", _DEFAULT_SAFETY_NET_DAYS))
+            if should_run_safety_net(last_run_ts, now, safety_net_days):
+                triggers_fired.append("safety_net")
+
+            # regime_change
+            current_regime = _load_current_regime_score()
+            last_calib_regime = _load_last_calibration_regime_score()
+            if should_run_regime_change(last_calib_regime, current_regime):
+                triggers_fired.append("regime_change")
+
+            # portfolio_dd_degradation
+            current_dd = _compute_current_portfolio_dd(cfg)
+            last_applied = _load_last_applied_recommendation()
+            last_proj_dd = (last_applied or {}).get("projected_dd")
+            multiplier = float(auto_cal.get("portfolio_dd_degradation_multiplier", 1.5))
+            if should_run_portfolio_dd_degradation(current_dd, last_proj_dd, multiplier):
+                triggers_fired.append("portfolio_dd_degradation")
+
+            # event_cascade
+            cascade_window = float(auto_cal.get("event_cascade_window_hours", 72))
+            cascade_threshold = int(auto_cal.get("event_cascade_min_symbols", 3))
+            symbols_count = _count_symbols_with_recent_alerts(cascade_window)
+            if should_run_event_cascade(symbols_count, cascade_threshold):
+                triggers_fired.append("event_cascade")
+
+            # Rate limit check (safety_net bypasses; auto otherwise)
+            if triggers_fired:
+                rate_kind = "safety_net" if "safety_net" in triggers_fired else "auto"
+                if is_rate_limit_ok(
+                    last_run_ts, now, max_per_day, today_count, cooldown_h, rate_kind,
+                ):
+                    # Real fitness with fallback to stub
+                    from strategy.kill_switch_v2_optimizer import run_optimization_v2
+                    try:
+                        result = run_optimization_v2(cfg, regime_score=current_regime)
+                    except Exception as opt_err:
+                        log.warning(
+                            "run_optimization_v2 failed; falling back to stub: %s",
+                            opt_err, exc_info=True,
+                        )
+                        result = run_optimization_stub(cfg)
+
+                    rec_id = _persist_recommendation(
+                        triggered_by=triggers_fired, result=result, now=now,
                     )
-                    result = run_optimization_stub(cfg)
-                rec_id = _persist_recommendation(
-                    triggered_by=["safety_net"], result=result, now=now,
-                )
-                # Stub notification — real Telegram lands in B4b.3 (#217)
-                log.warning(
-                    "Kill switch v2: recomendación id=%d (status=%s, "
-                    "triggered_by=safety_net). Telegram pendiente B4b.3.",
-                    rec_id, result["status"],
-                )
+
+                    if result["status"] == "pending":
+                        _mark_prior_pending_as_superseded(rec_id)
+                        _send_telegram_recommendation(
+                            rec_id, result, triggers_fired, cfg,
+                        )
+
+                    log.warning(
+                        "Kill switch v2: recomendación id=%d (status=%s, "
+                        "triggered_by=%s).",
+                        rec_id, result["status"], triggers_fired,
+                    )
         except Exception as e:
             log.warning(
                 "kill_switch_calibrator_loop iteration failed: %s",
                 e, exc_info=True,
             )
 
-        # Sleep until next midnight UTC (or until stop_event is set)
+        # Sleep until next hour UTC (changed from next_midnight in B4b.1)
         now = datetime.now(tz=timezone.utc)
-        next_midnight = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0,
+        next_hour = (now + timedelta(hours=1)).replace(
+            minute=0, second=0, microsecond=0,
         )
-        seconds = max(60.0, (next_midnight - now).total_seconds())
+        seconds = max(60.0, (next_hour - now).total_seconds())
         if stop_event.wait(seconds):
             break
 
     log.info("kill_switch_calibrator_loop exiting cleanly")
+
+
+def _load_current_regime_score() -> float | None:
+    """Read the current regime score from the cached daily detector.
+
+    Returns None if cache is empty / missing / malformed.
+    """
+    try:
+        from btc_scanner import get_cached_regime
+    except Exception:
+        return None
+    try:
+        cached = get_cached_regime()
+    except Exception:
+        return None
+    if not cached or not isinstance(cached, dict):
+        return None
+    score = cached.get("score")
+    if score is None:
+        return None
+    try:
+        return float(score)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_current_portfolio_dd(cfg: dict[str, Any]) -> float:
+    """Compute live portfolio DD from closed trades + open positions MTM.
+
+    Reuses kill_switch_v2.compute_portfolio_dd + compute_portfolio_equity_curve.
+    Returns 0.0 if anything fails (conservative — won't fire degradation trigger).
+    """
+    try:
+        from strategy.kill_switch_v2 import (
+            compute_portfolio_equity_curve, compute_portfolio_dd,
+        )
+        from strategy.kill_switch_v2_shadow import (
+            _load_closed_trades, _load_open_positions, _snapshot_prices,
+        )
+        capital_base = float(cfg.get("capital_usd", 1000.0))
+        equity_curve = compute_portfolio_equity_curve(
+            closed_trades=_load_closed_trades(),
+            open_positions=_load_open_positions(),
+            capital_base=capital_base,
+            now_price_by_symbol=_snapshot_prices(),
+        )
+        return float(compute_portfolio_dd(equity_curve))
+    except Exception as e:
+        log.warning(
+            "compute_current_portfolio_dd failed: %s",
+            e, exc_info=True,
+        )
+        return 0.0

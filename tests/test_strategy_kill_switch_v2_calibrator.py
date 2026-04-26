@@ -1540,3 +1540,332 @@ def test_send_telegram_recommendation_swallows_notifier_errors(monkeypatch, capl
         "Telegram notification failed" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+# ── B4b.3: daemon iteration with full triggers ──────────────────────────────
+
+
+def test_calibrator_loop_uses_hourly_sleep(tmp_path, monkeypatch):
+    """Loop now sleeps until next_hour (was next_midnight in B4b.1)."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    captured_sleeps = []
+    stop_event = threading.Event()
+
+    def fake_wait(seconds):
+        captured_sleeps.append(seconds)
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {"safety_net_days": 30},
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Sleep should be < 1 hour (3600s); we slept toward "next hour"
+    assert len(captured_sleeps) == 1
+    assert captured_sleeps[0] <= 3600.0
+    assert captured_sleeps[0] >= 60.0  # min floor
+
+
+def test_calibrator_loop_rate_limit_blocks_repeated_auto_trigger(tmp_path, monkeypatch):
+    """Two iterations within cooldown: first persists, second is blocked."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import (
+        kill_switch_calibrator_loop, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Pre-seed a recent (manual, 1h ago) recalibration so cooldown blocks auto triggers
+    one_hour_ago = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+    _persist_recommendation(
+        triggered_by=["manual"],
+        result=run_optimization_stub({}),
+        now=one_hour_ago,
+    )
+
+    # Force an event_cascade by seeding ALERTs
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=2)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Should have only the seed row — second persist blocked by cooldown
+    conn = btc_api.get_db()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM kill_switch_recommendations"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+def test_calibrator_loop_event_cascade_fires_when_3_alerts_in_window(
+    tmp_path, monkeypatch,
+):
+    """3 distinct symbols in ALERT in last 72h → event_cascade fires + persists."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed 3 ALERT decisions for distinct symbols (within 72h)
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    # Should have persisted with event_cascade in triggered_by
+    import json
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT triggered_by, status FROM kill_switch_recommendations"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    triggered = json.loads(rows[0][0])
+    # event_cascade triggered alongside any other firing trigger (e.g., safety_net)
+    assert "event_cascade" in triggered
+
+
+def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
+    tmp_path, monkeypatch,
+):
+    """When a new pending recommendation persists, prior pending become superseded."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import (
+        kill_switch_calibrator_loop, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Pre-seed a pending row from "yesterday"
+    yesterday = datetime.now(tz=timezone.utc) - timedelta(days=2)
+    pending_result = {
+        "status": "pending",
+        "slider_value": 60,
+        "projected_pnl": 100.0,
+        "projected_dd": -0.05,
+        "report": {"stub": False, "ts": yesterday.isoformat()},
+    }
+    _persist_recommendation(
+        triggered_by=["safety_net"], result=pending_result, now=yesterday,
+    )
+
+    # Add a profitable trade so v2 grid produces a new pending
+    inside = (datetime.now(tz=timezone.utc) - timedelta(days=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            (inside, inside),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    # safety_net 30d + last persist 2d ago → safety_net WON'T fire
+    # But we also seeded the cascade so let's keep cascade firing the new pending
+    inside_alert = (datetime.now(tz=timezone.utc) - timedelta(hours=10)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside_alert, sym),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 5,        # generous so cooldown doesn't block
+            "min_cooldown_hours": 1,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    statuses = {r[0]: r[1] for r in rows}
+    # Original pending (id=1) → superseded
+    assert statuses[1] == "superseded"
+    # New pending (id=2) → pending
+    assert statuses.get(2) == "pending"
+
+
+def test_calibrator_loop_pending_sends_telegram_notification(
+    tmp_path, monkeypatch,
+):
+    """When new pending persisted, _send_telegram_recommendation is called."""
+    import btc_api, threading
+    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed cascade trigger
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=5)).isoformat()
+    conn = btc_api.get_db()
+    try:
+        for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
+            conn.execute(
+                "INSERT INTO kill_switch_decisions "
+                "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+                "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+                (inside, sym),
+            )
+        # Seed a profitable trade so v2 returns pending
+        conn.execute(
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
+            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            (inside, inside),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    captured = []
+    import strategy.kill_switch_v2_calibrator as cal_mod
+
+    def fake_send(rec_id, result, triggered_by, cfg):
+        captured.append({"rec_id": rec_id, "status": result["status"]})
+
+    monkeypatch.setattr(cal_mod, "_send_telegram_recommendation", fake_send)
+
+    stop_event = threading.Event()
+    def fake_wait(seconds):
+        stop_event.set()
+        return True
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg_fn = lambda: {"kill_switch": {"v2": {
+        "auto_calibrator": {
+            "safety_net_days": 30,
+            "max_per_day": 1,
+            "min_cooldown_hours": 6,
+            "event_cascade_window_hours": 72,
+            "event_cascade_min_symbols": 3,
+            "portfolio_dd_degradation_multiplier": 1.5,
+            "backtest_window_days": 365,
+            "dd_target": -0.10,
+        },
+    }}}
+    kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
+
+    assert len(captured) == 1
+    assert captured[0]["status"] == "pending"
