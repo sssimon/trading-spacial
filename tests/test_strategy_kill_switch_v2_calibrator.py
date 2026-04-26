@@ -1341,3 +1341,144 @@ def test_load_last_calibration_regime_score_handles_missing_field(tmp_path, monk
         conn.close()
 
     assert _load_last_calibration_regime_score() is None
+
+
+# ── B4b.3: DB glue (continued) ──────────────────────────────────────────────
+
+
+def test_count_symbols_with_recent_alerts_empty_returns_zero(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_symbols_with_recent_alerts
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _count_symbols_with_recent_alerts(window_hours=72.0) == 0
+
+
+def test_count_symbols_with_recent_alerts_counts_distinct_symbols(tmp_path, monkeypatch):
+    """Distinct ALERT/REDUCED/FROZEN symbols within window — multiple rows per symbol = 1."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_symbols_with_recent_alerts
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime.now(tz=timezone.utc)
+    inside = (now - timedelta(hours=10)).isoformat()
+    outside = (now - timedelta(hours=100)).isoformat()
+
+    conn = btc_api.get_db()
+    try:
+        # BTC ALERT (inside)
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'BTCUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            (inside,),
+        )
+        # BTC ALERT again (inside) — should still count as 1 distinct symbol
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'BTCUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            ((now - timedelta(hours=5)).isoformat(),),
+        )
+        # ETH portfolio REDUCED (inside) — counts
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'ETHUSDT', 'v2_shadow', 'NORMAL', 'REDUCED', 0.5, 0)",
+            (inside,),
+        )
+        # ADA NORMAL/NORMAL (inside) — does NOT count
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'ADAUSDT', 'v2_shadow', 'NORMAL', 'NORMAL', 1.0, 0)",
+            (inside,),
+        )
+        # SOL ALERT (outside window) — does NOT count
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'SOLUSDT', 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
+            (outside,),
+        )
+        # XRP FROZEN (inside) — counts
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'XRPUSDT', 'v2_shadow', 'NORMAL', 'FROZEN', 0.0, 1)",
+            (inside,),
+        )
+        # v1 engine ALERT (inside) — does NOT count (only v2_shadow)
+        conn.execute(
+            "INSERT INTO kill_switch_decisions "
+            "(ts, symbol, engine, per_symbol_tier, portfolio_tier, size_factor, skip) "
+            "VALUES (?, 'DOGEUSDT', 'v1', 'ALERT', 'NORMAL', 0.5, 0)",
+            (inside,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Distinct: BTC, ETH, XRP = 3
+    assert _count_symbols_with_recent_alerts(window_hours=72.0) == 3
+
+
+def test_mark_prior_pending_as_superseded_only_pending(tmp_path, monkeypatch):
+    """Only prior 'pending' rows get marked superseded; applied/ignored stay."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _mark_prior_pending_as_superseded
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        # 3 rows: pending(id=1), applied(id=2), pending(id=3 — the "new" one)
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, report_json) "
+            "VALUES ('2026-04-20T10:00:00+00:00', '[]', 'pending', '{}')",
+        )
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, applied_ts, applied_by, report_json) "
+            "VALUES ('2026-04-21T10:00:00+00:00', '[]', 'applied', "
+            "'2026-04-21T11:00:00+00:00', 'operator', '{}')",
+        )
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, status, report_json) "
+            "VALUES ('2026-04-25T10:00:00+00:00', '[]', 'pending', '{}')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Mark prior pending as superseded; new id is 3
+    _mark_prior_pending_as_superseded(new_id=3)
+
+    conn = btc_api.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    statuses = {r[0]: r[1] for r in rows}
+    assert statuses[1] == "superseded"
+    assert statuses[2] == "applied"   # untouched
+    assert statuses[3] == "pending"    # the new one stays

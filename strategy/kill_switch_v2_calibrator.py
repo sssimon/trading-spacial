@@ -325,6 +325,48 @@ def _load_last_calibration_regime_score() -> float | None:
         return None
 
 
+def _count_symbols_with_recent_alerts(window_hours: float) -> int:
+    """Count distinct symbols whose v2_shadow decisions in the last window_hours
+    have per_symbol_tier='ALERT' OR portfolio_tier IN ('REDUCED','FROZEN').
+    """
+    from datetime import datetime, timedelta, timezone
+    import btc_api
+
+    now = datetime.now(tz=timezone.utc)
+    cutoff = (now - timedelta(hours=float(window_hours))).isoformat()
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT COUNT(DISTINCT symbol)
+               FROM kill_switch_decisions
+               WHERE engine = 'v2_shadow'
+                 AND ts >= ?
+                 AND (per_symbol_tier = 'ALERT'
+                      OR portfolio_tier IN ('REDUCED', 'FROZEN'))""",
+            (cutoff,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else 0
+
+
+def _mark_prior_pending_as_superseded(new_id: int) -> None:
+    """Mark all pending recommendations except `new_id` as superseded."""
+    import btc_api
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """UPDATE kill_switch_recommendations
+               SET status = 'superseded'
+               WHERE status = 'pending' AND id != ?""",
+            (int(new_id),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
     """Daily auto-calibrator loop.
 
