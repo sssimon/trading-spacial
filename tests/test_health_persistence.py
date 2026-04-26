@@ -193,7 +193,7 @@ def test_apply_transition_preserves_state_since_on_same_state(tmp_db):
 
 
 def test_reactivate_sets_manual_override(tmp_db):
-    """reactivate_symbol flips manual_override to 1 and emits event."""
+    """B5: reactivate_symbol PAUSED → PROBATION. reason!='manual' → manual_override=0; event=reactivated_<reason>."""
     from health import apply_transition, reactivate_symbol
     metrics = {"trades_count_total": 50, "win_rate_20_trades": 0.5,
                 "pnl_30d": 0.0, "pnl_by_month": {},
@@ -213,8 +213,8 @@ def test_reactivate_sets_manual_override(tmp_db):
         ).fetchone()
     finally:
         conn.close()
-    assert row == ("NORMAL", 1)
-    assert last_event[0] == "manual_override"
+    assert row == ("PROBATION", 0)
+    assert last_event[0] == "reactivated_backtest_validated"
 
 
 def test_compute_rolling_metrics_from_trades_empty():

@@ -1,12 +1,14 @@
-"""Manually reactivate a PAUSED symbol.
+"""Manually reactivate a PAUSED symbol — transitions PAUSED → PROBATION (B5 #199).
 
 Usage:
     python scripts/reactivate_symbol.py BTCUSDT --reason "backtest validated"
 
-Resets symbol_health.state to NORMAL and sets manual_override=1 so future
-evaluations respect the reactivation until a severe rule (e.g. 3mo neg
-again) triggers another transition. Records an event in
-symbol_health_events with trigger_reason='manual_override'.
+Transitions symbol_health.state from PAUSED to PROBATION. The symbol enters
+PROBATION with `probation_trades_remaining` computed from days_paused. Reason
+'manual' sets manual_override=1; any other reason sets it to 0 (e.g.
+'backtest_validated' implies operator-driven but auto-style).
+
+Records an event in symbol_health_events with trigger_reason='reactivated_<reason>'.
 """
 from __future__ import annotations
 
@@ -36,8 +38,8 @@ def main() -> int:
     before = get_symbol_state(symbol)
     print(f"State before: {before}")
 
-    if before == "NORMAL":
-        print(f"Note: {symbol} is already NORMAL. Proceeding anyway to set manual_override=1 + log event.")
+    if before != "PAUSED":
+        print(f"Note: {symbol} is not in PAUSED (current={before}). reactivate_symbol will no-op + warn.")
 
     reactivate_symbol(symbol, reason=args.reason)
 
