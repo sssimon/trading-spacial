@@ -18,6 +18,15 @@
     "pause_months_consecutive": 2,
     "auto_recovery_enabled": true,
     "v2": {
+      "auto_recovery_mode": "smart_auto",
+      "probation": {
+        "trades_base": 10,
+        "trades_per_pause_day": 0.2,
+        "regression_wr_threshold": 0.10,
+        "regression_window_trades": 10,
+        "paused_to_probation_days": 14,
+        "size_factor": 0.5
+      },
       "auto_calibrator": {
         "safety_net_days": 30,
         "backtest_window_days": 365,
