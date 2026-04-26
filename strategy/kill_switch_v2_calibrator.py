@@ -251,6 +251,80 @@ def _load_last_recalibration_ts() -> str | None:
     return row[0] if row and row[0] else None
 
 
+def _count_recalibrations_today(now) -> int:
+    """Count rows in kill_switch_recommendations persisted today (UTC)."""
+    import btc_api
+
+    today_prefix = now.strftime("%Y-%m-%d")
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM kill_switch_recommendations WHERE ts LIKE ?",
+            (today_prefix + "%",),
+        ).fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else 0
+
+
+def _load_last_applied_recommendation() -> dict[str, Any] | None:
+    """Return the most recent applied recommendation row as a dict, or None."""
+    import btc_api
+
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT id, ts, slider_value, projected_pnl, projected_dd,
+                      status, applied_ts, applied_by, report_json
+               FROM kill_switch_recommendations
+               WHERE status = 'applied'
+               ORDER BY applied_ts DESC, id DESC
+               LIMIT 1""",
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "ts": row[1], "slider_value": row[2],
+        "projected_pnl": row[3], "projected_dd": row[4],
+        "status": row[5], "applied_ts": row[6], "applied_by": row[7],
+        "report_json": row[8],
+    }
+
+
+def _load_last_calibration_regime_score() -> float | None:
+    """Read regime_score from the latest recommendation's report_json.
+
+    Returns None if no rows exist, report_json is malformed, or regime_score
+    field is missing.
+    """
+    import json
+    import btc_api
+
+    conn = btc_api.get_db()
+    try:
+        row = conn.execute(
+            """SELECT report_json FROM kill_switch_recommendations
+               ORDER BY ts DESC, id DESC LIMIT 1""",
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return None
+    try:
+        report = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    score = report.get("regime_score")
+    if score is None:
+        return None
+    try:
+        return float(score)
+    except (TypeError, ValueError):
+        return None
+
+
 def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
     """Daily auto-calibrator loop.
 

@@ -1167,3 +1167,177 @@ def test_is_rate_limit_ok_max_per_day_reached_returns_false():
         max_per_day_count=1, today_count=1,
         min_cooldown_hours=6.0, trigger_kind="auto",
     ) is False
+
+
+# ── B4b.3: DB glue ──────────────────────────────────────────────────────────
+
+
+def test_count_recalibrations_today_empty_returns_zero(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _count_recalibrations_today
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    assert _count_recalibrations_today(now) == 0
+
+
+def test_count_recalibrations_today_counts_only_today_utc(tmp_path, monkeypatch):
+    """Rows with ts on different UTC days are NOT counted."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _count_recalibrations_today, _persist_recommendation, run_optimization_stub,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    today = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    yesterday = today - timedelta(days=1)
+    same_day_earlier = datetime(2026, 4, 25, 1, 0, tzinfo=timezone.utc)
+
+    result = run_optimization_stub({})
+    _persist_recommendation(triggered_by=["manual"], result=result, now=yesterday)
+    _persist_recommendation(triggered_by=["manual"], result=result, now=same_day_earlier)
+    _persist_recommendation(triggered_by=["manual"], result=result, now=today)
+
+    # 2 rows on 2026-04-25 UTC, 1 on 2026-04-24
+    assert _count_recalibrations_today(today) == 2
+
+
+def test_load_last_applied_recommendation_empty_returns_none(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_applied_recommendation
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_last_applied_recommendation() is None
+
+
+def test_load_last_applied_recommendation_returns_latest_applied(tmp_path, monkeypatch):
+    """Returns the most recent row with status='applied'; ignores pending/ignored."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import (
+        _load_last_applied_recommendation,
+    )
+    from datetime import datetime, timezone
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
+    conn = btc_api.get_db()
+    try:
+        # pending row
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 50, 100.0, -0.05, 'pending', '{}')",
+            ("2026-04-20T10:00:00+00:00",),
+        )
+        # applied row earlier
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 60, 200.0, -0.04, 'applied', '{}')",
+            ("2026-04-22T10:00:00+00:00",),
+        )
+        # applied row later — this is what we want returned
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, projected_pnl, projected_dd, status, report_json) "
+            "VALUES (?, '[\"manual\"]', 70, 300.0, -0.03, 'applied', '{}')",
+            ("2026-04-24T10:00:00+00:00",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    row = _load_last_applied_recommendation()
+    assert row is not None
+    assert row["slider_value"] == 70
+    assert row["projected_dd"] == pytest.approx(-0.03)
+
+
+def test_load_last_calibration_regime_score_empty_returns_none(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    assert _load_last_calibration_regime_score() is None
+
+
+def test_load_last_calibration_regime_score_extracts_from_report_json(tmp_path, monkeypatch):
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+    import json
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES (?, '[\"safety_net\"]', NULL, 'no_feasible', ?)",
+            (
+                "2026-04-25T10:00:00+00:00",
+                json.dumps({"regime_score": 72.5, "stub": False}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _load_last_calibration_regime_score() == pytest.approx(72.5)
+
+
+def test_load_last_calibration_regime_score_handles_missing_field(tmp_path, monkeypatch):
+    """If report_json lacks regime_score (or is malformed), return None."""
+    import btc_api
+    from strategy.kill_switch_v2_calibrator import _load_last_calibration_regime_score
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO kill_switch_recommendations "
+            "(ts, triggered_by, slider_value, status, report_json) "
+            "VALUES (?, '[\"safety_net\"]', NULL, 'no_feasible', '{}')",
+            ("2026-04-25T10:00:00+00:00",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _load_last_calibration_regime_score() is None
