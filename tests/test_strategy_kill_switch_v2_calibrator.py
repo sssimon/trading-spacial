@@ -1070,3 +1070,22 @@ def test_should_run_portfolio_dd_degradation_zero_baseline_returns_false():
     assert should_run_portfolio_dd_degradation(
         current_dd=-0.05, last_applied_projected_dd=0.0, multiplier=1.5,
     ) is False
+
+
+# ── B4b.3: should_run_event_cascade ─────────────────────────────────────────
+
+
+def test_should_run_event_cascade_below_threshold_returns_false():
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=2, threshold=3) is False
+
+
+def test_should_run_event_cascade_at_threshold_returns_true():
+    """Boundary: count == threshold → True (>= semantics)."""
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=3, threshold=3) is True
+
+
+def test_should_run_event_cascade_above_threshold_returns_true():
+    from strategy.kill_switch_v2_calibrator import should_run_event_cascade
+    assert should_run_event_cascade(symbols_in_alert_count=5, threshold=3) is True

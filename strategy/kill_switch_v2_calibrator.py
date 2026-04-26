@@ -95,6 +95,17 @@ def should_run_portfolio_dd_degradation(
     return current_dd < threshold
 
 
+def should_run_event_cascade(
+    symbols_in_alert_count: int,
+    threshold: int = 3,
+) -> bool:
+    """Fire if number of distinct symbols in ALERT-or-worse >= threshold.
+
+    Boundary: count == threshold returns True (>= semantics).
+    """
+    return symbols_in_alert_count >= threshold
+
+
 def build_no_feasible_report(reason: str, now) -> dict[str, Any]:
     """Construct the report payload for stub no_feasible runs.
 
