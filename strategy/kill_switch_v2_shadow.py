@@ -451,6 +451,22 @@ def emit_shadow_decision(
             cfg=cfg_eff,
         )
 
+        # B6: record portfolio-tier transitions for the dashboard
+        try:
+            from health import recent_portfolio_transitions, record_portfolio_transition
+            recent = recent_portfolio_transitions(limit=1)
+            prev_tier = recent[0]["to_tier"] if recent else "NORMAL"
+            if prev_tier != portfolio["tier"]:
+                record_portfolio_transition(
+                    from_tier=prev_tier,
+                    to_tier=portfolio["tier"],
+                    reason=f"shadow_eval_dd_{portfolio_dd:.4f}",
+                    dd_pct=float(portfolio_dd),
+                    concurrent=int(concurrent),
+                )
+        except Exception:
+            log.warning("record_portfolio_transition (shadow) failed", exc_info=True)
+
         # Slider values for telemetry
         v2_base = (cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
         v2_eff = (cfg_eff.get("kill_switch", {}) or {}).get("v2", {}) or {}

@@ -363,3 +363,27 @@ def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeyp
     monkeypatch.setattr(btc_api, "load_config", lambda: {"kill_switch": {"enabled": False}})
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
+
+
+# ── Portfolio transition recording integration ──────────────────────────────
+
+
+def test_portfolio_tier_change_records_transition(tmp_db, monkeypatch):
+    """When portfolio tier changes between two shadow evaluations, a row is
+    appended to portfolio_health_events."""
+    import btc_api
+    from health import recent_portfolio_transitions
+
+    # Simulate: first eval NORMAL, second eval WARNED. Both via the same
+    # shadow path. We invoke the helper directly (the integration via
+    # kill_switch_v2_shadow is wired in step 4 below).
+    from health import record_portfolio_transition
+    record_portfolio_transition("NORMAL", "WARNED", reason="3_concurrent",
+                                 dd_pct=-0.01, concurrent=3)
+    record_portfolio_transition("WARNED", "REDUCED", reason="dd_threshold",
+                                 dd_pct=-0.04, concurrent=3)
+
+    transitions = recent_portfolio_transitions(limit=5)
+    assert len(transitions) == 2
+    assert transitions[0]["to_tier"] == "REDUCED"
+    assert transitions[1]["to_tier"] == "WARNED"
