@@ -16,6 +16,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  CONFIG PATCH HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _patch_config_files(monkeypatch, tmp_path):
+    """Patch CONFIG_FILE/DEFAULTS_FILE/SECRETS_FILE on BOTH btc_api and api.config
+    modules so tests reach an isolated tmp_path config (and never the developer's
+    real config files). Required after PR2 because load_config now lives in
+    api.config and reads api.config.CONFIG_FILE — patching btc_api alone is silent."""
+    import btc_api
+    import api.config as api_config
+    cfg_path = tmp_path / "config.json"
+    defaults_path = tmp_path / "_no_defaults.json"
+    secrets_path = tmp_path / "_no_secrets.json"
+    monkeypatch.setattr(btc_api, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(btc_api, "DEFAULTS_FILE", str(defaults_path), raising=False)
+    monkeypatch.setattr(btc_api, "SECRETS_FILE", str(secrets_path), raising=False)
+    monkeypatch.setattr(api_config, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(api_config, "DEFAULTS_FILE", str(defaults_path), raising=False)
+    monkeypatch.setattr(api_config, "SECRETS_FILE", str(secrets_path), raising=False)
+    return cfg_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  FIXTURES
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -260,12 +283,11 @@ class TestAPIEndpoints:
 
         # Parchear DB y config
         monkeypatch.setattr(btc_api, "DB_FILE", tmp_db)
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "", "webhook_secret": "s3cret",
                        "telegram_bot_token": "tok123", "api_key": "",
                        "notify_setup_only": False, "scan_interval_sec": 300}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
 
         btc_api.init_db()
         yield
@@ -564,17 +586,13 @@ class TestPushWebhook:
 
 class TestLoadConfig:
     def _patch_config_files(self, monkeypatch, cfg_path, tmp_path):
-        """Patch CONFIG_FILE in both btc_api (legacy re-export) and api.config (authoritative)."""
+        """Delegate to module-level helper, then override CONFIG_FILE if a custom path was requested."""
         import btc_api
         import api.config as _ac
-        no_defaults = str(tmp_path / "_no_defaults.json")
-        no_secrets = str(tmp_path / "_no_secrets.json")
+        _patch_config_files(monkeypatch, tmp_path)  # sets up defaults/secrets isolation
+        # Override CONFIG_FILE with the caller-specified path (may differ from tmp_path/config.json)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
-        monkeypatch.setattr(btc_api, "DEFAULTS_FILE", no_defaults, raising=False)
-        monkeypatch.setattr(btc_api, "SECRETS_FILE", no_secrets, raising=False)
         monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
-        monkeypatch.setattr(_ac, "DEFAULTS_FILE", no_defaults)
-        monkeypatch.setattr(_ac, "SECRETS_FILE", no_secrets)
 
     def test_defaults_sin_archivo(self, tmp_path, monkeypatch):
         self._patch_config_files(monkeypatch, str(tmp_path / "no_existe.json"), tmp_path)
@@ -626,11 +644,10 @@ class TestExecuteScanForSymbol:
     def setup(self, tmp_path, monkeypatch):
         import btc_api
         db_path = str(tmp_path / "test_scan.db")
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"signal_filters": {"min_score": 4}}, f)
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         # Prevent file I/O for logs/csv in tests
         monkeypatch.setattr(btc_api, "append_signal_log", lambda rep, sid: None)
         monkeypatch.setattr(btc_api, "append_signal_csv", lambda rep, sid: None)
@@ -1296,11 +1313,10 @@ class TestPositionsAPI:
         import btc_api
         db_path = str(tmp_path / "test_pos_api.db")
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "", "webhook_secret": "",
                        "notify_setup_only": False, "scan_interval_sec": 300}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         # Monkeypatch DATA_DIR and LOGS_DIR to temp dirs to avoid file writes
         monkeypatch.setattr(btc_api, "DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setattr(btc_api, "LOGS_DIR", str(tmp_path / "logs"))
@@ -1510,10 +1526,9 @@ class TestPositionsAPI:
         assert pos["pnl_usd"] == pytest.approx(250.0, abs=0.01)  # (175-150)*10
     def test_dedup_window_default(self, tmp_path, monkeypatch):
         import btc_api
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         monkeypatch.setenv("TRADING_SCAN_INTERVAL", "120")
         cfg = btc_api.load_config()
         assert cfg["scan_interval_sec"] == 120

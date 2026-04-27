@@ -49,6 +49,7 @@ from api.config import (  # noqa: F401
     load_config, save_config, _strip_secrets, _SECRET_KEYS,
     SignalFiltersUpdate, ConfigUpdate, _deep_merge, _load_json_file,
     get_config, update_config,
+    CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE,
 )
 from api.config import router as config_router
 
@@ -141,9 +142,6 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
 
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
-CONFIG_FILE       = os.path.join(SCRIPT_DIR, "config.json")           # legacy, secret + overrides (Simon prod)
-DEFAULTS_FILE     = os.path.join(SCRIPT_DIR, "config.defaults.json")  # committed, symbol_overrides + non-secret defaults
-SECRETS_FILE      = os.path.join(SCRIPT_DIR, "config.secrets.json")   # gitignored, telegram/webhook creds only
 DB_FILE           = os.path.join(SCRIPT_DIR, "signals.db")
 DATA_DIR          = os.path.join(SCRIPT_DIR, "data")
 LOGS_DIR          = os.path.join(SCRIPT_DIR, "logs")
