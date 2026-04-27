@@ -460,9 +460,10 @@ def test_evaluate_signal_entry_sl_tp_computed_for_long():
     price = decision.indicators["price"]
     atr = decision.indicators["atr_1h"]
     # Defaults: SL = 1.0x ATR, TP = 4.0x ATR (from strategy.core module constants)
-    assert decision.entry_price == pytest.approx(round(price, 2), abs=1e-9)
-    assert decision.sl_price == pytest.approx(round(price - atr * 1.0, 2), abs=1e-9)
-    assert decision.tp_price == pytest.approx(round(price + atr * 4.0, 2), abs=1e-9)
+    # Full float precision (no round to 2 decimals — broke sub-$1 symbols).
+    assert decision.entry_price == pytest.approx(price, abs=1e-9)
+    assert decision.sl_price == pytest.approx(price - atr * 1.0, abs=1e-9)
+    assert decision.tp_price == pytest.approx(price + atr * 4.0, abs=1e-9)
     # SL must be below entry, TP above entry for LONG
     assert decision.sl_price < decision.entry_price
     assert decision.tp_price > decision.entry_price
@@ -486,9 +487,10 @@ def test_evaluate_signal_entry_sl_tp_computed_for_short():
     assert decision.direction == "SHORT"
     price = decision.indicators["price"]
     atr = decision.indicators["atr_1h"]
-    assert decision.entry_price == pytest.approx(round(price, 2), abs=1e-9)
-    assert decision.sl_price == pytest.approx(round(price + atr * 1.0, 2), abs=1e-9)
-    assert decision.tp_price == pytest.approx(round(price - atr * 4.0, 2), abs=1e-9)
+    # Full float precision (no round to 2 decimals — broke sub-$1 symbols).
+    assert decision.entry_price == pytest.approx(price, abs=1e-9)
+    assert decision.sl_price == pytest.approx(price + atr * 1.0, abs=1e-9)
+    assert decision.tp_price == pytest.approx(price - atr * 4.0, abs=1e-9)
     # SL must be above entry, TP below entry for SHORT
     assert decision.sl_price > decision.entry_price
     assert decision.tp_price < decision.entry_price
@@ -581,8 +583,8 @@ def test_evaluate_signal_honors_per_symbol_atr_multipliers():
     assert decision.direction == "LONG"
     price = decision.indicators["price"]
     atr = decision.indicators["atr_1h"]
-    assert decision.sl_price == pytest.approx(round(price - atr * 2.5, 2), abs=1e-9)
-    assert decision.tp_price == pytest.approx(round(price + atr * 6.0, 2), abs=1e-9)
+    assert decision.sl_price == pytest.approx(price - atr * 2.5, abs=1e-9)
+    assert decision.tp_price == pytest.approx(price + atr * 6.0, abs=1e-9)
     assert decision.reasons["atr_sl_mult"] == 2.5
     assert decision.reasons["atr_tp_mult"] == 6.0
     assert decision.reasons["atr_be_mult"] == 2.0

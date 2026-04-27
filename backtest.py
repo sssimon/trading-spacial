@@ -267,18 +267,37 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
                     capital: float) -> dict:
     """Compute P&L + trade dict for closing `position` at exit_price.
 
-    Handles LONG and SHORT symmetrically: SHORT gains when exit_price < entry_price,
-    SHORT stop-loss distance uses |entry − sl_orig| so pnl_usd never short-circuits
-    to 0 for a valid SHORT setup (fix for #156, #157).
+    Direction-aware SL distance: LONG expects sl_orig < entry, SHORT expects
+    sl_orig > entry. If a malformed setup sends in an inverted SL (e.g. via a
+    rounding bug — see fix/precision-rounding-bug), `sl_pct_actual` goes
+    negative and pnl_usd is forced to 0 with a warning. Without this guard,
+    `abs(entry - sl_orig)` would silently strip the sign and produce a
+    PHANTOM PROFIT equal to `risk_amount` — historically inflating
+    documented backtest portfolio numbers (see #fix/precision-rounding-bug).
     """
     entry_price = position["entry_price"]
-    if position.get("direction") == "SHORT":
+    direction = position.get("direction", "LONG")
+    sl_orig = position["sl_orig"]
+    if direction == "SHORT":
         pnl_pct = (entry_price - exit_price) / entry_price * 100
+        # Valid SHORT: sl_orig > entry_price → sl_pct_actual > 0.
+        sl_pct_actual = (sl_orig - entry_price) / entry_price * 100
     else:
         pnl_pct = (exit_price - entry_price) / entry_price * 100
+        # Valid LONG: sl_orig < entry_price → sl_pct_actual > 0.
+        sl_pct_actual = (entry_price - sl_orig) / entry_price * 100
     risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
-    sl_pct_actual = abs(entry_price - position["sl_orig"]) / entry_price * 100
-    pnl_usd = risk_amount * (pnl_pct / sl_pct_actual) if sl_pct_actual > 0 else 0
+    if sl_pct_actual > 0:
+        pnl_usd = risk_amount * (pnl_pct / sl_pct_actual)
+    else:
+        # Inverted or zero-distance SL (malformed setup). Refuse to amplify
+        # a phantom profit; record a real-money zero PnL and log the anomaly.
+        log.warning(
+            "_close_position: inverted SL detected for %s %s — entry=%.6f, "
+            "sl_orig=%.6f (sl on wrong side or coincident). pnl_usd forced to 0.",
+            position.get("entry_time"), direction, entry_price, sl_orig,
+        )
+        pnl_usd = 0
     return {
         "entry_time": position["entry_time"],
         "exit_time": exit_time,
@@ -569,12 +588,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 _tp_m_use = _tp_m
                 _be_m_use = _be_m
                 if trade_dir == "SHORT":
-                    sl_price = round(price + atr_val * _sl_m_use, 2)
-                    tp_price = round(price - atr_val * _tp_m_use, 2)
+                    # Full float precision — see strategy/core.py rationale.
+                    sl_price = float(price + atr_val * _sl_m_use)
+                    tp_price = float(price - atr_val * _tp_m_use)
                     be_threshold = price - atr_val * _be_m_use
                 else:
-                    sl_price = round(price - atr_val * _sl_m_use, 2)
-                    tp_price = round(price + atr_val * _tp_m_use, 2)
+                    sl_price = float(price - atr_val * _sl_m_use)
+                    tp_price = float(price + atr_val * _tp_m_use)
                     be_threshold = price + atr_val * _be_m_use
             else:
                 # Use decision's SL/TP (already resolved via cfg.symbol_overrides).
@@ -595,11 +615,12 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             _tp_m_use = _tp_m
             _be_m_use = _be_m
             if trade_dir == "SHORT":
-                sl_price = round(price * (1 + SL_PCT / 100), 2)
-                tp_price = round(price * (1 - TP_PCT / 100), 2)
+                # Full float precision — fixed-pct SL/TP path.
+                sl_price = float(price * (1 + SL_PCT / 100))
+                tp_price = float(price * (1 - TP_PCT / 100))
             else:
-                sl_price = round(price * (1 - SL_PCT / 100), 2)
-                tp_price = round(price * (1 + TP_PCT / 100), 2)
+                sl_price = float(price * (1 - SL_PCT / 100))
+                tp_price = float(price * (1 + TP_PCT / 100))
             be_threshold = None
 
         position = {
@@ -1009,9 +1030,20 @@ def main():
     df_fng = get_historical_fear_greed()
     df_funding = get_historical_funding_rate()
 
+    # Load config so simulate_strategy can apply per-symbol ATR overrides
+    # (epic #121 / #122 / #123). Without this, all symbols run with BTC defaults.
+    try:
+        import btc_api
+        cfg = btc_api.load_config()
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_config failed: {e} — running with empty cfg (no symbol_overrides)")
+        cfg = {}
+    symbol_overrides = cfg.get("symbol_overrides", {}) if isinstance(cfg, dict) else {}
+
     trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode,
                                                df1d=df1d, sim_start=sim_start, sim_end=sim_end,
-                                               df_fng=df_fng, df_funding=df_funding)
+                                               df_fng=df_fng, df_funding=df_funding,
+                                               cfg=cfg, symbol_overrides=symbol_overrides)
     log.info(f"Simulation complete: {len(trades)} trades generated")
 
     if not trades:

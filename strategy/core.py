@@ -483,13 +483,16 @@ def evaluate_signal(
         sl_price = None
         tp_price = None
     else:
-        entry_price = round(price, 2)
+        # Full float precision — sub-$1 symbols (DOGE/XLM) lose all SL/TP fidelity
+        # if rounded to 2 decimals (SL collapses onto entry_price). Display layers
+        # downstream format for human reading; computation stays exact.
+        entry_price = float(price)
         if direction == "SHORT":
-            sl_price = round(price + sl_dist, 2)   # SL above for SHORT
-            tp_price = round(price - tp_dist, 2)   # TP below for SHORT
+            sl_price = float(price + sl_dist)   # SL above for SHORT
+            tp_price = float(price - tp_dist)   # TP below for SHORT
         else:  # LONG
-            sl_price = round(price - sl_dist, 2)
-            tp_price = round(price + tp_dist, 2)
+            sl_price = float(price - sl_dist)
+            tp_price = float(price + tp_dist)
 
     decision.entry_price = entry_price
     decision.sl_price = sl_price
