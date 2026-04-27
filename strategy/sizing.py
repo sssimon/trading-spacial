@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from strategy.constants import SCORE_PREMIUM, SCORE_STANDARD
+
 
 RISK_PER_TRADE = 0.01
-SCORE_PREMIUM = 4  # threshold for 1.5x
-SCORE_STANDARD = 2  # threshold for 1.0x (else 0.5x)
 
 
 def _score_multiplier(score: int) -> float:

@@ -10,6 +10,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# Asegurar que el directorio tests esté en el path para imports como
+# `from _fakes import ...` cuando tests/ es un paquete Python
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if TESTS_DIR not in sys.path:
+    sys.path.insert(0, TESTS_DIR)
+
 
 @pytest.fixture
 def tmp_ohlcv_db(tmp_path, monkeypatch):

@@ -31,6 +31,17 @@ from data import market_data as md
 from strategy.indicators import (
     calc_lrc, calc_rsi, calc_bb, calc_sma, calc_atr, calc_adx, calc_cvd_delta,
 )
+from strategy.constants import (
+    LRC_PERIOD, LRC_STDEV, RSI_PERIOD, BB_PERIOD, BB_STDEV, VOL_PERIOD,
+    ATR_PERIOD, ATR_SL_MULT_DEFAULT, ATR_TP_MULT_DEFAULT, ATR_BE_MULT_DEFAULT,
+    LRC_LONG_MAX, LRC_SHORT_MIN, SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
+)
+# strategy.constants exports ATR_*_MULT_DEFAULT (rename in #186 to disambiguate
+# from per-symbol overrides). This module's existing call sites still use the
+# shorter ATR_SL_MULT/TP/BE names; aliases preserve those without renaming.
+ATR_SL_MULT = ATR_SL_MULT_DEFAULT
+ATR_TP_MULT = ATR_TP_MULT_DEFAULT
+ATR_BE_MULT = ATR_BE_MULT_DEFAULT
 
 # Reconfigure stdout for Windows Unicode support
 try:
@@ -62,18 +73,6 @@ LOG_FILE       = os.path.join(SCRIPT_DIR, "logs", "signals_log.txt")
 os.makedirs(os.path.join(SCRIPT_DIR, "logs"), exist_ok=True)
 
 SCAN_INTERVAL  = 300   # 5 minutos = cierre de vela 5M
-
-# ── Parámetros de indicadores ──────────────────────────────────────────────
-LRC_PERIOD     = 100
-LRC_STDEV      = 2.0
-RSI_PERIOD     = 14
-BB_PERIOD      = 20
-BB_STDEV       = 2.0
-VOL_PERIOD     = 20
-ATR_PERIOD     = 14
-ATR_SL_MULT    = 1.0    # SL = entry - 1.0x ATR (optimizado para mean-reversion)
-ATR_TP_MULT    = 4.0    # TP = entry + 4.0x ATR (ratio 4:1, adaptativo)
-ATR_BE_MULT    = 1.5    # Mover SL a breakeven cuando profit >= 1.5x ATR
 
 # ── Yang-Zhang vol estimator (diagnostic utility only — NOT applied to sizing) ──
 # The vol-normalized sizing idea of #125 was found to regress P&L in comparative
@@ -409,17 +408,9 @@ def resolve_direction_params(
 
 
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
-LRC_LONG_MAX   = 25.0     # LRC% ≤ 25  →  zona de entrada
-LRC_SHORT_MIN  = 75.0     # LRC% >= 75  →  zona de entrada SHORT
 SL_PCT         = 2.0      # Stop Loss  2.0%
 TP_PCT         = 4.0      # Take Profit 4.0%
 COOLDOWN_H     = 6        # Horas mínimas entre trades
-
-# ── Score (Spot V6) ────────────────────────────────────────────────────────
-# 0–1 pts → sizing 50%  |  2–3 → sizing normal  |  ≥4 → sizing +50%
-SCORE_MIN_HALF  = 0       # Mínimo para entrar (sizing reducido)
-SCORE_STANDARD  = 2
-SCORE_PREMIUM   = 4
 
 # ── Gatillo 5M ─────────────────────────────────────────────────────────────
 # Condiciones que debe cumplir la última vela de 5M para activar la entrada.
