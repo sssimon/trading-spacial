@@ -41,7 +41,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from btc_scanner import scan, get_top_symbols
 from data import market_data as md
-from notifier import notify, SignalEvent, SystemEvent
+from notifier import notify, SystemEvent
 from api.ohlcv import router as ohlcv_router
 # Config domain moved to api/config.py in PR2 of the api+db domain refactor.
 # Re-exports preserved for legacy callers (scanner_loop, position routes, etc.) until PR7.
@@ -52,6 +52,14 @@ from api.config import (  # noqa: F401
     CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE,
 )
 from api.config import router as config_router
+# Telegram service moved to api/telegram.py in PR3 of the api+db refactor.
+# Re-exports preserved for legacy callers (scanner_loop, etc.) until PR7.
+from api.telegram import (  # noqa: F401
+    build_telegram_message,
+    push_telegram_direct,
+    _send_telegram_raw,
+    push_webhook,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -781,16 +789,6 @@ def get_signals_summary() -> list:
     """).fetchall()
     con.close()
     return [dict(r) for r in rows]
-
-
-# Telegram service moved to api/telegram.py in PR3 of the api+db refactor.
-# Re-exports preserved for legacy callers (scanner_loop, etc.) until PR7.
-from api.telegram import (  # noqa: F401
-    build_telegram_message,
-    push_telegram_direct,
-    _send_telegram_raw,
-    push_webhook,
-)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
