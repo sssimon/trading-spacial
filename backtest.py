@@ -569,12 +569,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 _tp_m_use = _tp_m
                 _be_m_use = _be_m
                 if trade_dir == "SHORT":
-                    sl_price = round(price + atr_val * _sl_m_use, 2)
-                    tp_price = round(price - atr_val * _tp_m_use, 2)
+                    # Full float precision — see strategy/core.py rationale.
+                    sl_price = float(price + atr_val * _sl_m_use)
+                    tp_price = float(price - atr_val * _tp_m_use)
                     be_threshold = price - atr_val * _be_m_use
                 else:
-                    sl_price = round(price - atr_val * _sl_m_use, 2)
-                    tp_price = round(price + atr_val * _tp_m_use, 2)
+                    sl_price = float(price - atr_val * _sl_m_use)
+                    tp_price = float(price + atr_val * _tp_m_use)
                     be_threshold = price + atr_val * _be_m_use
             else:
                 # Use decision's SL/TP (already resolved via cfg.symbol_overrides).
@@ -595,11 +596,12 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             _tp_m_use = _tp_m
             _be_m_use = _be_m
             if trade_dir == "SHORT":
-                sl_price = round(price * (1 + SL_PCT / 100), 2)
-                tp_price = round(price * (1 - TP_PCT / 100), 2)
+                # Full float precision — fixed-pct SL/TP path.
+                sl_price = float(price * (1 + SL_PCT / 100))
+                tp_price = float(price * (1 - TP_PCT / 100))
             else:
-                sl_price = round(price * (1 - SL_PCT / 100), 2)
-                tp_price = round(price * (1 + TP_PCT / 100), 2)
+                sl_price = float(price * (1 - SL_PCT / 100))
+                tp_price = float(price * (1 + TP_PCT / 100))
             be_threshold = None
 
         position = {
@@ -1009,9 +1011,20 @@ def main():
     df_fng = get_historical_fear_greed()
     df_funding = get_historical_funding_rate()
 
+    # Load config so simulate_strategy can apply per-symbol ATR overrides
+    # (epic #121 / #122 / #123). Without this, all symbols run with BTC defaults.
+    try:
+        import btc_api
+        cfg = btc_api.load_config()
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"load_config failed: {e} — running with empty cfg (no symbol_overrides)")
+        cfg = {}
+    symbol_overrides = cfg.get("symbol_overrides", {}) if isinstance(cfg, dict) else {}
+
     trades, equity_curve = simulate_strategy(df1h, df4h, df5m, symbol, sl_mode=args.sl_mode,
                                                df1d=df1d, sim_start=sim_start, sim_end=sim_end,
-                                               df_fng=df_fng, df_funding=df_funding)
+                                               df_fng=df_fng, df_funding=df_funding,
+                                               cfg=cfg, symbol_overrides=symbol_overrides)
     log.info(f"Simulation complete: {len(trades)} trades generated")
 
     if not trades:
