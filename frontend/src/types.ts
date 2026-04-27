@@ -301,3 +301,72 @@ export interface KillSwitchCurrentStateResponse {
   symbols: { [symbol: string]: KillSwitchSymbolState };
   portfolio: KillSwitchPortfolioState;
 }
+
+// ─── Kill switch v2 dashboard (#187 B6) ───────────────────────────────
+
+export interface DashboardSymbolMetrics {
+  trades_count_total: number;
+  win_rate_20_trades: number;
+  win_rate_10_trades: number;
+  pnl_30d: number;
+  months_negative_consecutive: number;
+  probation_trades_remaining: number | null;
+  paused_days_at_entry: number | null;
+}
+
+export interface DashboardSymbolTransition {
+  from_state: string;
+  to_state: string;
+  reason: string;
+  ts: string;
+}
+
+export interface DashboardSymbolState {
+  symbol: string;
+  state: KillSwitchPerSymbolTier;
+  state_since: string | null;
+  manual_override: boolean;
+  metrics: DashboardSymbolMetrics;
+  last_transition: DashboardSymbolTransition | null;
+  sparkline_20: Array<'W' | 'L' | null>;
+  next_conditions: string;
+}
+
+export interface DashboardPortfolioTransition {
+  from_tier: string;
+  to_tier: string;
+  reason: string;
+  dd_pct: number;
+  concurrent: number;
+  ts: string;
+}
+
+export interface DashboardPortfolioState {
+  tier: KillSwitchPortfolioTier;
+  dd_pct: number;
+  peak_equity: number;
+  current_equity: number;
+  concurrent_failures: number;
+  recent_transitions: DashboardPortfolioTransition[];
+}
+
+export type DashboardAlertKind =
+  | 'symbol_failures' | 'portfolio_dd' | 'velocity_burst' | 'auto_reactivation';
+
+export interface DashboardAlertItem {
+  kind: DashboardAlertKind;
+  text: string;
+  severity: 'info' | 'warning' | 'critical';
+  ts: string;
+}
+
+export interface DashboardAlertSummary {
+  items: DashboardAlertItem[];
+}
+
+export interface DashboardResponse {
+  symbols: DashboardSymbolState[];
+  portfolio: DashboardPortfolioState;
+  alerts: DashboardAlertSummary;
+  generated_at: string;
+}

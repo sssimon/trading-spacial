@@ -1053,6 +1053,21 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_recommendations_ts
             ON kill_switch_recommendations(ts)
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_health_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_tier       TEXT NOT NULL,
+            to_tier         TEXT NOT NULL,
+            reason          TEXT NOT NULL,
+            dd_pct          REAL,
+            concurrent      INTEGER,
+            ts              TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_portfolio_events_ts
+            ON portfolio_health_events(ts DESC)
+    """)
     con.commit()
     con.close()
     log.info(f"DB inicializada: {DB_FILE}")
@@ -2525,6 +2540,19 @@ def get_kill_switch_current_state(engine: str = "v1"):
     """Current tier state per symbol + portfolio aggregate (#187 phase 1)."""
     import observability
     return observability.get_current_state(engine=engine)
+
+
+@app.get("/health/dashboard", dependencies=[Depends(verify_api_key)])
+def get_health_dashboard():
+    """B6: single-shot consolidated state for the kill switch dashboard.
+
+    Returns per-symbol full state + portfolio aggregate + 24h alert summary.
+    Read-only; safe even when kill_switch.enabled=False (returns last-evaluated
+    snapshot).
+    """
+    from health import get_dashboard_state
+    cfg = load_config()
+    return get_dashboard_state(cfg)
 
 
 @app.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])

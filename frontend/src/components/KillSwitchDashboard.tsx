@@ -1,100 +1,95 @@
 // ============================================================
-// KillSwitchDashboard.tsx — Phase 1 MVP of kill switch v2 (#187)
-// Shows per-symbol tier grid + portfolio aggregate state.
-// Polls /kill_switch/current_state every 30s.
+// KillSwitchDashboard.tsx — B6 dashboard observability (#187 #200)
+// Polls /health/dashboard every 30s, renders alerts + portfolio + symbols.
 // ============================================================
 
-import React, { useEffect, useState } from 'react';
-import { getKillSwitchCurrentState } from '../api';
-import type {
-  KillSwitchCurrentStateResponse,
-  KillSwitchPerSymbolTier,
-  KillSwitchPortfolioTier,
-} from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { getHealthDashboard } from '../api';
+import AlertsStrip from './AlertsStrip';
+import PortfolioPanel from './PortfolioPanel';
+import KillSwitchSymbolCard from './KillSwitchSymbolCard';
+import type { DashboardResponse } from '../types';
 
 const POLL_INTERVAL_MS = 30_000;
 
-const TIER_COLORS_PER_SYMBOL: Record<KillSwitchPerSymbolTier, string> = {
-  NORMAL: '#22c55e',
-  ALERT: '#f59e0b',
-  REDUCED: '#fb923c',
-  PAUSED: '#ef4444',
-  PROBATION: '#a78bfa',
-};
-
-const TIER_COLORS_PORTFOLIO: Record<KillSwitchPortfolioTier, string> = {
-  NORMAL: '#22c55e',
-  WARNED: '#f59e0b',
-  REDUCED: '#fb923c',
-  FROZEN: '#ef4444',
-};
-
 const KillSwitchDashboard: React.FC = () => {
-  const [state, setState] = useState<KillSwitchCurrentStateResponse | null>(null);
+  const [data, setData] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const liveRegionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
-    const fetchState = async () => {
+    let lastAnnouncement = 0;
+
+    const fetch = async () => {
       try {
-        const resp = await getKillSwitchCurrentState('v1');
+        const resp = await getHealthDashboard();
         if (!alive) return;
-        setState(resp);
+        setData(resp);  // KEEP previous on top until new arrives
         setError(null);
+        setLoading(false);
+        // Polite announcement (debounce to 1×/5s)
+        const now = Date.now();
+        if (liveRegionRef.current && now - lastAnnouncement > 5000) {
+          liveRegionRef.current.textContent = 'Datos actualizados';
+          lastAnnouncement = now;
+        }
       } catch (err) {
         if (!alive) return;
         setError(err instanceof Error ? err.message : 'Error');
+        setLoading(false);
       }
     };
-    fetchState();
-    const id = setInterval(fetchState, POLL_INTERVAL_MS);
+
+    fetch();
+    const id = setInterval(fetch, POLL_INTERVAL_MS);
     return () => {
       alive = false;
       clearInterval(id);
     };
   }, []);
 
-  const symbols = state ? Object.values(state.symbols) : [];
-  const portfolio = state?.portfolio ?? { tier: 'NORMAL' as const, concurrent_failures: 0 };
+  if (loading && !data) {
+    return (
+      <div className="ks-dashboard" aria-busy="true">
+        <div className="ks-skeleton-strip" />
+        <div className="ks-skeleton-portfolio" />
+        <div className="ks-skeleton-grid">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="ks-skeleton-card" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="ks-dashboard">
+        {error && (
+          <div className="ks-error">Error cargando kill switch: {error}</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="ks-dashboard">
       {error && (
-        <div className="ks-error">Error cargando kill switch: {error}</div>
+        <div className="ks-error">Error refrescando: {error} (mostrando última data)</div>
       )}
 
-      <div className="ks-portfolio-card">
-        <div className="ks-portfolio-label">Portfolio</div>
-        <div
-          className="ks-portfolio-tier"
-          style={{ color: TIER_COLORS_PORTFOLIO[portfolio.tier] }}
-        >
-          {portfolio.tier}
-        </div>
-        <div className="ks-portfolio-meta">
-          {portfolio.concurrent_failures} símbolo(s) en ALERT/REDUCED/PAUSED
-        </div>
-      </div>
+      <div ref={liveRegionRef} role="status" aria-live="polite" className="ks-sr-only" />
 
-      <div className="ks-symbol-grid">
-        {symbols.map((s) => (
-          <div key={s.symbol} className="ks-symbol-card">
-            <div className="ks-symbol-name">{s.symbol}</div>
-            <div
-              className="ks-symbol-tier"
-              style={{ color: TIER_COLORS_PER_SYMBOL[s.per_symbol_tier] }}
-            >
-              {s.per_symbol_tier}
-            </div>
-            <div className="ks-symbol-meta">
-              size × {s.size_factor.toFixed(2)} · {s.skip ? 'skip' : 'operating'}
-            </div>
-            <div className="ks-symbol-ts">
-              {new Date(s.ts).toLocaleString('es-ES')}
-            </div>
-          </div>
+      <AlertsStrip alerts={data.alerts} />
+      <PortfolioPanel portfolio={data.portfolio} />
+
+      <div className="ks-symbol-grid-v2">
+        {data.symbols.map((s) => (
+          <KillSwitchSymbolCard key={s.symbol} state={s} />
         ))}
-        {symbols.length === 0 && (
+        {data.symbols.length === 0 && (
           <div className="ks-empty">Sin datos aún — esperando scans.</div>
         )}
       </div>

@@ -24,6 +24,7 @@ import type {
   KillSwitchDecisionsResponse,
   KillSwitchCurrentStateResponse,
   KillSwitchEngine,
+  DashboardResponse,
 } from './types';
 
 const BASE_URL = '/api';
@@ -237,4 +238,8 @@ export async function getKillSwitchCurrentState(
   return request<KillSwitchCurrentStateResponse>(
     `/kill_switch/current_state?engine=${engine}`,
   );
+}
+
+export async function getHealthDashboard(): Promise<DashboardResponse> {
+  return request<DashboardResponse>('/health/dashboard');
 }
