@@ -47,16 +47,46 @@ def _seed_minimal(con) -> None:
 
 
 def _capture_ohlcv(client: TestClient) -> dict[str, Any]:
-    """Placeholder capturer for the ohlcv domain. PR1 replaces this with the
-    real version that mocks data.market_data.get_klines_live with a fixed
-    DataFrame. For PR0c, this just exists to verify the capture pipeline works."""
-    resp = client.get("/ohlcv?symbol=BTCUSDT&interval=1h&limit=5")
-    return {
-        "GET /ohlcv?symbol=BTCUSDT&interval=1h&limit=5": {
+    """Capture /ohlcv with mocked fetcher returning a fixed DataFrame."""
+    import pandas as pd  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    fixed_df = pd.DataFrame({
+        "open_time": [1736899200000 + i * 3_600_000 for i in range(5)],
+        "open":      [50000.0, 50100.0, 50050.0, 50200.0, 50300.0],
+        "high":      [50500.0, 50400.0, 50300.0, 50500.0, 50600.0],
+        "low":       [49800.0, 49900.0, 49850.0, 50000.0, 50100.0],
+        "close":     [50100.0, 50050.0, 50200.0, 50300.0, 50400.0],
+        "volume":    [10.0, 12.0, 8.0, 15.0, 11.0],
+    })
+    empty_df = pd.DataFrame(columns=["open_time", "open", "high", "low", "close", "volume"])
+
+    out: dict[str, Any] = {}
+    with patch("data.market_data.get_klines_live", return_value=fixed_df):
+        for url in [
+            "/ohlcv?symbol=BTCUSDT&interval=1h&limit=5",
+            "/ohlcv?symbol=ETHUSDT&interval=4h&limit=5",
+        ]:
+            resp = client.get(url)
+            out[f"GET {url}"] = {
+                "status": resp.status_code,
+                "body": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+            }
+    # Invalid interval — should 400 without hitting the fetcher
+    resp = client.get("/ohlcv?symbol=BTCUSDT&interval=invalid&limit=5")
+    out["GET /ohlcv?symbol=BTCUSDT&interval=invalid&limit=5"] = {
+        "status": resp.status_code,
+        "body": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+    }
+    # Empty DataFrame — should return empty arrays
+    with patch("data.market_data.get_klines_live", return_value=empty_df):
+        resp = client.get("/ohlcv?symbol=BTCUSDT&interval=1h&limit=5")
+        out["GET /ohlcv?symbol=BTCUSDT&interval=1h&limit=5 (empty)"] = {
             "status": resp.status_code,
             "body": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
         }
-    }
+
+    return out
 
 
 CAPTURERS: dict[str, Callable[[TestClient], dict[str, Any]]] = {

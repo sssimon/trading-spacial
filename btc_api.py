@@ -42,6 +42,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from btc_scanner import scan, get_top_symbols
 from data import market_data as md
 from notifier import notify, SignalEvent, SystemEvent
+from api.ohlcv import router as ohlcv_router
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1317,6 +1318,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(ohlcv_router)
+
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
@@ -1861,40 +1864,6 @@ def update_config(body: ConfigUpdate):
         return {"ok": True, "config": _strip_secrets(updated)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/ohlcv", summary="Velas OHLCV para graficar")
-def get_ohlcv(
-    symbol:   str = Query("BTCUSDT", description="Par de trading (ej: ETHUSDT)"),
-    interval: str = Query("1h",      description="Intervalo: 5m,15m,1h,4h,1d"),
-    limit:    int = Query(300,       ge=1, le=1000, description="Número de velas"),
-):
-    """Retorna datos OHLCV listos para lightweight-charts (timestamps en segundos UTC).
-    Usa md.get_klines_live() — incluye la barra en curso para el gráfico animado."""
-    VALID = {"1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"}
-    if interval not in VALID:
-        raise HTTPException(status_code=400, detail=f"Intervalo invalido: {interval}")
-    try:
-        df = md.get_klines_live(symbol.upper(), interval, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Error obteniendo OHLCV: {e}")
-
-    if df.empty:
-        return {"symbol": symbol.upper(), "interval": interval, "candles": [], "volumes": []}
-
-    candles, volumes = [], []
-    for _, row in df.iterrows():
-        ts = int(row["open_time"]) // 1000  # ms → seconds for lightweight-charts
-        o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
-        v = float(row["volume"])
-        candles.append({"time": ts, "open": o, "high": h, "low": l, "close": c})
-        volumes.append({
-            "time":  ts,
-            "value": v,
-            "color": "rgba(34,197,94,0.35)" if c >= o else "rgba(239,68,68,0.35)",
-        })
-
-    return {"symbol": symbol.upper(), "interval": interval, "candles": candles, "volumes": volumes}
 
 
 # ── Posiciones ────────────────────────────────────────────────────────────────
