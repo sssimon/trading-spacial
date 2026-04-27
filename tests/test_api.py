@@ -718,6 +718,7 @@ class TestExecuteScanForSymbol:
     def test_notifies_on_premium_signal(self, monkeypatch):
         """Notification sent when signal passes filters."""
         import btc_api
+        import api.telegram as tg_mod
         notified = []
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
@@ -728,7 +729,8 @@ class TestExecuteScanForSymbol:
             "confirmations": {},
         }
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify",
+        # notify is called via api.telegram.push_telegram_direct (PR3); patch there.
+        monkeypatch.setattr(tg_mod, "notify",
                             lambda event, cfg: notified.append(event.symbol) or [])
 
         cfg = btc_api.load_config()
