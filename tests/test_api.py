@@ -418,7 +418,8 @@ class TestAPIEndpoints:
             "errors": [],
         }
 
-        with patch("btc_api.scan", return_value=mock_rep):
+        with patch("btc_api.scan", return_value=mock_rep), \
+             patch("scanner.runtime.scan", return_value=mock_rep):
             # Escanear un solo símbolo para que el resultado sea predecible
             r = client.post("/scan?symbol=BTCUSDT")
         assert r.status_code == 200
