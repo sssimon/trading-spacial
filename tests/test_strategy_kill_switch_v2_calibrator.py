@@ -2088,6 +2088,10 @@ def test_apply_endpoint_preserves_other_v2_keys_in_config(tmp_path, monkeypatch)
     with open(cfg_path, "w") as f:
         json.dump(full_cfg, f)
     monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+    import api.config as _ac
+    monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"))
+    monkeypatch.setattr(_ac, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"))
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
 
     # Seed pending rec with slider=65

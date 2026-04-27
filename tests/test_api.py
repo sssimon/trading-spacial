@@ -462,10 +462,14 @@ class TestAPIEndpoints:
 
     def test_webhook_test_con_url(self, client, tmp_path, monkeypatch):
         import btc_api
+        import api.config as _ac
         cfg_path = str(tmp_path / "config_wh.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://localhost:9999/wh"}, f)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"))
+        monkeypatch.setattr(_ac, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"))
 
         with patch("btc_api.req_lib.post") as mock_post:
             mock_post.return_value = MagicMock(ok=True, status_code=200)
@@ -559,42 +563,55 @@ class TestPushWebhook:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestLoadConfig:
-    def test_defaults_sin_archivo(self, tmp_path, monkeypatch):
+    def _patch_config_files(self, monkeypatch, cfg_path, tmp_path):
+        """Patch CONFIG_FILE in both btc_api (legacy re-export) and api.config (authoritative)."""
         import btc_api
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", str(tmp_path / "no_existe.json"))
+        import api.config as _ac
+        no_defaults = str(tmp_path / "_no_defaults.json")
+        no_secrets = str(tmp_path / "_no_secrets.json")
+        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(btc_api, "DEFAULTS_FILE", no_defaults, raising=False)
+        monkeypatch.setattr(btc_api, "SECRETS_FILE", no_secrets, raising=False)
+        monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "DEFAULTS_FILE", no_defaults)
+        monkeypatch.setattr(_ac, "SECRETS_FILE", no_secrets)
+
+    def test_defaults_sin_archivo(self, tmp_path, monkeypatch):
+        self._patch_config_files(monkeypatch, str(tmp_path / "no_existe.json"), tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         assert "webhook_url" in cfg
         assert "scan_interval_sec" in cfg
         assert cfg["scan_interval_sec"] == 300
 
     def test_lee_archivo_existente(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://test.com", "scan_interval_sec": 60}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         assert cfg["webhook_url"] == "http://test.com"
         assert cfg["scan_interval_sec"] == 60
 
     def test_valores_por_defecto_cuando_faltan_claves(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://test.com"}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         # notify_setup_only debe tener valor por defecto
         assert "notify_setup_only" in cfg
         assert cfg["notify_setup_only"] is False
 
     def test_env_var_override(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"telegram_chat_id": "from_file"}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
         monkeypatch.setenv("TRADING_TELEGRAM_CHAT_ID", "from_env")
+        import btc_api
         cfg = btc_api.load_config()
         assert cfg["telegram_chat_id"] == "from_env"  # ENV takes precedence
 

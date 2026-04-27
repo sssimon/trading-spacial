@@ -89,10 +89,41 @@ def _capture_ohlcv(client: TestClient) -> dict[str, Any]:
     return out
 
 
+def _capture_config(client: TestClient) -> dict[str, Any]:
+    """Capture /config GET (with secrets stripped) and POST scenarios.
+
+    Uses isolated config files written into the seeding step's temp dir.
+    Tests must monkeypatch CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE so the
+    routes don't read the real production files.
+    """
+    out: dict[str, Any] = {}
+
+    # GET /config without auth — should still 200 if api_key not set, or 401 if set
+    # Since the seeded test config sets api_key="test-key", GET requires auth header
+    r = client.get("/config", headers={"X-API-Key": "test-key"})
+    out["GET /config (auth)"] = {"status": r.status_code, "body": r.json()}
+
+    # GET /config without auth header — expect 401
+    r = client.get("/config")
+    out["GET /config (no auth)"] = {"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text}
+
+    # POST without auth → 401
+    r = client.post("/config", json={"signal_filters": {"min_score": 5}})
+    out["POST /config (no auth)"] = {"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text}
+
+    # POST with auth + valid update
+    r = client.post("/config",
+                    json={"signal_filters": {"min_score": 5}},
+                    headers={"X-API-Key": "test-key"})
+    out["POST /config (auth, valid)"] = {"status": r.status_code, "body": r.json()}
+
+    return out
+
+
 CAPTURERS: dict[str, Callable[[TestClient], dict[str, Any]]] = {
     "ohlcv": _capture_ohlcv,
+    "config": _capture_config,
     # PR1-PR6 register their domain capturers here:
-    #   "config":        _capture_config,
     #   "telegram":      _capture_telegram,
     #   "positions":     _capture_positions,
     #   "signals":       _capture_signals,
@@ -115,12 +146,42 @@ def main() -> None:
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
+    config_dir = tempfile.mkdtemp(prefix="config_test_")
 
     try:
         # Patch btc_api.DB_FILE before init_db so the temp DB is the target.
         # _resolve_db_file() in db/connection.py honors this patch.
-        import btc_api  # noqa: PLC0415
-        btc_api.DB_FILE = db_path
+        import btc_api as _ba  # noqa: PLC0415
+        _ba.DB_FILE = db_path
+
+        # Test config (only used for the "config" domain capturer)
+        import json as _json  # noqa: PLC0415
+        config_path = os.path.join(config_dir, "config.json")
+        _test_cfg = {
+            "api_key": "test-key",
+            "webhook_url": "http://test.local/hook",
+            "telegram_chat_id": "test-chat",
+            "telegram_bot_token": "test-token",
+            "signal_filters": {"min_score": 4, "require_macro_ok": False, "notify_setup": False},
+            "scan_interval_sec": 300,
+            "num_symbols": 20,
+            "proxy": "",
+            "auto_approve_tune": True,
+        }
+        with open(config_path, "w") as f:
+            _json.dump(_test_cfg, f)
+
+        # Patch the config file path. Both btc_api (legacy) and api.config (new)
+        # read CONFIG_FILE at call time via load_config; patch both to ensure the
+        # routes see the test config regardless of which path resolves first.
+        _ba.CONFIG_FILE = config_path
+        _ba.DEFAULTS_FILE = "/tmp/_nonexistent_defaults.json"  # force fallback to hardcoded
+        _ba.SECRETS_FILE = "/tmp/_nonexistent_secrets.json"
+
+        import api.config as _ac  # noqa: PLC0415
+        _ac.CONFIG_FILE = config_path
+        _ac.DEFAULTS_FILE = "/tmp/_nonexistent_defaults.json"
+        _ac.SECRETS_FILE = "/tmp/_nonexistent_secrets.json"
 
         from db.schema import init_db  # noqa: PLC0415
         init_db()
@@ -134,10 +195,12 @@ def main() -> None:
         client = TestClient(app)
 
         result = CAPTURERS[domain](client)
-        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        print(_json.dumps(result, indent=2, sort_keys=True, default=str))
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+        import shutil as _shutil  # noqa: PLC0415
+        _shutil.rmtree(config_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
