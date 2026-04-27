@@ -1,0 +1,50 @@
+{
+  "GET /health (no scanner)": {
+    "body": {
+      "checks": {
+        "database": "ok",
+        "errors": 0,
+        "scan_freshness": "no_scans_yet",
+        "scanner": "stopped",
+        "scans_total": 0,
+        "signals_total": 0
+      },
+      "healthy": false
+    },
+    "status": 503
+  },
+  "GET /health/dashboard (auth, mocked)": {
+    "body": {
+      "alerts_24h": [],
+      "portfolio": {},
+      "symbols": {}
+    },
+    "status": 200
+  },
+  "GET /health/events (auth, empty)": {
+    "body": {
+      "events": []
+    },
+    "status": 200
+  },
+  "GET /health/symbols (auth, empty)": {
+    "body": {
+      "symbols": []
+    },
+    "status": 200
+  },
+  "GET /health/symbols (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /health/reactivate/BTCUSDT (auth, mocked)": {
+    "body": {
+      "ok": true,
+      "state": "PROBATION",
+      "symbol": "BTCUSDT"
+    },
+    "status": 200
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "GET /kill_switch/current_state (auth)": {
+    "body": {
+      "state": "ok",
+      "symbols": {}
+    },
+    "status": 200
+  },
+  "GET /kill_switch/current_state (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "GET /kill_switch/recommendations (auth, empty)": {
+    "body": [],
+    "status": 200
+  },
+  "POST /kill_switch/recalibrate (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /kill_switch/recommendations/1/apply (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /kill_switch/recommendations/1/ignore (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  }
+}

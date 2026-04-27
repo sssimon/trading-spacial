@@ -177,17 +177,208 @@ def _capture_signals(client: TestClient) -> dict[str, Any]:
     return out
 
 
+def _capture_kill_switch(client: TestClient) -> dict[str, Any]:
+    """Capture /kill_switch endpoints.
+
+    GET /kill_switch/current_state (simple, no DB setup needed).
+    GET /kill_switch/recommendations (empty list).
+    POST endpoints covered with auth-failure (no auth → 401) only.
+    """
+    from unittest.mock import patch  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+
+    # GET /kill_switch/current_state — uses observability module
+    with patch("observability.get_current_state", return_value={"state": "ok", "symbols": {}}):
+        r = client.get("/kill_switch/current_state", headers={"X-API-Key": "test-key"})
+        out["GET /kill_switch/current_state (auth)"] = {
+            "status": r.status_code,
+            "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+        }
+
+    # GET /kill_switch/current_state — no auth → 401
+    r = client.get("/kill_switch/current_state")
+    out["GET /kill_switch/current_state (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /kill_switch/recommendations — empty DB → []
+    r = client.get("/kill_switch/recommendations", headers={"X-API-Key": "test-key"})
+    out["GET /kill_switch/recommendations (auth, empty)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /kill_switch/recalibrate — no auth → 401
+    r = client.post("/kill_switch/recalibrate")
+    out["POST /kill_switch/recalibrate (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /kill_switch/recommendations/1/apply — no auth → 401
+    r = client.post("/kill_switch/recommendations/1/apply")
+    out["POST /kill_switch/recommendations/1/apply (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /kill_switch/recommendations/1/ignore — no auth → 401
+    r = client.post("/kill_switch/recommendations/1/ignore")
+    out["POST /kill_switch/recommendations/1/ignore (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    return out
+
+
+def _capture_tune(client: TestClient) -> dict[str, Any]:
+    """Capture /tune endpoints.
+
+    GET /tune/latest returns null (empty DB).
+    POST /tune/apply and /tune/reject covered with auth-failure only.
+    """
+    out: dict[str, Any] = {}
+
+    # GET /tune/latest — empty DB → null (no auth required)
+    r = client.get("/tune/latest")
+    out["GET /tune/latest (empty)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /tune/apply — no auth → 401
+    r = client.post("/tune/apply")
+    out["POST /tune/apply (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /tune/reject — no auth → 401
+    r = client.post("/tune/reject")
+    out["POST /tune/reject (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    return out
+
+
+def _capture_health(client: TestClient) -> dict[str, Any]:
+    """Capture /health endpoints.
+
+    GET /health — simple liveness check (no auth).
+    GET /health/symbols — requires auth, empty DB.
+    GET /health/events — requires auth, empty DB.
+    GET /health/dashboard — requires auth, mocked.
+    POST /health/reactivate/{symbol} — requires auth, mocked.
+    """
+    from unittest.mock import patch  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+
+    # GET /health — no auth required; scanner not running → 503
+    r = client.get("/health")
+    out["GET /health (no scanner)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /health/symbols — auth required, empty DB
+    r = client.get("/health/symbols", headers={"X-API-Key": "test-key"})
+    out["GET /health/symbols (auth, empty)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /health/symbols — no auth → 401
+    r = client.get("/health/symbols")
+    out["GET /health/symbols (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /health/events — auth required, empty DB
+    r = client.get("/health/events", headers={"X-API-Key": "test-key"})
+    out["GET /health/events (auth, empty)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /health/dashboard — auth required, mocked
+    _mock_dashboard = {"symbols": {}, "portfolio": {}, "alerts_24h": []}
+    with patch("health.get_dashboard_state", return_value=_mock_dashboard):
+        r = client.get("/health/dashboard", headers={"X-API-Key": "test-key"})
+        out["GET /health/dashboard (auth, mocked)"] = {
+            "status": r.status_code,
+            "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+        }
+
+    # POST /health/reactivate/BTCUSDT — auth required, mocked
+    with patch("health.reactivate_symbol"), patch("health.get_symbol_state", return_value="PROBATION"):
+        r = client.post(
+            "/health/reactivate/BTCUSDT",
+            json={"reason": "manual"},
+            headers={"X-API-Key": "test-key"},
+        )
+        out["POST /health/reactivate/BTCUSDT (auth, mocked)"] = {
+            "status": r.status_code,
+            "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+        }
+
+    return out
+
+
+def _capture_notifications(client: TestClient) -> dict[str, Any]:
+    """Capture /notifications endpoints.
+
+    GET /notifications — auth required, empty DB.
+    POST /notifications/{id}/read and /read-all covered with auth-failure only.
+    """
+    out: dict[str, Any] = {}
+
+    # GET /notifications — auth required, empty DB
+    r = client.get("/notifications", headers={"X-API-Key": "test-key"})
+    out["GET /notifications (auth, empty)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # GET /notifications — no auth → 401
+    r = client.get("/notifications")
+    out["GET /notifications (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /notifications/1/read — no auth → 401
+    r = client.post("/notifications/1/read")
+    out["POST /notifications/1/read (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    # POST /notifications/read-all — no auth → 401
+    r = client.post("/notifications/read-all")
+    out["POST /notifications/read-all (no auth)"] = {
+        "status": r.status_code,
+        "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+    }
+
+    return out
+
+
 CAPTURERS: dict[str, Callable[[TestClient], dict[str, Any]]] = {
     "ohlcv": _capture_ohlcv,
     "config": _capture_config,
     "positions": _capture_positions,
     "signals": _capture_signals,
-    # PR1-PR6 register their domain capturers here:
-    #   "telegram":      _capture_telegram,
-    #   "kill_switch":   _capture_kill_switch,
-    #   "health":        _capture_health,
-    #   "tune":          _capture_tune,
-    #   "notifications": _capture_notifications,
+    "kill_switch": _capture_kill_switch,
+    "tune": _capture_tune,
+    "health": _capture_health,
+    "notifications": _capture_notifications,
 }
 
 
