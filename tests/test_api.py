@@ -643,20 +643,25 @@ class TestExecuteScanForSymbol:
     @pytest.fixture(autouse=True)
     def setup(self, tmp_path, monkeypatch):
         import btc_api
+        import api.signals as _sig_mod
+        import api.positions as _pos_mod
         db_path = str(tmp_path / "test_scan.db")
         cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"signal_filters": {"min_score": 4}}, f)
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-        # Prevent file I/O for logs/csv in tests
-        monkeypatch.setattr(btc_api, "append_signal_log", lambda rep, sid: None)
-        monkeypatch.setattr(btc_api, "append_signal_csv", lambda rep, sid: None)
-        monkeypatch.setattr(btc_api, "check_position_stops", lambda sym, price: None)
+        # Prevent file I/O for logs/csv in tests — patch authoritative modules
+        # (execute_scan_for_symbol now lives in scanner/runtime.py and uses
+        # lazy imports from api.signals / api.positions, not btc_api re-exports)
+        monkeypatch.setattr(_sig_mod, "append_signal_log", lambda rep, sid: None)
+        monkeypatch.setattr(_sig_mod, "append_signal_csv", lambda rep, sid: None)
+        monkeypatch.setattr(_pos_mod, "check_position_stops", lambda sym, price: None)
         btc_api.init_db()
 
     def test_returns_dict_with_symbol(self, monkeypatch):
         """execute_scan_for_symbol returns a dict with the symbol."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT",
             "timestamp": "2026-01-01T00:00:00",
@@ -671,8 +676,8 @@ class TestExecuteScanForSymbol:
             "sizing_1h": {},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
 
         cfg = btc_api.load_config()
         result = btc_api.execute_scan_for_symbol("BTCUSDT", cfg)
@@ -682,14 +687,15 @@ class TestExecuteScanForSymbol:
     def test_saves_scan_to_db(self, monkeypatch):
         """Scan results are persisted to the database."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "ETHUSDT", "timestamp": "2026-01-01T00:00:00",
             "estado": "Sin zona", "señal_activa": False, "gatillo_activo": False,
             "price": 3500.0, "score": 1, "score_label": "MINIMA",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
 
         cfg = btc_api.load_config()
         btc_api.execute_scan_for_symbol("ETHUSDT", cfg)
@@ -700,14 +706,15 @@ class TestExecuteScanForSymbol:
     def test_updates_scanner_state(self, monkeypatch):
         """Scanner state is updated after scan."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T12:00:00",
             "estado": "Test", "señal_activa": False, "gatillo_activo": False,
             "price": 65000.0, "score": 0, "score_label": "MINIMA",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
         initial_count = btc_api._scanner_state["scans_total"]
 
         cfg = btc_api.load_config()
@@ -719,6 +726,7 @@ class TestExecuteScanForSymbol:
         """Notification sent when signal passes filters."""
         import btc_api
         import api.telegram as tg_mod
+        import scanner.runtime as _rt
         notified = []
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
@@ -728,6 +736,7 @@ class TestExecuteScanForSymbol:
             "sizing_1h": {"sl_precio": 63000, "tp_precio": 70000},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
         # notify is called via api.telegram.push_telegram_direct (PR3); patch there.
         monkeypatch.setattr(tg_mod, "notify",
@@ -741,6 +750,8 @@ class TestExecuteScanForSymbol:
     def test_no_notification_below_threshold(self, monkeypatch):
         """No notification when score is below min_score."""
         import btc_api
+        import api.telegram as tg_mod
+        import scanner.runtime as _rt
         notified = []
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
@@ -749,8 +760,9 @@ class TestExecuteScanForSymbol:
             "macro_4h": {}, "lrc_1h": {"pct": 15.0}, "sizing_1h": {},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify",
+        monkeypatch.setattr(tg_mod, "notify",
                             lambda event, cfg: notified.append(True) or [])
 
         cfg = btc_api.load_config()
@@ -761,10 +773,12 @@ class TestExecuteScanForSymbol:
     def test_handles_scan_exception(self, monkeypatch):
         """Exception in scan() returns error dict, doesn't crash."""
         import btc_api
+        import scanner.runtime as _rt
 
         def raise_error(sym):
             raise ValueError("API down")
 
+        monkeypatch.setattr(_rt, "scan", raise_error)
         monkeypatch.setattr(btc_api, "scan", raise_error)
 
         cfg = btc_api.load_config()
@@ -774,14 +788,17 @@ class TestExecuteScanForSymbol:
     def test_increments_signal_count(self, monkeypatch):
         """signals_total incremented for confirmed signals."""
         import btc_api
+        import api.telegram as tg_mod
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
             "estado": "SEÑAL CONFIRMADA", "señal_activa": True, "gatillo_activo": True,
             "price": 65000.0, "score": 6, "score_label": "PREMIUM",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
+        monkeypatch.setattr(tg_mod, "notify", lambda event, cfg: [])
 
         initial = btc_api._scanner_state["signals_total"]
         cfg = btc_api.load_config()

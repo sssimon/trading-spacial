@@ -2,495 +2,78 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   CRYPTO SCANNER API  —  Ultimate Macro & Order Flow V6.0        ║
-║   FastAPI  •  SQLite  •  Webhook push  •  Localhost:8000         ║
-║   Top 20 pares por capitalización de mercado                     ║
-║                                                                  ║
-║   Endpoints principales:                                         ║
-║     GET  /                       →  bienvenida + estado          ║
-║     GET  /symbols                →  estado de cada par           ║
-║     GET  /status                 →  estado del scanner           ║
-║     GET  /signals                →  historial (filtros)          ║
-║     GET  /signals/latest         →  última señal completa        ║
-║     GET  /signals/latest/message →  mensaje listo para Telegram  ║
-║     POST /scan                   →  forzar escaneo manual        ║
-║     GET  /docs                   →  documentación Swagger UI     ║
+║   FastAPI bootstrap — routers in api/*, scanner in scanner/      ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
-
-from fastapi import FastAPI, HTTPException, Query, Body, Depends, Security
-from fastapi.security import APIKeyHeader
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from contextlib import asynccontextmanager
-from typing import Optional, List
-import threading
-import sqlite3
-import json
-import os
-import time
-import glob
-import shutil
-import hmac
-import requests as req_lib
-from datetime import datetime, timezone, timedelta
+from __future__ import annotations
 import logging
-from logging.handlers import RotatingFileHandler
-
+import os
 import sys
+from contextlib import asynccontextmanager
+from typing import Optional
+
+import requests as req_lib  # noqa: F401 — tests patch btc_api.req_lib.post
+from fastapi import Depends, FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
-from btc_scanner import scan, get_top_symbols
-from data import market_data as md
-from notifier import notify, SystemEvent
-from api.ohlcv import router as ohlcv_router
-# Config domain moved to api/config.py in PR2 of the api+db domain refactor.
-# Re-exports preserved for legacy callers (scanner_loop, position routes, etc.) until PR7.
-from api.config import (  # noqa: F401
-    load_config, save_config, _strip_secrets, _SECRET_KEYS,
-    SignalFiltersUpdate, ConfigUpdate, _deep_merge, _load_json_file,
-    get_config, update_config,
-    CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE,
-)
+
+# Domain routers
+from api.config import CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE, _strip_secrets, load_config, save_config, get_config  # noqa: F401
 from api.config import router as config_router
-# Telegram service moved to api/telegram.py in PR3 of the api+db refactor.
-# Re-exports preserved for legacy callers (scanner_loop, etc.) until PR7.
-from api.telegram import (  # noqa: F401
-    build_telegram_message,
-    push_telegram_direct,
-    _send_telegram_raw,
-    push_webhook,
-)
+from api.deps import verify_api_key
+from api.health import router as health_router
+from api.kill_switch import router as kill_switch_router
+from api.notifications import router as notifications_router
+from api.ohlcv import router as ohlcv_router
+from api.positions import check_position_stops, POSITIONS_JSON_FILE  # noqa: F401
 from api.positions import router as positions_router
-# Positions domain moved to api/positions.py + db/positions.py in PR4.
-# Re-exports preserved for legacy callers (scanner_loop, etc.) until PR7.
-from api.positions import (  # noqa: F401
-    _calc_pnl, check_position_stops, _write_position_event_log, update_positions_json,
-    POSITIONS_JSON_FILE,
-)
-from db.positions import (  # noqa: F401
-    db_create_position, db_get_positions, db_close_position, db_update_position,
-)
-# Signals domain moved to api/signals.py + db/signals.py in PR5.
-# Re-exports preserved for scanner_loop and other legacy callers until PR7.
 from api.signals import (  # noqa: F401
-    should_notify_signal, _is_duplicate_signal, _mark_notified,
-    update_symbols_json, append_signal_csv, append_signal_log,
-    get_signals_performance,
-    list_signals, latest_signal, latest_message, signal_by_id,
-    SIGNALS_LOG_FILE,
+    _is_duplicate_signal, _mark_notified, append_signal_csv, append_signal_log,
+    get_signals_performance, latest_message, latest_signal, list_signals, signal_by_id,
+    should_notify_signal, update_symbols_json, SIGNALS_LOG_FILE,
 )
 import api.signals as _api_signals  # noqa: F401
-_notified_signals = _api_signals._notified_signals  # same dict object — tests mutate via btc_api._notified_signals
-from db.signals import (  # noqa: F401
-    save_scan, get_scans, get_latest_signal, get_latest_scan, get_signals_summary,
-)
+_notified_signals = _api_signals._notified_signals  # tests mutate via btc_api._notified_signals
 from api.signals import router as signals_router
-# PR6: thin route wrappers extracted to dedicated APIRouter modules.
-from api.kill_switch import router as kill_switch_router
+from api.telegram import build_telegram_message, push_telegram_direct, push_webhook  # noqa: F401
 from api.tune import router as tune_router
-from api.health import router as health_router
-from api.notifications import router as notifications_router
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TRACKING DE PERFORMANCE HISTÓRICO
-# ─────────────────────────────────────────────────────────────────────────────
-
-def check_pending_signal_outcomes(current_prices: dict[str, float]):
-    """
-    Recorre señales pendientes y actualiza su precio 1h, 4h y 24h después.
-    También actualiza max_runup y max_drawdown si no han pasado 24h.
-
-    current_prices: {symbol: price} recolectado del ciclo de scan actual,
-    para evitar llamadas extra a la API de Binance.
-    """
-    con = get_db()
-    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
-    con.close()
-
-    if not rows:
-        return
-
-    now = datetime.now(timezone.utc)
-    updated_count = 0
-
-    # Cache de klines 1h por symbol para runup/drawdown (una llamada por symbol)
-    _klines_cache: dict[str, object] = {}
-
-    for r in [dict(row) for row in rows]:
-        try:
-            sig_ts = datetime.fromisoformat(r["signal_ts"])
-            if sig_ts.tzinfo is None:
-                sig_ts = sig_ts.replace(tzinfo=timezone.utc)
-
-            age_hours = (now - sig_ts).total_seconds() / 3600
-            symbol    = r["symbol"]
-            sig_price = r["signal_price"]
-            cur_price = current_prices.get(symbol)
-
-            updates = {}
-
-            # 1. Capturar precios en hitos (1h, 4h, 24h)
-            #    Usa el precio actual del ciclo de scan (sin llamada API)
-            if cur_price is not None:
-                if r["price_1h"] is None and age_hours >= 1.0:
-                    updates["price_1h"] = cur_price
-
-                if r["price_4h"] is None and age_hours >= 4.0:
-                    updates["price_4h"] = cur_price
-
-                if r["price_24h"] is None and age_hours >= 24.0:
-                    updates["price_24h"] = cur_price
-                    updates["status"] = "completed"
-
-            # 2. Max Runup / Drawdown con velas 1h (una llamada por symbol único)
-            if age_hours <= 25.0:
-                if symbol not in _klines_cache:
-                    try:
-                        _klines_cache[symbol] = md.get_klines(symbol, "1h", limit=25)
-                    except Exception:
-                        _klines_cache[symbol] = None
-
-                df = _klines_cache[symbol]
-                if df is not None and not df.empty:
-                    high = df["high"].max()
-                    low  = df["low"].min()
-                    updates["max_runup_pct"]    = round((high - sig_price) / sig_price * 100, 2)
-                    updates["max_drawdown_pct"] = round((low - sig_price) / sig_price * 100, 2)
-
-            if updates:
-                updates["last_checked_ts"] = now.isoformat()
-                set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-                params     = list(updates.values()) + [r["id"]]
-
-                con_up = get_db()
-                con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
-                con_up.commit()
-                con_up.close()
-                updated_count += 1
-
-        except Exception as e:
-            log.warning(f"Error trackeando performance de {r['symbol']} (id={r['id']}): {e}")
-
-    if updated_count > 0:
-        log.info(f"Performance Tracking: {updated_count} señales actualizadas.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-
-#  CONFIGURACIÓN
-# ─────────────────────────────────────────────────────────────────────────────
-DB_FILE           = os.path.join(SCRIPT_DIR, "signals.db")
-DATA_DIR          = os.path.join(SCRIPT_DIR, "data")
-LOGS_DIR          = os.path.join(SCRIPT_DIR, "logs")
-API_HOST          = "0.0.0.0"
-API_PORT          = 8000
-SCAN_INTERVAL_SEC   = 300
-SYMBOLS_REFRESH_SEC = 3600   # refrescar top 20 cada 1 hora
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from btc_scanner import scan  # noqa: F401 — tests monkeypatch
+from data import market_data as md  # noqa: F401 — tests patch
+from db.connection import DB_FILE, get_db  # noqa: F401 — DB_FILE patched by tests
+from db.schema import init_db  # noqa: F401
+from db.signals import get_latest_scan, get_latest_signal, get_scans, get_signals_summary, save_scan  # noqa: F401
+from db.positions import db_close_position, db_create_position, db_get_positions, db_update_position  # noqa: F401
+from notifier import notify, SystemEvent  # noqa: F401 — tests monkeypatch
+from scanner.runtime import (
+    _scanner_state, execute_scan_for_symbol, check_pending_signal_outcomes,
+    get_active_symbols, start_scanner_thread,
 )
+
+DATA_DIR = os.path.join(SCRIPT_DIR, "data")  # noqa: F841 — patched by tests
+LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")  # noqa: F841 — patched by tests
+API_HOST = "0.0.0.0"
+API_PORT = 8000
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("btc_api")
 
 
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  API KEY AUTHENTICATION
-# ─────────────────────────────────────────────────────────────────────────────
-
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def verify_api_key(key: str = Security(_api_key_header)):
-    """Verify API key for sensitive endpoints. If no key configured, allow all."""
-    cfg = load_config()
-    expected = cfg.get("api_key", "").strip()
-    if not expected:
-        return  # No key configured = open access (backward compatible)
-    if not key or not hmac.compare_digest(key, expected):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
-
-
-
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  CACHÉ DE SÍMBOLOS  (validados contra Binance)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_symbols_cache: List[str] = []
-_symbols_fetched_at: float = 0.0
-
-_binance_valid: set = set()
-_binance_valid_at: float = 0.0
-BINANCE_INFO_REFRESH_SEC = 6 * 3600   # refrescar lista de pares válidos cada 6h
-
-
-def _get_binance_usdt_symbols() -> set:
-    """Devuelve el conjunto de pares USDT activos en Binance Spot."""
-    global _binance_valid, _binance_valid_at
-    if _binance_valid and (time.time() - _binance_valid_at) < BINANCE_INFO_REFRESH_SEC:
-        return _binance_valid
-    try:
-        r = req_lib.get(
-            "https://api.binance.com/api/v3/exchangeInfo",
-            params={"permissions": "SPOT"},
-            timeout=15,
-        )
-        r.raise_for_status()
-        data = r.json()
-        _binance_valid = {
-            s["symbol"]
-            for s in data.get("symbols", [])
-            if s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"
-        }
-        _binance_valid_at = time.time()
-        log.info(f"Binance exchange info cargado: {len(_binance_valid)} pares USDT activos")
-    except Exception as e:
-        log.warning(f"_get_binance_usdt_symbols error: {e}")
-    return _binance_valid
-
-
-def get_active_symbols(n: int = 20) -> List[str]:
-    """Retorna la lista CURADA de 10 símbolos rentables (epic #135).
-
-    Previamente pedía top-N por market cap a CoinGecko, lo que reinsertaba
-    los 13 tokens confirmados no rentables (BNB, SOL, XRP, DOT, MATIC,
-    LINK, LTC, ATOM, NEAR, FIL, APT, OP, ARB) en cada refresh.
-
-    Diseño actual (epic #121/#135): la lista es ESTÁTICA y vive en
-    `btc_scanner.DEFAULT_SYMBOLS`. La validación contra Binance spot se
-    mantiene como guarda adicional para evitar scanear pares delisted.
-    """
-    from btc_scanner import DEFAULT_SYMBOLS
-    global _symbols_cache, _symbols_fetched_at
-    if not _symbols_cache or (time.time() - _symbols_fetched_at) > SYMBOLS_REFRESH_SEC:
-        candidates = DEFAULT_SYMBOLS[:n]
-        valid_on_binance = _get_binance_usdt_symbols()
-        if valid_on_binance:
-            dropped = [s for s in candidates if s not in valid_on_binance]
-            if dropped:
-                log.warning(f"Símbolos curados no listados en Binance (serán omitidos): {dropped}")
-            candidates = [s for s in candidates if s in valid_on_binance]
-        _symbols_cache = candidates
-        _symbols_fetched_at = time.time()
-        log.info(f"Símbolos activos (curados): {_symbols_cache}")
-    return _symbols_cache
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  BASE DE DATOS  (SQLite)
-# ─────────────────────────────────────────────────────────────────────────────
-# Connection layer (get_db, _DictRow, backup_db) moved to db/connection.py in
-# PR0 of the api+db domain refactor (2026-04-27). Re-exports preserved for
-# compatibility with scanner_loop and other legacy callers until PR7.
-from db.connection import get_db, backup_db, _DictRow  # noqa: F401
-
-_BACKUP_INTERVAL_CYCLES = 288  # ~24h at 5min cycles (288 × 5min = 1440min) — used by scanner_loop
-_backup_cycles_since_last = 0
-
-
-# DB schema (init_db) moved to db/schema.py in PR0 of the api+db domain refactor.
-from db.schema import init_db  # noqa: F401
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  BACKGROUND SCANNER THREAD
-# ─────────────────────────────────────────────────────────────────────────────
-
-_scanner_state = {
-    "running":        False,
-    "last_scan_ts":   None,
-    "last_symbol":    None,
-    "last_estado":    "Iniciando...",
-    "scans_total":    0,
-    "signals_total":  0,
-    "errors":         0,
-    "symbols_active": [],
-}
-
-
-def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
-    """Ejecuta scan-save-notify para un símbolo. Único punto de verdad usado
-    tanto por scanner_loop como por force_scan.
-
-    Retorna un dict con los resultados del escaneo o con clave 'error' si falla.
-    """
-    try:
-        rep     = scan(sym)
-        scan_id = save_scan(rep)
-
-        # Auto-check TP/SL para posiciones abiertas en este símbolo
-        price_now = rep.get("price")
-        if price_now:
-            check_position_stops(sym, price_now)
-
-        _scanner_state["last_scan_ts"] = rep.get("timestamp")
-        _scanner_state["last_symbol"]  = sym
-        _scanner_state["last_estado"]  = rep.get("estado", "")
-        _scanner_state["scans_total"] += 1
-
-        estado    = rep.get("estado", "")
-        is_signal = rep.get("señal_activa", False)
-        is_setup  = "SETUP VÁLIDO" in estado
-
-        if is_signal:
-            _scanner_state["signals_total"] += 1
-            log.info(f"SENAL {sym} — score {rep.get('score')}/9  "
-                     f"precio ${rep.get('price')}")
-            append_signal_log(rep, scan_id)
-            append_signal_csv(rep, scan_id)
-        elif is_setup:
-            log.info(f"SETUP {sym} — score {rep.get('score')}/9 (sin gatillo)")
-            append_signal_log(rep, scan_id)
-            append_signal_csv(rep, scan_id)
-
-        if should_notify_signal(rep, cfg):
-            if not _is_duplicate_signal(sym, cfg):
-                push_telegram_direct(rep, cfg)
-                if cfg.get("webhook_url", "").strip():
-                    push_webhook(rep, scan_id, cfg)
-                _mark_notified(sym)
-            else:
-                log.info(f"{sym}: senal duplicada, notificacion omitida")
-        else:
-            log.info(f"{sym}: {estado[:55]}")
-
-        return {
-            "symbol":    sym,
-            "scan_id":   scan_id,
-            "timestamp": rep.get("timestamp"),
-            "estado":    rep.get("estado"),
-            "price":     rep.get("price"),
-            "lrc_pct":   rep.get("lrc_1h", {}).get("pct"),
-            "score":     rep.get("score"),
-            "señal":     rep.get("señal_activa"),
-            "gatillo":   rep.get("gatillo_activo"),
-        }
-
-    except Exception as e:
-        _scanner_state["errors"] += 1
-        log.error(f"Error escaneando {sym}: {e}")
-        return {"symbol": sym, "error": str(e)}
-
-
-def scanner_loop():
-    cfg      = load_config()
-    interval = cfg.get("scan_interval_sec", SCAN_INTERVAL_SEC)
-    n_sym    = cfg.get("num_symbols", 20)
-    log.info(f"Scanner iniciado — intervalo: {interval}s  |  simbolos: {n_sym}")
-    _scanner_state["running"] = True
-
-    while _scanner_state["running"]:
-        cycle_start = time.time()
-        symbols     = get_active_symbols(n_sym)
-        _scanner_state["symbols_active"] = symbols
-        log.info(f"Ciclo iniciado — {len(symbols)} simbolos")
-
-        # Calentar el caché OHLCV en paralelo para que los scans por símbolo
-        # siguientes sean hits del caché en lugar de cold fetches a Binance.
-        # El diagnóstico per-símbolo luego hace md.get_klines en 5m/1h/4h/1d.
-        try:
-            md.prefetch(symbols, ["5m", "1h", "4h"], limit=210)
-        except Exception as e:
-            log.warning(f"prefetch batch fallo: {e}")
-
-        cycle_prices = {}
-        for sym in symbols:
-            if not _scanner_state["running"]:
-                break
-            result = execute_scan_for_symbol(sym, cfg)
-            if result and result.get("price"):
-                cycle_prices[sym] = result["price"]
-
-        # Actualizar data/symbols_status.json al final de cada ciclo
-        try:
-            rows = get_signals_summary()
-            update_symbols_json(rows)
-        except Exception as e:
-            log.warning(f"update_symbols_json error en ciclo: {e}")
-
-        # Actualizar data/positions_summary.json
-        try:
-            update_positions_json()
-        except Exception as e:
-            log.warning(f"update_positions_json error en ciclo: {e}")
-
-        # Seguimiento de performance de señales
-        try:
-            check_pending_signal_outcomes(cycle_prices)
-        except Exception as e:
-            log.warning(f"check_pending_signal_outcomes error en ciclo: {e}")
-
-        # Periodic DB backup (~every 24h, counted per cycle not per symbol)
-        global _backup_cycles_since_last
-        _backup_cycles_since_last += 1
-        if _backup_cycles_since_last >= _BACKUP_INTERVAL_CYCLES:
-            backup_db()
-            _backup_cycles_since_last = 0
-
-        elapsed    = time.time() - cycle_start
-        sleep_time = max(5, interval - elapsed)
-        log.info(f"Ciclo completo en {elapsed:.0f}s. Proximo en {sleep_time:.0f}s.")
-        time.sleep(sleep_time)
-
-
-def start_scanner_thread():
-    t = threading.Thread(target=scanner_loop, daemon=True, name="crypto-scanner")
-    t.start()
-    # Kill switch daily sweep (#138)
-    from health import health_monitor_loop
-    health_thread = threading.Thread(
-        target=health_monitor_loop,
-        args=(lambda: load_config(),),
-        daemon=True,
-        name="health-monitor",
-    )
-    health_thread.start()
-    log.info("Health monitor thread started (daily @ 00:00 UTC)")
-
-    # Kill switch v2 auto-calibrator (#214 B4b.1)
-    from strategy.kill_switch_v2_calibrator import kill_switch_calibrator_loop
-    calibrator_thread = threading.Thread(
-        target=kill_switch_calibrator_loop,
-        args=(lambda: load_config(),),
-        daemon=True,
-        name="kill-switch-calibrator",
-    )
-    calibrator_thread.start()
-    log.info("Kill switch v2 calibrator thread started (daily @ 00:00 UTC)")
-    return t
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  FASTAPI APP
-# ─────────────────────────────────────────────────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log.info("Initializing DB schema…")
     init_db()
+    log.info("Starting scanner thread…")
     start_scanner_thread()
-    log.info(f"API disponible en http://localhost:{API_PORT}")
-    log.info(f"Documentacion Swagger en http://localhost:{API_PORT}/docs")
     yield
     _scanner_state["running"] = False
-    log.info("API detenida.")
+    log.info("Shutdown.")
 
 
-app = FastAPI(
-    title="Crypto Scanner API",
-    description="Top 20 pares USDT Spot 1H — Señal LRC + Score + Gatillo 5M",
-    version="2.0.0",
-    lifespan=lifespan,
-)
-
+app = FastAPI(title="Crypto Scanner API", description="Ultimate Macro & Order Flow V6.0",
+              version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
@@ -507,8 +90,6 @@ app.include_router(tune_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
 
-
-# ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/", summary="Bienvenida y estado general")
 def root():
@@ -567,10 +148,7 @@ def status():
 
 @app.post("/scan", summary="Forzar escaneo manual", dependencies=[Depends(verify_api_key)])
 def force_scan(
-    symbol: Optional[str] = Query(
-        None,
-        description="Par a escanear (ej: ETHUSDT). Sin valor escanea todos los activos."
-    )
+    symbol: Optional[str] = Query(None, description="Par a escanear (ej: ETHUSDT). Sin valor escanea todos.")
 ):
     """Ejecuta el scanner ahora. Sin symbol escanea todos los pares activos."""
     cfg     = load_config()
@@ -579,38 +157,29 @@ def force_scan(
     return {"scanned": len(results), "results": results}
 
 
-@app.get("/webhook/test", summary="Probar webhook y Telegram directo", dependencies=[Depends(verify_api_key)])
+@app.get("/webhook/test", summary="Probar webhook y Telegram directo",
+         dependencies=[Depends(verify_api_key)])
 def test_webhook():
+    from datetime import datetime, timezone  # noqa: PLC0415
     cfg     = load_config()
     ts      = datetime.now(timezone.utc).isoformat()
     results = {}
-
-    # ── 1. Telegram directo ──────────────────────────────────
     token   = cfg.get("telegram_bot_token", "").strip()
     chat_id = cfg.get("telegram_chat_id", "").strip()
     if token and chat_id:
         try:
-            receipts = notify(
-                SystemEvent(kind="scanner_connected", message="Scanner online — todo OK"),
-                cfg=cfg,
-            )
+            receipts = notify(SystemEvent(kind="scanner_connected", message="Scanner online — todo OK"), cfg=cfg)
             ok = bool(receipts and receipts[0].status == "ok")
             results["telegram_directo"] = {"ok": ok, "status_code": 200 if ok else 0}
         except Exception as e:
             results["telegram_directo"] = {"ok": False, "error": str(e)}
     else:
         results["telegram_directo"] = {"ok": False, "error": "telegram_bot_token no configurado"}
-
-    # ── 2. Webhook n8n (opcional) ────────────────────────────
     url = cfg.get("webhook_url", "").strip()
     if url:
-        payload = {
-            "event":            "test",
-            "message":          "Crypto Scanner conectado — todo OK",
-            "telegram_message": f"*Scanner Conectado*\n`todo OK`\n_{ts}_",
-            "chat_id":          chat_id,
-            "ts":               ts,
-        }
+        payload = {"event": "test", "message": "Crypto Scanner conectado — todo OK",
+                   "telegram_message": f"*Scanner Conectado*\n`todo OK`\n_{ts}_",
+                   "chat_id": chat_id, "ts": ts}
         headers = {"Content-Type": "application/json"}
         if cfg.get("webhook_secret"):
             headers["X-Scanner-Secret"] = cfg["webhook_secret"]
@@ -621,19 +190,11 @@ def test_webhook():
             results["webhook_n8n"] = {"ok": False, "error": str(e), "url": url}
     else:
         results["webhook_n8n"] = {"ok": False, "error": "webhook_url no configurado"}
-
-    # Overall OK if at least one notification channel works
     overall_ok = results.get("telegram_directo", {}).get("ok", False) or \
                  results.get("webhook_n8n", {}).get("ok", False)
     return {"ok": overall_ok, **results}
 
 
-# ── Auto-Tune, Kill switch, Health, Notifications → moved to api/ in PR6 ──────
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("btc_api:app", host=API_HOST, port=API_PORT, reload=False)

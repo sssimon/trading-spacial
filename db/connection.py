@@ -33,12 +33,10 @@ _BACKUP_MAX_FILES = 7
 def _resolve_db_file() -> str:
     """Resolve the active DB path at call time.
 
-    During the api+db refactor (PR0-PR7), btc_api.DB_FILE is the canonical
-    source — tests routinely patch btc_api.DB_FILE for isolation, and that
-    pattern must keep working through the re-export of get_db/backup_db
-    from this module. This lookup honors that patch without forcing every
-    test to switch to db.connection.DB_FILE. PR7 collapses btc_api.DB_FILE
-    into this module and removes the lookup.
+    Checks btc_api.DB_FILE at call time to honour the legacy
+    `monkeypatch.setattr(btc_api, "DB_FILE", path)` pattern used throughout
+    the test suite. The lazy import is inside a function body — intentional
+    escape hatch exempt from top-level import boundary checks.
     """
     try:
         import btc_api  # noqa: PLC0415

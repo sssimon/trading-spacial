@@ -9,8 +9,9 @@ Rules (per spec §3.2):
 
 Documented exception: db/connection.py has a lazy `import btc_api` inside
 _resolve_db_file() to honor the legacy `monkeypatch.setattr(btc_api, "DB_FILE", path)`
-pattern in existing tests. This shim is removed in PR7. The lazy import is
-inside a function body, not at module level — the AST walk excludes it.
+pattern in existing tests. The lazy import is inside a function body, not at
+module level — the AST walk excludes it. Retained post-PR7 to avoid touching
+50+ test fixtures across the suite.
 
 Implementation: walk the AST of each module file and check imports
 against an allowlist + denylist. Only top-level imports count (lazy imports
