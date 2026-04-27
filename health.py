@@ -1119,9 +1119,14 @@ def get_dashboard_state(cfg: dict[str, Any]) -> dict[str, Any]:
                     days_in_paused = 0
 
             sparkline = sparkline_for_symbol(sym, conn, n=20)
-            next_conditions = compute_next_conditions(
-                state, metrics, manual_override, ks_cfg, days_in_paused,
-            )
+            if row is None:
+                # B6 spec: never-evaluated symbols get explicit placeholder copy,
+                # not the misleading "Saludable" that would come from compute_next_conditions("NORMAL", ...).
+                next_conditions = "Sin datos aún — esperando primer scan."
+            else:
+                next_conditions = compute_next_conditions(
+                    state, metrics, manual_override, ks_cfg, days_in_paused,
+                )
 
             symbols_out.append({
                 "symbol": sym,

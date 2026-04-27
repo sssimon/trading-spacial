@@ -356,6 +356,23 @@ def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
     assert "PROBATION" in btc["next_conditions"] or "trades" in btc["next_conditions"].lower()
 
 
+def test_get_health_dashboard_unevaluated_symbol_has_placeholder_text(client):
+    """B6 boundary: symbol with no row → next_conditions='Sin datos aún', not 'Saludable'.
+
+    Empty-DB DEFAULT_SYMBOLS appear as placeholders; their next_conditions must
+    explicitly say there's no data, NOT mislead operators with 'Saludable'.
+    """
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    # All symbols in empty DB are placeholders (no row in symbol_health)
+    for sym_state in data["symbols"]:
+        assert "Sin datos aún" in sym_state["next_conditions"], (
+            f"Placeholder symbol {sym_state['symbol']} should say "
+            f"'Sin datos aún' but got: {sym_state['next_conditions']}"
+        )
+
+
 def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeypatch):
     """Even with kill_switch.enabled=False, the dashboard still serves a snapshot
     (read-only — useful for post-mortems)."""
