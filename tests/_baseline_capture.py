@@ -155,13 +155,35 @@ def _capture_positions(client: TestClient) -> dict[str, Any]:
     return out
 
 
+def _capture_signals(client: TestClient) -> dict[str, Any]:
+    """Capture /signals endpoints with seeded scan data."""
+    out: dict[str, Any] = {}
+    for url in [
+        "/signals",
+        "/signals?limit=10",
+        "/signals?only_signals=true",
+        "/signals?since_hours=24",
+        "/signals/latest",
+        "/signals/latest?symbol=BTCUSDT",
+        "/signals/latest/message",
+        "/signals/performance",
+        "/signals/2",  # by ID — uses seeded scan_id=2
+    ]:
+        r = client.get(url)
+        out[f"GET {url}"] = {
+            "status": r.status_code,
+            "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text,
+        }
+    return out
+
+
 CAPTURERS: dict[str, Callable[[TestClient], dict[str, Any]]] = {
     "ohlcv": _capture_ohlcv,
     "config": _capture_config,
     "positions": _capture_positions,
+    "signals": _capture_signals,
     # PR1-PR6 register their domain capturers here:
     #   "telegram":      _capture_telegram,
-    #   "signals":       _capture_signals,
     #   "kill_switch":   _capture_kill_switch,
     #   "health":        _capture_health,
     #   "tune":          _capture_tune,
