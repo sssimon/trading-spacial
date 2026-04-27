@@ -1333,14 +1333,14 @@ class TestPositionsAPI:
         """TestClient with position routes registered."""
         from fastapi.testclient import TestClient
         from fastapi import FastAPI
-        import btc_api
+        import api.positions as _pos
 
         test_app = FastAPI()
-        test_app.get("/positions")(btc_api.list_positions)
-        test_app.post("/positions")(btc_api.open_position)
-        test_app.put("/positions/{pos_id}")(btc_api.edit_position)
-        test_app.post("/positions/{pos_id}/close")(btc_api.close_position)
-        test_app.delete("/positions/{pos_id}")(btc_api.delete_position)
+        test_app.get("/positions")(_pos.list_positions)
+        test_app.post("/positions")(_pos.open_position)
+        test_app.put("/positions/{pos_id}")(_pos.edit_position)
+        test_app.post("/positions/{pos_id}/close")(_pos.close_position)
+        test_app.delete("/positions/{pos_id}")(_pos.delete_position)
 
         return TestClient(test_app)
 

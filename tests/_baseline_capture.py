@@ -120,12 +120,47 @@ def _capture_config(client: TestClient) -> dict[str, Any]:
     return out
 
 
+def _capture_positions(client: TestClient) -> dict[str, Any]:
+    """Capture /positions endpoints with seeded position data."""
+    out: dict[str, Any] = {}
+
+    # GET /positions?status=all (uses _seed_minimal's seeded position id=1)
+    r = client.get("/positions?status=all")
+    out["GET /positions?status=all"] = {"status": r.status_code, "body": r.json()}
+
+    r = client.get("/positions?status=open")
+    out["GET /positions?status=open"] = {"status": r.status_code, "body": r.json()}
+
+    r = client.get("/positions?status=closed")
+    out["GET /positions?status=closed"] = {"status": r.status_code, "body": r.json()}
+
+    # POST without auth → 401
+    r = client.post("/positions", json={"symbol": "ETHUSDT", "entry_price": 3000.0})
+    out["POST /positions (no auth)"] = {"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text}
+
+    # POST with auth → 200 + new position
+    r = client.post("/positions",
+                    json={"symbol": "ETHUSDT", "entry_price": 3000.0,
+                          "sl_price": 2900.0, "tp_price": 3300.0,
+                          "size_usd": 100.0, "qty": 0.033, "direction": "LONG"},
+                    headers={"X-API-Key": "test-key"})
+    out["POST /positions (auth)"] = {"status": r.status_code, "body": r.json()}
+
+    # PUT /positions/1 — set notes
+    r = client.put("/positions/1",
+                   json={"notes": "test note"},
+                   headers={"X-API-Key": "test-key"})
+    out["PUT /positions/1"] = {"status": r.status_code, "body": r.json()}
+
+    return out
+
+
 CAPTURERS: dict[str, Callable[[TestClient], dict[str, Any]]] = {
     "ohlcv": _capture_ohlcv,
     "config": _capture_config,
+    "positions": _capture_positions,
     # PR1-PR6 register their domain capturers here:
     #   "telegram":      _capture_telegram,
-    #   "positions":     _capture_positions,
     #   "signals":       _capture_signals,
     #   "kill_switch":   _capture_kill_switch,
     #   "health":        _capture_health,

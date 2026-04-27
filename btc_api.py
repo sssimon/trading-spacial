@@ -60,6 +60,15 @@ from api.telegram import (  # noqa: F401
     _send_telegram_raw,
     push_webhook,
 )
+from api.positions import router as positions_router
+# Positions domain moved to api/positions.py + db/positions.py in PR4.
+# Re-exports preserved for legacy callers (scanner_loop, etc.) until PR7.
+from api.positions import (  # noqa: F401
+    _calc_pnl, check_position_stops, _write_position_event_log, update_positions_json,
+)
+from db.positions import (  # noqa: F401
+    db_create_position, db_get_positions, db_close_position, db_update_position,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -361,243 +370,6 @@ def append_signal_log(rep: dict, scan_id: int):
     except Exception as e:
         log.warning(f"append_signal_log error: {e}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  POSICIONES
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _calc_pnl(direction: str, entry: float, exit_p: float, qty: float):
-    if direction == 'LONG':
-        pnl_usd = (exit_p - entry) * qty
-        pnl_pct = ((exit_p - entry) / entry) * 100
-    else:
-        pnl_usd = (entry - exit_p) * qty
-        pnl_pct = ((entry - exit_p) / entry) * 100
-    return round(pnl_usd, 4), round(pnl_pct, 4)
-
-
-def db_create_position(data: dict) -> dict:
-    con = get_db()
-    entry = float(data["entry_price"])
-    qty   = float(data.get("qty") or (float(data.get("size_usd", 0) or 0) / entry if entry else 0))
-    ts    = data.get("entry_ts") or datetime.now(timezone.utc).isoformat()
-    cur = con.execute("""
-        INSERT INTO positions
-            (scan_id, symbol, direction, status, entry_price, entry_ts,
-             sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (
-        data.get("scan_id"),
-        data["symbol"].upper(),
-        data.get("direction", "LONG").upper(),
-        "open",
-        entry,
-        ts,
-        data.get("sl_price"),
-        data.get("tp_price"),
-        data.get("size_usd"),
-        qty,
-        data.get("atr_entry"),
-        data.get("be_mult"),
-        data.get("notes", ""),
-    ))
-    pos_id = cur.lastrowid
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
-    return dict(row)
-
-
-def db_get_positions(status: Optional[str] = None) -> list:
-    con = get_db()
-    if status and status != "all":
-        rows = con.execute(
-            "SELECT * FROM positions WHERE status=? ORDER BY id DESC", (status,)
-        ).fetchall()
-    else:
-        rows = con.execute(
-            "SELECT * FROM positions ORDER BY id DESC"
-        ).fetchall()
-    con.close()
-    return [dict(r) for r in rows]
-
-
-def db_close_position(pos_id: int, exit_price: float, exit_reason: str) -> Optional[dict]:
-    con = get_db()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    if not row:
-        con.close()
-        return None
-    pos = dict(row)
-    qty = pos.get("qty") or 0
-    pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
-    exit_ts = datetime.now(timezone.utc).isoformat()
-    con.execute("""
-        UPDATE positions
-        SET status=?, exit_price=?, exit_ts=?, exit_reason=?, pnl_usd=?, pnl_pct=?
-        WHERE id=?
-    """, ("closed", exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, pos_id))
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
-    closed = dict(row)
-    # Kill switch #138: trigger health evaluation for this symbol.
-    try:
-        from health import trigger_health_evaluation
-        trigger_health_evaluation(pos["symbol"], load_config())
-    except Exception as e:
-        log.warning("health trigger skipped for position close: %s", e)
-    return closed
-
-
-def db_update_position(pos_id: int, data: dict) -> Optional[dict]:
-    allowed = {"sl_price", "tp_price", "size_usd", "qty", "notes", "entry_price", "atr_entry", "be_mult"}
-    updates = {k: v for k, v in data.items() if k in allowed}
-    if not updates:
-        return None
-    con = get_db()
-    sets = ", ".join(f"{k}=?" for k in updates)
-    vals = list(updates.values()) + [pos_id]
-    con.execute(f"UPDATE positions SET {sets} WHERE id=?", vals)
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
-    return dict(row) if row else None
-
-
-def check_position_stops(symbol: str, price: float):
-    """Auto-cierra posiciones abiertas si el precio toca TP o SL. Sends notifications."""
-    con = get_db()
-    rows = con.execute(
-        "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
-    ).fetchall()
-    con.close()
-
-    cfg = load_config()
-
-    for pos in [dict(r) for r in rows]:
-        reason = None
-        exit_price = None
-
-        # Trailing ratchet: move SL to breakeven when profit >= be_mult × ATR
-        atr_entry = pos.get("atr_entry")
-        _be_mult = pos.get("be_mult") or 1.5  # per-symbol from config, fallback 1.5
-        if atr_entry and pos["direction"] == "LONG" and pos["sl_price"]:
-            be_threshold = pos["entry_price"] + round(atr_entry * _be_mult, 2)
-            if price >= be_threshold and pos["sl_price"] < pos["entry_price"]:
-                new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
-                pos["sl_price"] = new_sl
-                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
-        elif atr_entry and pos["direction"] == "SHORT" and pos["sl_price"]:
-            be_threshold = pos["entry_price"] - round(atr_entry * _be_mult, 2)
-            if price <= be_threshold and pos["sl_price"] > pos["entry_price"]:
-                new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
-                pos["sl_price"] = new_sl
-                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
-
-        if pos["direction"] == "LONG":
-            if pos["tp_price"] and price >= pos["tp_price"]:
-                reason, exit_price = "TP_HIT", pos["tp_price"]
-            elif pos["sl_price"] and price <= pos["sl_price"]:
-                reason, exit_price = "SL_HIT", pos["sl_price"]
-        else:  # SHORT
-            if pos["tp_price"] and price <= pos["tp_price"]:
-                reason, exit_price = "TP_HIT", pos["tp_price"]
-            elif pos["sl_price"] and price >= pos["sl_price"]:
-                reason, exit_price = "SL_HIT", pos["sl_price"]
-
-        if reason:
-            db_close_position(pos["id"], exit_price, reason)
-            log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
-            _write_position_event_log(pos, reason, exit_price)
-
-            # Send exit notification via the centralized notifier (#162 PR B).
-            entry = pos.get("entry_price", 0)
-            qty = pos.get("qty", 0)
-            pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
-
-            try:
-                from notifier import notify, PositionExitEvent
-                # Map legacy reason strings ("SL_HIT"/"TP_HIT") to tier codes.
-                exit_reason_code = "SL" if reason == "SL_HIT" else (
-                    "TP" if reason == "TP_HIT" else reason
-                )
-                notify(
-                    PositionExitEvent(
-                        symbol=symbol,
-                        direction=pos.get("direction", "LONG"),
-                        exit_reason=exit_reason_code,
-                        entry_price=float(entry or 0.0),
-                        exit_price=float(exit_price or 0.0),
-                        pnl_usd=float(pnl_usd or 0.0),
-                        pnl_pct=float(pnl_pct or 0.0),
-                    ),
-                    cfg=cfg,
-                )
-            except Exception as e:
-                log.warning(f"Failed to notify {reason} for {symbol}: {e}")
-
-
-def _write_position_event_log(pos: dict, reason: str, exit_price: float):
-    try:
-        _ensure_dirs()
-        qty = pos.get("qty") or 0
-        pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
-        emoji = "TAKE PROFIT" if reason == "TP_HIT" else "STOP LOSS"
-        ts_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        lines = [
-            "",
-            "-" * 58,
-            f"[{ts_now} UTC]  {emoji}  {pos['symbol']}  (pos_id={pos['id']})",
-            "-" * 58,
-            f"  Entrada : ${pos['entry_price']}  ->  Salida: ${exit_price}",
-            f"  P&L     : ${pnl_usd:+.2f}  ({pnl_pct:+.2f}%)",
-            f"  Tamanio : ${pos.get('size_usd', '?')}  |  Qty: {pos.get('qty', '?')}",
-        ]
-        with open(SIGNALS_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
-    except Exception as e:
-        log.warning(f"_write_position_event_log error: {e}")
-
-
-def update_positions_json():
-    """Escribe data/positions_summary.json con estado de posiciones."""
-    try:
-        _ensure_dirs()
-        all_pos   = db_get_positions()
-        open_pos  = [p for p in all_pos if p["status"] == "open"]
-        closed_pos = [p for p in all_pos if p["status"] == "closed"]
-        realized  = sum((p["pnl_usd"] or 0) for p in closed_pos)
-        wins      = sum(1 for p in closed_pos if (p["pnl_usd"] or 0) > 0)
-        win_rate  = (wins / len(closed_pos)) if closed_pos else 0
-        payload = {
-            "updated_at":      datetime.now(timezone.utc).isoformat(),
-            "open_count":      len(open_pos),
-            "closed_count":    len(closed_pos),
-            "realized_pnl_usd": round(realized, 2),
-            "win_rate":        round(win_rate, 4),
-            "open_positions":  open_pos,
-        }
-        tmp = POSITIONS_JSON_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, POSITIONS_JSON_FILE)
-    except Exception as e:
-        log.warning(f"update_positions_json error: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -990,6 +762,7 @@ app.add_middleware(
 
 app.include_router(ohlcv_router)
 app.include_router(config_router)
+app.include_router(positions_router)
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -1510,67 +1283,6 @@ def signal_by_id(scan_id: int):
         payload = {}
     return {**row, "full_report": payload,
             "telegram_message": build_telegram_message(payload)}
-
-
-# ── Posiciones ────────────────────────────────────────────────────────────────
-
-@app.get("/positions", summary="Listar posiciones")
-def list_positions(
-    status: Optional[str] = Query("all", description="open | closed | all")
-):
-    positions = db_get_positions(status)
-    return {"total": len(positions), "positions": positions}
-
-
-@app.post("/positions", summary="Abrir nueva posicion", dependencies=[Depends(verify_api_key)])
-def open_position(body: dict = Body(...)):
-    required = {"symbol", "entry_price"}
-    missing  = required - body.keys()
-    if missing:
-        raise HTTPException(status_code=422, detail=f"Faltan campos: {missing}")
-    try:
-        pos = db_create_position(body)
-        update_positions_json()
-        return {"ok": True, "position": pos}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/positions/{pos_id}", summary="Editar posicion (SL/TP/notas)", dependencies=[Depends(verify_api_key)])
-def edit_position(pos_id: int, body: dict = Body(...)):
-    pos = db_update_position(pos_id, body)
-    if not pos:
-        raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    update_positions_json()
-    return {"ok": True, "position": pos}
-
-
-@app.post("/positions/{pos_id}/close", summary="Cerrar posicion manualmente", dependencies=[Depends(verify_api_key)])
-def close_position(pos_id: int, body: dict = Body(...)):
-    exit_price  = body.get("exit_price")
-    exit_reason = body.get("exit_reason", "MANUAL")
-    if exit_price is None:
-        raise HTTPException(status_code=422, detail="Falta exit_price")
-    pos = db_close_position(pos_id, float(exit_price), exit_reason)
-    if not pos:
-        raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    _write_position_event_log(pos, exit_reason, float(exit_price))
-    update_positions_json()
-    return {"ok": True, "position": pos}
-
-
-@app.delete("/positions/{pos_id}", summary="Cancelar/eliminar posicion", dependencies=[Depends(verify_api_key)])
-def delete_position(pos_id: int):
-    con = get_db()
-    row = con.execute("SELECT id FROM positions WHERE id=?", (pos_id,)).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
-    con.commit()
-    con.close()
-    update_positions_json()
-    return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}
 
 
 @app.get("/webhook/test", summary="Probar webhook y Telegram directo", dependencies=[Depends(verify_api_key)])

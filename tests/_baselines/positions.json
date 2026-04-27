@@ -1,0 +1,127 @@
+{
+  "GET /positions?status=all": {
+    "body": {
+      "positions": [
+        {
+          "atr_entry": null,
+          "be_mult": null,
+          "direction": "LONG",
+          "entry_price": 50000.0,
+          "entry_ts": "2026-01-15T10:05:00Z",
+          "exit_price": null,
+          "exit_reason": null,
+          "exit_ts": null,
+          "id": 1,
+          "notes": null,
+          "pnl_pct": null,
+          "pnl_usd": null,
+          "qty": 0.002,
+          "scan_id": 2,
+          "size_usd": 100.0,
+          "sl_price": 49000.0,
+          "status": "open",
+          "symbol": "BTCUSDT",
+          "tp_price": 54000.0
+        }
+      ],
+      "total": 1
+    },
+    "status": 200
+  },
+  "GET /positions?status=closed": {
+    "body": {
+      "positions": [],
+      "total": 0
+    },
+    "status": 200
+  },
+  "GET /positions?status=open": {
+    "body": {
+      "positions": [
+        {
+          "atr_entry": null,
+          "be_mult": null,
+          "direction": "LONG",
+          "entry_price": 50000.0,
+          "entry_ts": "2026-01-15T10:05:00Z",
+          "exit_price": null,
+          "exit_reason": null,
+          "exit_ts": null,
+          "id": 1,
+          "notes": null,
+          "pnl_pct": null,
+          "pnl_usd": null,
+          "qty": 0.002,
+          "scan_id": 2,
+          "size_usd": 100.0,
+          "sl_price": 49000.0,
+          "status": "open",
+          "symbol": "BTCUSDT",
+          "tp_price": 54000.0
+        }
+      ],
+      "total": 1
+    },
+    "status": 200
+  },
+  "POST /positions (auth)": {
+    "body": {
+      "ok": true,
+      "position": {
+        "atr_entry": null,
+        "be_mult": null,
+        "direction": "LONG",
+        "entry_price": 3000.0,
+        "entry_ts": "2026-04-27T17:05:48.172642+00:00",
+        "exit_price": null,
+        "exit_reason": null,
+        "exit_ts": null,
+        "id": 2,
+        "notes": "",
+        "pnl_pct": null,
+        "pnl_usd": null,
+        "qty": 0.033,
+        "scan_id": null,
+        "size_usd": 100.0,
+        "sl_price": 2900.0,
+        "status": "open",
+        "symbol": "ETHUSDT",
+        "tp_price": 3300.0
+      }
+    },
+    "status": 200
+  },
+  "POST /positions (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "PUT /positions/1": {
+    "body": {
+      "ok": true,
+      "position": {
+        "atr_entry": null,
+        "be_mult": null,
+        "direction": "LONG",
+        "entry_price": 50000.0,
+        "entry_ts": "2026-01-15T10:05:00Z",
+        "exit_price": null,
+        "exit_reason": null,
+        "exit_ts": null,
+        "id": 1,
+        "notes": "test note",
+        "pnl_pct": null,
+        "pnl_usd": null,
+        "qty": 0.002,
+        "scan_id": 2,
+        "size_usd": 100.0,
+        "sl_price": 49000.0,
+        "status": "open",
+        "symbol": "BTCUSDT",
+        "tp_price": 54000.0
+      }
+    },
+    "status": 200
+  }
+}
