@@ -9,8 +9,8 @@ Monkeypatches:
 - observability.record_decision → no-op
 - strategy.kill_switch_v2_shadow.emit_shadow_decision → no-op
 
-PR0 monkeypatches `btc_scanner.*` for regime cache vars. As pieces move out
-(notably regime → strategy.regime in PR6), this fixture is updated per-PR.
+PR6 updated: regime cache vars now patched on `strategy.regime.*` (home module)
+rather than `btc_scanner.*` (re-export). Production code reads from home module.
 """
 from __future__ import annotations
 import json
@@ -97,11 +97,15 @@ def frozen_scan(monkeypatch, tmp_path):
     monkeypatch.setattr("btc_scanner.datetime", _FrozenDatetime)
     monkeypatch.setattr(md, "get_klines", _frozen_get_klines)
     monkeypatch.setattr(md, "prefetch", lambda *a, **kw: None)
+    # PR6: regime moved to strategy.regime — patch the home module so the
+    # production read of _REGIME_CACHE_FILE inside _save_regime_cache picks
+    # up the tmp_path. Patching btc_scanner.* would only rebind the
+    # re-export name, not the home-module name that production code reads.
     monkeypatch.setattr(
-        "btc_scanner._REGIME_CACHE_FILE", str(tmp_path / "regime.json"))
+        "strategy.regime._REGIME_CACHE_FILE", str(tmp_path / "regime.json"))
     monkeypatch.setattr(
-        "btc_scanner._REGIME_CACHE_PATH", str(tmp_path / "regime.json"))
-    monkeypatch.setattr("btc_scanner._regime_cache", {})
+        "strategy.regime._REGIME_CACHE_PATH", str(tmp_path / "regime.json"))
+    monkeypatch.setattr("strategy.regime._regime_cache", {})
     monkeypatch.setattr(requests, "get", _frozen_requests_get)
     monkeypatch.setattr("observability.record_decision", lambda **kw: None)
     monkeypatch.setattr(
