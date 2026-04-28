@@ -1,6 +1,6 @@
 import math
 import pytest
-from btc_scanner import _classify_tune_result
+from strategy.tune import _classify_tune_result
 
 
 class TestClassifyTuneResult:

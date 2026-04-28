@@ -48,6 +48,9 @@ from strategy.patterns import (  # noqa: F401
     score_label, check_trigger_5m, check_trigger_5m_short,
 )
 
+# Re-export for backward compatibility — moved to strategy/tune.py per #225 PR3
+from strategy.tune import _classify_tune_result  # noqa: F401
+
 # Reconfigure stdout for Windows Unicode support
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -323,39 +326,6 @@ def detect_regime_for_symbol(symbol: str | None, mode: str = "global") -> dict:
     _regime_cache[key] = result
     _save_regime_cache(_regime_cache)
     return result
-
-
-def _classify_tune_result(count: int, profit_factor: float | None) -> str:
-    """Classify a (symbol, direction) tuning result into one of three tiers.
-
-    Used by scripts/apply_tune_to_config.py to decide whether to commit a
-    dedicated triplet, fall back to a single-triplet per-symbol, or disable
-    the direction entirely.
-
-    Returns one of: "dedicated", "fallback", "disabled".
-
-    Rules (from spec §6):
-        N ≥ 30 AND PF ≥ 1.3   → "dedicated"
-        N ≥ 30 AND 1.0 ≤ PF < 1.3 → "fallback"
-        N < 30 OR PF < 1.0    → "disabled"
-        PF = inf (no losses)  → "dedicated" if N ≥ 30
-        PF is None or NaN     → "disabled" (insufficient info)
-    """
-    if count == 0 or profit_factor is None:
-        return "disabled"
-    try:
-        pf = float(profit_factor)
-    except (TypeError, ValueError):
-        return "disabled"
-    if np.isnan(pf):
-        return "disabled"
-    if count < 30:
-        return "disabled"
-    if pf < 1.0:
-        return "disabled"
-    if pf < 1.3:
-        return "fallback"
-    return "dedicated"  # pf ≥ 1.3 (including inf)
 
 
 # ── Parámetros de la estrategia Spot 1H ────────────────────────────────────
