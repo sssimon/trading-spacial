@@ -61,6 +61,9 @@ frontend/dist/
 .claude/settings.local.json
 .claude/worktrees/
 
+# ── Git worktrees (subagent-driven development) ──────────────
+.worktrees/
+
 # ── MemPalace ────────────────────────────────────────────────
 # Índice de minado local — se regenera con `mempalace mine .`
 # Descomenta si no quieres commitear el archivo de configuración
