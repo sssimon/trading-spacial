@@ -56,6 +56,11 @@ from strategy.vol import (  # noqa: F401
     annualized_vol_yang_zhang, TARGET_VOL_ANNUAL, VOL_LOOKBACK_DAYS,
 )
 
+# Re-export for backward compatibility — moved to infra/http.py per #225 PR5
+from infra.http import (  # noqa: F401
+    _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock,
+)
+
 # Reconfigure stdout for Windows Unicode support
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -368,41 +373,8 @@ def get_top_symbols(n: int = 20, quote: str = "USDT") -> list:
 #
 #  Proxy: configurar en config.json  →  "proxy": "socks5://127.0.0.1:1080"
 #         o variable de entorno  HTTPS_PROXY / HTTP_PROXY
-
-def _load_proxy() -> dict:
-    """Lee proxy de config.json o de variables de entorno."""
-    cfg_path = os.path.join(SCRIPT_DIR, "config.json")
-    proxy_str = ""
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path) as f:
-                cfg = json.load(f)
-            proxy_str = cfg.get("proxy", "").strip()
-        except Exception:
-            pass
-    # Variable de entorno tiene prioridad sobre config
-    proxy_str = os.environ.get("HTTPS_PROXY",
-                os.environ.get("HTTP_PROXY", proxy_str)).strip()
-    if proxy_str:
-        return {"http": proxy_str, "https": proxy_str}
-    return {}
-
-
-_last_api_call = 0.0
-_API_MIN_INTERVAL = 0.1  # 100ms between API calls (max 10/sec, well under limits)
-_api_lock = threading.Lock()
-
-
-def _rate_limit():
-    """Enforce minimum interval between API calls to avoid rate-limit bans."""
-    global _last_api_call
-    with _api_lock:
-        now = time.time()
-        elapsed = now - _last_api_call
-        if elapsed < _API_MIN_INTERVAL:
-            time.sleep(_API_MIN_INTERVAL - elapsed)
-        _last_api_call = time.time()
-
+#  _load_proxy / _rate_limit / _last_api_call / _API_MIN_INTERVAL / _api_lock
+#  moved to infra/http.py (Epic #225 PR5). Re-exported above for backward compat.
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  INDICADORES — calc_lrc / calc_rsi / calc_bb / calc_sma / calc_atr / calc_adx
