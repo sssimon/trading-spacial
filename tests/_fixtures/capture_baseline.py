@@ -13,25 +13,9 @@ from pathlib import Path
 
 from btc_scanner import scan
 from tests._fixtures.scanner_frozen import frozen_scan  # noqa: F401
+from tests._fixtures.scanner_frozen import _normalize
 
 _BASELINE = Path(__file__).resolve().parent.parent / "_baselines" / "scan_btcusdt.json"
-
-
-def _normalize(obj):
-    """Convert any non-JSON-native types (e.g. numpy) to native Python."""
-    import numpy as np
-
-    if isinstance(obj, dict):
-        return {k: _normalize(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_normalize(x) for x in obj]
-    if isinstance(obj, (np.bool_,)):
-        return bool(obj)
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    if isinstance(obj, (np.floating,)):
-        return float(obj)
-    return obj
 
 
 def test_capture_btcusdt(frozen_scan):

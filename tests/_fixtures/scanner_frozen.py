@@ -74,6 +74,23 @@ class _FrozenDatetime(datetime):
         return _FIXED_NOW.replace(tzinfo=None)
 
 
+def _normalize(obj):
+    """Convert any non-JSON-native types (e.g. numpy) to native Python."""
+    import numpy as np
+
+    if isinstance(obj, dict):
+        return {k: _normalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize(x) for x in obj]
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    return obj
+
+
 @pytest.fixture
 def frozen_scan(monkeypatch, tmp_path):
     """Apply all monkeypatches needed to get deterministic scan() output."""

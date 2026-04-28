@@ -9,7 +9,7 @@ This directory holds frozen snapshots of `scan()` output used by `tests/test_sca
 If you intentionally change `scan()` output (new field, fixed bug, new indicator):
 
 1. Discuss the change with a reviewer first.
-2. Run `pytest tests/_fixtures/capture_baseline.py::test_capture -s` to regenerate.
+2. Run `pytest tests/_fixtures/capture_baseline.py::test_capture_btcusdt -s` to regenerate.
 3. Diff the new vs old baseline and commit BOTH the baseline and the code change in the same PR.
 4. PR description must explain the intentional drift.
 

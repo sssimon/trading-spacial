@@ -13,7 +13,7 @@ import pytest
 
 from btc_scanner import scan
 from tests._fixtures.scanner_frozen import frozen_scan  # noqa: F401
-from tests._fixtures.capture_baseline import _normalize
+from tests._fixtures.scanner_frozen import _normalize
 
 _BASELINE = Path(__file__).resolve().parent / "_baselines" / "scan_btcusdt.json"
 
