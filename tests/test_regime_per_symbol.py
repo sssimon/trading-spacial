@@ -203,21 +203,23 @@ class TestComposeLocalRegime:
 class TestDetectRegimeForSymbol:
     def test_global_mode_delegates_to_legacy(self, monkeypatch):
         """mode='global' delegates to detect_regime() unchanged."""
-        import btc_scanner as scanner
+        import strategy.regime as _regime_mod
         from btc_scanner import detect_regime_for_symbol
         expected = {"ts": "2026-01-01T00:00:00Z", "regime": "NEUTRAL", "score": 50.0}
-        monkeypatch.setattr(scanner, "detect_regime", lambda: expected)
-        monkeypatch.setattr(scanner, "_regime_cache", {})
+        # PR6: patch the home module (strategy.regime) not the re-export (btc_scanner)
+        monkeypatch.setattr(_regime_mod, "detect_regime", lambda: expected)
+        monkeypatch.setattr(_regime_mod, "_regime_cache", {})
         result = detect_regime_for_symbol(symbol=None, mode="global")
         assert result["regime"] == "NEUTRAL"
 
     def test_invalid_mode_falls_back_to_global(self, monkeypatch):
         """Invalid mode → falls back to 'global'."""
-        import btc_scanner as scanner
+        import strategy.regime as _regime_mod
         from btc_scanner import detect_regime_for_symbol
         expected = {"ts": "2026-01-01T00:00:00Z", "regime": "BULL", "score": 80.0}
-        monkeypatch.setattr(scanner, "detect_regime", lambda: expected)
-        monkeypatch.setattr(scanner, "_regime_cache", {})
+        # PR6: patch the home module (strategy.regime) not the re-export (btc_scanner)
+        monkeypatch.setattr(_regime_mod, "detect_regime", lambda: expected)
+        monkeypatch.setattr(_regime_mod, "_regime_cache", {})
         result = detect_regime_for_symbol(symbol="BTCUSDT", mode="garbage_mode")
         assert result["regime"] == "BULL"
 
@@ -238,14 +240,16 @@ class TestCacheKeyResolution:
     def test_legacy_cache_soft_migration(self, tmp_path, monkeypatch):
         """Legacy flat format {ts, regime, score} loads wrapped in {'global': {...}}."""
         import json
-        import btc_scanner as scanner
+        import strategy.regime as _regime_mod
+        from btc_scanner import _load_regime_cache
         legacy_path = tmp_path / "regime_cache.json"
         legacy_path.write_text(json.dumps({
             "ts": "2026-01-01T00:00:00Z",
             "regime": "NEUTRAL",
             "score": 50.0,
         }))
-        monkeypatch.setattr(scanner, "_REGIME_CACHE_PATH", str(legacy_path))
-        data = scanner._load_regime_cache()
+        # PR6: patch the home module (strategy.regime) not the re-export (btc_scanner)
+        monkeypatch.setattr(_regime_mod, "_REGIME_CACHE_PATH", str(legacy_path))
+        data = _load_regime_cache()
         assert "global" in data
         assert data["global"]["regime"] == "NEUTRAL"

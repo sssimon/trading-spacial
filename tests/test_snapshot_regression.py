@@ -30,7 +30,8 @@ def test_empty_overrides_uses_global_defaults():
 def test_regime_default_mode_matches_legacy(monkeypatch):
     """Regression guard: detect_regime_for_symbol(None, 'global') produces same
     output as legacy detect_regime() when both get the same mocked inputs."""
-    import btc_scanner as scanner
+    import strategy.regime as _regime_mod
+    from btc_scanner import detect_regime_for_symbol
 
     legacy_result = {
         "ts": "2026-04-20T14:30:00Z",
@@ -38,8 +39,9 @@ def test_regime_default_mode_matches_legacy(monkeypatch):
         "score": 33.6,
         "components": {"price": 30, "fng": 23, "funding": 49},
     }
-    monkeypatch.setattr(scanner, "detect_regime", lambda: legacy_result)
-    monkeypatch.setattr(scanner, "_regime_cache", {})
+    # PR6: patch the home module (strategy.regime) not the re-export (btc_scanner)
+    monkeypatch.setattr(_regime_mod, "detect_regime", lambda: legacy_result)
+    monkeypatch.setattr(_regime_mod, "_regime_cache", {})
 
-    result = scanner.detect_regime_for_symbol(symbol=None, mode="global")
+    result = detect_regime_for_symbol(symbol=None, mode="global")
     assert result == legacy_result
