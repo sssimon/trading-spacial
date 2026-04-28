@@ -12,7 +12,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import requests as req_lib  # noqa: F401 — tests patch btc_api.req_lib.post
+import requests as req_lib  # tests patch btc_api.req_lib.post (test_api.py); also used directly at line 187
 from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,32 +20,54 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 # Domain routers
-from api.config import CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE, _strip_secrets, load_config, save_config, get_config  # noqa: F401
+# _strip_secrets + load_config: used in this file (lines 96, 144, 154, 164)
+from api.config import _strip_secrets, load_config
+# CONFIG_FILE/DEFAULTS_FILE/SECRETS_FILE: monkeypatched by tests (test_api_config_parity,
+#   test_api_health_parity, test_api_kill_switch_parity, test_api_notifications_parity,
+#   test_api_positions_parity, test_api_tune_parity, test_health_persistence)
+# get_config: called as btc_api.get_config in test_api.py (line 314)
+# save_config: monkeypatched as btc_api.save_config in test_strategy_kill_switch_v2_calibrator.py
+from api.config import CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE, get_config, save_config  # noqa: F401
 from api.config import router as config_router
 from api.deps import verify_api_key
 from api.health import router as health_router
 from api.kill_switch import router as kill_switch_router
 from api.notifications import router as notifications_router
 from api.ohlcv import router as ohlcv_router
+# check_position_stops: called as btc_api.check_position_stops in test_api.py (lines 1115–1188)
+# POSITIONS_JSON_FILE: monkeypatched as btc_api.POSITIONS_JSON_FILE in test_api.py (line 1343)
 from api.positions import check_position_stops, POSITIONS_JSON_FILE  # noqa: F401
 from api.positions import router as positions_router
+# Re-exports consumed by test_api.py via btc_api.<name>:
+#   _is_duplicate_signal, _mark_notified: lines 1575–1629
+#   get_signals_performance: line 1650
+#   latest_message, latest_signal, list_signals, signal_by_id: lines 310–313
+#   SIGNALS_LOG_FILE: monkeypatched at line 1345
 from api.signals import (  # noqa: F401
-    _is_duplicate_signal, _mark_notified, append_signal_csv, append_signal_log,
+    _is_duplicate_signal, _mark_notified,
     get_signals_performance, latest_message, latest_signal, list_signals, signal_by_id,
-    should_notify_signal, update_symbols_json, SIGNALS_LOG_FILE,
+    SIGNALS_LOG_FILE,
 )
 import api.signals as _api_signals  # noqa: F401
 _notified_signals = _api_signals._notified_signals  # tests mutate via btc_api._notified_signals
 from api.signals import router as signals_router
+# build_telegram_message: called as btc_api.build_telegram_message in test_api.py (lines 121–173)
+# push_telegram_direct: called as btc_api.push_telegram_direct in test_health_shim_integration.py (lines 50, 70)
+# push_webhook: called as btc_api.push_webhook in test_api.py (lines 521–575)
 from api.telegram import build_telegram_message, push_telegram_direct, push_webhook  # noqa: F401
 from api.tune import router as tune_router
-from btc_scanner import scan  # noqa: F401 — tests monkeypatch
-from data import market_data as md  # noqa: F401 — tests patch
-from db.connection import DB_FILE, get_db  # noqa: F401 — DB_FILE patched by tests
-from db.schema import init_db  # noqa: F401
+from btc_scanner import scan  # noqa: F401 — patch("btc_api.scan", ...) in test_api.py line 421
+from data import market_data as md  # used directly at line 145; patch.object(btc_api.md) in test_api.py
+# DB_FILE: monkeypatched as btc_api.DB_FILE by ~25 test files to redirect SQLite path
+# get_db: called as btc_api.get_db() in test_api.py, test_health_persistence.py, and many others
+from db.connection import DB_FILE, get_db  # noqa: F401
+from db.schema import init_db  # used in lifespan() at line 67; also btc_api.init_db() in many tests
+# get_latest_scan + get_signals_summary: used in this file (lines 112, 133)
+# get_latest_signal, get_scans, save_scan: called as btc_api.<name> in test_api.py
 from db.signals import get_latest_scan, get_latest_signal, get_scans, get_signals_summary, save_scan  # noqa: F401
+# db_*: called as btc_api.db_* in test_api.py (position CRUD, lines 827–1088)
 from db.positions import db_close_position, db_create_position, db_get_positions, db_update_position  # noqa: F401
-from notifier import notify, SystemEvent  # noqa: F401 — tests monkeypatch
+from notifier import notify, SystemEvent  # used directly at line 171
 from scanner.runtime import (
     _scanner_state, execute_scan_for_symbol, check_pending_signal_outcomes,
     get_active_symbols, start_scanner_thread,

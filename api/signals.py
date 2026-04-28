@@ -27,12 +27,11 @@ from db.signals import (
 
 log = logging.getLogger("api.signals")
 
-_SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_SCRIPT_DIR, "data")
-LOGS_DIR = os.path.join(_SCRIPT_DIR, "logs")
+# Shared filesystem paths live in api/_paths.py (single source of truth).
+from api._paths import DATA_DIR, LOGS_DIR, SIGNALS_LOG_FILE, _ensure_dirs  # noqa: E402,F401
+
 SYMBOLS_JSON_FILE = os.path.join(DATA_DIR, "symbols_status.json")
 SIGNALS_CSV_FILE = os.path.join(DATA_DIR, "signals_history.csv")
-SIGNALS_LOG_FILE = os.path.join(LOGS_DIR, "signals.log")
 
 # Cabecera del CSV de señales
 _CSV_HEADER = (
@@ -90,11 +89,6 @@ def _is_duplicate_signal(symbol: str, cfg: dict) -> bool:
 def _mark_notified(symbol: str):
     """Mark a symbol as notified now."""
     _notified_signals[symbol] = datetime.now(timezone.utc).isoformat()
-
-
-def _ensure_dirs():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(LOGS_DIR, exist_ok=True)
 
 
 def update_symbols_json(symbols_rows: list):
