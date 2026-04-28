@@ -26,18 +26,12 @@ from db.positions import (
 
 log = logging.getLogger("api.positions")
 
-_SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_SCRIPT_DIR, "data")
-LOGS_DIR = os.path.join(_SCRIPT_DIR, "logs")
-SIGNALS_LOG_FILE = os.path.join(LOGS_DIR, "signals.log")
+# Shared filesystem paths live in api/_paths.py (single source of truth).
+from api._paths import DATA_DIR, LOGS_DIR, SIGNALS_LOG_FILE, _ensure_dirs  # noqa: E402,F401
+
 POSITIONS_JSON_FILE = os.path.join(DATA_DIR, "positions_summary.json")
 
 router = APIRouter(prefix="/positions", tags=["positions"])
-
-
-def _ensure_dirs():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(LOGS_DIR, exist_ok=True)
 
 
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
