@@ -716,19 +716,19 @@ class TestScan:
 
 class TestLoadProxy:
     def test_sin_proxy_retorna_dict_vacio(self, tmp_path, monkeypatch):
-        # config.json sin proxy
+        # config.json sin proxy — patch infra.http.REPO_ROOT (moved from btc_scanner per PR5)
+        import infra.http as _http
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"proxy": ""}))
         monkeypatch.setenv("HTTPS_PROXY", "")
         monkeypatch.setenv("HTTP_PROXY", "")
 
-        orig_dir = scanner.SCRIPT_DIR
-        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+        monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
         result = scanner._load_proxy()
-        monkeypatch.setattr(scanner, "SCRIPT_DIR", orig_dir)
         assert result == {}
 
     def test_proxy_desde_config(self, tmp_path, monkeypatch):
+        import infra.http as _http
         proxy_url = "socks5://127.0.0.1:1080"
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"proxy": proxy_url}))
@@ -736,18 +736,19 @@ class TestLoadProxy:
         monkeypatch.delenv("HTTPS_PROXY", raising=False)
         monkeypatch.delenv("HTTP_PROXY", raising=False)
 
-        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+        monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
         result = scanner._load_proxy()
         assert result == {"http": proxy_url, "https": proxy_url}
 
     def test_variable_entorno_tiene_prioridad(self, tmp_path, monkeypatch):
+        import infra.http as _http
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"proxy": "socks5://config-proxy:1080"}))
         env_proxy = "http://env-proxy:8080"
         monkeypatch.setenv("HTTPS_PROXY", env_proxy)
         monkeypatch.delenv("HTTP_PROXY", raising=False)
 
-        monkeypatch.setattr(scanner, "SCRIPT_DIR", str(tmp_path))
+        monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
         result = scanner._load_proxy()
         assert result["https"] == env_proxy
 
