@@ -43,6 +43,12 @@ ATR_SL_MULT = ATR_SL_MULT_DEFAULT
 ATR_TP_MULT = ATR_TP_MULT_DEFAULT
 ATR_BE_MULT = ATR_BE_MULT_DEFAULT
 
+# Re-exports for backward compatibility — moved to strategy/patterns.py per #225 PR1
+from strategy.patterns import (  # noqa: F401
+    detect_bull_engulfing, detect_bear_engulfing, detect_rsi_divergence,
+    score_label, check_trigger_5m, check_trigger_5m_short,
+)
+
 # Reconfigure stdout for Windows Unicode support
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -518,154 +524,6 @@ def _rate_limit():
 #  moved to strategy/indicators.py (Epic #186 A2). Re-exported at the top of
 #  this module for backward compatibility.
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def detect_bull_engulfing(df: pd.DataFrame):
-    """
-    BullEngulfing: vela anterior bajista completamente engullida por vela alcista.
-    Si está activo → NO entrar (E1).
-    """
-    if len(df) < 2:
-        return False
-    p, c = df.iloc[-2], df.iloc[-1]
-    return (p["close"] < p["open"]          # anterior bajista
-            and c["close"] > c["open"]      # actual alcista
-            and c["open"]  <= p["close"]    # abre ≤ cierre anterior
-            and c["close"] >= p["open"])    # cierra ≥ open anterior
-
-
-def detect_bear_engulfing(df: pd.DataFrame):
-    """
-    BearEngulfing: vela anterior alcista completamente engullida por vela bajista.
-    Si está activo → NO entrar SHORT (exclusion para shorts).
-    """
-    if len(df) < 2:
-        return False
-    p, c = df.iloc[-2], df.iloc[-1]
-    return bool(p["close"] > p["open"]          # anterior alcista
-               and c["close"] < c["open"]      # actual bajista
-               and c["open"]  >= p["close"]    # abre >= cierre anterior
-               and c["close"] <= p["open"])    # cierra <= open anterior
-
-
-# calc_cvd_delta moved to strategy/indicators.py (Epic #186 A2); see re-export at top.
-
-
-def detect_rsi_divergence(close: pd.Series, rsi: pd.Series, window=72):
-    """
-    Detecta divergencias entre precio y RSI.
-    - Alcista (Bullish): Precio hace mínimo más bajo, RSI hace mínimo más alto.
-    - Bajista (Bearish): Precio hace máximo más alto, RSI hace máximo más bajo.
-    Ventana default: 72 barras (3 días en 1H).
-    Usa extremos locales de 5 puntos para filtrar ruido.
-    """
-    if len(close) < window:
-        return {"bull": False, "bear": False}
-    
-    p = close.iloc[-window:].values
-    r = rsi.iloc[-window:].values
-    
-    # 1. Buscar Mínimos Locales (para Bullish)
-    # i < i-2, i-1, i+1, i+2
-    mins = [i for i in range(2, window - 2)
-            if p[i] < p[i-1] and p[i] < p[i-2] and p[i] < p[i+1] and p[i] < p[i+2]]
-    
-    bull_div = False
-    if len(mins) >= 2:
-        a, b = mins[-2], mins[-1]
-        # Precio baja + RSI sube
-        bull_div = bool(p[b] < p[a] and r[b] > r[a])
-
-    # 2. Buscar Máximos Locales (para Bearish)
-    # i > i-2, i-1, i+1, i+2
-    maxs = [i for i in range(2, window - 2)
-            if p[i] > p[i-1] and p[i] > p[i-2] and p[i] > p[i+1] and p[i] > p[i+2]]
-    
-    bear_div = False
-    if len(maxs) >= 2:
-        a, b = maxs[-2], maxs[-1]
-        # Precio sube + RSI baja
-        bear_div = bool(p[b] > p[a] and r[b] < r[a])
-
-    return {"bull": bull_div, "bear": bear_div}
-
-
-def score_label(score):
-    """Etiqueta de calidad según puntuación Spot V6."""
-    if score >= SCORE_PREMIUM:
-        return "PREMIUM ⭐⭐⭐ (sizing 150%)"
-    elif score >= SCORE_STANDARD:
-        return "ESTÁNDAR ⭐⭐ (sizing 100%)"
-    elif score >= SCORE_MIN_HALF:
-        return "MÍNIMA ⭐ (sizing 50%)"
-    return "INSUFICIENTE"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  GATILLO 5M
-# ─────────────────────────────────────────────────────────────────────────────
-
-def check_trigger_5m(df5: pd.DataFrame):
-    """
-    Evalúa si la última vela de 5M activa el gatillo de entrada.
-
-    Gatillo ACTIVO cuando se cumplen las dos condiciones:
-      1. Vela 5M cierra alcista (close > open)  →  primera señal de reversión
-      2. RSI 5M está recuperando  (RSI actual > RSI vela anterior)
-    Ambas confirman que la presión vendedora en la zona baja del 1H está cediendo.
-    """
-    if len(df5) < 3:
-        return False, {}
-
-    rsi5        = calc_rsi(df5["close"], RSI_PERIOD)
-    cur         = df5.iloc[-1]
-    prev        = df5.iloc[-2]
-
-    bullish_candle  = bool(cur["close"] > cur["open"])
-    rsi_recovering  = bool(rsi5.iloc[-1] > rsi5.iloc[-2])
-
-    # El gatillo requiere las dos condiciones
-    trigger_active = bullish_candle and rsi_recovering
-
-    details = {
-        "vela_5m_alcista":    bullish_candle,
-        "rsi_5m_recuperando": rsi_recovering,
-        "rsi_5m_actual":      round(rsi5.iloc[-1], 2),
-        "rsi_5m_anterior":    round(rsi5.iloc[-2], 2),
-        "close_5m":           round(cur["close"], 2),
-        "open_5m":            round(cur["open"], 2),
-    }
-    return trigger_active, details
-
-
-def check_trigger_5m_short(df5: pd.DataFrame):
-    """
-    Evalúa si la última vela de 5M activa el gatillo de entrada SHORT.
-
-    Gatillo SHORT ACTIVO cuando:
-      1. Vela 5M cierra bajista (close < open)
-      2. RSI 5M está cayendo (RSI actual < RSI vela anterior)
-    """
-    if len(df5) < 3:
-        return False, {}
-
-    rsi5        = calc_rsi(df5["close"], RSI_PERIOD)
-    cur         = df5.iloc[-1]
-
-    bearish_candle  = bool(cur["close"] < cur["open"])
-    rsi_falling     = bool(rsi5.iloc[-1] < rsi5.iloc[-2])
-
-    trigger_active = bearish_candle and rsi_falling
-
-    details = {
-        "vela_5m_bajista":    bearish_candle,
-        "rsi_5m_cayendo":     rsi_falling,
-        "rsi_5m_actual":      round(rsi5.iloc[-1], 2),
-        "rsi_5m_anterior":    round(rsi5.iloc[-2], 2),
-        "close_5m":           round(cur["close"], 2),
-        "open_5m":            round(cur["open"], 2),
-    }
-    return trigger_active, details
 
 
 # ─────────────────────────────────────────────────────────────────────────────
