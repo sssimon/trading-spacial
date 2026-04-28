@@ -1,0 +1,18 @@
+{
+  "GET /tune/latest (empty)": {
+    "body": null,
+    "status": 200
+  },
+  "POST /tune/apply (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /tune/reject (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "GET /notifications (auth, empty)": {
+    "body": {
+      "notifications": []
+    },
+    "status": 200
+  },
+  "GET /notifications (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /notifications/1/read (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /notifications/read-all (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  }
+}

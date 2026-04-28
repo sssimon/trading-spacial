@@ -605,6 +605,7 @@ def test_post_recalibrate_unauthenticated_rejected_when_api_key_configured(
     via load_config monkeypatch to validate the auth path actually rejects.
     """
     import btc_api
+    import api.config as _ac
     from fastapi.testclient import TestClient
 
     db_path = str(tmp_path / "signals.db")
@@ -612,7 +613,10 @@ def test_post_recalibrate_unauthenticated_rejected_when_api_key_configured(
     if hasattr(btc_api, "_db_conn"):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
-    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+    _cfg = lambda: {"api_key": "test-secret"}
+    monkeypatch.setattr(btc_api, "load_config", _cfg)
+    # api/deps.py calls api.config.load_config — patch that too (PR6 refactor)
+    monkeypatch.setattr(_ac, "load_config", _cfg)
 
     client = TestClient(btc_api.app)
     # No X-API-Key header → 401
@@ -637,6 +641,7 @@ def test_get_recommendations_unauthenticated_rejected_when_api_key_configured(
 ):
     """When api_key is configured, GET without X-API-Key returns 401."""
     import btc_api
+    import api.config as _ac
     from fastapi.testclient import TestClient
 
     db_path = str(tmp_path / "signals.db")
@@ -644,7 +649,10 @@ def test_get_recommendations_unauthenticated_rejected_when_api_key_configured(
     if hasattr(btc_api, "_db_conn"):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
-    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+    _cfg = lambda: {"api_key": "test-secret"}
+    monkeypatch.setattr(btc_api, "load_config", _cfg)
+    # api/deps.py calls api.config.load_config — patch that too (PR6 refactor)
+    monkeypatch.setattr(_ac, "load_config", _cfg)
 
     client = TestClient(btc_api.app)
     resp = client.get("/kill_switch/recommendations")
@@ -1879,6 +1887,7 @@ def test_post_apply_recommendation_marks_applied_and_writes_config(
 ):
     """POST /apply transitions pending → applied, writes config override."""
     import btc_api
+    import api.config as _ac
     from fastapi.testclient import TestClient
     from strategy.kill_switch_v2_calibrator import _persist_recommendation
 
@@ -1895,6 +1904,10 @@ def test_post_apply_recommendation_marks_applied_and_writes_config(
         captured_updates.append(updates)
         return updates
     monkeypatch.setattr(btc_api, "save_config", fake_save_config)
+    # api/kill_switch.py imports save_config from api.config at module load time
+    # (PR6 refactor) — patch the name in that module's namespace directly.
+    import api.kill_switch as _aks
+    monkeypatch.setattr(_aks, "save_config", fake_save_config)
 
     # Seed a pending recommendation
     from datetime import datetime, timezone
@@ -2035,6 +2048,7 @@ def test_post_ignore_recommendation_marks_ignored(tmp_path, monkeypatch):
 def test_post_apply_recommendation_auth_required(tmp_path, monkeypatch):
     """Without dependency_overrides + with api_key configured → 401."""
     import btc_api
+    import api.config as _ac
     from fastapi.testclient import TestClient
 
     db_path = str(tmp_path / "signals.db")
@@ -2042,7 +2056,10 @@ def test_post_apply_recommendation_auth_required(tmp_path, monkeypatch):
     if hasattr(btc_api, "_db_conn"):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
-    monkeypatch.setattr(btc_api, "load_config", lambda: {"api_key": "test-secret"})
+    _cfg = lambda: {"api_key": "test-secret"}
+    monkeypatch.setattr(btc_api, "load_config", _cfg)
+    # api/deps.py calls api.config.load_config — patch that too (PR6 refactor)
+    monkeypatch.setattr(_ac, "load_config", _cfg)
 
     client = TestClient(btc_api.app)
     resp = client.post("/kill_switch/recommendations/1/apply")
@@ -2088,6 +2105,10 @@ def test_apply_endpoint_preserves_other_v2_keys_in_config(tmp_path, monkeypatch)
     with open(cfg_path, "w") as f:
         json.dump(full_cfg, f)
     monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+    import api.config as _ac
+    monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"))
+    monkeypatch.setattr(_ac, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"))
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
 
     # Seed pending rec with slider=65

@@ -26,34 +26,19 @@ from strategy.indicators import (
     calc_rsi,
     calc_sma,
 )
+from strategy.constants import (
+    LRC_PERIOD, LRC_STDEV, RSI_PERIOD, BB_PERIOD, BB_STDEV, VOL_PERIOD,
+    ATR_PERIOD, ATR_SL_MULT_DEFAULT, ATR_TP_MULT_DEFAULT, ATR_BE_MULT_DEFAULT,
+    LRC_LONG_MAX, LRC_SHORT_MIN, SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
+)
 
 # Imported lazily inside evaluate_signal to avoid circular imports:
 #   btc_scanner imports strategy.indicators; we re-import its helpers here.
 # Keeping these imports at call-time preserves isolation of the pure module
 # should btc_scanner ever depend on strategy.core in the future.
 
-# Strategy parameters — kept in sync with btc_scanner constants. Duplicated
-# intentionally to keep `strategy/` self-contained (pure function with no
-# dependency on btc_scanner's module state). The indicator periods and zone
-# thresholds never change at runtime.
-LRC_PERIOD = 100
-LRC_STDEV = 2.0
-RSI_PERIOD = 14
-BB_PERIOD = 20
-BB_STDEV = 2.0
-VOL_PERIOD = 20
-ATR_PERIOD = 14
-ATR_SL_MULT_DEFAULT = 1.0
-ATR_TP_MULT_DEFAULT = 4.0
-ATR_BE_MULT_DEFAULT = 1.5
-
-LRC_LONG_MAX = 25.0
-LRC_SHORT_MIN = 75.0
-
-# Score tier thresholds (Spot V6, 0-9 scale)
-SCORE_MIN_HALF = 0
-SCORE_STANDARD = 2
-SCORE_PREMIUM = 4
+# Strategy parameters now live in strategy/constants.py (single source of truth).
+# Imported above. The duplication that lived here pre-2026-04-27 was eliminated.
 
 
 # ─────────────────────────────────────────────────────────────────────────────

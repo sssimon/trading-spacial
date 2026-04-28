@@ -1,0 +1,159 @@
+{
+  "GET /ohlcv?symbol=BTCUSDT&interval=1h&limit=5": {
+    "body": {
+      "candles": [
+        {
+          "close": 50100.0,
+          "high": 50500.0,
+          "low": 49800.0,
+          "open": 50000.0,
+          "time": 1736899200
+        },
+        {
+          "close": 50050.0,
+          "high": 50400.0,
+          "low": 49900.0,
+          "open": 50100.0,
+          "time": 1736902800
+        },
+        {
+          "close": 50200.0,
+          "high": 50300.0,
+          "low": 49850.0,
+          "open": 50050.0,
+          "time": 1736906400
+        },
+        {
+          "close": 50300.0,
+          "high": 50500.0,
+          "low": 50000.0,
+          "open": 50200.0,
+          "time": 1736910000
+        },
+        {
+          "close": 50400.0,
+          "high": 50600.0,
+          "low": 50100.0,
+          "open": 50300.0,
+          "time": 1736913600
+        }
+      ],
+      "interval": "1h",
+      "symbol": "BTCUSDT",
+      "volumes": [
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736899200,
+          "value": 10.0
+        },
+        {
+          "color": "rgba(239,68,68,0.35)",
+          "time": 1736902800,
+          "value": 12.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736906400,
+          "value": 8.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736910000,
+          "value": 15.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736913600,
+          "value": 11.0
+        }
+      ]
+    },
+    "status": 200
+  },
+  "GET /ohlcv?symbol=BTCUSDT&interval=1h&limit=5 (empty)": {
+    "body": {
+      "candles": [],
+      "interval": "1h",
+      "symbol": "BTCUSDT",
+      "volumes": []
+    },
+    "status": 200
+  },
+  "GET /ohlcv?symbol=BTCUSDT&interval=invalid&limit=5": {
+    "body": {
+      "detail": "Intervalo invalido: invalid"
+    },
+    "status": 400
+  },
+  "GET /ohlcv?symbol=ETHUSDT&interval=4h&limit=5": {
+    "body": {
+      "candles": [
+        {
+          "close": 50100.0,
+          "high": 50500.0,
+          "low": 49800.0,
+          "open": 50000.0,
+          "time": 1736899200
+        },
+        {
+          "close": 50050.0,
+          "high": 50400.0,
+          "low": 49900.0,
+          "open": 50100.0,
+          "time": 1736902800
+        },
+        {
+          "close": 50200.0,
+          "high": 50300.0,
+          "low": 49850.0,
+          "open": 50050.0,
+          "time": 1736906400
+        },
+        {
+          "close": 50300.0,
+          "high": 50500.0,
+          "low": 50000.0,
+          "open": 50200.0,
+          "time": 1736910000
+        },
+        {
+          "close": 50400.0,
+          "high": 50600.0,
+          "low": 50100.0,
+          "open": 50300.0,
+          "time": 1736913600
+        }
+      ],
+      "interval": "4h",
+      "symbol": "ETHUSDT",
+      "volumes": [
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736899200,
+          "value": 10.0
+        },
+        {
+          "color": "rgba(239,68,68,0.35)",
+          "time": 1736902800,
+          "value": 12.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736906400,
+          "value": 8.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736910000,
+          "value": 15.0
+        },
+        {
+          "color": "rgba(34,197,94,0.35)",
+          "time": 1736913600,
+          "value": 11.0
+        }
+      ]
+    },
+    "status": 200
+  }
+}

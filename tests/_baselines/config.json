@@ -1,0 +1,71 @@
+{
+  "GET /config (auth)": {
+    "body": {
+      "auto_approve_tune": true,
+      "kill_switch": {
+        "alert_win_rate_threshold": 0.15,
+        "auto_recovery_enabled": true,
+        "enabled": true,
+        "min_trades_for_eval": 20,
+        "pause_months_consecutive": 3,
+        "reduce_pnl_window_days": 30,
+        "reduce_size_factor": 0.5
+      },
+      "notify_setup_only": false,
+      "num_symbols": 20,
+      "proxy": "",
+      "scan_interval_sec": 300,
+      "signal_filters": {
+        "dedup_window_minutes": 30,
+        "min_score": 4,
+        "notify_setup": false,
+        "require_macro_ok": false
+      },
+      "telegram_chat_id": "test-chat",
+      "webhook_url": "http://test.local/hook"
+    },
+    "status": 200
+  },
+  "GET /config (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  },
+  "POST /config (auth, valid)": {
+    "body": {
+      "config": {
+        "auto_approve_tune": true,
+        "kill_switch": {
+          "alert_win_rate_threshold": 0.15,
+          "auto_recovery_enabled": true,
+          "enabled": true,
+          "min_trades_for_eval": 20,
+          "pause_months_consecutive": 3,
+          "reduce_pnl_window_days": 30,
+          "reduce_size_factor": 0.5
+        },
+        "notify_setup_only": false,
+        "num_symbols": 20,
+        "proxy": "",
+        "scan_interval_sec": 300,
+        "signal_filters": {
+          "dedup_window_minutes": 30,
+          "min_score": 5,
+          "notify_setup": false,
+          "require_macro_ok": false
+        },
+        "telegram_chat_id": "test-chat",
+        "webhook_url": "http://test.local/hook"
+      },
+      "ok": true
+    },
+    "status": 200
+  },
+  "POST /config (no auth)": {
+    "body": {
+      "detail": "Invalid or missing API key"
+    },
+    "status": 401
+  }
+}

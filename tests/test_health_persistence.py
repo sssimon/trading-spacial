@@ -67,6 +67,8 @@ def test_kill_switch_config_partial_override_preserves_defaults(tmp_path, monkey
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(_json.dumps({"kill_switch": {"enabled": False}}))
     monkeypatch.setattr(btc_api, "CONFIG_FILE", str(cfg_file))
+    import api.config as _ac
+    monkeypatch.setattr(_ac, "CONFIG_FILE", str(cfg_file))
 
     cfg = btc_api.load_config()
     ks = cfg["kill_switch"]

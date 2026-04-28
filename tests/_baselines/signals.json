@@ -1,0 +1,185 @@
+{
+  "GET /signals": {
+    "body": {
+      "signals": [
+        {
+          "estado": "LONG",
+          "gatillo": true,
+          "id": 2,
+          "lrc_pct": 20.0,
+          "macro_ok": true,
+          "price": 50000.0,
+          "rsi_1h": 40.0,
+          "score": 5,
+          "score_label": "premium",
+          "setup": false,
+          "se\u00f1al": true,
+          "symbol": "BTCUSDT",
+          "ts": "2026-01-15T10:05:00Z"
+        },
+        {
+          "estado": "NEUTRAL",
+          "gatillo": false,
+          "id": 1,
+          "lrc_pct": 30.0,
+          "macro_ok": true,
+          "price": 50000.0,
+          "rsi_1h": 45.0,
+          "score": 2,
+          "score_label": "standard",
+          "setup": false,
+          "se\u00f1al": false,
+          "symbol": "BTCUSDT",
+          "ts": "2026-01-15T10:00:00Z"
+        }
+      ],
+      "total": 2
+    },
+    "status": 200
+  },
+  "GET /signals/2": {
+    "body": {
+      "estado": "LONG",
+      "full_report": {
+        "sl": 49000.0,
+        "tp": 54000.0
+      },
+      "gatillo": 1,
+      "id": 2,
+      "lrc_pct": 20.0,
+      "macro_ok": 1,
+      "payload": "{\"sl\": 49000.0, \"tp\": 54000.0}",
+      "price": 50000.0,
+      "rsi_1h": 40.0,
+      "score": 5,
+      "score_label": "premium",
+      "setup": 0,
+      "se\u00f1al": 1,
+      "symbol": "BTCUSDT",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "ts": "2026-01-15T10:05:00Z"
+    },
+    "status": 200
+  },
+  "GET /signals/latest": {
+    "body": {
+      "confirmations": {},
+      "estado": "LONG",
+      "gatillo": true,
+      "id": 2,
+      "lrc_pct": 20.0,
+      "macro_ok": true,
+      "price": 50000.0,
+      "score": 5,
+      "score_label": "premium",
+      "sizing": {},
+      "symbol": "BTCUSDT",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "ts": "2026-01-15T10:05:00Z"
+    },
+    "status": 200
+  },
+  "GET /signals/latest/message": {
+    "body": {
+      "message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "scan_id": 2,
+      "symbol": "BTCUSDT",
+      "ts": "2026-01-15T10:05:00Z"
+    },
+    "status": 200
+  },
+  "GET /signals/latest?symbol=BTCUSDT": {
+    "body": {
+      "confirmations": {},
+      "estado": "LONG",
+      "gatillo": true,
+      "id": 2,
+      "lrc_pct": 20.0,
+      "macro_ok": true,
+      "price": 50000.0,
+      "score": 5,
+      "score_label": "premium",
+      "sizing": {},
+      "symbol": "BTCUSDT",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "ts": "2026-01-15T10:05:00Z"
+    },
+    "status": 200
+  },
+  "GET /signals/performance": {
+    "body": {
+      "message": "No hay suficientes se\u00f1ales con >24h de historia.",
+      "ok": true,
+      "total_completed": 0
+    },
+    "status": 200
+  },
+  "GET /signals?limit=10": {
+    "body": {
+      "signals": [
+        {
+          "estado": "LONG",
+          "gatillo": true,
+          "id": 2,
+          "lrc_pct": 20.0,
+          "macro_ok": true,
+          "price": 50000.0,
+          "rsi_1h": 40.0,
+          "score": 5,
+          "score_label": "premium",
+          "setup": false,
+          "se\u00f1al": true,
+          "symbol": "BTCUSDT",
+          "ts": "2026-01-15T10:05:00Z"
+        },
+        {
+          "estado": "NEUTRAL",
+          "gatillo": false,
+          "id": 1,
+          "lrc_pct": 30.0,
+          "macro_ok": true,
+          "price": 50000.0,
+          "rsi_1h": 45.0,
+          "score": 2,
+          "score_label": "standard",
+          "setup": false,
+          "se\u00f1al": false,
+          "symbol": "BTCUSDT",
+          "ts": "2026-01-15T10:00:00Z"
+        }
+      ],
+      "total": 2
+    },
+    "status": 200
+  },
+  "GET /signals?only_signals=true": {
+    "body": {
+      "signals": [
+        {
+          "estado": "LONG",
+          "gatillo": true,
+          "id": 2,
+          "lrc_pct": 20.0,
+          "macro_ok": true,
+          "price": 50000.0,
+          "rsi_1h": 40.0,
+          "score": 5,
+          "score_label": "premium",
+          "setup": false,
+          "se\u00f1al": true,
+          "symbol": "BTCUSDT",
+          "ts": "2026-01-15T10:05:00Z"
+        }
+      ],
+      "total": 1
+    },
+    "status": 200
+  },
+  "GET /signals?since_hours=24": {
+    "body": {
+      "signals": [],
+      "total": 0
+    },
+    "status": 200
+  }
+}

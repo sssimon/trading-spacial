@@ -16,6 +16,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  CONFIG PATCH HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _patch_config_files(monkeypatch, tmp_path):
+    """Patch CONFIG_FILE/DEFAULTS_FILE/SECRETS_FILE on BOTH btc_api and api.config
+    modules so tests reach an isolated tmp_path config (and never the developer's
+    real config files). Required after PR2 because load_config now lives in
+    api.config and reads api.config.CONFIG_FILE — patching btc_api alone is silent."""
+    import btc_api
+    import api.config as api_config
+    cfg_path = tmp_path / "config.json"
+    defaults_path = tmp_path / "_no_defaults.json"
+    secrets_path = tmp_path / "_no_secrets.json"
+    monkeypatch.setattr(btc_api, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(btc_api, "DEFAULTS_FILE", str(defaults_path), raising=False)
+    monkeypatch.setattr(btc_api, "SECRETS_FILE", str(secrets_path), raising=False)
+    monkeypatch.setattr(api_config, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(api_config, "DEFAULTS_FILE", str(defaults_path), raising=False)
+    monkeypatch.setattr(api_config, "SECRETS_FILE", str(secrets_path), raising=False)
+    return cfg_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  FIXTURES
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -260,12 +283,11 @@ class TestAPIEndpoints:
 
         # Parchear DB y config
         monkeypatch.setattr(btc_api, "DB_FILE", tmp_db)
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "", "webhook_secret": "s3cret",
                        "telegram_bot_token": "tok123", "api_key": "",
                        "notify_setup_only": False, "scan_interval_sec": 300}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
 
         btc_api.init_db()
         yield
@@ -396,7 +418,8 @@ class TestAPIEndpoints:
             "errors": [],
         }
 
-        with patch("btc_api.scan", return_value=mock_rep):
+        with patch("btc_api.scan", return_value=mock_rep), \
+             patch("scanner.runtime.scan", return_value=mock_rep):
             # Escanear un solo símbolo para que el resultado sea predecible
             r = client.post("/scan?symbol=BTCUSDT")
         assert r.status_code == 200
@@ -462,10 +485,14 @@ class TestAPIEndpoints:
 
     def test_webhook_test_con_url(self, client, tmp_path, monkeypatch):
         import btc_api
+        import api.config as _ac
         cfg_path = str(tmp_path / "config_wh.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://localhost:9999/wh"}, f)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"))
+        monkeypatch.setattr(_ac, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"))
 
         with patch("btc_api.req_lib.post") as mock_post:
             mock_post.return_value = MagicMock(ok=True, status_code=200)
@@ -559,42 +586,51 @@ class TestPushWebhook:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestLoadConfig:
-    def test_defaults_sin_archivo(self, tmp_path, monkeypatch):
+    def _patch_config_files(self, monkeypatch, cfg_path, tmp_path):
+        """Delegate to module-level helper, then override CONFIG_FILE if a custom path was requested."""
         import btc_api
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", str(tmp_path / "no_existe.json"))
+        import api.config as _ac
+        _patch_config_files(monkeypatch, tmp_path)  # sets up defaults/secrets isolation
+        # Override CONFIG_FILE with the caller-specified path (may differ from tmp_path/config.json)
+        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
+
+    def test_defaults_sin_archivo(self, tmp_path, monkeypatch):
+        self._patch_config_files(monkeypatch, str(tmp_path / "no_existe.json"), tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         assert "webhook_url" in cfg
         assert "scan_interval_sec" in cfg
         assert cfg["scan_interval_sec"] == 300
 
     def test_lee_archivo_existente(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://test.com", "scan_interval_sec": 60}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         assert cfg["webhook_url"] == "http://test.com"
         assert cfg["scan_interval_sec"] == 60
 
     def test_valores_por_defecto_cuando_faltan_claves(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "http://test.com"}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
+        import btc_api
         cfg = btc_api.load_config()
         # notify_setup_only debe tener valor por defecto
         assert "notify_setup_only" in cfg
         assert cfg["notify_setup_only"] is False
 
     def test_env_var_override(self, tmp_path, monkeypatch):
-        import btc_api
         cfg_path = str(tmp_path / "config.json")
         with open(cfg_path, "w") as f:
             json.dump({"telegram_chat_id": "from_file"}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
+        self._patch_config_files(monkeypatch, cfg_path, tmp_path)
         monkeypatch.setenv("TRADING_TELEGRAM_CHAT_ID", "from_env")
+        import btc_api
         cfg = btc_api.load_config()
         assert cfg["telegram_chat_id"] == "from_env"  # ENV takes precedence
 
@@ -608,21 +644,25 @@ class TestExecuteScanForSymbol:
     @pytest.fixture(autouse=True)
     def setup(self, tmp_path, monkeypatch):
         import btc_api
+        import api.signals as _sig_mod
+        import api.positions as _pos_mod
         db_path = str(tmp_path / "test_scan.db")
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"signal_filters": {"min_score": 4}}, f)
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
-        # Prevent file I/O for logs/csv in tests
-        monkeypatch.setattr(btc_api, "append_signal_log", lambda rep, sid: None)
-        monkeypatch.setattr(btc_api, "append_signal_csv", lambda rep, sid: None)
-        monkeypatch.setattr(btc_api, "check_position_stops", lambda sym, price: None)
+        # Prevent file I/O for logs/csv in tests — patch authoritative modules
+        # (execute_scan_for_symbol now lives in scanner/runtime.py and uses
+        # lazy imports from api.signals / api.positions, not btc_api re-exports)
+        monkeypatch.setattr(_sig_mod, "append_signal_log", lambda rep, sid: None)
+        monkeypatch.setattr(_sig_mod, "append_signal_csv", lambda rep, sid: None)
+        monkeypatch.setattr(_pos_mod, "check_position_stops", lambda sym, price: None)
         btc_api.init_db()
 
     def test_returns_dict_with_symbol(self, monkeypatch):
         """execute_scan_for_symbol returns a dict with the symbol."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT",
             "timestamp": "2026-01-01T00:00:00",
@@ -637,8 +677,8 @@ class TestExecuteScanForSymbol:
             "sizing_1h": {},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
 
         cfg = btc_api.load_config()
         result = btc_api.execute_scan_for_symbol("BTCUSDT", cfg)
@@ -648,14 +688,15 @@ class TestExecuteScanForSymbol:
     def test_saves_scan_to_db(self, monkeypatch):
         """Scan results are persisted to the database."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "ETHUSDT", "timestamp": "2026-01-01T00:00:00",
             "estado": "Sin zona", "señal_activa": False, "gatillo_activo": False,
             "price": 3500.0, "score": 1, "score_label": "MINIMA",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
 
         cfg = btc_api.load_config()
         btc_api.execute_scan_for_symbol("ETHUSDT", cfg)
@@ -666,14 +707,15 @@ class TestExecuteScanForSymbol:
     def test_updates_scanner_state(self, monkeypatch):
         """Scanner state is updated after scan."""
         import btc_api
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T12:00:00",
             "estado": "Test", "señal_activa": False, "gatillo_activo": False,
             "price": 65000.0, "score": 0, "score_label": "MINIMA",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
         initial_count = btc_api._scanner_state["scans_total"]
 
         cfg = btc_api.load_config()
@@ -684,6 +726,8 @@ class TestExecuteScanForSymbol:
     def test_notifies_on_premium_signal(self, monkeypatch):
         """Notification sent when signal passes filters."""
         import btc_api
+        import api.telegram as tg_mod
+        import scanner.runtime as _rt
         notified = []
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
@@ -693,8 +737,10 @@ class TestExecuteScanForSymbol:
             "sizing_1h": {"sl_precio": 63000, "tp_precio": 70000},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify",
+        # notify is called via api.telegram.push_telegram_direct (PR3); patch there.
+        monkeypatch.setattr(tg_mod, "notify",
                             lambda event, cfg: notified.append(event.symbol) or [])
 
         cfg = btc_api.load_config()
@@ -705,6 +751,8 @@ class TestExecuteScanForSymbol:
     def test_no_notification_below_threshold(self, monkeypatch):
         """No notification when score is below min_score."""
         import btc_api
+        import api.telegram as tg_mod
+        import scanner.runtime as _rt
         notified = []
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
@@ -713,8 +761,9 @@ class TestExecuteScanForSymbol:
             "macro_4h": {}, "lrc_1h": {"pct": 15.0}, "sizing_1h": {},
             "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify",
+        monkeypatch.setattr(tg_mod, "notify",
                             lambda event, cfg: notified.append(True) or [])
 
         cfg = btc_api.load_config()
@@ -725,10 +774,12 @@ class TestExecuteScanForSymbol:
     def test_handles_scan_exception(self, monkeypatch):
         """Exception in scan() returns error dict, doesn't crash."""
         import btc_api
+        import scanner.runtime as _rt
 
         def raise_error(sym):
             raise ValueError("API down")
 
+        monkeypatch.setattr(_rt, "scan", raise_error)
         monkeypatch.setattr(btc_api, "scan", raise_error)
 
         cfg = btc_api.load_config()
@@ -738,14 +789,17 @@ class TestExecuteScanForSymbol:
     def test_increments_signal_count(self, monkeypatch):
         """signals_total incremented for confirmed signals."""
         import btc_api
+        import api.telegram as tg_mod
+        import scanner.runtime as _rt
         fake_report = {
             "symbol": "BTCUSDT", "timestamp": "2026-01-01T00:00:00",
             "estado": "SEÑAL CONFIRMADA", "señal_activa": True, "gatillo_activo": True,
             "price": 65000.0, "score": 6, "score_label": "PREMIUM",
             "macro_4h": {}, "lrc_1h": {}, "sizing_1h": {}, "confirmations": {},
         }
+        monkeypatch.setattr(_rt, "scan", lambda sym: fake_report)
         monkeypatch.setattr(btc_api, "scan", lambda sym: fake_report)
-        monkeypatch.setattr(btc_api, "notify", lambda event, cfg: [])
+        monkeypatch.setattr(tg_mod, "notify", lambda event, cfg: [])
 
         initial = btc_api._scanner_state["signals_total"]
         cfg = btc_api.load_config()
@@ -1279,11 +1333,10 @@ class TestPositionsAPI:
         import btc_api
         db_path = str(tmp_path / "test_pos_api.db")
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({"webhook_url": "", "webhook_secret": "",
                        "notify_setup_only": False, "scan_interval_sec": 300}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         # Monkeypatch DATA_DIR and LOGS_DIR to temp dirs to avoid file writes
         monkeypatch.setattr(btc_api, "DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setattr(btc_api, "LOGS_DIR", str(tmp_path / "logs"))
@@ -1298,14 +1351,14 @@ class TestPositionsAPI:
         """TestClient with position routes registered."""
         from fastapi.testclient import TestClient
         from fastapi import FastAPI
-        import btc_api
+        import api.positions as _pos
 
         test_app = FastAPI()
-        test_app.get("/positions")(btc_api.list_positions)
-        test_app.post("/positions")(btc_api.open_position)
-        test_app.put("/positions/{pos_id}")(btc_api.edit_position)
-        test_app.post("/positions/{pos_id}/close")(btc_api.close_position)
-        test_app.delete("/positions/{pos_id}")(btc_api.delete_position)
+        test_app.get("/positions")(_pos.list_positions)
+        test_app.post("/positions")(_pos.open_position)
+        test_app.put("/positions/{pos_id}")(_pos.edit_position)
+        test_app.post("/positions/{pos_id}/close")(_pos.close_position)
+        test_app.delete("/positions/{pos_id}")(_pos.delete_position)
 
         return TestClient(test_app)
 
@@ -1493,10 +1546,9 @@ class TestPositionsAPI:
         assert pos["pnl_usd"] == pytest.approx(250.0, abs=0.01)  # (175-150)*10
     def test_dedup_window_default(self, tmp_path, monkeypatch):
         import btc_api
-        cfg_path = str(tmp_path / "config.json")
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
         with open(cfg_path, "w") as f:
             json.dump({}, f)
-        monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         monkeypatch.setenv("TRADING_SCAN_INTERVAL", "120")
         cfg = btc_api.load_config()
         assert cfg["scan_interval_sec"] == 120
