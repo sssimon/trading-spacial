@@ -1,0 +1,78 @@
+{
+  "fng": {
+    "name": "Fear and Greed Index",
+    "data": [
+      {
+        "value": "33",
+        "value_classification": "Fear",
+        "timestamp": "1777334400",
+        "time_until_update": "46821"
+      }
+    ],
+    "metadata": {
+      "error": null
+    }
+  },
+  "funding": [
+    {
+      "symbol": "BTCUSDT",
+      "fundingTime": 1777363200000,
+      "fundingRate": "-0.00003204",
+      "markPrice": "76828.30000000"
+    }
+  ],
+  "exchangeInfo": {
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "ETHUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "ADAUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "AVAXUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "DOGEUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "UNIUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "XLMUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "PENDLEUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "JUPUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      },
+      {
+        "symbol": "RUNEUSDT",
+        "status": "TRADING",
+        "quoteAsset": "USDT"
+      }
+    ]
+  }
+}
