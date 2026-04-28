@@ -1,0 +1,152 @@
+{
+  "adx_1h": 20.33,
+  "blocks_auto": [],
+  "confirmations": {
+    "C1_RSI_Sobreventa": {
+      "max_pts": 2,
+      "pass": true,
+      "pts": 2,
+      "rsi_1h": 36.25
+    },
+    "C2_Divergencia_Alcista": {
+      "max_pts": 2,
+      "pass": false,
+      "pts": 0
+    },
+    "C3_Soporte_Cercano": {
+      "dist_soporte_pct": 0.29,
+      "max_pts": 1,
+      "pass": true,
+      "pts": 1
+    },
+    "C4_BB_Inferior": {
+      "bb_lower_1h": 76380.55,
+      "max_pts": 1,
+      "pass": false,
+      "pts": 0
+    },
+    "C5_Volumen": {
+      "max_pts": 1,
+      "pass": false,
+      "pts": 0,
+      "vol_ratio": 0.59
+    },
+    "C6_CVD_Delta_Positivo": {
+      "cvd_delta": 1654.7846,
+      "max_pts": 1,
+      "pass": true,
+      "pts": 1
+    },
+    "C7_SMA10_mayor_SMA20": {
+      "max_pts": 1,
+      "pass": false,
+      "pts": 0,
+      "sma10": 76900.03,
+      "sma20": 76943.38
+    },
+    "C8_DXY": {
+      "max_pts": 1,
+      "nota": "DXY verificar TradingView (DXY < SMA20 para LONG, > SMA20 para SHORT)",
+      "pass": "MANUAL",
+      "pts": "?"
+    }
+  },
+  "direction": null,
+  "errors": [],
+  "estado": "\u23f3 SIN SETUP \u2014 LRC% fuera de zona (25%-75%)",
+  "exclusions": {
+    "E1_BullEngulfing": {
+      "activo": false,
+      "nota": "Vela alcista que cubre la anterior \u2014 entrada en micro-techo"
+    },
+    "E2_Noticias_Macro": {
+      "activo": "VERIFICAR_MANUAL",
+      "nota": "Revisar ForexFactory / TradingView Calendar (\u00b130 min)"
+    },
+    "E3_RachaPerdedora": {
+      "activo": "VERIFICAR_MANUAL",
+      "nota": "\u00bf3 o m\u00e1s trades perdedores consecutivos? Pausa 24h"
+    },
+    "E4_Capital_Min": {
+      "activo": "VERIFICAR_MANUAL",
+      "nota": "Capital disponible > $100 (o > 10% del capital inicial)"
+    },
+    "E5_Cooldown": {
+      "activo": "VERIFICAR_MANUAL",
+      "nota": "\u00bfHan pasado \u2265 6h desde el \u00faltimo trade?"
+    },
+    "E6_Divergencia_Bajista": {
+      "activo": false,
+      "nota": "Precio sube + RSI baja (1H) \u2014 peligro de reversi\u00f3n bajista"
+    },
+    "E7_Tendencia_Fuerte": {
+      "activo": "INFORMATIVO",
+      "nota": "ADX=20.33 (>=25 = tendencia fuerte). Indicador informativo, no bloquea."
+    }
+  },
+  "gatillo_5m": {
+    "close_5m": 76622.47,
+    "open_5m": 76629.09,
+    "rsi_5m_actual": 46.82,
+    "rsi_5m_anterior": 47.39,
+    "rsi_5m_recuperando": false,
+    "vela_5m_alcista": false
+  },
+  "gatillo_activo": false,
+  "lrc_1h": {
+    "lower": 76374.26,
+    "mid": 77440.95,
+    "pct": 10.49,
+    "upper": 78507.65
+  },
+  "macro_4h": {
+    "price_above": true,
+    "sma100": 75805.62
+  },
+  "price": 76598.0,
+  "regime": "BEAR",
+  "regime_details": {
+    "funding": {
+      "rate": -3.204e-05,
+      "rate_pct": -0.0032,
+      "score": 49
+    },
+    "price": {
+      "death_cross": true,
+      "price": 77371.32,
+      "price_below_sma200": true,
+      "ret_30d_pct": 17.2,
+      "score": 30,
+      "sma200": 84779.21,
+      "sma50": 71806.15
+    },
+    "sentiment": {
+      "classification": "Fear",
+      "fear_greed_index": 33,
+      "score": 33
+    }
+  },
+  "regime_score": 36.6,
+  "rsi_1h": 36.25,
+  "score": 4,
+  "score_label": "PREMIUM \u2b50\u2b50\u2b50 (sizing 150%)",
+  "se\u00f1al_activa": false,
+  "sizing_1h": {
+    "atr_1h": 338.17,
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 1.0,
+    "atr_tp_mult": 4.0,
+    "capital_usd": 1000.0,
+    "pct_capital": 98.0,
+    "qty_btc": 0.012794,
+    "riesgo_usd": 10.0,
+    "sl_mode": "atr",
+    "sl_pct": "0.44%",
+    "sl_precio": 76259.83,
+    "tp_pct": "1.77%",
+    "tp_precio": 77950.68,
+    "valor_pos": 980.0
+  },
+  "symbol": "BTCUSDT",
+  "timestamp": "2026-04-28 12:00:00 UTC"
+}
