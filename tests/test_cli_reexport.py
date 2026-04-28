@@ -1,12 +1,20 @@
 # tests/test_cli_reexport.py
-def test_cli_reexport_identity():
-    import btc_scanner
+"""cli.scanner_report — re-export breadcrumb.
+
+PR8 cleanup (#225): fmt, save_log, main, get_top_symbols, LOG_FILE,
+SCAN_INTERVAL, STABLECOINS all had 0 external callers via btc_scanner and
+were removed from btc_scanner.py. Import directly from cli.scanner_report instead.
+"""
+
+
+def test_cli_scanner_report_home_module_accessible():
+    """Verify the home module is importable and key names exist there."""
     from cli import scanner_report
 
-    assert btc_scanner.fmt is scanner_report.fmt
-    assert btc_scanner.save_log is scanner_report.save_log
-    assert btc_scanner.main is scanner_report.main
-    assert btc_scanner.get_top_symbols is scanner_report.get_top_symbols
-    assert btc_scanner.LOG_FILE is scanner_report.LOG_FILE
-    assert btc_scanner.SCAN_INTERVAL is scanner_report.SCAN_INTERVAL
-    assert btc_scanner.STABLECOINS is scanner_report.STABLECOINS
+    assert callable(scanner_report.fmt)
+    assert callable(scanner_report.save_log)
+    assert callable(scanner_report.main)
+    assert callable(scanner_report.get_top_symbols)
+    assert isinstance(scanner_report.LOG_FILE, str)
+    assert isinstance(scanner_report.SCAN_INTERVAL, int)
+    assert isinstance(scanner_report.STABLECOINS, set)

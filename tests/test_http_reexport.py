@@ -1,15 +1,11 @@
 # tests/test_http_reexport.py
-"""Identity + minimal behavior tests for infra.http (PR5)."""
+"""Behavior tests for infra.http (PR5).
+
+PR8 cleanup (#225): _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock had
+0 external callers via btc_scanner and were removed from btc_scanner.py.
+Import directly from infra.http instead. Behavior tests retained below.
+"""
 import time
-
-
-def test_http_reexport_identity():
-    import btc_scanner
-    from infra import http
-    assert btc_scanner._load_proxy is http._load_proxy
-    assert btc_scanner._rate_limit is http._rate_limit
-    assert btc_scanner._API_MIN_INTERVAL is http._API_MIN_INTERVAL
-    assert btc_scanner._api_lock is http._api_lock
 
 
 def test_rate_limit_enforces_min_interval():

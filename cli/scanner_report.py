@@ -167,14 +167,13 @@ def fmt(rep: dict) -> str:
 
 def save_log(rep: dict, full_text: str) -> None:
     """Append scan output to logs/signals_log.txt with a per-state format."""
-    SCRIPT_DIR_REPO = str(REPO_ROOT)
     estado = rep.get("estado", "")
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         if rep.get("señal_activa"):
             f.write(full_text + "\n\n")
             ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             score = rep.get("score", 0)
-            sig_path = os.path.join(SCRIPT_DIR_REPO,
+            sig_path = os.path.join(str(REPO_ROOT),
                                     f"SIGNAL_LONG_SCORE{score}_{ts_str}.txt")
             with open(sig_path, "w", encoding="utf-8") as sf:
                 sf.write(full_text)

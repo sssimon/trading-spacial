@@ -204,7 +204,6 @@ def detect_regime_for_symbol(symbol: str | None, mode: str = "global") -> dict:
 
     # Per-symbol path for hybrid / hybrid_momentum
     key = _regime_cache_key(symbol, mode)
-    global _regime_cache
     cached = _regime_cache.get(key)
     if cached and cached.get("ts"):
         try:
@@ -385,7 +384,6 @@ def detect_regime() -> dict:
     }
 
     # Update cache (RAM + disk)
-    global _regime_cache
     _regime_cache["global"] = result
     _save_regime_cache(_regime_cache)
     log.info(f"Regime Detection: {regime} (score={composite}) "

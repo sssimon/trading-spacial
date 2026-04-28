@@ -36,47 +36,73 @@ from strategy.constants import (
     ATR_PERIOD,
     LRC_LONG_MAX, LRC_SHORT_MIN, SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
 )
-# Re-exports for backward compatibility — moved to strategy/direction.py per #225 PR2
-from strategy.direction import (  # noqa: F401
-    ATR_SL_MULT, ATR_TP_MULT, ATR_BE_MULT,
-    resolve_direction_params, metrics_inc_direction_disabled,
+# ── BACKWARD-COMPAT RE-EXPORTS ────────────────────────────────────────────────
+# These imports serve a dual purpose: (1) used internally by scan(); or (2)
+# re-exported for callers that still do `from btc_scanner import …`. Removing
+# a name without migrating all callers will cause silent ImportErrors.
+#
+# To remove a re-export in the future:
+#   1. Run `grep -rn "from btc_scanner import" --include='*.py' .` (multi-line
+#      imports span multiple lines — check file contents, not just grep output).
+#   2. Migrate callers to import from the home module directly.
+#   3. Then remove the import line here.
+#
+# PR8 cleanup (#225): audit removed names with confirmed 0 external callers.
+# Names removed: detect_regime, _save_regime_cache, _REGIME_CACHE_{FILE,PATH},
+#   _REGIME_TTL_SEC, _regime_cache, _classify_tune_result, VOL_LOOKBACK_DAYS,
+#   _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock,
+#   fmt, save_log, main, get_top_symbols, LOG_FILE, SCAN_INTERVAL, STABLECOINS.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# strategy/patterns.py — used internally by scan() + some names are re-exported.
+# detect_bull_engulfing, score_label, check_trigger_5m: used by scan() internally;
+#   also present on module namespace for callers that do `from btc_scanner import …`
+#   (detected by backtest.py — missed by single-line grep audit in PR8).
+# detect_bear_engulfing, check_trigger_5m_short: same + also in noqa list.
+# detect_rsi_divergence: 0 callers via single-line import; has multi-line caller in
+#   backtest.py — retained as re-export.  # noqa: F401
+from strategy.patterns import (
+    detect_bull_engulfing,
+    detect_bear_engulfing,  # noqa: F401 — re-exported; callers in tests/test_scanner.py
+    detect_rsi_divergence,  # noqa: F401 — re-exported; caller in backtest.py
+    score_label,
+    check_trigger_5m,
+    check_trigger_5m_short,  # noqa: F401 — re-exported; callers in tests/test_scanner.py
 )
 
-# Re-exports for backward compatibility — moved to strategy/patterns.py per #225 PR1
-from strategy.patterns import (  # noqa: F401
-    detect_bull_engulfing, detect_bear_engulfing, detect_rsi_divergence,
-    score_label, check_trigger_5m, check_trigger_5m_short,
+# strategy/direction.py — used internally by scan() + ATR_SL_MULT is re-exported.
+# resolve_direction_params, metrics_inc_direction_disabled: used internally by scan();
+#   also present on module namespace for callers (backtest.py, test_symbol_overrides).
+# ATR_SL_MULT: has a caller in tests/test_scanner.py.
+# ATR_TP_MULT, ATR_BE_MULT: 0 callers via single-line grep; have multi-line callers
+#   in tests/test_symbol_overrides_resolution.py and backtest.py — retained.
+from strategy.direction import (
+    resolve_direction_params,
+    metrics_inc_direction_disabled,
+    ATR_SL_MULT,  # noqa: F401 — re-exported; caller in tests/test_scanner.py
+    ATR_TP_MULT,  # noqa: F401 — re-exported; callers in test_symbol_overrides + backtest.py
+    ATR_BE_MULT,  # noqa: F401 — re-exported; callers in test_symbol_overrides + backtest.py
 )
 
-# Re-export for backward compatibility — moved to strategy/tune.py per #225 PR3
-from strategy.tune import _classify_tune_result  # noqa: F401
+# strategy/vol.py — annualized_vol_yang_zhang + TARGET_VOL_ANNUAL have callers;
+# VOL_LOOKBACK_DAYS had 0 callers and was removed.
+from strategy.vol import annualized_vol_yang_zhang, TARGET_VOL_ANNUAL  # noqa: F401
 
-# Re-export for backward compatibility — moved to strategy/vol.py per #225 PR4
-from strategy.vol import (  # noqa: F401
-    annualized_vol_yang_zhang, TARGET_VOL_ANNUAL, VOL_LOOKBACK_DAYS,
-)
-
-# Re-export for backward compatibility — moved to infra/http.py per #225 PR5
-from infra.http import (  # noqa: F401
-    _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock,
-)
-
-# Re-exports for backward compatibility — moved to strategy/regime.py per #225 PR6
+# strategy/regime.py — 9 names have callers (see table above);
+# detect_regime, _save_regime_cache, _REGIME_CACHE_FILE, _REGIME_CACHE_PATH,
+# _REGIME_TTL_SEC, _regime_cache had 0 callers and were removed.
 from strategy.regime import (  # noqa: F401
-    detect_regime, get_cached_regime, detect_regime_for_symbol,
+    get_cached_regime, detect_regime_for_symbol,
     _compute_price_score, _compute_fng_score, _compute_funding_score,
     _compute_rsi_score, _compute_adx_score,
-    _regime_cache_key, _compute_local_regime,
-    _load_regime_cache, _save_regime_cache,
-    _REGIME_CACHE_FILE, _REGIME_CACHE_PATH, _REGIME_TTL_SEC,
-    _regime_cache,
+    _regime_cache_key, _compute_local_regime, _load_regime_cache,
 )
 
-# Re-exports for backward compatibility — moved to cli/scanner_report.py per #225 PR7
-from cli.scanner_report import (  # noqa: F401
-    fmt, save_log, main, get_top_symbols,
-    LOG_FILE, SCAN_INTERVAL, STABLECOINS,
-)
+# strategy/tune.py — _classify_tune_result had 0 callers; entire re-export removed.
+# infra/http.py — _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock had 0 callers;
+#   entire re-export block removed.
+# cli/scanner_report.py — fmt, save_log, main, get_top_symbols, LOG_FILE, SCAN_INTERVAL,
+#   STABLECOINS all had 0 callers; entire re-export block removed.
 
 # Reconfigure stdout for Windows Unicode support
 try:
@@ -112,33 +138,6 @@ TRIGGER_BULLISH_CLOSE = True   # Vela 5M cierra alcista (close > open)
 
 # ── Filtro de tendencia ADX ────────────────────────────────────────────────
 ADX_THRESHOLD = 25  # ADX < 25 = ranging market (OK for mean-reversion)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  CAPA DE DATOS  —  Binance (multi-URL + proxy)  →  Bybit (fallback auto)
-# ─────────────────────────────────────────────────────────────────────────────
-#
-#  Orden de intento:
-#    1. api.binance.com   (principal)
-#    2. api1–api4.binance.com  (mirrors oficiales de Binance)
-#    3. api.bybit.com  (si Binance entero falla → mismo par BTCUSDT Spot)
-#
-#  Proxy: configurar en config.json  →  "proxy": "socks5://127.0.0.1:1080"
-#         o variable de entorno  HTTPS_PROXY / HTTP_PROXY
-#  _load_proxy / _rate_limit / _last_api_call / _API_MIN_INTERVAL / _api_lock
-#  moved to infra/http.py (Epic #225 PR5). Re-exported above for backward compat.
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  INDICADORES — calc_lrc / calc_rsi / calc_bb / calc_sma / calc_atr / calc_adx
-#  moved to strategy/indicators.py (Epic #186 A2). Re-exported at the top of
-#  this module for backward compatibility.
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  REGIME DETECTOR — moved to strategy/regime.py per #225 PR6
-#  Re-exported above for backward compatibility.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────────────────────
