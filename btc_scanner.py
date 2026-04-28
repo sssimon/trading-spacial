@@ -58,7 +58,7 @@ from strategy.vol import (  # noqa: F401
 
 # Re-export for backward compatibility — moved to infra/http.py per #225 PR5
 from infra.http import (  # noqa: F401
-    _load_proxy, _rate_limit, _last_api_call, _API_MIN_INTERVAL, _api_lock,
+    _load_proxy, _rate_limit, _API_MIN_INTERVAL, _api_lock,
 )
 
 # Reconfigure stdout for Windows Unicode support
