@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from btc_scanner import _classify_tune_result  # noqa: E402
+from strategy.tune import _classify_tune_result  # noqa: E402
 
 
 def _triplet(best: dict) -> dict:
