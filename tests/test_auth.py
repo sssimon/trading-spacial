@@ -92,6 +92,52 @@ def test_login_success_sets_httponly_cookies(unauthed_client):
     assert "Authorization" not in resp.headers
 
 
+@pytest.mark.parametrize(
+    "prefix_env, expected_path",
+    [
+        ("",     "/auth/refresh"),       # default: dev / direct-mount
+        ("/api", "/api/auth/refresh"),   # production behind /api proxy
+    ],
+)
+def test_refresh_cookie_path_respects_api_prefix(
+    unauthed_client, monkeypatch, prefix_env, expected_path,
+):
+    """The refresh_token cookie's `path` attribute must reflect AUTH_API_PREFIX.
+
+    When the backend lives behind a reverse proxy that mounts the API under
+    `/api/` (nginx with `proxy_pass /;` or Vite dev proxy with `rewrite`),
+    the browser hits `/api/auth/refresh`. The Set-Cookie path attribute must
+    match for the cookie to be sent — `path=/auth/refresh` would never match
+    `/api/auth/refresh` in a real browser.
+
+    LIMITATION: TestClient (httpx) does NOT enforce path-matching when sending
+    cookies on follow-up requests, so this test cannot prove the end-to-end
+    refresh flow against a path-prefixed URL — it can only verify that the
+    Set-Cookie header carries the correct `path=` attribute. The full
+    end-to-end verification is part of the deploy validation (real browser
+    against `https://trading.sdar.dev/api/auth/refresh`).
+    """
+    monkeypatch.setenv("AUTH_API_PREFIX", prefix_env)
+    _create_user_directly(unauthed_client, "carol@example.com", "long_pw_phrase_xz9", role="viewer")
+
+    resp = _login(unauthed_client, "carol@example.com", "long_pw_phrase_xz9")
+    assert resp.status_code == 200, resp.text
+
+    set_cookie_headers = (
+        resp.headers.get_list("set-cookie")
+        if hasattr(resp.headers, "get_list")
+        else [resp.headers.get("set-cookie", "")]
+    )
+    refresh_header = next(
+        (h for h in set_cookie_headers if h.startswith("refresh_token=")),
+        None,
+    )
+    assert refresh_header is not None, f"no refresh_token Set-Cookie in {set_cookie_headers!r}"
+    assert f"Path={expected_path};" in refresh_header or refresh_header.endswith(f"Path={expected_path}"), (
+        f"expected Path={expected_path} in {refresh_header!r}"
+    )
+
+
 def test_login_unknown_email_same_error_as_wrong_password(unauthed_client):
     _create_user_directly(unauthed_client, "bob@example.com", "long_pass_phrase_x9", role="viewer")
 

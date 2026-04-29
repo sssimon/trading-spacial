@@ -2,16 +2,29 @@
 
 Cookies emitted:
 - access_token: httpOnly, Secure (configurable in dev), SameSite=Lax, 15min
-- refresh_token: httpOnly, Secure, SameSite=Lax, path=/auth/refresh, 7d
+- refresh_token: httpOnly, Secure, SameSite=Lax,
+  path=${AUTH_API_PREFIX}/auth/refresh, 7d
 - csrf_token: NOT httpOnly (frontend reads it), Secure, SameSite=Lax,
   path=/, lifetime matches access_token
+
+The `AUTH_API_PREFIX` env var (default empty) is prepended to the
+refresh_token cookie path so it matches the URL the browser actually hits.
+When deployed behind a reverse proxy that mounts the API under `/api/`
+(nginx with `proxy_pass /;` strip-prefix, or Vite dev proxy), the browser
+calls `/api/auth/refresh`. The cookie's path attribute must match for the
+cookie to be sent — `path=/auth/refresh` would never match `/api/auth/refresh`.
+Setting `AUTH_API_PREFIX=/api` produces `path=/api/auth/refresh`, which does
+match. The router itself stays mounted at `/auth/*`; the proxy strips the
+prefix before requests reach FastAPI, so middleware and route handlers see
+unprefixed paths regardless.
 
 CSRF on mutating endpoints uses double-submit-cookie pattern.
 
 `/auth/login` is the only mutating endpoint without CSRF (no session yet).
 `/auth/refresh` doesn't require CSRF either: it consumes a refresh token
-which is path-scoped to /auth/refresh and httpOnly, so CSRF can't reach it
-from a malicious site without first exfiltrating the cookie.
+which is path-scoped to /auth/refresh (or its prefixed variant) and httpOnly,
+so CSRF can't reach it from a malicious site without first exfiltrating
+the cookie.
 """
 from __future__ import annotations
 
@@ -104,6 +117,26 @@ def _cookie_domain() -> Optional[str]:
     return d or None
 
 
+def _api_prefix() -> str:
+    """Public path prefix that the reverse proxy adds to backend URLs.
+
+    The browser hits `${AUTH_API_PREFIX}/auth/refresh`, but FastAPI sees
+    `/auth/refresh` (the proxy strips the prefix). The refresh_token cookie's
+    `path` attribute must match what the browser requests, so we prepend
+    this prefix when emitting the cookie.
+
+    Default empty preserves compat with environments that don't sit behind
+    a prefix-stripping proxy. Production sets `AUTH_API_PREFIX=/api`.
+    """
+    p = os.environ.get("AUTH_API_PREFIX", "").strip()
+    if not p:
+        return ""
+    # Normalize: leading slash, no trailing slash.
+    if not p.startswith("/"):
+        p = "/" + p
+    return p.rstrip("/")
+
+
 def _client_ip(request: Request) -> Optional[str]:
     """Extract the client's IP. Trusts X-Forwarded-For only if explicitly
     enabled — for now, fall back to the socket peer."""
@@ -136,11 +169,12 @@ def _set_auth_cookies(
     """Set the three auth cookies on the response.
 
     access_token: httpOnly, path=/, lifetime = access_minutes
-    refresh_token: httpOnly, path=/auth/refresh, lifetime = refresh_days
+    refresh_token: httpOnly, path=${AUTH_API_PREFIX}/auth/refresh, lifetime = refresh_days
     csrf_token: NOT httpOnly, path=/, lifetime = access_minutes
     """
     secure = _cookie_secure()
     domain = _cookie_domain()
+    refresh_path = f"{_api_prefix()}/auth/refresh"
     common = {
         "secure": secure,
         "samesite": "lax",
@@ -160,7 +194,7 @@ def _set_auth_cookies(
         refresh_token,
         httponly=True,
         max_age=_refresh_days() * 24 * 60 * 60,
-        path="/auth/refresh",
+        path=refresh_path,
         **common,
     )
     response.set_cookie(
@@ -176,9 +210,10 @@ def _set_auth_cookies(
 def _clear_auth_cookies(response: Response) -> None:
     """Best-effort cookie deletion. Browser will overwrite with empty values."""
     domain = _cookie_domain()
+    refresh_path = f"{_api_prefix()}/auth/refresh"
     for name, path in (
         ("access_token", "/"),
-        ("refresh_token", "/auth/refresh"),
+        ("refresh_token", refresh_path),
         ("csrf_token", "/"),
     ):
         response.delete_cookie(name, path=path, domain=domain)
