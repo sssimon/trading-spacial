@@ -12,3 +12,7 @@ freezegun>=1.4
 pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.0,<5
+# Required by pydantic EmailStr (used in auth/api.py LoginRequest).
+email-validator>=2.0
+# Required by FastAPI Form() parsing (used in api/setup.py).
+python-multipart>=0.0.9
