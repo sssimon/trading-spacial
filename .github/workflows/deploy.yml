@@ -1,0 +1,112 @@
+# Deploy in-place. Trade-off conocido: si el rsync de frontend falla
+# después del rsync de backend, el sistema queda con backend nuevo y
+# frontend viejo hasta el siguiente deploy. Aceptable mientras el sistema
+# sea single-user sin capital real. Para capital real, migrar a deploy
+# atómico con symlink swap (releases/<sha> → /var/www/trading current).
+#
+# Bootstrap manual del server requerido ANTES del primer deploy:
+#   docs/superpowers/specs/es/2026-04-29-trading-sdar-dev-deploy-design.md §6
+# El step "Verify .env exists" abajo falla fast si no se hizo.
+
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to trading.sdar.dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST:    ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Verify .env exists on server (fail-fast if bootstrap missing)
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "test -f /var/www/trading/.env"; then
+            echo "::error::/var/www/trading/.env no existe en el server."
+            echo "::error::Ejecutar bootstrap manual primero (ver docs/superpowers/specs/es/2026-04-29-trading-sdar-dev-deploy-design.md §6)."
+            exit 1
+          fi
+
+      - name: rsync backend source
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude='tests/' --exclude='data/' --exclude='logs/' \
+            --exclude='*.db' --exclude='.venv/' --exclude='__pycache__/' \
+            --exclude='frontend/' --exclude='.git/' --exclude='.github/' \
+            --exclude='.coverage' --exclude='.pytest_cache/' \
+            --exclude='.worktrees/' --exclude='Backtesting_BTCUSDT/' \
+            --exclude='Dashboard/' --exclude='docs/' --exclude='*.bat' \
+            --exclude='*.ps1' --exclude='.env' --exclude='.env.*' \
+            --exclude='.claude/' \
+            ./ ubuntu@${HOST}:/var/www/trading/
+
+      - name: rsync frontend dist
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            frontend/dist/ ubuntu@${HOST}:/var/www/trading/dist/
+
+      - name: pip install + restart service
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            cd /var/www/trading &&
+            .venv/bin/pip install --upgrade -r requirements.txt &&
+            sudo systemctl restart trading-spacial
+          "
+
+      - name: Health check
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          sleep 15
+          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health"; then
+            echo "::error::Health check falló. Logs del servicio:"
+            ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
