@@ -68,7 +68,7 @@ jobs:
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
-            --exclude='tests/' --exclude='data/' --exclude='logs/' \
+            --exclude='tests/' --exclude='logs/' \
             --exclude='*.db' --exclude='.venv/' --exclude='__pycache__/' \
             --exclude='frontend/' --exclude='.git/' --exclude='.github/' \
             --exclude='.coverage' --exclude='.pytest_cache/' \
@@ -76,6 +76,8 @@ jobs:
             --exclude='Dashboard/' --exclude='docs/' --exclude='*.bat' \
             --exclude='*.ps1' --exclude='.env' --exclude='.env.*' \
             --exclude='.claude/' \
+            --exclude='data/*.json' --exclude='data/*.csv' \
+            --exclude='data/*.xlsx' --exclude='data/backtest/' \
             ./ ubuntu@${HOST}:/var/www/trading/
 
       - name: rsync frontend dist
