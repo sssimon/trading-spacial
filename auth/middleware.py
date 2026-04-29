@@ -83,6 +83,19 @@ _PUBLIC_PATHS_EXACT: frozenset = frozenset({
     "/auth/refresh",
     "/openapi.json",
     "/favicon.ico",
+    # First-time setup (added 2026-04-29):
+    # - /setup is the bootstrap path; gated internally by both the
+    #   "no users" check and a 32-byte token. The middleware can't enforce
+    #   auth on it because there is no user yet.
+    # - /setup/status is a tiny JSON endpoint the frontend reads to decide
+    #   whether to redirect to /setup or /login. It MUST be public so the
+    #   frontend can render before login. Both endpoints have their own
+    #   rate limiter (10/IP/hour) inside api/setup.py.
+    # - After setup completes, the routes return 404 from inside the
+    #   handler (system_state has setup_completed_at) — the whitelist
+    #   here is a no-op once setup is done, but harmless.
+    "/setup",
+    "/setup/status",
 })
 _PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     "/docs",

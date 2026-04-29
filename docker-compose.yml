@@ -1,4 +1,39 @@
 services:
+  trading:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trading-spacial-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # REQUIRED — generate with:
+      #   python -c 'import secrets; print(secrets.token_urlsafe(64))'
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required}
+      # CORS origin(s). Comma-separated. No wildcard.
+      - AUTH_CORS_ORIGINS=${AUTH_CORS_ORIGINS:-http://localhost:3000}
+      # Optional: if both set, creates the admin at boot (no web setup).
+      # PASSWORD MUST come from a secrets manager / .env, never hardcoded.
+      - AUTH_INITIAL_ADMIN_EMAIL=${AUTH_INITIAL_ADMIN_EMAIL:-}
+      - AUTH_INITIAL_ADMIN_PASSWORD=${AUTH_INITIAL_ADMIN_PASSWORD:-}
+      # Optional: disable web setup entirely (CLI-only via docker exec).
+      - AUTH_DISABLE_WEB_SETUP=${AUTH_DISABLE_WEB_SETUP:-}
+      # Cookie security — set to 1 when running behind HTTPS.
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-0}
+    volumes:
+      # Persist signals.db, ohlcv.db, logs across container restarts.
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # If you want signals.db at the repo root rather than under data/,
+      # add: - ./signals.db:/app/signals.db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   frontend:
     build:
       context: ./frontend
@@ -7,5 +42,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    depends_on:
+      trading:
+        condition: service_healthy
 
 volumes: {}

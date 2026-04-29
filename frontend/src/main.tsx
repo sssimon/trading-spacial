@@ -10,6 +10,7 @@ import App from './App';
 import { AuthProvider } from './auth/AuthContext';
 import { LoginPage } from './auth/LoginPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { SetupPage } from './auth/SetupPage';
 
 const rootElement = document.getElementById('root');
 
@@ -22,7 +23,10 @@ createRoot(rootElement).render(
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          {/* Public routes — no auth check */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/setup" element={<SetupPage />} />
+          {/* Everything else is gated by ProtectedRoute */}
           <Route
             path="/*"
             element={

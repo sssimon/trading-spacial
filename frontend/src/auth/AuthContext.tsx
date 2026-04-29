@@ -22,25 +22,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Hydrate from /auth/me on first mount. If unauthenticated, try one
-  // silent refresh (in case the access cookie expired but the refresh is
-  // still valid). If that also fails, leave user=null.
+  // Hydrate from /auth/me on first mount. Order:
+  //   1. GET /setup/status — if setup_required && we're already on /setup,
+  //      skip the auth probe entirely (no point trying to authenticate
+  //      against a system with no users). If the call FAILS (network etc),
+  //      assume setup_required=false and proceed normally — the real auth
+  //      gate is the middleware on every other route, not this hint.
+  //   2. GET /auth/me with cookies.
+  //   3. On 401, one silent refresh attempt; if that also fails, user=null.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // Step 1: setup status (fail-tolerant)
+        let setupRequired = false;
+        try {
+          const r = await fetch('/api/setup/status', { credentials: 'include' });
+          if (r.ok) {
+            const j = await r.json();
+            setupRequired = !!j.setup_required;
+          }
+        } catch (err) {
+          // Network/backend slow — log and proceed as if setup is done.
+          // The middleware is the real gate.
+          // eslint-disable-next-line no-console
+          console.warn('[auth] /setup/status failed; assuming setup complete:', err);
+        }
+        if (cancelled) return;
+
+        if (setupRequired) {
+          // Don't even probe /auth/me — there's no user to authenticate.
+          // ProtectedRoute will see user=null and the SetupPage route will
+          // catch / when present.
+          return;
+        }
+
+        // Step 2: hydrate user
         const meResp = await authApi.me();
         if (cancelled) return;
         if (meResp) {
           setUser(meResp.user);
           return;
         }
-        // Try one refresh
-        const r = await authApi.refresh();
+
+        // Step 3: one silent refresh
+        const ref = await authApi.refresh();
         if (cancelled) return;
-        if (r) {
-          setUser(r.user);
-          // Re-fetch /me to get the canonical user record after refresh
+        if (ref) {
+          setUser(ref.user);
           const me2 = await authApi.me();
           if (!cancelled && me2) setUser(me2.user);
         }

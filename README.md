@@ -52,11 +52,14 @@ watchdog.py             — Windows process supervisor (keeps API alive)
 ### 1. Backend
 
 ```bash
-pip install pandas numpy requests fastapi uvicorn
+pip install -r requirements.txt
 
+cp .env.example .env       # then fill in AUTH_JWT_SECRET (see comment in file)
 python btc_api.py          # REST API → http://localhost:8000
 python watchdog.py         # Process supervisor (Windows only)
 ```
+
+On first launch the system has no users. See **First-time setup** below.
 
 ### 2. Frontend
 
@@ -67,18 +70,136 @@ npm run dev      # Dev server → http://localhost:5173
 npm run build    # Production build
 ```
 
-### 3. Docker (production frontend + n8n)
+### 3. Docker
 
 ```bash
+# Generate a JWT secret and persist it (or use a secrets manager)
+echo "AUTH_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(64))')" >> .env
+
 docker compose up --build
-# Frontend → :3000  |  n8n → :5678
+# Backend  → :8000  (multi-stage image, runs as uid 1000)
+# Frontend → :3000
 ```
+
+Setup banner appears in `docker compose logs trading` on first boot —
+click the printed `http://localhost:8000/setup?token=...` URL to create
+the admin user.
 
 ### 4. Windows autostart
 
 ```powershell
 .\scripts\INSTALAR_AUTOSTART.ps1   # registers watchdog as Task Scheduler task
 .\scripts\REINICIAR_SERVICIOS.ps1  # restart all services
+```
+
+---
+
+## First-time setup
+
+The system has no default user. The first user is created via one of three
+paths — pick the one that matches your deployment.
+
+The auth subsystem refuses to boot without `AUTH_JWT_SECRET`. Generate one
+and keep it secret:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(64))'
+```
+
+### Path A — Web setup (recommended for self-hosters)
+
+Default behaviour. On first boot, the server prints a banner like:
+
+```
+================================================================
+  SETUP REQUIRED — first-time installation detected
+================================================================
+
+  No users exist yet. Create the first admin user via:
+
+  Web (recommended):
+    http://localhost:8000/setup?token=<TOKEN>
+
+  Or CLI:
+    python scripts/create_user.py
+================================================================
+```
+
+Open the URL. The form works in any browser — including text-mode browsers
+(`lynx`, `w3m`) with JavaScript disabled. Submit email + password (≥ 12
+chars, must contain a letter and a digit). After submission, `/setup` is
+permanently disabled (returns 404) and you'll be redirected to `/login`.
+
+The setup token lives only in process memory. If you lose it, restart the
+backend — a new token is generated.
+
+### Path B — CLI (recommended for remote servers)
+
+Use this when you'd rather not expose any web setup surface. Either set
+`AUTH_DISABLE_WEB_SETUP=1` to suppress the web form, or just run the CLI
+directly:
+
+```bash
+python scripts/create_user.py --email you@example.com --role admin
+# (prompts for password twice via getpass — no echo)
+```
+
+Same password rules. Creates an admin user; the next time the backend
+boots it sees the user and skips the setup banner.
+
+### Path C — Environment variables (automated deploys)
+
+For Ansible, Terraform, docker-compose with secrets, etc. Set both env
+vars before booting:
+
+```bash
+AUTH_INITIAL_ADMIN_EMAIL=admin@example.com
+AUTH_INITIAL_ADMIN_PASSWORD=<from your secrets manager>
+```
+
+If both are set AND no users exist, the backend creates the admin during
+startup, marks setup as complete, and continues without printing the
+banner.
+
+> ⚠️ The password is plaintext in environment variables. For real
+> production, source it from a secrets manager (Vault, AWS Secrets
+> Manager, sops, doppler) and inject at runtime. Do **not** commit a
+> real password to `.env`.
+
+Setting only one of the two variables (e.g. email but no password) is a
+hard boot failure — there is no silent fallback.
+
+### Password reset
+
+There is no web "forgot password" flow on purpose. Recovery requires
+shell access to the server:
+
+```bash
+python scripts/reset_password.py --email user@example.com
+```
+
+This rehashes the password and revokes every active refresh token for the
+user (force re-login on every device).
+
+### Edge case: admin row deleted
+
+If the only admin user gets deleted but `system_state` still has
+`setup_completed_at`, the system is inaccessible via the web — `/setup`
+returns 404 by design (it's a one-shot bootstrap, not a recovery flow).
+
+Recover via CLI (creates a new admin without re-enabling `/setup`):
+
+```bash
+python scripts/create_user.py --role admin
+```
+
+Or, if you specifically want the web setup form to come back, take a
+backup first and then clear the marker:
+
+```bash
+cp signals.db signals.db.backup-$(date +%Y%m%d-%H%M%S)
+sqlite3 signals.db "DELETE FROM system_state WHERE key='setup_completed_at'"
+# Restart the backend; the next boot will print a fresh setup banner.
 ```
 
 ---

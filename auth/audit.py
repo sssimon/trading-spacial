@@ -25,6 +25,8 @@ VALID_EVENT_TYPES = frozenset({
     "password_change",
     "role_change",
     "refresh_reuse_detected",  # token theft — also revokes family
+    "initial_setup_completed",  # first-time setup (web/cli/env_vars)
+    "password_reset_via_cli",   # admin reset by SSH-only CLI
 })
 
 
