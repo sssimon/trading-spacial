@@ -13,12 +13,21 @@ from passlib.context import CryptContext
 
 
 def _rounds() -> int:
+    """Return the bcrypt cost factor.
+
+    Reads AUTH_BCRYPT_ROUNDS from env (default "12"), parses it, and clamps
+    it to a minimum of 12 — the project's spec floor. The clamp is a
+    hardening invariant, NOT a forgotten cleanup: even if an attacker can
+    inject env vars (or someone misconfigures a deploy with `=4`), the
+    bcrypt cost cannot drop below 12. To raise the cost, set the env var
+    to a higher value (e.g. 14 for paranoid setups).
+    """
     raw = os.environ.get("AUTH_BCRYPT_ROUNDS", "12")
     try:
         n = int(raw)
     except ValueError:
         n = 12
-    return max(12, n)  # spec floor
+    return max(12, n)  # hardening floor — see docstring
 
 
 _pwd_context = CryptContext(schemes=["bcrypt"], bcrypt__rounds=_rounds(), deprecated="auto")

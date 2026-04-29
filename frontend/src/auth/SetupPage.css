@@ -1,0 +1,100 @@
+.setup-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  padding: 24px;
+}
+
+.setup-card {
+  width: 100%;
+  max-width: 460px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #e6edf3;
+}
+
+.setup-card h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.setup-subtitle {
+  margin: 0 0 8px 0;
+  color: #8b949e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setup-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.setup-card input {
+  padding: 8px 12px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 14px;
+}
+
+.setup-card input:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
+.setup-card button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: #238636;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setup-card button:disabled {
+  background: #30363d;
+  cursor: not-allowed;
+}
+
+.setup-card button:hover:not(:disabled) {
+  background: #2ea043;
+}
+
+.setup-rules {
+  font-size: 12px;
+  color: #8b949e;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.setup-error {
+  background: #491b1f;
+  border: 1px solid #c0392b;
+  color: #f99393;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.setup-card code {
+  background: #0d1117;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid #30363d;
+  font-size: 12px;
+}

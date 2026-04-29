@@ -117,3 +117,32 @@ def reset_all_for_tests() -> None:
     with _lock:
         _ip_attempts.clear()
         _email_attempts.clear()
+        _setup_ip_attempts.clear()
+
+
+# ─── /setup rate limit (added with first-time setup) ────────────────────────
+#
+# Independent bucket from login. Spec: 10 per IP per hour. Not for security
+# (token entropy already covers that) but to suppress timing-scan probing
+# of /setup and /setup/status. Both endpoints share the bucket.
+
+_SETUP_WINDOW_SECONDS = 60 * 60  # 1 hour
+_SETUP_MAX_PER_IP = 10
+_setup_ip_attempts: Dict[str, Deque[float]] = {}
+
+
+def check_setup_allowed(ip: Optional[str]) -> Tuple[bool, Optional[int]]:
+    """Same shape as check_login_allowed: returns (allowed, retry_after_s)."""
+    now = _now()
+    cutoff = now - _SETUP_WINDOW_SECONDS
+
+    with _lock:
+        if not ip:
+            return True, None
+        d = _setup_ip_attempts.setdefault(ip, deque())
+        _prune(d, cutoff)
+        if len(d) >= _SETUP_MAX_PER_IP:
+            retry = max(1, int((d[0] + _SETUP_WINDOW_SECONDS) - now))
+            return False, retry
+        d.append(now)
+        return True, None

@@ -18,10 +18,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Auth (added 2026-04-29) — JWT cookie auth + CSRF + role gating.
 from api.auth import router as auth_router
+from api.setup import router as setup_router
+from auth.audit import log_auth_event
 from auth.dependencies import require_role
 from auth.middleware import AuthMiddleware, CsrfMiddleware
+from auth.password import hash_password
+from auth.setup import generate_token as generate_setup_token
 from auth.tokens import _jwt_secret  # boot-time validation
-from db.auth_schema import has_any_user, init_auth_db
+from db.auth_schema import (
+    has_any_user, init_auth_db, init_system_state,
+    is_setup_completed, mark_setup_completed,
+)
+from db.connection import get_db
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -90,6 +98,109 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(
 log = logging.getLogger("btc_api")
 
 
+def _bootstrap_first_user() -> None:
+    """Run before the scanner starts. Picks one of three setup paths:
+
+      A) AUTH_INITIAL_ADMIN_EMAIL + AUTH_INITIAL_ADMIN_PASSWORD set →
+         create the admin and continue silently. For Ansible/Terraform.
+      B) AUTH_DISABLE_WEB_SETUP=1 → print CLI-only banner. No web setup.
+      C) Default: generate setup_token, print web banner.
+
+    XOR check: setting only one of the two env vars hard-fails at boot.
+    No silent ignore — operators need to see misconfigured deploys.
+    Already-configured systems (users exist OR setup_completed_at marked)
+    skip this entire function.
+    """
+    # Already done — the most common case after first boot.
+    if has_any_user() or is_setup_completed():
+        return
+
+    init_email = os.environ.get("AUTH_INITIAL_ADMIN_EMAIL", "").strip()
+    init_pwd = os.environ.get("AUTH_INITIAL_ADMIN_PASSWORD", "")
+    disable_web = os.environ.get("AUTH_DISABLE_WEB_SETUP", "").strip() == "1"
+
+    # Hard-fail XOR. Empty password is treated as missing.
+    if bool(init_email) != bool(init_pwd):
+        raise RuntimeError(
+            "Misconfigured initial admin: AUTH_INITIAL_ADMIN_EMAIL and "
+            "AUTH_INITIAL_ADMIN_PASSWORD must be set together (or neither). "
+            "Set both for unattended setup, or neither and use /setup or "
+            "scripts/create_user.py."
+        )
+
+    # ── Path A: env vars present → create admin programmatically ─────────
+    if init_email and init_pwd:
+        from auth.setup import validate_setup_password
+        ok, msg = validate_setup_password(init_pwd)
+        if not ok:
+            raise RuntimeError(
+                f"AUTH_INITIAL_ADMIN_PASSWORD does not meet policy: {msg}"
+            )
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        pwd_hash = hash_password(init_pwd)
+        con = get_db()
+        try:
+            cur = con.execute(
+                "INSERT INTO users (email, password_hash, role, is_active, "
+                "created_at, password_changed_at) VALUES (?, ?, 'admin', 1, ?, ?)",
+                (init_email.lower(), pwd_hash, now, now),
+            )
+            uid = int(cur.lastrowid or 0)
+            con.commit()
+        finally:
+            con.close()
+        mark_setup_completed(ip=None, method="env_vars")
+        log_auth_event(
+            event_type="initial_setup_completed",
+            success=True,
+            user_id=uid,
+            metadata={"method": "env_vars", "email": init_email.lower()},
+        )
+        log.info(
+            "First-time setup completed via env vars (user_id=%d, email=%s)",
+            uid, init_email.lower(),
+        )
+        return
+
+    # ── Path B: web setup disabled → CLI-only banner ─────────────────────
+    if disable_web:
+        bar = "=" * 64
+        print(
+            f"\n{bar}\n"
+            f"  SETUP REQUIRED — first-time installation detected\n"
+            f"{bar}\n\n"
+            f"  No users exist yet, and AUTH_DISABLE_WEB_SETUP=1.\n"
+            f"  Create the first admin user via CLI:\n\n"
+            f"    python scripts/create_user.py\n\n"
+            f"  The system will start, but every protected route will\n"
+            f"  return 401 until a user is created.\n\n"
+            f"{bar}\n",
+            flush=True,
+        )
+        return
+
+    # ── Path C: default — web setup token + banner ───────────────────────
+    token = generate_setup_token()
+    port = int(os.environ.get("API_PORT", str(API_PORT)))
+    bar = "=" * 64
+    print(
+        f"\n{bar}\n"
+        f"  SETUP REQUIRED — first-time installation detected\n"
+        f"{bar}\n\n"
+        f"  No users exist yet. Create the first admin user via:\n\n"
+        f"  Web (recommended):\n"
+        f"    http://localhost:{port}/setup?token={token}\n\n"
+        f"  Or CLI:\n"
+        f"    python scripts/create_user.py\n\n"
+        f"  The setup token above is valid until setup is completed or\n"
+        f"  the process restarts. It is shown only once. If you lose it,\n"
+        f"  restart the process to generate a new one.\n\n"
+        f"{bar}\n",
+        flush=True,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Auth (2026-04-29): fail fast if AUTH_JWT_SECRET is not configured. We
@@ -100,11 +211,11 @@ async def lifespan(app: FastAPI):
     log.info("Initializing DB schema…")
     init_db()
     init_auth_db()
-    if not has_any_user():
-        log.warning(
-            "No users in auth DB. Create the first one with: "
-            "python scripts/create_user.py"
-        )
+    init_system_state()
+
+    # First-time setup gate. Picks one of three paths (env / cli / web)
+    # or no-ops if a user already exists.
+    _bootstrap_first_user()
 
     log.info("Starting scanner thread…")
     start_scanner_thread()
@@ -138,8 +249,9 @@ app.add_middleware(
 )
 
 # Auth router goes first so /auth/* doesn't accidentally inherit any
-# dependencies from later routers.
+# dependencies from later routers. Setup router right after.
 app.include_router(auth_router)
+app.include_router(setup_router)
 app.include_router(ohlcv_router)
 app.include_router(config_router)
 app.include_router(positions_router)

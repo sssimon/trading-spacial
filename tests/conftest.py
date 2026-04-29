@@ -39,7 +39,6 @@ os.environ.setdefault(
 )
 os.environ.setdefault("AUTH_TEST_BYPASS_ALLOWED", "1")
 os.environ.setdefault("AUTH_TEST_BYPASS_ROLE", "admin")
-os.environ.setdefault("AUTH_BCRYPT_ROUNDS", "4")  # speed up tests; spec floor is 12 in prod
 
 
 @pytest.fixture(autouse=True)
@@ -55,10 +54,18 @@ def _auth_bypass_default(monkeypatch):
     )
     monkeypatch.setenv("AUTH_TEST_BYPASS_ALLOWED", "1")
     monkeypatch.setenv("AUTH_TEST_BYPASS_ROLE", "admin")
-    monkeypatch.setenv("AUTH_BCRYPT_ROUNDS", "4")
-    # Reset rate limiter between tests so /auth/login tests don't leak.
+    # First-time-setup env vars: ensure tests start from a clean slate even
+    # if the dev's shell exported them. Tests that need specific values set
+    # them explicitly via monkeypatch.setenv.
+    monkeypatch.delenv("AUTH_INITIAL_ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("AUTH_INITIAL_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("AUTH_DISABLE_WEB_SETUP", raising=False)
+    # Reset rate limiter between tests so /auth/login + /setup tests don't leak.
     from auth.rate_limit import reset_all_for_tests
     reset_all_for_tests()
+    # Reset the in-memory setup token between tests.
+    from auth.setup import reset_for_tests as _setup_reset
+    _setup_reset()
     yield
 
 

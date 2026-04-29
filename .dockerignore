@@ -1,0 +1,43 @@
+# Don't ship local state into the image.
+.git
+.gitignore
+.env
+.venv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local data and logs — mounted as a volume in production.
+data/ohlcv.db*
+data/symbols_status.json
+data/positions_summary.json
+data/signals_history.csv
+data/regime_cache.json
+data/backtest/
+signals.db
+signals.db-*
+backups/
+logs/
+
+# Secrets + config — provided via env/secrets manager at runtime.
+config.json
+config.secrets.json
+
+# Frontend build artefacts (the backend image doesn't need them).
+frontend/node_modules/
+frontend/dist/
+
+# Test/dev tooling.
+.claude/
+.worktrees/
+.e2e-tmp/
+docs/
+
+# OS / IDE.
+.DS_Store
+.idea/
+.vscode/
