@@ -70,9 +70,16 @@ class _DictRow(tuple):
 
 
 def get_db() -> sqlite3.Connection:
-    """Open a fresh DB connection with the dict-row factory."""
+    """Open a fresh DB connection with the dict-row factory.
+
+    Sub-fix (2026-04-29): set busy_timeout=5000ms to prevent immediate
+    "database is locked" errors under contention. Was 0 (default),
+    reproducible during the 2026-04-29 audit. WAL mode plus this 5s window
+    lets multi-thread routes + scanner thread serialise writes.
+    """
     con = sqlite3.connect(_resolve_db_file())
     con.row_factory = _DictRow
+    con.execute("PRAGMA busy_timeout = 5000")
     return con
 
 
