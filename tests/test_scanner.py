@@ -715,6 +715,8 @@ class TestScan:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestLoadProxy:
+    # PR8 cleanup (#225): _load_proxy moved to infra.http; no longer re-exported from
+    # btc_scanner. Tests now import from the home module directly.
     def test_sin_proxy_retorna_dict_vacio(self, tmp_path, monkeypatch):
         # config.json sin proxy — patch infra.http.REPO_ROOT (moved from btc_scanner per PR5)
         import infra.http as _http
@@ -724,7 +726,7 @@ class TestLoadProxy:
         monkeypatch.setenv("HTTP_PROXY", "")
 
         monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
-        result = scanner._load_proxy()
+        result = _http._load_proxy()
         assert result == {}
 
     def test_proxy_desde_config(self, tmp_path, monkeypatch):
@@ -737,7 +739,7 @@ class TestLoadProxy:
         monkeypatch.delenv("HTTP_PROXY", raising=False)
 
         monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
-        result = scanner._load_proxy()
+        result = _http._load_proxy()
         assert result == {"http": proxy_url, "https": proxy_url}
 
     def test_variable_entorno_tiene_prioridad(self, tmp_path, monkeypatch):
@@ -749,7 +751,7 @@ class TestLoadProxy:
         monkeypatch.delenv("HTTP_PROXY", raising=False)
 
         monkeypatch.setattr(_http, "REPO_ROOT", tmp_path)
-        result = scanner._load_proxy()
+        result = _http._load_proxy()
         assert result["https"] == env_proxy
 
 
@@ -758,9 +760,12 @@ class TestLoadProxy:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestGetTopSymbols:
-    @patch("btc_scanner._load_proxy", return_value={})
+    # PR8 cleanup (#225): get_top_symbols + STABLECOINS moved to cli.scanner_report;
+    # _load_proxy moved to infra.http. Tests now import from the home modules directly.
+    @patch("cli.scanner_report._load_proxy", return_value={})
     def test_retorna_lista_usdt(self, _mock):
         """Con CoinGecko mockeado retorna pares USDT correctos."""
+        from cli.scanner_report import get_top_symbols
         import requests as _req
         fake_coins = [
             {"symbol": "btc", "market_cap": 1e12},
@@ -776,17 +781,18 @@ class TestGetTopSymbols:
                 json=lambda: fake_coins,
                 raise_for_status=lambda: None,
             )
-            symbols = scanner.get_top_symbols(n=3)
+            symbols = get_top_symbols(n=3)
         assert "BTCUSDT" in symbols
         assert "ETHUSDT" in symbols
         assert "USDTUSDT" not in symbols   # stablecoin excluida
         assert len(symbols) == 3
 
-    @patch("btc_scanner._load_proxy", return_value={})
+    @patch("cli.scanner_report._load_proxy", return_value={})
     def test_fallback_si_coingecko_falla(self, _mock):
         """Si CoinGecko lanza error, retorna DEFAULT_SYMBOLS."""
+        from cli.scanner_report import get_top_symbols
         with patch("requests.get", side_effect=ConnectionError("sin red")):
-            symbols = scanner.get_top_symbols(n=5)
+            symbols = get_top_symbols(n=5)
         assert symbols == scanner.DEFAULT_SYMBOLS[:5]
 
     def test_default_symbols_son_pares_usdt(self):
@@ -794,11 +800,14 @@ class TestGetTopSymbols:
             assert sym.endswith("USDT"), f"{sym} no termina en USDT"
 
     def test_stablecoins_excluidas(self):
-        for stable in scanner.STABLECOINS:
+        from cli.scanner_report import STABLECOINS
+        for stable in STABLECOINS:
             assert f"{stable}USDT" not in scanner.DEFAULT_SYMBOLS
 
 
 class TestFmt:
+    # PR8 cleanup (#225): fmt moved to cli.scanner_report; no longer re-exported
+    # from btc_scanner. Tests now import from the home module directly.
     def _make_report(self, señal=False, setup=False):
         return {
             "timestamp": "2025-01-01 12:00:00 UTC",
@@ -843,39 +852,46 @@ class TestFmt:
         }
 
     def test_fmt_retorna_string(self):
+        from cli.scanner_report import fmt
         rep = self._make_report()
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert isinstance(result, str)
 
     def test_fmt_contiene_precio(self):
+        from cli.scanner_report import fmt
         rep = self._make_report()
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "85,000.00" in result or "85000" in result
 
     def test_fmt_contiene_estado(self):
+        from cli.scanner_report import fmt
         rep = self._make_report(señal=False)
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "SIN SETUP" in result
 
     def test_fmt_señal_activa_menciona_confirmado(self):
+        from cli.scanner_report import fmt
         rep = self._make_report(señal=True)
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "SEÑAL" in result
 
     def test_fmt_muestra_lrc_pct(self):
+        from cli.scanner_report import fmt
         rep = self._make_report()
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "15.5%" in result or "15.5" in result
 
     def test_fmt_sin_bloques_auto(self):
+        from cli.scanner_report import fmt
         rep = self._make_report()
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "Ningún bloqueo automático" in result
 
     def test_fmt_con_bloqueo(self):
+        from cli.scanner_report import fmt
         rep = self._make_report()
         rep["blocks_auto"] = ["E1: BullEngulfing activo"]
-        result = scanner.fmt(rep)
+        result = fmt(rep)
         assert "BullEngulfing" in result
 
 

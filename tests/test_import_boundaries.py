@@ -80,3 +80,56 @@ def test_import_boundaries(folder: str, denylist: list[str]) -> None:
                     )
 
     assert not violations, "Import boundary violations:\n  " + "\n  ".join(violations)
+
+
+def test_strategy_regime_no_circular_imports():
+    """strategy.regime must not import api/, db/, scanner/, cli/, btc_scanner."""
+    src = (PROJECT_ROOT / "strategy" / "regime.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert not (node.module or "").startswith(("api.", "db.", "scanner.", "cli.")), \
+                f"strategy/regime.py must not import {node.module}"
+            assert node.module != "btc_scanner", \
+                f"strategy/regime.py must not import btc_scanner"
+
+
+def test_strategy_patterns_no_external_strategy_imports():
+    """strategy.patterns may only import from strategy.{constants,indicators}."""
+    src = (PROJECT_ROOT / "strategy" / "patterns.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if mod.startswith("strategy."):
+                assert mod in ("strategy.constants", "strategy.indicators"), \
+                    f"strategy/patterns.py must not import {mod}"
+
+
+def test_infra_http_pure():
+    """infra.http imports only stdlib + requests."""
+    infra_http = PROJECT_ROOT / "infra" / "http.py"
+    if not infra_http.exists():
+        pytest.skip("infra/http.py does not exist")
+    src = infra_http.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            assert mod in ("", "pathlib") or not mod.startswith(
+                ("strategy.", "btc_scanner", "api.", "db.")
+            ), f"infra/http.py must not import {mod}"
+
+
+def test_cli_scanner_report_no_api_db_imports():
+    """cli.scanner_report must not import api/ or db/."""
+    cli_report = PROJECT_ROOT / "cli" / "scanner_report.py"
+    if not cli_report.exists():
+        pytest.skip("cli/scanner_report.py does not exist")
+    src = cli_report.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            assert not mod.startswith(("api.", "db.")), \
+                f"cli/scanner_report.py must not import {mod}"

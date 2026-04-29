@@ -89,6 +89,9 @@ Desktop.ini
 *.sublime-project
 *.sublime-workspace
 
+# ── Per-signal CLI artifacts (transient smoke output) ────────
+SIGNAL_*.txt
+
 # ── Archivos temporales ───────────────────────────────────────
 *.tmp
 *.bak

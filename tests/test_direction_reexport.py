@@ -1,5 +1,11 @@
 # tests/test_direction_reexport.py
-"""Identity tests: strategy.direction re-exports preserved on btc_scanner."""
+"""Identity tests: strategy.direction re-exports preserved on btc_scanner.
+
+All 5 names from PR2 are RETAINED in btc_scanner.py (they have callers in
+tests/test_scanner.py, tests/test_symbol_overrides_resolution.py, and
+backtest.py). This test guards all 5 so that an accidental shadow/rebind is
+caught immediately.
+"""
 
 
 def test_direction_reexport_identity():
