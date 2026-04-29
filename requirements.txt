@@ -7,3 +7,8 @@ beautifulsoup4>=4.12
 lxml>=4.9
 jinja2>=3.1
 freezegun>=1.4
+
+# auth (added 2026-04-29)
+pyjwt>=2.8.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0,<5

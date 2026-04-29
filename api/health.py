@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from api.config import load_config
 from api.deps import verify_api_key
+from auth.dependencies import require_role
 from db.connection import get_db
 
 log = logging.getLogger("api.health")
@@ -91,7 +92,11 @@ def get_health_dashboard():
     return get_dashboard_state(cfg)
 
 
-@router.post("/health/reactivate/{symbol}", dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/health/reactivate/{symbol}",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def post_health_reactivate(symbol: str, body: ReactivateRequest):
     """Manually reactivate a PAUSED symbol — transitions PAUSED → PROBATION (B5 #199)."""
     from health import reactivate_symbol, get_symbol_state

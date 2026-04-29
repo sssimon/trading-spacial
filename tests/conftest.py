@@ -17,6 +17,102 @@ if TESTS_DIR not in sys.path:
     sys.path.insert(0, TESTS_DIR)
 
 
+# ─── Auth test setup (added 2026-04-29 with the JWT auth system) ───────────
+#
+# The auth middleware enforces JWT cookies on every non-public path. Without
+# the bypass below, every existing test that uses TestClient(app) directly
+# would 401. We set AUTH_TEST_BYPASS_ROLE=admin before any test runs so all
+# 23 pre-existing tests keep working without modification.
+#
+# The 2 explicit fixtures below (unauthed_client, viewer_client) override
+# this for the role/auth tests in tests/test_auth.py.
+#
+# AUTH_JWT_SECRET must be set or auth/tokens._jwt_secret() raises at import.
+# Use a stable test value so tokens we sign in tests are verifiable.
+
+# NOTE: AUTH_TEST_BYPASS_ALLOWED gates the bypass. Without it set to "1"
+# AND pytest in sys.modules AND AUTH_TEST_BYPASS_ROLE in {admin,viewer},
+# the middleware refuses to skip JWT. See auth/middleware.py:_bypass_role_or_none.
+os.environ.setdefault(
+    "AUTH_JWT_SECRET",
+    "test_secret_64bytes_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+)
+os.environ.setdefault("AUTH_TEST_BYPASS_ALLOWED", "1")
+os.environ.setdefault("AUTH_TEST_BYPASS_ROLE", "admin")
+os.environ.setdefault("AUTH_BCRYPT_ROUNDS", "4")  # speed up tests; spec floor is 12 in prod
+
+
+@pytest.fixture(autouse=True)
+def _auth_bypass_default(monkeypatch):
+    """Default every test to admin-bypass + test JWT secret.
+
+    Tests that need to verify real auth behavior (test_auth.py) override
+    these via monkeypatch in their own fixtures.
+    """
+    monkeypatch.setenv(
+        "AUTH_JWT_SECRET",
+        "test_secret_64bytes_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    monkeypatch.setenv("AUTH_TEST_BYPASS_ALLOWED", "1")
+    monkeypatch.setenv("AUTH_TEST_BYPASS_ROLE", "admin")
+    monkeypatch.setenv("AUTH_BCRYPT_ROUNDS", "4")
+    # Reset rate limiter between tests so /auth/login tests don't leak.
+    from auth.rate_limit import reset_all_for_tests
+    reset_all_for_tests()
+    yield
+
+
+# ─── Explicit fixtures for tests/test_auth.py ──────────────────────────────
+
+
+@pytest.fixture
+def unauthed_client(monkeypatch, tmp_path):
+    """TestClient with NO bypass — middleware enforces real JWT cookies.
+
+    Uses an isolated DB (tmp_path/signals.db) and bootstraps the auth schema
+    so /auth/login can actually look up users.
+    """
+    from fastapi.testclient import TestClient
+
+    # Isolate signals.db
+    db_file = str(tmp_path / "signals.db")
+    import btc_api
+    monkeypatch.setattr(btc_api, "DB_FILE", db_file)
+
+    # Disable bypass — middleware will demand real tokens
+    monkeypatch.delenv("AUTH_TEST_BYPASS_ROLE", raising=False)
+
+    # Initialize schemas in the isolated DB
+    from db.schema import init_db
+    from db.auth_schema import init_auth_db
+    init_db()
+    init_auth_db()
+
+    return TestClient(btc_api.app)
+
+
+@pytest.fixture
+def viewer_client(monkeypatch, tmp_path):
+    """TestClient where the middleware injects a synthetic viewer user.
+
+    Used to test that admin-only endpoints return 403 for viewers.
+    """
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "signals.db")
+    import btc_api
+    monkeypatch.setattr(btc_api, "DB_FILE", db_file)
+
+    monkeypatch.setenv("AUTH_TEST_BYPASS_ROLE", "viewer")
+
+    from db.schema import init_db
+    from db.auth_schema import init_auth_db
+    init_db()
+    init_auth_db()
+
+    return TestClient(btc_api.app)
+
+
 @pytest.fixture
 def tmp_ohlcv_db(tmp_path, monkeypatch):
     """Isolated ohlcv.db per test. Points data._storage at a tmp file + fresh schema."""

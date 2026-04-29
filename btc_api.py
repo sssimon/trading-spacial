@@ -16,6 +16,13 @@ import requests as req_lib  # tests patch btc_api.req_lib.post (test_api.py); al
 from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+# Auth (added 2026-04-29) — JWT cookie auth + CSRF + role gating.
+from api.auth import router as auth_router
+from auth.dependencies import require_role
+from auth.middleware import AuthMiddleware, CsrfMiddleware
+from auth.tokens import _jwt_secret  # boot-time validation
+from db.auth_schema import has_any_user, init_auth_db
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
@@ -85,8 +92,20 @@ log = logging.getLogger("btc_api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Auth (2026-04-29): fail fast if AUTH_JWT_SECRET is not configured. We
+    # call _jwt_secret() once here so a misconfigured deploy crashes at boot
+    # rather than on the first /auth/login request.
+    _jwt_secret()
+
     log.info("Initializing DB schema…")
     init_db()
+    init_auth_db()
+    if not has_any_user():
+        log.warning(
+            "No users in auth DB. Create the first one with: "
+            "python scripts/create_user.py"
+        )
+
     log.info("Starting scanner thread…")
     start_scanner_thread()
     yield
@@ -96,13 +115,31 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crypto Scanner API", description="Ultimate Macro & Order Flow V6.0",
               version="2.0.0", lifespan=lifespan)
+
+# Middleware order (Starlette processes outermost-first on request).
+# user_middleware list builds in reverse: last add_middleware() = outermost.
+# We want execution order: CORS → Auth → Csrf → app, so we add in reverse.
+app.add_middleware(CsrfMiddleware)
+app.add_middleware(AuthMiddleware)
+
+# CORS — must be the OUTERMOST middleware so even 401/403 responses get
+# CORS headers (otherwise the browser rejects them as CORS errors and the
+# frontend can't read the auth status code).
+_CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "AUTH_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000",
+).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,                # required for cookie auth
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token"],
 )
 
+# Auth router goes first so /auth/* doesn't accidentally inherit any
+# dependencies from later routers.
+app.include_router(auth_router)
 app.include_router(ohlcv_router)
 app.include_router(config_router)
 app.include_router(positions_router)
@@ -168,7 +205,12 @@ def status():
     }
 
 
-@app.post("/scan", summary="Forzar escaneo manual", dependencies=[Depends(verify_api_key)])
+@app.post(
+    "/scan",
+    summary="Forzar escaneo manual",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def force_scan(
     symbol: Optional[str] = Query(None, description="Par a escanear (ej: ETHUSDT). Sin valor escanea todos.")
 ):
@@ -179,8 +221,12 @@ def force_scan(
     return {"scanned": len(results), "results": results}
 
 
-@app.get("/webhook/test", summary="Probar webhook y Telegram directo",
-         dependencies=[Depends(verify_api_key)])
+@app.get(
+    "/webhook/test",
+    summary="Probar webhook y Telegram directo",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def test_webhook():
     from datetime import datetime, timezone  # noqa: PLC0415
     cfg     = load_config()

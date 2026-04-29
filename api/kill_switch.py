@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import load_config, save_config
 from api.deps import verify_api_key
+from auth.dependencies import require_role
 from db.connection import get_db
 
 log = logging.getLogger("api.kill_switch")
@@ -21,7 +22,8 @@ router = APIRouter(tags=["kill_switch"])
 @router.post(
     "/kill_switch/recalibrate",
     summary="Manually trigger an auto-calibrator recommendation",
-    dependencies=[Depends(verify_api_key)],
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
 def kill_switch_recalibrate():
     """Manually trigger the auto-calibrator (#187 B4b.1).
@@ -141,7 +143,8 @@ def kill_switch_list_recommendations(
 @router.post(
     "/kill_switch/recommendations/{rec_id}/apply",
     summary="Apply a pending recommendation (operator action)",
-    dependencies=[Depends(verify_api_key)],
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
 def kill_switch_apply_recommendation(rec_id: int):
     """Apply a pending recommendation: write config override + mark applied.
@@ -239,7 +242,8 @@ def kill_switch_apply_recommendation(rec_id: int):
 @router.post(
     "/kill_switch/recommendations/{rec_id}/ignore",
     summary="Ignore a pending recommendation (operator action)",
-    dependencies=[Depends(verify_api_key)],
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
 def kill_switch_ignore_recommendation(rec_id: int):
     """Mark a pending recommendation as ignored (no config change).

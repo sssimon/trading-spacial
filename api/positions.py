@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from api.config import load_config
 from api.deps import verify_api_key
+from auth.dependencies import require_role
 from db.connection import get_db
 from db.positions import (
     _calc_pnl,
@@ -177,7 +178,12 @@ def list_positions(
     return {"total": len(positions), "positions": positions}
 
 
-@router.post("", summary="Abrir nueva posicion", dependencies=[Depends(verify_api_key)])
+@router.post(
+    "",
+    summary="Abrir nueva posicion",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def open_position(body: dict = Body(...)):
     required = {"symbol", "entry_price"}
     missing  = required - body.keys()
@@ -191,7 +197,12 @@ def open_position(body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{pos_id}", summary="Editar posicion (SL/TP/notas)", dependencies=[Depends(verify_api_key)])
+@router.put(
+    "/{pos_id}",
+    summary="Editar posicion (SL/TP/notas)",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def edit_position(pos_id: int, body: dict = Body(...)):
     pos = db_update_position(pos_id, body)
     if not pos:
@@ -200,7 +211,12 @@ def edit_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@router.post("/{pos_id}/close", summary="Cerrar posicion manualmente", dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/{pos_id}/close",
+    summary="Cerrar posicion manualmente",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def close_position(pos_id: int, body: dict = Body(...)):
     exit_price  = body.get("exit_price")
     exit_reason = body.get("exit_reason", "MANUAL")
@@ -214,7 +230,12 @@ def close_position(pos_id: int, body: dict = Body(...)):
     return {"ok": True, "position": pos}
 
 
-@router.delete("/{pos_id}", summary="Cancelar/eliminar posicion", dependencies=[Depends(verify_api_key)])
+@router.delete(
+    "/{pos_id}",
+    summary="Cancelar/eliminar posicion",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def delete_position(pos_id: int):
     con = get_db()
     row = con.execute("SELECT id FROM positions WHERE id=?", (pos_id,)).fetchone()

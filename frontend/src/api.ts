@@ -29,15 +29,73 @@ import type {
 
 const BASE_URL = '/api';
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+function readCsrfCookie(): string {
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+// Module-level guard against infinite refresh loops. Two requests racing on
+// a 401 share a single refresh attempt.
+let _refreshInflight: Promise<boolean> | null = null;
+
+async function tryRefreshOnce(): Promise<boolean> {
+  if (_refreshInflight) return _refreshInflight;
+  _refreshInflight = (async () => {
+    try {
+      const r = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      return r.ok;
+    } catch {
+      return false;
+    } finally {
+      // Release the gate on next tick so back-to-back 401s can still share it.
+      setTimeout(() => {
+        _refreshInflight = null;
+      }, 0);
+    }
+  })();
+  return _refreshInflight;
+}
+
+async function rawRequest(path: string, options?: RequestInit): Promise<Response> {
   const url = `${BASE_URL}${path}`;
-  const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+  const method = (options?.method || 'GET').toUpperCase();
+  const headers = new Headers(options?.headers || {});
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (!SAFE_METHODS.has(method)) {
+    const csrf = readCsrfCookie();
+    if (csrf) headers.set('X-CSRF-Token', csrf);
+  }
+  return fetch(url, {
     ...options,
+    method,
+    headers,
+    credentials: 'include',
   });
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  let response = await rawRequest(path, options);
+
+  // 401 interceptor: try one silent refresh, then retry once. If refresh
+  // also 401s, dispatch the user to /login.
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    const refreshed = await tryRefreshOnce();
+    if (refreshed) {
+      response = await rawRequest(path, options);
+    } else {
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+      throw new Error('API error 401: not authenticated');
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
