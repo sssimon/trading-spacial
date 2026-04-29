@@ -1,5 +1,7 @@
 # Crypto Trading Scanner — Ultimate Macro & Order Flow V6.0
 
+[![CI](https://github.com/sssimon/trading-spacial/actions/workflows/ci.yml/badge.svg)](https://github.com/sssimon/trading-spacial/actions/workflows/ci.yml)
+
 Automated signal system for the top 20 crypto pairs by market cap. Uses multi-timeframe technical analysis (4H macro context → 1H signal → 5M entry trigger) to generate scored entry alerts delivered to Telegram.
 
 ---
@@ -52,7 +54,9 @@ watchdog.py             — Windows process supervisor (keeps API alive)
 ### 1. Backend
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt        # runtime only
+# OR for development (adds pytest + httpx):
+pip install -r requirements-dev.txt
 
 cp .env.example .env       # then fill in AUTH_JWT_SECRET (see comment in file)
 python btc_api.py          # REST API → http://localhost:8000

@@ -1,0 +1,14 @@
+# Dev/test dependencies. Pulls in everything from requirements.txt plus
+# the tooling needed to run the test suite. CI installs this file directly.
+#
+# To set up a dev environment:
+#   python -m venv .venv
+#   source .venv/bin/activate         (or .venv\Scripts\activate on Windows)
+#   pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest>=8.0
+# httpx is what fastapi.testclient uses internally for its HTTP simulation.
+# It's not a transitive dep of fastapi itself.
+httpx>=0.27

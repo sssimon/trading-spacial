@@ -6,42 +6,81 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-flight runs on the same ref when a new commit lands. Saves CI
+# minutes on rapid pushes to a PR branch — only the latest commit gets a
+# full check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  backend-tests:
+  backend:
+    name: Backend (pytest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
+          # Cache key invalidates when EITHER file changes (dev pulls in
+          # runtime via `-r requirements.txt`).
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Generate ephemeral JWT secret
+        # Per-run secret. Not in git, not reusable across runs. The auth
+        # subsystem refuses to boot without AUTH_JWT_SECRET; tests need a
+        # valid value but it's purely local to this CI run.
+        run: |
+          echo "AUTH_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
 
       - name: Install dependencies
+        # requirements-dev.txt includes `-r requirements.txt` + pytest + httpx.
         run: |
-          pip install -r requirements.txt
-          pip install httpx pytest
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
+      - name: Run pytest
+        # `-m "not network"` is defensive: pytest.ini declares a `network`
+        # marker that's currently unused by any test. If someone marks a
+        # network-dependent test in the future, CI will skip it instead of
+        # failing on transient connectivity. The 5 tests that require
+        # data/ohlcv.db (705 MB, gitignored) auto-skip via @pytest.mark.skipif.
+        run: pytest -m "not network"
 
-  frontend-typecheck:
+  frontend:
+    name: Frontend (tsc + vitest + build)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
         run: npm ci
 
-      - name: TypeScript type check
-        working-directory: frontend
+      - name: Type check
+        # Run separately from the build so a tsc failure surfaces with a
+        # clean error before vite starts. `npm run build` runs `tsc && vite
+        # build`, so we'd still catch it later — this is for diagnostics.
         run: npx tsc --noEmit
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Production build
+        # Catches errors that tsc misses (vite plugin issues, asset
+        # resolution, dynamic-import chains).
+        run: npm run build
