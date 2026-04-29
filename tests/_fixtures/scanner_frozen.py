@@ -95,6 +95,12 @@ def _normalize(obj):
 def frozen_scan(monkeypatch, tmp_path):
     """Apply all monkeypatches needed to get deterministic scan() output."""
     monkeypatch.setattr("btc_scanner.datetime", _FrozenDatetime)
+    # PR0-PR8 fixture relied on config.json being absent in worktrees. On main
+    # config.json exists and may set regime_mode="hybrid" or other config that
+    # changes scan() output. Force scan() to find no config.json by redirecting
+    # SCRIPT_DIR to a fresh tmp_path. This makes the snapshot deterministic
+    # regardless of the runner's actual config.json contents.
+    monkeypatch.setattr("btc_scanner.SCRIPT_DIR", str(tmp_path))
     monkeypatch.setattr(md, "get_klines", _frozen_get_klines)
     monkeypatch.setattr(md, "prefetch", lambda *a, **kw: None)
     # PR6: regime moved to strategy.regime — patch the home module so the
