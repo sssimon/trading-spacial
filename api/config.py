@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.deps import verify_api_key
+from auth.dependencies import require_role
 
 log = logging.getLogger("api.config")
 
@@ -186,7 +187,12 @@ def get_config():
     return result
 
 
-@router.post("/config", summary="Actualizar configuracion", dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/config",
+    summary="Actualizar configuracion",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def update_config(body: ConfigUpdate):
     # Convert Pydantic model to dict, excluding unset fields
     updates = body.model_dump(exclude_unset=True)

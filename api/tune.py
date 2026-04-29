@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.config import load_config, CONFIG_FILE
 from api.deps import verify_api_key
+from auth.dependencies import require_role
 from db.connection import get_db
 
 log = logging.getLogger("api.tune")
@@ -43,8 +44,12 @@ def tune_latest():
     return result
 
 
-@router.post("/apply", summary="Apply pending tune proposal",
-             dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/apply",
+    summary="Apply pending tune proposal",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def tune_apply():
     """Applies the latest pending tune proposal to config.json symbol_overrides."""
     con = get_db()
@@ -106,8 +111,12 @@ def tune_apply():
     return {"ok": True, "applied": applied_count, "backup": backup_name}
 
 
-@router.post("/reject", summary="Reject pending tune proposal",
-             dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/reject",
+    summary="Reject pending tune proposal",
+    # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
+)
 def tune_reject():
     """Rejects the latest pending tune proposal."""
     con = get_db()
