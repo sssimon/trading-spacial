@@ -609,10 +609,21 @@ def test_evaluate_signal_estado_contains_direction_when_setup():
     assert "LONG" in decision.estado or "SIN SETUP" in decision.estado
 
 
+@pytest.mark.network
 def test_evaluate_signal_parity_full_fields_against_scan_snapshot():
     """Parity: evaluate_signal output matches scan()'s report fields on real data.
 
-    Skips when cached OHLCV is unavailable in the workspace.
+    Marked `network` because btc_scanner.scan() falls through to live
+    Binance/Bybit fetches when the local OHLCV cache is empty. The
+    pre-existing `os.path.exists("data/ohlcv.db")` skip is insufficient:
+    other components (data/_storage.py:init_schema) create the file empty
+    on first run, so the path-exists check passes but there's no data,
+    and the fetcher reaches the network. CI runners (US AWS) get HTTP 451
+    from Binance and HTTP 403 from Bybit's CloudFront. Skipped in CI by
+    `pytest -m "not network"`.
+
+    Skips when cached OHLCV is unavailable locally too — preserves the
+    original guard so a dev without ohlcv.db still doesn't blow up.
     """
     import os
     if not os.path.exists("data/ohlcv.db"):
