@@ -1,7 +1,7 @@
 # A.1 — Provenance del holdout de validación
 
 **Fecha de lock:** 2026-04-30T07:52:17.939277+00:00
-**Commit del lock:** `9dcde3d0f32848fe2eb5cdc4ce3b001333d94a07`
+**Commit del lock:** `5b0affedce9129c62cc9289e747c77e8b45df124` (refrescado tras agregar 4to caveat post-review; ver §6)
 **Estado del árbol al lock:** `git_clean = true`
 **Epic:** [#246](https://github.com/sssimon/trading-spacial/issues/246)
 **Ticket:** [#247](https://github.com/sssimon/trading-spacial/issues/247)
@@ -215,7 +215,7 @@ Tests demostrativos en el mismo archivo:
 Para regenerar este lock bit-a-bit (modulo el drift de proveedor de F&G/funding):
 
 ```bash
-git checkout 9dcde3d0f32848fe2eb5cdc4ce3b001333d94a07
+git checkout 5b0affedce9129c62cc9289e747c77e8b45df124
 rm -rf data/holdout/  # requiere chmod +w previo en macOS/Linux
 python scripts/lock_holdout.py
 ```
