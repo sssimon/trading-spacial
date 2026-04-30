@@ -220,10 +220,11 @@ Tratamos **fixed-horizon h=+5 simple** como baseline validado; los siguientes so
 
 **Cons / riesgos:**
 - Si la edge real está en h=+10h ó h=+15h (no medido en train por falta de tiempo en #281 §6), un time-limit a h=+5 podría dejar dinero en la mesa.
-- En el subset `B-like + winners`, BTC/ETH muestran winner-holding mediano de 14h — un time-limit a 5h podría cortar winners legítimos en majors. **Mitigable:** time-limit per-symbol (5h en small-caps, 12-15h en majors).
+- **Time-limit global a t+5h activamente daña BTC/ETH** — winners hold 14h (#6 ratio 3.5x / 2.8x). Un t+5h global no es "mitigable", es **incompatible** con la heterogeneidad observada del basket. Ver §5 Gate 2 para el decoupling per-cluster (que es a su vez una hipótesis, no una asunción).
+- **Time-limit determinista clusterea exits en momentos fijos** (e.g., overnight UTC, sesiones de bajo volumen). Si la liquidity-by-hour-of-day correlaciona con el bucket de exits TIME_LIMIT, la atribución por `close_type` se ensucia: el bucket TIME_LIMIT podría tener spread implícito sistemáticamente más ancho que SL/TP. Worth medir en A.4 cruce de exit_reason × hour-of-day × cost.
 - Hereda riesgo de leakage si los ATR multipliers actuales fueron tuned con la holdout incluida (caveat #1 de [holdout provenance](../specs/es/2026-04-30-a1-holdout-dataset-provenance.md)).
 
-**Etiqueta:** **strong candidate, validation needed in A.4.**
+**Etiqueta:** **strong candidate, validation needed in A.4 — pero con basket-decoupling tratado como hipótesis y cost-survival check pre-registrado (ver §5).**
 
 **Citas relevantes:**
 - López de Prado, *Advances in Financial Machine Learning*, Ch. 3 (Triple Barrier Method): <https://github.com/hudson-and-thames/mlfinlab>.
@@ -371,30 +372,86 @@ Los frameworks retail exponen ATR/percent/trailing-stop primitives pero tratan e
 
 ## 5 · Recomendación
 
-**Para A.4 prototyping (input al review del martes — no decisión final):**
+**Framing crítico:** §3.1 NO es una decisión, es **el siguiente experimento** dentro de una secuencia de gates. La diferencia importa: una "decisión" implica que pasa el experimento se aplica; un "experimento" produce data que alimenta la decisión real, que se toma después de Gate 4. El doc anterior comprimió esto en "Si A.4 hit la barra de A.0.3, está hecho" — eso era prematuro. La secuencia explícita:
 
-1. **Prioridad #1 — Triple Barrier puro (§3.1):** mantener ATR_SL + ATR_TP actuales (re-tuned post-A.0.2) **agregando hard time-limit a t+5h**. Mínimo cambio estructural, máximo aligned con la edge medida, atribución natural. Es el equivalente del default de Hummingbot v2 + el `minimal_roi: {"300": -1}` de Freqtrade. Si A.4 prueba esto y hit la barra de A.0.3 (Deflated Sharpe), está hecho.
+### Gate 0 — Resolver #8 conscientemente, no implícitamente
 
-2. **Prioridad #2 — Time-decaying TP (§3.2):** si #1 deja dinero en la mesa por TPs muy ambiciosos, relajar TP con tabla decay tipo Freqtrade ROI. Más parametrizable, más superficie de overfit; correr **solo después de #1** y validar la curva de decay con OOS.
+#8 (robustez temporal) quedó **inconclusivo** en el diagnóstico. Hay dos caminos legítimos, NO un default:
 
-**Lo que NO recomiendo prototipar primero:**
+- **Camino A: cerrar #8 ANTES de A.4.** Buscar data pre-train adicional (e.g., backtest exchanges con histórico más largo, datos OOS de proveedor alternativo) hasta que la pregunta "edge real vs artifact" tenga respuesta empírica. Costo: tiempo. Beneficio: cuando holdout falle, sabés POR QUÉ.
 
-- Adaptive horizon per-symbol (§3.3) — overfit risk muy alto, no sobrevive Deflated Sharpe con N=10 trials.
-- Híbrido post-horizon trailing (§3.4) — más complejo, value condicional; reservarlo si los simples no alcanzan.
+- **Camino B: aceptar holdout como test dual-propósito.** El holdout valida simultáneamente (i) la edge predictiva y (ii) la exit logic. Costo: si holdout falla, no podés diagnosticar si fue (i) o (ii) — el experimento queda confundido. Beneficio: tiempo a A.4 ahora.
 
-**Decisión orthogonal que A.4 debe surface antes de tunear:**
+**Decision pendiente para martes:** ¿Camino A o B? **No es asunción operativa** — debe estar documentada en el ticket de A.4 antes de empezar. Si Camino B, el N de Deflated Sharpe en Gate 3 debe penalizar dos preguntas en paralelo, no una.
 
-Cualquier candidato (3.1–3.4) requiere honrar el caveat #1 del holdout dataset: **re-tunear ATR multipliers sobre `[earliest, holdout_start - 1 bar]` ANTES de evaluar contra holdout** ([provenance doc](../specs/es/2026-04-30-a1-holdout-dataset-provenance.md)). Implementar un nuevo exit pattern sin re-tune dejaría leakage residual de los overrides actuales.
+### Gate 1 — Re-tune ATR multipliers honest
+
+Re-tunear `atr_sl_mult/tp/be` sobre `[earliest, holdout_start - 1 bar]` ([provenance doc](../specs/es/2026-04-30-a1-holdout-dataset-provenance.md), caveat #1). Sin esto, los multipliers actuales heredan exposición al rango holdout y cualquier evaluación posterior tiene leakage residual.
+
+### Gate 2 — Evaluación contra holdout
+
+Aplicar el pattern §3.1 (Triple Barrier puro: ATR_SL + ATR_TP re-tuned + time_limit) sobre el holdout dataset.
+
+**Sub-gate 2a — Decoupling per-cluster es HIPÓTESIS, no asunción.**
+
+El doc original sugería evaluar §3.1 sobre dos sub-baskets: `{PENDLE, ADA}` con `time_limit = 5h` y `{BTC, ETH}` con `time_limit = 14h`, basándose en la heterogeneidad de holding-period observada en #6 train. **Esa partición se está derivando de una observación post-hoc en train** — exactamente el tipo de "casualmente coincide con la estructura de los overrides previos" que el doc flaguea como riesgo de leakage.
+
+Tratamiento honest:
+- Pre-registrar la hipótesis: "los clusters {PENDLE, ADA} y {BTC, ETH} se distinguen significativamente en holding-period óptimo en holdout".
+- Test en holdout con basket dividida.
+- **Si en holdout los clusters NO se distinguen → colapsar a single-basket-single-horizon** (probablemente sub-óptimo en ambos extremos, y eso ES información válida — significa que la heterogeneidad de train era artifact).
+- Si los clusters SÍ se distinguen → la partición se ratifica y queda operativa.
+
+No pre-asumir el decoupling es la diferencia entre un test honesto y curve-fit a train.
+
+### Gate 3 — Deflated Sharpe con N honest
+
+`N` para la corrección de multiple-testing **NO es 10** (cardinalidad del basket). `N` debe contar:
+- Símbolos del basket (10).
+- Variantes de exit pattern barridas (al menos: Triple Barrier, ATR-only baseline, time-only baseline, time-decay TP si aplica).
+- Grid de ATR multipliers explorados en Gate 1.
+- Override-history acumulado en epics anteriores (#121, #135, etc.) — cada uno consumió DOF.
+- Si Gate 0 = Camino B: penalty adicional por validar dos preguntas (edge + exit logic) en el mismo holdout.
+- Cluster partitions evaluadas (1 si single basket, 2+ si decoupling).
+
+El número honest probablemente está en el rango N=30–100, no N=10. Eso cambia el threshold de Deflated Sharpe materialmente.
+
+### Gate 4 — Cost-survival check con pass criterion PRE-REGISTRADO
+
+**El criterion debe definirse ANTES de correr el experimento, no después.** Sin pre-registration, el sesgo de continuar empuja el bar hacia abajo cuando los números lleguen incómodos.
+
+Sugerencia de criterion (a confirmar por reviewer/dev en martes, ANTES de Gate 1):
+
+- **Net edge per-trade ≥ Y bps**, donde `Y` es función del round-trip cost esperado en el cluster:
+  - Para `{BTC, ETH}`: `Y_majors ≈ 2 × round_trip_cost_majors_p50` (e.g., si round-trip mediana ≈ 10–15 bps, `Y_majors ≈ 25 bps` = ~2x safety margin).
+  - Para `{PENDLE, ADA}`: `Y_smallcaps ≈ 2 × round_trip_cost_smallcaps_p50` (más alto, depende de #279 sqrt v2 calibration).
+- **Net Sharpe ≥ X**, con `X` definido contra benchmark de "buy-and-hold el cluster" para el período holdout. Pasar SR del strategy > SR del HODL es bar mínimo; preferiblemente SR ≥ 1.0 anualizado.
+- Aplicar el cost model upstream: A.0.2 linear v1 ([#277](https://github.com/sssimon/trading-spacial/pull/277)) + #279 sqrt v2 ([epic](https://github.com/sssimon/trading-spacial/issues/279)) cuando esté shipped.
+
+**Compromiso:** los valores numéricos exactos de `Y_majors`, `Y_smallcaps`, `X` se acuerdan martes. Documentados en el ticket de A.4 antes de Gate 1. Si en Gate 4 los números fallan el criterion, A.4 no procede a producción — independiente de cuán "cerca" hayan quedado.
+
+---
+
+### Resumen — qué prototipar y en qué orden
+
+1. **Gate 0–4 sobre §3.1 (Triple Barrier puro).** Es el siguiente experimento, no la decisión.
+2. **§3.2 (time-decay TP estilo Freqtrade ROI):** solo si §3.1 falla por dejar dinero en la mesa (i.e., gross edge alto pero TP fija lo trunca).
+3. **§3.3, §3.4: NO ahora.** Reservar.
+
+### Lo que NO recomiendo prototipar primero (sin cambio)
+
+- Adaptive horizon per-symbol (§3.3) — N de Deflated Sharpe explota; overfit risk alto. Reservar para iteración futura SI §3.1 + §3.2 no alcanzan.
+- Híbrido post-horizon trailing (§3.4) — más complejo, value condicional. Reservar.
 
 ---
 
 ## 6 · Decisions to surface (no resueltas en este doc)
 
-1. **Definición operacional de "signal-decay-based" exit.** Tres definiciones distintas en la práctica, todas válidas:
+1. **Definición operacional de "signal-decay-based" exit — DEFER.** Tres definiciones distintas en la práctica, todas válidas:
    - **Académica:** cierre cuando el score de la señal cae por debajo de un umbral (re-evaluar la signal cada bar).
    - **Retail / Freqtrade-style:** TP que decae con tiempo (ROI table) — proxy temporal del decay sin re-evaluar la signal.
    - **Quant cuantitativa:** cierre proporcional al decay de half-life del momentum factor (OU half-life, Jegadeesh-Titman).
-   Tabularlo bajo un solo bucket es engañoso. **Decisión del reviewer:** ¿con cuál de las tres definiciones se queda A.4 si elige este pattern?
+   Tabularlo bajo un solo bucket es engañoso. **Resolución diferida:** esta decisión solo es relevante si §3.1 falla y §3.2 entra en juego. Resolverla ahora es overengineering — la edit anterior del doc proponía cerrarla en este review, pero es más honesto dejar la pregunta abierta hasta que la condición que la dispara (fallo de §3.1) ocurra. Si nunca llega, nunca hay que cerrarla.
 
 2. **Time-limit horizon per-symbol vs fijo en h=+5.** El finding #6 muestra winner-holding mediano de 14h en BTC/ETH y 0 winners en 8 small-caps. Un time-limit a 5h global corta winners potenciales en majors. ¿A.4 acepta horizon per-symbol (con cost de overfit) o fija 5h global y acepta que majors quedan sub-óptimos?
 
@@ -402,7 +459,7 @@ Cualquier candidato (3.1–3.4) requiere honrar el caveat #1 del holdout dataset
 
 4. **vectorbt como herramienta para A.4 grid search.** vectorbt OSS permite barrer combinaciones (ATR-only / horizon-only / híbrido / signal-decay) en minutos sobre el mismo dataset. ¿A.4 considera adoptar vectorbt como motor de grid search en paralelo a `simulate_strategy`, o se queda con el motor actual? Es una decisión de tooling, no de policy.
 
-5. **Triple Barrier en Hummingbot v2 como blueprint de implementación.** ¿Re-implementar el patrón en `backtest._close_position` (mínima fricción), o portar/inspirarse de `TripleBarrierConfig` de Hummingbot para forzar separación entre policy y plumbing? Decisión de architecture.
+5. **~~Triple Barrier en Hummingbot v2 como blueprint de implementación~~ — CERRADO.** Re-implementación in-place en `backtest._close_position`. Agregar `time_limit` como kwarg en `_close_position` + check en el loop bar-by-bar (~20 líneas). Hummingbot v2 puede inspirar el shape de `TripleBarrierConfig` (dataclass con campos opcionales), pero **portar/refactor architectural queda fuera de scope para A.4** — es un proyecto de 2 meses disfrazado de exit logic decision. Mínima fricción gana; si en el futuro el sistema crece a múltiples patterns y el switch policy-vs-plumbing se vuelve doloroso, ahí se considera el refactor. No ahora.
 
 ---
 
