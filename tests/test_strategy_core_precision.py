@@ -118,6 +118,10 @@ def test_doge_backtest_smoke_pnl_distribution_post_fix(tmp_path, monkeypatch):
         sim_start=sim_start, sim_end=sim_end,
         df1d=df1d,
         cfg=cfg, symbol_overrides=symbol_overrides,
+        # A.0.2 (#277): smoke test pins the precision-bug zero-PnL distribution
+        # which is a pre-cost concept; explicit flags=False preserves it.
+        # Cost-on behavior on DOGE has its own coverage in test_backtest_with_costs.
+        enable_slippage=False, enable_spread=False, enable_fees=False,
     )
 
     if not trades:

@@ -12,6 +12,25 @@ Usage:
     python backtest.py                  # Run backtest, generate report
     python backtest.py --download-only  # Only download/cache data
     python backtest.py --symbol ETHUSDT # Backtest a different symbol
+
+Cost model (A.0.2, #277)
+------------------------
+simulate_strategy applies a tier-based cost model when
+`enable_slippage` / `enable_spread` / `enable_fees` are True (default). The
+model is **v1 linear** in participation rate:
+
+    slippage_bps = base_bps + size_factor * (order_usd / liquidity_usd_per_min)
+
+This deliberately over-penalizes small orders and under-penalizes large ones
+relative to the empirically-better Almgren-Chriss `sqrt(participation)`
+baseline. **v2 should migrate to sqrt**; the v1 simplification is documented
+both here and in backtest_costs.py so it does not get forgotten. Per-tier
+parameters and source citations live in `costs_calibration.json`.
+
+Pre-A.0.2 the FEE_PCT constant was defined but never deducted from pnl_usd —
+A.0.2 is the first revision to actually apply costs. Backtests prior to this
+revision should be considered cost-blind; numbers in older docs (e.g.
+2026-04-17-formula-ganadora) are pre-cost.
 """
 
 import os
@@ -58,7 +77,13 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DEFAULT_START = datetime(2021, 1, 1, tzinfo=timezone.utc)  # earliest data to cache
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.01  # 1% of capital per trade
-FEE_PCT = 0.001  # 0.1% per trade (Binance spot)
+# 0.1% per side, Binance spot retail taker, no BNB discount. Conservative —
+# if production uses BNB discount (~0.075%), this overestimates fee cost.
+# Until A.0.2 (#277) the constant was defined here but never deducted from
+# pnl_usd; the cost model in backtest_costs.py + the enable_fees flag in
+# simulate_strategy now apply it. costs_calibration.json mirrors this value
+# under tiers.*.fee_bps_per_side (10 bps).
+FEE_PCT = 0.001
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -286,7 +311,15 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
         pnl_pct = (exit_price - entry_price) / entry_price * 100
         # Valid LONG: sl_orig < entry_price → sl_pct_actual > 0.
         sl_pct_actual = (entry_price - sl_orig) / entry_price * 100
-    risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
+    # Floor capital at 0 (A.0.2 #277): under realistic costs a streak of
+    # losses can drive the simulated capital negative. With negative capital,
+    # the R-multiple `risk_amount * (pnl_pct / sl_pct)` flips sign and
+    # reports losing trades as positive pnl — silently corrupting metrics
+    # downstream. Bankruptcy is a sharper signal than "negative R-multiples":
+    # cap risk at zero and let calculate_metrics observe the trades that
+    # actually contributed pnl. (Pre-cost runs cannot reach this branch.)
+    effective_capital = max(0.0, capital)
+    risk_amount = effective_capital * RISK_PER_TRADE * position["size_mult"]
     if sl_pct_actual > 0:
         pnl_usd = risk_amount * (pnl_pct / sl_pct_actual)
     else:
@@ -316,6 +349,52 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
     }
 
 
+def _apply_costs_to_trade(
+    trade: dict,
+    position: dict,
+    exit_price_actual: float,
+    exit_liquidity_per_min: float,
+    compute_trade_costs_fn,
+    tier_params,
+    enable_slippage: bool,
+    enable_spread: bool,
+    enable_fees: bool,
+) -> None:
+    """Mutate `trade` in place: append cost-component fields and reduce
+    pnl_usd by total_cost_usd (preserving the original gross value as
+    `gross_pnl_usd`). No-op when entry_notional is non-positive (malformed
+    SL — already handled upstream by the phantom-profit guard).
+    """
+    entry_notional = position.get("entry_notional_usd", 0.0)
+    if entry_notional <= 0:
+        return
+    entry_price = position["entry_price"]
+    exit_notional = entry_notional * (exit_price_actual / entry_price) if entry_price else 0.0
+
+    cost = compute_trade_costs_fn(
+        entry_notional_usd=entry_notional,
+        exit_notional_usd=exit_notional,
+        entry_liquidity_usd_per_min=position.get("entry_liquidity_per_min", float("nan")),
+        exit_liquidity_usd_per_min=exit_liquidity_per_min,
+        tier_params=tier_params,
+        enable_slippage=enable_slippage,
+        enable_spread=enable_spread,
+        enable_fees=enable_fees,
+    )
+    trade.update(cost)
+    trade["gross_pnl_usd"] = trade["pnl_usd"]
+    trade["gross_pnl_pct"] = trade["pnl_pct"]
+    trade["entry_notional_usd"] = entry_notional
+    trade["pnl_usd"] = round(trade["pnl_usd"] - cost["total_cost_usd"], 2)
+    # pnl_pct is the per-trade % return used downstream by Sharpe / Sortino in
+    # calculate_metrics. Subtracting cost in absolute % terms (cost_usd /
+    # entry_notional × 100) keeps risk-adjusted metrics consistent with net
+    # pnl_usd and avoids the misleading "Sharpe unchanged but PnL collapsed"
+    # output that gross-pct returns would produce.
+    cost_pct = cost["total_cost_usd"] / entry_notional * 100.0
+    trade["pnl_pct"] = round(trade["pnl_pct"] - cost_pct, 4)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  SIMULATION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -335,6 +414,10 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       kill_switch_cfg: dict | None = None,  # NEW (#138 PR 3)
                       shared_simulator=None,             # NEW (#186 A6)
                       cfg: dict | None = None,           # NEW (#186 A6)
+                      enable_slippage: bool = True,      # NEW (A.0.2, #277)
+                      enable_spread: bool = True,        # NEW (A.0.2, #277)
+                      enable_fees: bool = True,          # NEW (A.0.2, #277)
+                      cost_calibration=None,             # NEW (A.0.2, #277)
                       ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy.
 
@@ -356,6 +439,29 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     # #186 A6: lazy imports keep backtest.py importable even when `strategy/`
     # or `backtest_kill_switch` has its own transient import issues.
     from backtest_kill_switch import KillSwitchSimulator
+
+    # A.0.2 (#277): cost-model bootstrap. Loaded lazily so non-cost callers
+    # (and historical tests with all flags off) skip the calibration JSON
+    # entirely. `_costs_active` short-circuits the per-trade augmentation when
+    # all flags are False — preserving byte-identical behavior on the
+    # legacy path.
+    _costs_active = bool(enable_slippage or enable_spread or enable_fees)
+    _tier_params = None
+    _liquidity_per_min = None
+    if _costs_active:
+        from backtest_costs import (
+            tier_for_symbol, load_calibration, compute_trade_costs,
+        )
+        _calibration = cost_calibration if cost_calibration is not None else load_calibration()
+        _tier_params = _calibration.tiers[tier_for_symbol(symbol)]
+        # 30-day rolling USD volume per minute on the 1H timeframe. Each 1H bar
+        # contributes (close × volume) USD over 60 minutes; we divide by 60 to
+        # convert to per-minute, then take a 720-bar (30-day) rolling mean to
+        # smooth single-bar spikes. min_periods=120 (5 days) avoids degenerate
+        # rolling outputs at the very start of the series; bars before that
+        # produce NaN, which compute_slippage_bps treats as fallback territory.
+        _usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
+        _liquidity_per_min = _usd_per_min.rolling(720, min_periods=120).mean()
 
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
@@ -448,6 +554,16 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                     position, exit_price=exit_price, exit_time=bar_time,
                     exit_reason=exit_reason, capital=capital,
                 )
+                if _costs_active:
+                    try:
+                        _exit_liq = float(_liquidity_per_min.loc[bar_time])
+                    except (KeyError, IndexError):
+                        _exit_liq = float("nan")
+                    _apply_costs_to_trade(
+                        trade, position, exit_price, _exit_liq,
+                        compute_trade_costs, _tier_params,
+                        enable_slippage, enable_spread, enable_fees,
+                    )
                 trades.append(trade)
                 capital += trade["pnl_usd"]
                 position = None
@@ -638,6 +754,26 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             "atr_be_mult_used": _be_m_use,
         }
 
+        # A.0.2 (#277): freeze cost inputs at entry. notional uses the
+        # per-trade risk budget translated into USD via the SL distance —
+        # mirrors how live execution would size the order. Liquidity is the
+        # 30-day rolling proxy at the entry bar; NaN here flows through to
+        # compute_slippage_bps' fallback path (punitive default 100 bps),
+        # which is the desired conservative behavior when liquidity is
+        # unobservable.
+        if _costs_active:
+            _sl_pct_actual = abs(price - sl_price) / price * 100.0
+            _risk_amount = capital * RISK_PER_TRADE * size_mult
+            position["entry_notional_usd"] = (
+                _risk_amount * 100.0 / _sl_pct_actual if _sl_pct_actual > 0 else 0.0
+            )
+            try:
+                position["entry_liquidity_per_min"] = float(
+                    _liquidity_per_min.loc[bar_time]
+                )
+            except (KeyError, IndexError):
+                position["entry_liquidity_per_min"] = float("nan")
+
     # Close any open position at last bar price
     if position is not None:
         last_bar = df1h.iloc[-1]
@@ -646,6 +782,16 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             position, exit_price=exit_price, exit_time=df1h.index[-1],
             exit_reason="OPEN", capital=capital,
         )
+        if _costs_active:
+            try:
+                _exit_liq_final = float(_liquidity_per_min.loc[df1h.index[-1]])
+            except (KeyError, IndexError):
+                _exit_liq_final = float("nan")
+            _apply_costs_to_trade(
+                trade, position, exit_price, _exit_liq_final,
+                compute_trade_costs, _tier_params,
+                enable_slippage, enable_spread, enable_fees,
+            )
         trades.append(trade)
         capital += trade["pnl_usd"]
 
@@ -743,6 +889,27 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
                 "total_pnl_usd": round(tier["pnl_usd"].sum(), 2),
             }
 
+    # A.0.2 (#277): cost aggregates surface only when trades carry the per-
+    # component fields populated by simulate_strategy with cost flags on. The
+    # gate keeps legacy callers (cost-flags-off) on the original metrics shape
+    # so downstream consumers do not see zero-valued fields they would have
+    # to reason about. Mini-contract names locked here; A.0.3 (#278) reserves
+    # the deflated/Calmar names and must not collide.
+    cost_metrics: dict = {}
+    if "total_cost_bps" in closed.columns:
+        cost_metrics = {
+            "total_cost_bps_mean": round(float(closed["total_cost_bps"].mean()), 2),
+            "total_cost_usd_sum": round(float(closed["total_cost_usd"].sum()), 2),
+            "entry_slippage_bps_mean": round(float(closed["entry_slippage_bps"].mean()), 2),
+            "exit_slippage_bps_mean": round(float(closed["exit_slippage_bps"].mean()), 2),
+            "entry_spread_bps_mean": round(float(closed["entry_spread_bps"].mean()), 2),
+            "exit_spread_bps_mean": round(float(closed["exit_spread_bps"].mean()), 2),
+            "fee_bps_mean": round(float(closed["fee_bps"].mean()), 2),
+            "gross_net_pnl_diff_usd": round(
+                float((closed["gross_pnl_usd"] - closed["pnl_usd"]).sum()), 2
+            ),
+        }
+
     return {
         "total_trades": total_trades,
         "wins": win_count,
@@ -767,6 +934,7 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
         "median_trade_pct": round(closed["pnl_pct"].median(), 2) if len(closed) > 0 else 0,
         "final_equity": round(INITIAL_CAPITAL + net_pnl, 2),
         "score_tiers": score_tiers,
+        **cost_metrics,
     }
 
 
