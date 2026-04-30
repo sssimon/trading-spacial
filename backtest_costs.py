@@ -8,9 +8,21 @@ v1 model is **linear in participation rate**:
 
     slippage_bps = base_bps + size_factor * (order_usd / liquidity_usd_per_min)
 
-This deliberately overpenalizes small orders and underpenalizes large ones
-relative to the empirically-better Almgren-Chriss `sqrt(participation)` baseline.
-v2 should migrate to sqrt; this is documented here so it does not get forgotten.
+Compared to the empirically-better Almgren-Chriss `sqrt(participation)` baseline,
+v1 linear **underpenalizes small orders and overpenalizes large ones** when
+both models are calibrated to the same anchor (e.g., 30 bps at 0.1%
+participation). At P below the anchor, linear gives less slippage than sqrt
+(linear is more permissive of small orders). At P above the anchor, linear
+explodes super-proportionally while sqrt grows more slowly. Practical
+implication: a backtest using v1 with small per-trade participation
+under-states slippage (good news bias for tightly-sized trades), while a
+backtest where R-multiple sizing inflates notional past comfortable
+participation rates produces catastrophic slippage that is not what real
+execution would show. v2 migration to sqrt fixes both ends.
+
+Note: the spec text in #277 phrases the direction inverted ("overpenalizes
+small, underpenalizes large"). The math above is the correct read; the
+discrepancy is surfaced for the reviewer in the A.0.2 PR description.
 
 Calibration lives in `costs_calibration.json` (committed alongside this module).
 Each parameter cites its source — invented numbers are not allowed (#277).
