@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "lock_timestamp_utc": "2026-04-30T07:52:17.939277+00:00",
+  "lock_commit_sha": "5b0affedce9129c62cc9289e747c77e8b45df124",
+  "lock_git_clean": true,
+  "epic": "#246",
+  "ticket": "#247",
+  "cutoff": {
+    "type": "fixed",
+    "duration_days": 365,
+    "start_inclusive_utc": "2025-04-30T00:00:00+00:00"
+  },
+  "curated_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "UNIUSDT",
+    "XLMUSDT",
+    "PENDLEUSDT",
+    "JUPUSDT",
+    "RUNEUSDT"
+  ],
+  "sources": {
+    "ohlcv": {
+      "file": "ohlcv.sqlite",
+      "sha256": "545d7b18643f3658ebef0ce5f8b14112f5cad68532755a8b560cd17bd527f91d",
+      "total_rows": 1162898,
+      "timeframes": [
+        "1d",
+        "1h",
+        "4h",
+        "5m"
+      ],
+      "per_symbol_per_timeframe": {
+        "BTCUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "ETHUSDT": {
+          "1d": {
+            "rows": 362,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777161600000,
+            "last_iso": "2026-04-26T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "ADAUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "AVAXUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "DOGEUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "UNIUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "XLMUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "PENDLEUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "JUPUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        },
+        "RUNEUSDT": {
+          "1d": {
+            "rows": 364,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777334400000,
+            "last_iso": "2026-04-28T00:00:00+00:00"
+          },
+          "1h": {
+            "rows": 8749,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777464000000,
+            "last_iso": "2026-04-29T12:00:00+00:00"
+          },
+          "4h": {
+            "rows": 2187,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777449600000,
+            "last_iso": "2026-04-29T08:00:00+00:00"
+          },
+          "5m": {
+            "rows": 104990,
+            "first_ms": 1745971200000,
+            "first_iso": "2025-04-30T00:00:00+00:00",
+            "last_ms": 1777467900000,
+            "last_iso": "2026-04-29T13:05:00+00:00"
+          }
+        }
+      },
+      "drift_caveat": "OHLCV bars are immutable once recorded by Binance/Bybit. The source data/ohlcv.db is append-only via data/_storage.py. This snapshot is the authoritative copy for evaluation."
+    },
+    "fear_greed": {
+      "file": "fng.parquet",
+      "sha256": "ede33681d6801e94b8b5aa248146e09d7cbff1f24f6d899e66d4b1084c81b7e7",
+      "rows": 363,
+      "first_iso": "2025-04-30T00:00:00",
+      "last_iso": "2026-04-27T00:00:00",
+      "fetched_at_utc": "2026-04-30T07:52:29.144228+00:00",
+      "source": "https://api.alternative.me/fng/?limit=0",
+      "drift_caveat": "alternative.me may revise historical values. Hash freezes the snapshot taken at fetched_at_utc; A.4 must re-fetch + diff."
+    },
+    "funding_rate": {
+      "file": "funding.parquet",
+      "sha256": "8cead903e9095e8ee7ccb4ae51fe367525777e37b9e12a505a4084dacc7e38c1",
+      "rows": 1088,
+      "first_iso": "2025-04-30T00:00:00.001000",
+      "last_iso": "2026-04-27T08:00:00",
+      "fetched_at_utc": "2026-04-30T07:52:31.248571+00:00",
+      "source": "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT",
+      "symbols_covered": [
+        "BTCUSDT"
+      ],
+      "symbols_uncovered_rationale": "Per strategy/regime.py the regime detector uses BTC funding rate as a global signal for all symbols (line 240 in production code, line 349 in cached path). Snapshotting BTC-only matches what production scoring consumes.",
+      "drift_caveat": "Binance Futures may revise historical funding values. Hash freezes the snapshot at fetched_at_utc; A.4 must re-fetch + diff."
+    }
+  },
+  "uncovered_sources": [],
+  "caveats": [
+    {
+      "id": "RE_TUNE_REQUIRED_FOR_A4",
+      "summary": "Current atr_sl_mult/tp/be in config.json['symbol_overrides'] were tuned over the full history including the holdout range. Evaluating those parameters directly against this holdout is leakage.",
+      "obligation": "A.4 (#250) MUST re-tune over the train segment [ohlcv earliest, holdout_start - 1 bar] BEFORE evaluating against this holdout."
+    },
+    {
+      "id": "REGIME_COMPOSITION_NOT_GUARANTEED",
+      "summary": "The 12-month holdout window may not cover all regimes (bull/bear/neutral). If the window is dominated by one regime, A.4 cannot test SHORT gating or BULL/BEAR transitions out-of-sample with equal coverage.",
+      "obligation": "A.4 (#250) MUST report the bull/bear/neutral mix observed in this window (reconstructed from the locked F&G + funding + price components) and explicitly call out coverage gaps before claiming validation."
+    },
+    {
+      "id": "DRIFT_NOT_AUTODETECTABLE_FROM_LOCK",
+      "summary": "F&G and funding rate hashes freeze the snapshot taken at lock_timestamp_utc. Provider revisions of historical values are NOT detectable from this lock alone.",
+      "obligation": "A.4 (#250) MUST re-fetch F&G and funding for the holdout window from their source APIs and diff against the locked snapshot. Any divergence must be reported (not silently overridden)."
+    },
+    {
+      "id": "WINDOW_END_NOT_ALIGNED_ACROSS_SOURCES",
+      "summary": "The right edge of the holdout window is NOT aligned across sources because providers had no later data at fetched_at_utc. Concretely: OHLCV typically extends a day or two beyond F&G (alternative.me publishes once daily, often with a small delay) and beyond funding rate (Binance funding settles every 8h but the most recent unsettled period is excluded). The exact end timestamps per source are recorded in sources.*.last_iso.",
+      "obligation": "A.4 (#250) MUST either (a) truncate evaluation to the common window [holdout_start, min(end_per_source)] OR (b) document the asymmetric tail explicitly in its results report. Silently ignoring the misalignment is not allowed — regime scoring during the trailing days has reduced input coverage and any conclusions drawn there are weaker than for the common-window interior."
+    }
+  ],
+  "guard": {
+    "wrapper_module": "data/holdout_access.py",
+    "ast_scanner": "tests/test_holdout_isolation.py",
+    "policy": "Guard A (wrapper) is opt-in ergonomics. Guard B (AST scanner) is the structural net. There is intentionally no monkey-patch / env override of A. To use the holdout legitimately, either call open_holdout(..., evaluation_mode=True) or add the new module to HOLDOUT_LEGITIMATE_MODULES in tests/test_holdout_isolation.py with a justification in the PR."
+  },
+  "provenance_doc": "docs/superpowers/specs/es/2026-04-30-a1-holdout-dataset-provenance.md"
+}
