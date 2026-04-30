@@ -122,6 +122,32 @@ Proxy format when needed: `socks5://127.0.0.1:1080`
 - `data/symbols_status.json` — current symbol state (auto-generated)
 - `data/signals_history.csv` — CSV export of all signals
 
+## Validation Methodology — Holdout Dataset (epic #246, ticket #247)
+
+The repo contains a **locked holdout dataset** at `data/holdout/` that must NOT be touched by scanner / auto_tune / backtest tuning code paths. It exists so that strategy parameter changes can be validated honestly out-of-sample.
+
+- **Cutoff:** fixed (not rolling), 12 months back from the lock date `2026-04-30`. Holdout window starts `2025-04-30T00:00:00 UTC`.
+- **Contents:** OHLCV (10 curated symbols × 4 timeframes), Fear & Greed daily, BTC funding rate. SHA-256 + commit recorded in `data/holdout/MANIFEST.json`.
+- **Filesystem state:** `chmod -R 444/555`, read-only.
+- **Authoritative provenance doc:** `docs/superpowers/specs/es/2026-04-30-a1-holdout-dataset-provenance.md` — read this before A.2/A.4 work.
+
+### Read-guard policy (decision: A + B with B reinforced)
+
+- **Guard A — `data/holdout_access.py`** is the **only** legitimate read entry point: `open_holdout(rel_path, *, evaluation_mode=True)` returns the resolved Path. Anything else raises `HoldoutAccessError`. **No monkey-patch / env override** is offered — A is opt-in ergonomics by design.
+- **Guard B — `tests/test_holdout_isolation.py`** is the structural net. AST scanner walks every `.py` in the repo and fails CI if any non-whitelisted module references the holdout via string literal, `*.join(..., 'holdout', ...)`, `Path / 'holdout' / ...`, or f-string with `'holdout'`. Docstrings are skipped.
+- **To use the holdout from a new module** (A.2 walk-forward, A.4 evaluation): either call `open_holdout(..., evaluation_mode=True)` and never reference the path directly, or add the module to `HOLDOUT_LEGITIMATE_MODULES` in `tests/test_holdout_isolation.py` with a justification reviewed in the PR.
+
+### Caveats heredados — A.4 (#250) MUST honor
+
+1. **Re-tune required.** The current `atr_sl_mult/tp/be` were tuned over the full history including the holdout range. A.4 must re-tune over `[earliest, holdout_start - 1 bar]` BEFORE evaluating against the holdout (else: leakage).
+2. **Regime composition not guaranteed.** The 12-month window may not cover all regimes. A.4 must report bull/bear/neutral mix and call out gaps.
+3. **Drift not auto-detectable.** F&G and funding rate hashes freeze the snapshot at fetch time. A.4 must re-fetch + diff against source APIs to detect provider revisions.
+
+### Inviting users — guardrail (#271)
+
+`trading.sdar.dev` does **not** get additional user accounts until both: (a) Epic A passes its validation bar (A.4 documented, A.6 published), and (b) Epic B (#253) is implemented. This is a self-imposed contract; closing #271 requires explicit confirmation of both conditions.
+
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
 - The webhook process itself is not supervised by the watchdog (only btc_api.py is)
+- Strategy backtest numbers in `docs/superpowers/specs/es/2026-04-17-formula-ganadora-resultados-finales.md` and `docs/superpowers/specs/es/2026-04-18-documento-completo-sistema-trading.md` are **pre-#223/#224** (phantom-profit fix). The "real strategy contribution" decomposition in PR #223 showed those numbers were inflated. **Do not cite those numbers as baseline** — see #272 for the re-baselining work.

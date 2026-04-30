@@ -23,6 +23,12 @@ data/ohlcv.db
 data/ohlcv.db-wal
 data/ohlcv.db-shm
 
+# ── Holdout dataset: large OHLCV slice exceeds GitHub's 100 MB per-file limit ──
+# Manifest captures sha256 + lock commit so the slice can be regenerated bit-for-bit
+# from data/ohlcv.db at the locked commit. The small artifacts (MANIFEST.json,
+# README.md, fng.parquet, funding.parquet) ARE committed.
+data/holdout/ohlcv.sqlite
+
 # ── Logs ──────────────────────────────────────────────────────
 logs/
 *.log
