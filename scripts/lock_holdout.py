@@ -317,6 +317,25 @@ CAVEATS = [
             "must be reported (not silently overridden)."
         ),
     },
+    {
+        "id": "WINDOW_END_NOT_ALIGNED_ACROSS_SOURCES",
+        "summary": (
+            "The right edge of the holdout window is NOT aligned across sources because "
+            "providers had no later data at fetched_at_utc. Concretely: OHLCV typically "
+            "extends a day or two beyond F&G (alternative.me publishes once daily, often "
+            "with a small delay) and beyond funding rate (Binance funding settles every 8h "
+            "but the most recent unsettled period is excluded). The exact end timestamps "
+            "per source are recorded in sources.*.last_iso."
+        ),
+        "obligation": (
+            "A.4 (#250) MUST either (a) truncate evaluation to the common window "
+            "[holdout_start, min(end_per_source)] OR (b) document the asymmetric tail "
+            "explicitly in its results report. Silently ignoring the misalignment "
+            "is not allowed — regime scoring during the trailing days has reduced "
+            "input coverage and any conclusions drawn there are weaker than for the "
+            "common-window interior."
+        ),
+    },
 ]
 
 

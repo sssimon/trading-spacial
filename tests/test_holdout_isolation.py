@@ -17,6 +17,25 @@ To use the holdout legitimately from a new module, either:
       and never reference ``"data/holdout"`` directly, or
   (b) add the module path to ``HOLDOUT_LEGITIMATE_MODULES`` below with a
       one-line justification — the addition is reviewed in the PR.
+
+Known limitations
+-----------------
+This scanner is **defense against a distracted human, not a motivated attacker**.
+Patterns it does NOT catch by construction:
+
+  * String concatenation of literals: ``"data/" + "hold" + "out/foo"``.
+    (BinOp(Add) inspection could be added; not done here because it inflates
+    the false-positive surface for concatenation in unrelated code.)
+  * Variable indirection: ``x = "ho"; y = x + "ldout"; open("data/" + y)``.
+  * Encoded / obfuscated paths: ``bytes.fromhex(...).decode()``,
+    ``base64.b64decode(...)``, ``codecs.decode(...)``.
+  * Dynamic resolution: ``getattr(mod, "holdout")``, ``importlib`` games.
+  * Reading via subprocess (``subprocess.run(["cat", "data/holdout/..."])``)
+    — string is in a list, currently not inspected.
+
+If a contributor goes to those lengths to bypass the guard, the PR review is
+the next layer; the code-review checklist for Epic-A-related changes should
+include "did you read data/holdout/ from a non-whitelisted module".
 """
 from __future__ import annotations
 
@@ -210,15 +229,26 @@ def _scan_inline(code: str) -> list[tuple[int, str]]:
 
 
 def test_pattern_1_string_literal_is_caught():
-    code = (
-        "import pandas as pd\n"
-        'df = pd.read_csv("data/" + "hold" + "out/foo.csv")\n'
-    )
-    # First test the obvious literal case
-    code_obvious = 'import pandas as pd\ndf = pd.read_csv("data/holdout/foo.csv")\n'
-    violations = _scan_inline(code_obvious)
+    code = 'import pandas as pd\ndf = pd.read_csv("data/holdout/foo.csv")\n'
+    violations = _scan_inline(code)
     assert violations, "should detect 'data/holdout/foo.csv' string literal"
     assert any("string literal" in r for _, r in violations)
+
+
+def test_known_limitation_concatenation_is_not_caught():
+    """Documents that the scanner does NOT catch string concatenation by design.
+
+    See module docstring 'Known limitations'. This is not a defect — concatenation
+    can be added if needed, but inflates the false-positive surface elsewhere in
+    the repo. The PR-review checklist for Epic-A-related changes is the
+    backstop for this evasion class.
+    """
+    code = 'import pandas as pd\ndf = pd.read_csv("data/" + "hold" + "out/foo.csv")\n'
+    violations = _scan_inline(code)
+    assert not violations, (
+        "concatenation is intentionally not caught; if this fires, the visitor "
+        "was extended — update the Known limitations section in the module docstring."
+    )
 
 
 def test_pattern_2_os_path_join_is_caught():

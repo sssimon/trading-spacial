@@ -122,11 +122,17 @@ Vacío. Todo input al regime detector y al scoring de producción está cubierto
 
 Si A.2 / A.4 / futuras versiones del scoring incorporan una nueva fuente externa, **debe extenderse este snapshot y rotarse el lock**, no parchear el rango.
 
+### 3.5 Desalineamiento del borde derecho de la ventana
+
+OHLCV llega hasta `2026-04-29` (5m al `13:05 UTC`); F&G y funding paran en `2026-04-27`. No es bug: en el momento del fetch (`fetched_at_utc`), alternative.me todavía no había publicado los días 28-29, y Binance Futures excluye el período de funding más reciente (no settled).
+
+Esto se codifica como caveat machine-readable `WINDOW_END_NOT_ALIGNED_ACROSS_SOURCES` en `MANIFEST.json` y se desarrolla en §4.4. La obligación heredada por A.4 es **truncar la evaluación a la ventana común** `[holdout_start, min(end_per_source)]` o **documentar explícitamente la cola asimétrica** — silencio no permitido.
+
 ---
 
 ## 4. Caveats heredados — restricciones para A.4 (#250) y A.6 (#252)
 
-Tres caveats **bloqueantes**. Están además codificados machine-readable en `data/holdout/MANIFEST.json` bajo `caveats`.
+Cuatro caveats **bloqueantes**. Están además codificados machine-readable en `data/holdout/MANIFEST.json` bajo `caveats`.
 
 ### 4.1 `RE_TUNE_REQUIRED_FOR_A4`
 
@@ -145,6 +151,12 @@ Tres caveats **bloqueantes**. Están además codificados machine-readable en `da
 > Los hashes de F&G y funding congelan el snapshot tomado al `fetched_at_utc`. Las revisiones retroactivas del proveedor **NO son detectables desde este lock**.
 
 **Obligación heredada por A.4:** re-fetch F&G y funding para la ventana del holdout desde sus APIs y diff contra el snapshot locked. Cualquier divergencia debe reportarse (no overridearse silenciosamente).
+
+### 4.4 `WINDOW_END_NOT_ALIGNED_ACROSS_SOURCES`
+
+> El borde derecho de la ventana del holdout **no está alineado** entre fuentes porque los proveedores no tenían data más reciente al `fetched_at_utc`. Concretamente: OHLCV típicamente llega un día o dos más allá de F&G (alternative.me publica una vez al día, a veces con delay) y más allá de funding rate (Binance settla cada 8h pero excluye el período no settled). Los timestamps exactos por fuente están en `sources.*.last_iso` del manifest.
+
+**Obligación heredada por A.4:** O bien (a) truncar la evaluación a la ventana común `[holdout_start, min(end_per_source)]`, O bien (b) documentar explícitamente la cola asimétrica en el reporte de resultados. **Ignorarlo silenciosamente no está permitido** — el regime scoring durante los días de cola tiene cobertura de inputs reducida y cualquier conclusión derivada de esa franja es más débil que la del interior de la ventana común.
 
 ---
 
@@ -198,6 +210,8 @@ Tests demostrativos en el mismo archivo:
 
 ## 6. Reproducibilidad
 
+> **Nota sobre `lock_commit_sha`.** El campo `lock_commit_sha` apunta al commit que contiene **el código del lock** (`scripts/lock_holdout.py`, `data/holdout_access.py`, `tests/test_holdout_isolation.py`). El manifest mismo y los artifacts (`ohlcv.sqlite`, `fng.parquet`, `funding.parquet`, `MANIFEST.json`, `README.md`) **no existen** en ese commit — se materializan al ejecutar el script en un commit posterior (en este primer lock, el commit `0aaa100`). Esto evita la paradoja de un commit cuyo hash dependería de su propio output. Por eso el procedimiento de reproducibilidad checkea el infra commit (no el commit que contiene el manifest) y deja que el script genere los artifacts.
+
 Para regenerar este lock bit-a-bit (modulo el drift de proveedor de F&G/funding):
 
 ```bash
@@ -222,7 +236,33 @@ El script:
 
 ---
 
-## 7. Cuándo se rota este lock
+## 7. Modelo de confianza
+
+El SHA-256 de `data/holdout/ohlcv.sqlite` (1,162,898 filas, ~158 MB) es **verificable bit-a-bit sólo por quien tenga acceso a `data/ohlcv.db`** (también gitignored, datos de producción del scanner) y pueda reproducir el filtrado vía `scripts/lock_holdout.py` checkeado al `lock_commit_sha`.
+
+Para cualquier otro reviewer (externo al equipo, contratista, auditor sin acceso a la DB), la confianza se construye sobre tres anclas en el repo:
+
+1. **El manifest committeado** (`data/holdout/MANIFEST.json`) — captura sha256 + commit + timestamps + caveats. Es review-able en el PR.
+2. **El `lock_commit_sha`** apuntando al commit del código del lock — el reviewer puede inspeccionar el script y convencerse de que el procedimiento es correcto incluso sin re-ejecutarlo.
+3. **La cadena git de quien firmó el commit** — la garantía de "este lock fue producido por quien dice haberlo producido" descansa sobre la firma git del commit (en su defecto, sobre la identidad del committer registrado).
+
+Esta es una **limitación deliberada** del diseño:
+
+- **No usamos Git LFS** porque el repo no lo integra hoy y agregarlo es scope-creep para A.1 (impacto en CI, en cada checkout, y en el flujo deploy de #244/#245).
+- **No publicamos un mirror del subset** porque mover datos del scanner fuera del repo agrega superficie operativa que no necesitamos en este momento (storage, ACL, sync).
+- **Aceptamos que la verificación independiente requiere acceso a la DB de producción** — el caso de uso "auditor externo verifica el lock sin acceso a la DB" no está soportado en esta versión.
+
+**Opciones futuras** si la verificación independiente se vuelve un requisito (e.g., porque queremos publicar números a usuarios externos en Epic B y necesitan confianza sin acceso interno):
+
+- Integrar Git LFS para `data/holdout/ohlcv.sqlite` — requiere config de LFS en CI + en cada clone.
+- Publicar el subset en almacenamiento accesible (release attachment de GitHub, S3 firmado, IPFS) con el sha256 del manifest como ancla.
+- Aceptar la cadena de confianza actual como suficiente para el alcance interno y documentar la limitación en cualquier mensaje exterior.
+
+A día del lock (2026-04-30), la decisión es **opción 3**: confianza interna basada en commit + manifest + git, sin escalar a infraestructura externa.
+
+---
+
+## 8. Cuándo se rota este lock
 
 **No se rota.** Este es el holdout autoritativo de la metodología epic A.
 
@@ -236,7 +276,7 @@ Cualquier rotación requiere actualizar este doc y abrir un PR explícito. El lo
 
 ---
 
-## 8. Referencias cruzadas
+## 9. Referencias cruzadas
 
 - Issue **#247** — `feat(strategy-validation): reserve and lock holdout dataset` (este ticket)
 - Epic **#246** — `epic: strategy validation methodology — walk-forward on intact holdout`
