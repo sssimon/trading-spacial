@@ -16,10 +16,10 @@ Este doc es un **panorama de opciones**, no una recomendación cerrada. La decis
 
 **Premisa heredada del diagnóstico A.0.2.diag (#281):**
 
-- Exit logic actual = ATR-based: `SL = entry ± atr·atr_sl_mult`, `TP = entry ± atr·atr_tp_mult`, `BE = mover SL a entry cuando precio mueve atr·atr_be_mult favorable`. Sin trailing post-BE, sin time-stop. Lógica concreta: [`backtest.py:518-589`](../../../backtest.py).
+- Exit logic actual = ATR-based: `SL = entry ± atr·atr_sl_mult`, `TP = entry ± atr·atr_tp_mult`, `BE = mover SL a entry cuando precio mueve atr·atr_be_mult favorable`. Sin trailing post-BE, sin time-stop. Lógica concreta: [`_close_position` en `backtest.py:266-322`](../../../backtest.py) + evaluación bar-a-bar SL/TP/BE en [`backtest.py:323-657`](../../../backtest.py).
 - En PENDLE/AVAX/ADA, **fixed-horizon h=+5h captura `+0.46–0.55%` gross per-trade** vs `~0%` del ATR-based (medición real, train 18m). El exit logic ATR está destruyendo ~100% de la edge predictiva, *antes* de aplicar costos. Ver §2 + §6 de [`docs/superpowers/specs/es/2026-04-30-a02-diag-deep-dive.md`](../specs/es/2026-04-30-a02-diag-deep-dive.md) y la adenda en [#281](https://github.com/sssimon/trading-spacial/issues/281#issuecomment-4353692842).
 - **Fixed-horizon h=+5 simple es baseline validado en train.** El research busca variantes *superiores* a fixed-horizon, no si fixed-horizon vale la pena (eso ya se demostró).
-- **#8 (robustez temporal) quedó inconclusivo.** No está cerrado si la edge en train es real o artifact. Cualquier pattern que "casualmente coincida con la estructura del overrides previo" hereda el mismo riesgo de leakage que motivó re-tune de A.4.
+- **Análisis #8 (robustez temporal, dentro de [#281](https://github.com/sssimon/trading-spacial/issues/281)) quedó inconclusivo.** No está cerrado si la edge en train es real o artifact. Cualquier pattern que "casualmente coincida con la estructura del overrides previo" hereda el mismo riesgo de leakage que motivó re-tune de A.4. Aclaración: este "Análisis #8" es el §8 del thread de #281, **no** el GH issue #8 (que es otro tema, cerrado).
 
 **Restricciones explícitas observadas en este research:**
 
@@ -264,7 +264,7 @@ t=6h: TP = -1.0% (cierre forzado)
 
 Variantes razonables:
 - `horizon = 5h en bear, 8h en sideways, 12h en bull` (refleja lo observado en #4: bear es donde el strategy es menos malo, bull catastrófico — un horizon corto en bull podría limitar daño).
-- `horizon = winners_median_holdtime` per symbol (BTC=14h, ETH=14h, small-caps=5h post-#6).
+- `horizon = winners_median_holdtime` per symbol (BTC=14h, ETH=14h; small-caps **no medible** — 0 winners en train, post-#6). El "5h" que el doc anterior atribuía a small-caps era mediana de **losers**, no de winners; el winner holdtime per-símbolo en small-caps es indefinido bajo la exit logic actual.
 
 **Pros:**
 - Aprovecha el dato heterogéneo del basket (#6 mostró ratio 3.5x BTC, 2.8x ETH, 0 winners en 8 small-caps).
@@ -374,11 +374,11 @@ Los frameworks retail exponen ATR/percent/trailing-stop primitives pero tratan e
 
 **Framing crítico:** §3.1 NO es una decisión, es **el siguiente experimento** dentro de una secuencia de gates. La diferencia importa: una "decisión" implica que pasa el experimento se aplica; un "experimento" produce data que alimenta la decisión real, que se toma después de Gate 4. El doc anterior comprimió esto en "Si A.4 hit la barra de A.0.3, está hecho" — eso era prematuro. La secuencia explícita:
 
-### Gate 0 — Resolver #8 conscientemente, no implícitamente
+### Gate 0 — Resolver Análisis #8 (robustez temporal) conscientemente, no implícitamente
 
-#8 (robustez temporal) quedó **inconclusivo** en el diagnóstico. Hay dos caminos legítimos, NO un default:
+Análisis #8 (robustez temporal, dentro de [#281](https://github.com/sssimon/trading-spacial/issues/281)) quedó **inconclusivo** en el diagnóstico. Hay dos caminos legítimos, NO un default:
 
-- **Camino A: cerrar #8 ANTES de A.4.** Buscar data pre-train adicional (e.g., backtest exchanges con histórico más largo, datos OOS de proveedor alternativo) hasta que la pregunta "edge real vs artifact" tenga respuesta empírica. Costo: tiempo. Beneficio: cuando holdout falle, sabés POR QUÉ.
+- **Camino A: cerrar Análisis #8 ANTES de A.4.** Buscar data pre-train adicional (e.g., backtest exchanges con histórico más largo, datos OOS de proveedor alternativo) hasta que la pregunta "edge real vs artifact" tenga respuesta empírica. Costo: tiempo. Beneficio: cuando holdout falle, sabés POR QUÉ.
 
 - **Camino B: aceptar holdout como test dual-propósito.** El holdout valida simultáneamente (i) la edge predictiva y (ii) la exit logic. Costo: si holdout falla, no podés diagnosticar si fue (i) o (ii) — el experimento queda confundido. Beneficio: tiempo a A.4 ahora.
 
@@ -410,11 +410,13 @@ No pre-asumir el decoupling es la diferencia entre un test honesto y curve-fit a
 - Símbolos del basket (10).
 - Variantes de exit pattern barridas (al menos: Triple Barrier, ATR-only baseline, time-only baseline, time-decay TP si aplica).
 - Grid de ATR multipliers explorados en Gate 1.
-- Override-history acumulado en epics anteriores (#121, #135, etc.) — cada uno consumió DOF.
+- Override-history acumulado en epics anteriores (#121, #135, etc.) — cada uno consumió DOF (ver §6.6 para el desglose enumerable y decisión pendiente).
 - Si Gate 0 = Camino B: penalty adicional por validar dos preguntas (edge + exit logic) en el mismo holdout.
 - Cluster partitions evaluadas (1 si single basket, 2+ si decoupling).
 
 El número honest probablemente está en el rango N=30–100, no N=10. Eso cambia el threshold de Deflated Sharpe materialmente.
+
+**Atribución del threshold:** el valor numérico del DSR vive en [#249](https://github.com/sssimon/trading-spacial/issues/249) (A.3 quantitative bar), **no** en [#278](https://github.com/sssimon/trading-spacial/issues/278) — #278 sólo define **cómo** computar la métrica (`sharpe_deflated`, `n_effective`, `sigma_sr_trials`, `prob_sr_gt_0`). Pre-fijar el threshold en #249 antes de Gate 3 es prerequisito; sin número ex-ante, no hay pass/fail honesto y el gate degenera en post-rationalization.
 
 ### Gate 4 — Cost-survival check con pass criterion PRE-REGISTRADO
 
@@ -426,7 +428,7 @@ Sugerencia de criterion (a confirmar por reviewer/dev en martes, ANTES de Gate 1
   - Para `{BTC, ETH}`: `Y_majors ≈ 2 × round_trip_cost_majors_p50` (e.g., si round-trip mediana ≈ 10–15 bps, `Y_majors ≈ 25 bps` = ~2x safety margin).
   - Para `{PENDLE, ADA}`: `Y_smallcaps ≈ 2 × round_trip_cost_smallcaps_p50` (más alto, depende de #279 sqrt v2 calibration).
 - **Net Sharpe ≥ X**, con `X` definido contra benchmark de "buy-and-hold el cluster" para el período holdout. Pasar SR del strategy > SR del HODL es bar mínimo; preferiblemente SR ≥ 1.0 anualizado.
-- Aplicar el cost model upstream: A.0.2 linear v1 ([#277](https://github.com/sssimon/trading-spacial/pull/277)) + #279 sqrt v2 ([epic](https://github.com/sssimon/trading-spacial/issues/279)) cuando esté shipped.
+- Aplicar el cost model upstream cuando esté mergeado a main: A.0.2 linear v1 ([#277](https://github.com/sssimon/trading-spacial/issues/277), al 2026-04-30 vive solo en `feat/methodology-a02-realistic-costs` — branch local, sin PR abierto, no mergeado) + #279 sqrt v2 ([#279](https://github.com/sssimon/trading-spacial/issues/279), sin PR). **Las métricas en circulación son cost-OFF — Gate 4 no puede declararse pass hasta que A.0.2 esté shipped a main y aplicado upstream a las métricas que el doc cite como evidencia.**
 
 **Compromiso:** los valores numéricos exactos de `Y_majors`, `Y_smallcaps`, `X` se acuerdan martes. Documentados en el ticket de A.4 antes de Gate 1. Si en Gate 4 los números fallan el criterion, A.4 no procede a producción — independiente de cuán "cerca" hayan quedado.
 
@@ -461,6 +463,21 @@ Sugerencia de criterion (a confirmar por reviewer/dev en martes, ANTES de Gate 1
 
 5. **~~Triple Barrier en Hummingbot v2 como blueprint de implementación~~ — CERRADO.** Re-implementación in-place en `backtest._close_position`. Agregar `time_limit` como kwarg en `_close_position` + check en el loop bar-by-bar (~20 líneas). Hummingbot v2 puede inspirar el shape de `TripleBarrierConfig` (dataclass con campos opcionales), pero **portar/refactor architectural queda fuera de scope para A.4** — es un proyecto de 2 meses disfrazado de exit logic decision. Mínima fricción gana; si en el futuro el sistema crece a múltiples patterns y el switch policy-vs-plumbing se vuelve doloroso, ahí se considera el refactor. No ahora.
 
+6. **Gap auditable: `config.json` `.gitignored` ⇒ provenance de overrides ausente.** Las iteraciones de override por símbolo (atribuídas a epic [#121](https://github.com/sssimon/trading-spacial/issues/121), purga [#135](https://github.com/sssimon/trading-spacial/issues/135), etc.) no tienen historia git — `git log -- config.json` retorna 0 commits porque el archivo está en `.gitignore`. Cero auditabilidad de cuándo se introdujo cada override, en qué experimento, con qué justificación.
+
+   **Impacto cuantitativo en Gate 3.** El cómputo honest de `n_effective` para Deflated Sharpe tiene un piso enumerable y un techo desconocido:
+
+   - **Lower bound auditable: ~1,500–2,000 trials.** Componentes:
+     - `auto_tune.py:64-68` GRID = 7×5×3 = **105 combos** × 10 símbolos × {LONG,SHORT} = ~2,100 evaluaciones por corrida (`scripts/tune_per_direction.py`).
+     - `grid_search_tf.py:62-69` GRID = 4×4×4×4×3 = **768 combos** trend-following.
+     - MR optimization CSVs en `data/backtest/`: 5 símbolos × 105 = **525 trials** registrados.
+     - Kill-switch v2 grid (epic [#216](https://github.com/sssimon/trading-spacial/issues/216), commit `faefa22`): sweep adicional, no enumerado.
+   - **Upper bound: desconocido.** Cualquier exploración ad-hoc local que mutó `config.json` no dejó artifact.
+
+   **Decisión pendiente para #278 trial registry:** ¿(a) capturar provenance de overrides retroactivamente (re-correr los grids documentados, asociar cada combo ganador a un commit-equivalente), o (b) aceptar el techo desconocido como upper-bound estructural en la primera iteración y aplicar el `N_floor = 50` que el body de #278 propone para los primeros 6 meses? Sin tomar postura, el "N=10 era honestidad incompleta" sigue subestimando el N real por al menos dos órdenes de magnitud.
+
+   **Pre-requisito derivado para Gate 3:** la decisión (a) o (b) debe estar tomada y documentada en el ticket de A.4 antes de correr el experimento. La elección cambia el threshold del DSR (#249) materialmente, no es cosmética.
+
 ---
 
 ## 7 · Estado de completitud
@@ -471,8 +488,8 @@ Sugerencia de criterion (a confirmar por reviewer/dev en martes, ANTES de Gate 1
 | §2 Sección por framework | ✅ Freqtrade, Hummingbot, Jesse, Backtrader, NautilusTrader, vectorbt OSS | OctoBot cubierto en cobertura limitada |
 | §3 Patterns candidatos | ✅ 4 candidatos con pros/cons aplicados al contexto | |
 | §4 Quant tradicional addendum | ✅ 7 patterns con citas verificables | |
-| §5 Recomendación | ✅ 1-2 priorizados, con decisión orthogonal del holdout flagged | |
-| §6 Decisions to surface | ✅ 5 decisiones surfaced | |
+| §5 Recomendación | ✅ 5 gates (0-4) con sub-gate 2a decoupling, framing como "siguiente experimento" no decisión | |
+| §6 Decisions to surface | ✅ 6 decisiones surfaced | §6.1 deferred, §6.5 cerrada, §6.6 nueva (provenance gap) |
 
 **Frameworks cubiertos del scope #282:** Freqtrade ✅, Hummingbot ✅, Jesse ✅, Backtrader ✅ (+ `bt` flag-only), NautilusTrader ✅, vectorbt ✅, OctoBot 🟡 cobertura limitada.
 
