@@ -28,7 +28,7 @@ Este doc produce **30 valores** (10 símbolos × 3 parámetros) — `time_limit_
 - Winner holding median 14h en BTC/ETH; 0 winners en 8 small-caps bajo el exit logic actual (#281 §6).
 - Cost spectrum 4 órdenes de magnitud: BTC `participation_p50 = 0.0003` → PENDLE `8.0` (#281 §1).
 - Cooldown actual `COOLDOWN_H = 6` global ([`btc_scanner.py:131`](../../../btc_scanner.py)).
-- Cluster classification: B-like sólido (PENDLE, ADA), B-like parcial (BTC, ETH), Mundo C local (DOGE, JUP, RUNE, XLM, AVAX, UNI). Per [pivot plan §1.2](../plans/2026-05-01-a4-strategic-pivot-plan.md#12-cluster-classification-del-basket-de-10-per-281).
+- Cluster classification: B-like sólido (PENDLE, ADA), B-like parcial (BTC, ETH), Mundo C local (DOGE, JUP, RUNE, XLM, AVAX, UNI). Per [pivot plan §1.2](../plans/2026-05-01-a4-strategic-pivot-plan.md#12-cluster-classification-del-basket-de-10-per-281). **Nota (I1):** el diagnóstico [#281](https://github.com/sssimon/trading-spacial/issues/281) clasifica UNI como "Marginal alto-riesgo" (bucket separado de Mundo C local). El pivot plan §1.2 los absorbió por simplicidad operacional; este study sigue la agrupación del pivot plan.
 
 **Tier framework para cada valor (per #292 spec):**
 
@@ -74,7 +74,9 @@ Este doc produce **30 valores** (10 símbolos × 3 parámetros) — `time_limit_
 1. **Lower bound:** `peak_predictive_horizon = 5h` (AFML "give signal room to express").
 2. **Upper bound (B-like parcial):** `winners_median_holding` (no truncar winners validados).
 3. **B-like sólido (no winners observados):** `peak_horizon` directo (5h) — honest about train-set noise.
-4. **Mundo C local:** basket default 5h (intersección Hummingbot ~50min × scale + Freqtrade 1H first-tier ~3–4h, escalado a h=+5 cadence). Confidence baja por construcción.
+4. **Mundo C local:** basket default 5h. **Anchor honesty (I3):** este 5h está anchored SOLO en el AFML floor (peak h=+5). NO está anchored en framework convergence — Hummingbot MACD-BB 55min y Freqtrade sample 60min están definidos sobre TF de 5m (≈12 bars); applied al 1H TF nuestro, "12 bars" = 12h, no 5h. La elección de 5h sobre 12h prioriza el predictive-horizon anchor sobre el framework-bar-multiplier anchor — esto refuerza que el tier `low` para Mundo C es legítimo (floor-only, no benchmark-converged). Ver D6 para la decisión surfaced.
+
+**Same-bar tie-break (I2):** Resolución de conflicto intra-bar entre SL y `time_limit_hours` cuando ambos hit en el mismo 1H bar — deferida a PR Estructural 1; default proposal: **SL wins** (preserva R-multiple semantics y matches benchmark [#282](https://github.com/sssimon/trading-spacial/issues/282) §3.1 caveat sobre TIME_LIMIT bucket cost contamination).
 
 ### 1.5 Per-symbol proposals (10 filas)
 
@@ -91,7 +93,7 @@ Este doc produce **30 valores** (10 símbolos × 3 parámetros) — `time_limit_
 | **JUPUSDT** | **5** | Mundo C local, t=0.07 noise. Basket default. | Mismo que DOGE | low |
 | **RUNEUSDT** | **5** | Mundo C local, t=-0.18 noise (slightly negative — strongest "no edge" signal). Basket default. | Mismo que DOGE | low |
 
-**Confidence summary Área 1:** 1 high · 4 medium · 1 medium-low · 4 low.
+**Confidence summary Área 1:** 1 high · 3 medium · 1 medium-low · 1 low-medium · 4 low (= 10).
 
 ---
 
@@ -204,7 +206,7 @@ Aplicando rule (NW=4 dominado siempre por floor=6 → effectively `cooldown = ma
 | **BTCUSDT** | **14** | TL=14h binds; ρ=−0.135 mild reversal, no extra buffer; no clustering risk past TL. | Hummingbot 3600s for 1H setups; cooldown=TL pattern | medium |
 | **ETHUSDT** | **14** | TL=14h binds; ρ=+0.117 → T_half ≈ 0.32 bars ≪ 1h → cooldown=TL suficiente. | Mismo que BTC | medium |
 | **ADAUSDT** | **6** | TL≈5h; floor 6h binds (parity legacy backtest); ρ=+0.008 effectively independent. | Freqtrade 5–6 candles | high |
-| **AVAXUSDT** | **8** | TL uncertain 5–8h → upper bound 8h; ρ=−0.062 no carryover; t-stat solid 2.68 respeta TL upper. | Conservador dentro 5–8h band; > floor 6h | low |
+| **AVAXUSDT** | **8** | TL=8 (per Área 1 §1.5 upper bound de 5–8h band); rule output `max(TL=8, 4, 6) = 8`. ρ=−0.062 no carryover. | Rule §3.4 deterministic; confidence low propaga desde TL uncertainty (no discretionary) | low |
 | **DOGEUSDT** | **6** | basket TL default; floor binds; ρ=−0.149 (largest |neg|) → mild reversal already present; extender costaría edge. | Legacy global; Freqtrade 6-candle convention | high |
 | **UNIUSDT** | **6** | basket TL; floor binds; ρ=+0.090 negligible. | Same | high |
 | **XLMUSDT** | **6** | basket TL; floor binds; ρ=+0.155 (largest |pos|) — borderline Lo–MacKinlay critical 0.142 — pero N=190 + multiple-comparison across 10 → still inside noise band. | Same | medium |
@@ -220,7 +222,7 @@ Aplicando rule (NW=4 dominado siempre por floor=6 → effectively `cooldown = ma
 
 **Mundo C, sin clear TL:** Decisión = **6h** (legacy floor). Sin TL defendable per-symbol, no hay base para variar; preserva parity y evita inventar free params.
 
-**AVAX outlier:** TL uncertainty 5–8h → cooldown 8h conservative pick; confidence low precisely porque TL itself uncertain.
+**AVAX outlier:** TL=8 (Área 1 §1.5 picked upper bound de la 5–8h band). Aplicando rule §3.4 deterministicamente: `cooldown = max(TL=8, NW=4, floor=6) = 8`. Confidence low en cooldown propaga directly desde TL uncertainty — el cooldown value es rule-output puro, no discretionary pick (preserva claim DSR-N integrity de D14).
 
 **DSR-N integrity:** rule deterministic en (TL, tier, floor, NW). 0 grid expansion. Defendable como prior, no como search result.
 
@@ -324,11 +326,11 @@ Pero es *return* AC la que importa para entry-cooldown. Vol-AC matters para sizi
 
 **Confidence aggregate (30 valores):**
 
-- Área 1 (TL): 1 high · 4 medium · 1 medium-low · 1 low-medium · 4 low.
-- Área 2 (cap): 2 high · 4 medium · 2 low-medium · 2 low.
-- Área 3 (cooldown): 6 high · 3 medium · 1 low.
+- Área 1 (TL): 1 high · 3 medium · 1 medium-low · 1 low-medium · 4 low (= 10).
+- Área 2 (cap): 2 high · 4 medium · 2 low-medium · 2 low (= 10).
+- Área 3 (cooldown): 6 high · 3 medium · 1 low (= 10).
 
-**Total:** 9 high · 11 medium · 5 low-medium · 7 low (de 30).
+**Total:** 9 high · 10 medium · 1 medium-low · 3 low-medium · 7 low (= 30).
 
 **Lectura honest:** los 4 símbolos viables (BTC, ETH, PENDLE, ADA) tienen los anchors más fuertes en time_limit y cooldown pero **los más débiles en participation cap** (ADA low-medium, PENDLE low). Eso refleja que el cap es el grado de libertad menos validado por literatura per-symbol — el structural fix lo necesita pero la confidence se ganará empíricamente post-PR.
 
