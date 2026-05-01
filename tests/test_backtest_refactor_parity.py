@@ -55,10 +55,15 @@ def test_simulate_strategy_parity_without_kill_switch(tmp_path, monkeypatch):
     if df1h.empty or df4h.empty or df5m.empty:
         pytest.skip("BTCUSDT market data not cached in data/ohlcv.db")
 
+    # A.0.2 (#277) intentionally changed the default cost flags to True. This
+    # parity test pins pre-cost behavior (the regression net for #156/#157
+    # precision bugs); we keep that scope by passing flags=False explicitly.
+    # Cost-on behavior has its own pinned tests in test_backtest_with_costs.py.
     trades, equity = simulate_strategy(
         df1h, df4h, df5m, symbol,
         sim_start=start, sim_end=end,
         df1d=df1d,
+        enable_slippage=False, enable_spread=False, enable_fees=False,
     )
 
     # Pinned from a pre-refactor capture (committed at the start of Task 6).
@@ -206,6 +211,8 @@ def test_simulate_strategy_parity_doge_2024_h1(tmp_path, monkeypatch):
         sim_start=start, sim_end=end,
         df1d=df1d,
         cfg=cfg, symbol_overrides=symbol_overrides,
+        # A.0.2 (#277): pin is pre-cost; explicit flags=False preserves it.
+        enable_slippage=False, enable_spread=False, enable_fees=False,
     )
 
     # Pinned 2026-04-27 with main commit 664e85a (precision fix merged).
@@ -267,6 +274,8 @@ def test_simulate_strategy_parity_xlm_2024_h1(tmp_path, monkeypatch):
         sim_start=start, sim_end=end,
         df1d=df1d,
         cfg=cfg, symbol_overrides=symbol_overrides,
+        # A.0.2 (#277): pin is pre-cost; explicit flags=False preserves it.
+        enable_slippage=False, enable_spread=False, enable_fees=False,
     )
 
     # Pinned 2026-04-27 with main commit 664e85a (precision fix merged).
