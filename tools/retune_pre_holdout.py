@@ -130,21 +130,39 @@ def _build_params_block(results: list, current_overrides: dict) -> dict:
     for r in results:
         sym = r["symbol"]
         if r.get("recommendation") == "CHANGE" and r.get("proposed_params"):
+            pp = r["proposed_params"]
             out[sym] = {
-                "atr_sl_mult": r["proposed_params"]["atr_sl_mult"],
-                "atr_tp_mult": r["proposed_params"]["atr_tp_mult"],
-                "atr_be_mult": r["proposed_params"]["atr_be_mult"],
+                "atr_sl_mult": pp["atr_sl_mult"],
+                "atr_tp_mult": pp["atr_tp_mult"],
+                "atr_be_mult": pp["atr_be_mult"],
             }
-        else:
-            cur = current_overrides.get(sym, {})
-            if isinstance(cur, dict):
-                out[sym] = {
-                    "atr_sl_mult": cur.get("atr_sl_mult"),
-                    "atr_tp_mult": cur.get("atr_tp_mult"),
-                    "atr_be_mult": cur.get("atr_be_mult"),
-                }
-            else:
-                out[sym] = cur
+            continue
+
+        cur = current_overrides.get(sym)
+        if cur is False:
+            # Symbol explicitly disabled — preserve the False sentinel.
+            out[sym] = False
+            continue
+        if not isinstance(cur, dict):
+            raise ValueError(
+                f"_build_params_block: symbol {sym!r} is in the active portfolio "
+                f"(recommendation={r.get('recommendation')!r}) but has no flat "
+                f"override entry in current config (got {cur!r}). Refusing to "
+                f"emit a partial params.json with None values — fix the input "
+                f"config or extend this helper to handle non-flat shapes."
+            )
+        missing = [k for k in ("atr_sl_mult", "atr_tp_mult", "atr_be_mult") if k not in cur]
+        if missing:
+            raise ValueError(
+                f"_build_params_block: symbol {sym!r} current override is "
+                f"missing required keys {missing}. params.json must be a "
+                f"complete drop-in; refusing to emit None placeholders."
+            )
+        out[sym] = {
+            "atr_sl_mult": cur["atr_sl_mult"],
+            "atr_tp_mult": cur["atr_tp_mult"],
+            "atr_be_mult": cur["atr_be_mult"],
+        }
     return out
 
 

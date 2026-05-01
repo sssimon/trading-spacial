@@ -240,6 +240,68 @@ class TestRunBacktestCutoff:
         assert captured["df1h"].index.max() > datetime(2025, 4, 30)
 
 
+class TestBuildParamsBlock:
+    """``_build_params_block`` must refuse to emit a partial params.json
+    when a portfolio symbol has no usable override in the current config.
+    Silent None placeholders would make the artefact look like a valid
+    drop-in while actually breaking downstream consumers.
+    """
+
+    def _result(self, sym: str, recommendation: str = "KEEP", proposed: dict | None = None) -> dict:
+        return {
+            "symbol": sym,
+            "recommendation": recommendation,
+            "current_params": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+            "current_val_pnl": 0,
+            "proposed_params": proposed,
+            "proposal_detail": None,
+        }
+
+    def test_uses_proposed_when_change(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "CHANGE", {"atr_sl_mult": 1.5, "atr_tp_mult": 5.0, "atr_be_mult": 2.0})]
+        out = _build_params_block(results, {"BTC": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}})
+        assert out == {"BTC": {"atr_sl_mult": 1.5, "atr_tp_mult": 5.0, "atr_be_mult": 2.0}}
+
+    def test_preserves_current_when_keep(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "KEEP")]
+        current = {"BTC": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}}
+        out = _build_params_block(results, current)
+        assert out == current
+
+    def test_preserves_false_disabled_sentinel(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "KEEP")]
+        out = _build_params_block(results, {"BTC": False})
+        assert out == {"BTC": False}
+
+    def test_raises_when_symbol_missing_from_overrides(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "KEEP")]
+        with pytest.raises(ValueError, match="has no flat override entry"):
+            _build_params_block(results, {})
+
+    def test_raises_when_override_is_partial(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "KEEP")]
+        # Missing atr_be_mult — must refuse, not emit None.
+        with pytest.raises(ValueError, match="missing required keys"):
+            _build_params_block(results, {"BTC": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0}})
+
+    def test_raises_when_override_is_garbage(self):
+        from tools.retune_pre_holdout import _build_params_block
+
+        results = [self._result("BTC", "NO_DATA")]
+        with pytest.raises(ValueError, match="has no flat override entry"):
+            _build_params_block(results, {"BTC": "not-a-dict"})
+
+
 class TestArtefactReproducibility:
     """Belt-and-suspenders: the artefact JSON layer must be byte-stable
     across re-runs (sort_keys + indent enforced). This is a structural
