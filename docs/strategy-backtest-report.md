@@ -30,7 +30,7 @@
 - **Entry conditions:** LRC% <= 25 (1H) + Price > SMA100 (4H) + Bullish 5M trigger + No exclusions
 - **Exit:** Fixed SL at -2.0% or TP at +4.0% (whichever hit first)
 - **Position sizing:** 1% risk per trade, multiplied by score tier (0.5x / 1x / 1.5x)
-- **Constraints:** One position at a time, 6h cooldown between trades
+- **Constraints:** One position at a time, 6h cooldown between trades (backtest enforces automatically; live system treats E5 as manual-check — see [operational model spec](superpowers/specs/es/2026-05-01-operational-model-manual-gating.md))
 - **Fees:** Not deducted from P&L (Binance spot = 0.1% per side)
 - **Indicators:** Same functions as live scanner (`btc_scanner.py`)
 
