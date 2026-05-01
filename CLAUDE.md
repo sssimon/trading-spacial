@@ -94,6 +94,9 @@ Binance API (Bybit fallback)
 - `types.ts` — TypeScript interfaces (`SymbolStatus`, `Signal`, `Position`, etc.)
 - Components auto-refresh every 30 seconds; manual refresh + force-scan buttons available
 
+### Operational Model
+Signal generation is automatic; entry/close decisions require manual approval via CLI or frontend (Telegram is outbound only — no inbound bot for trade approval). Exclusions E2–E5 in `btc_scanner.py:305-335` are manual-check by design — see `docs/superpowers/specs/es/2026-05-01-operational-model-manual-gating.md` for the full classification and the backtest-vs-live distinction.
+
 ## Configuration
 
 **`config.json`** (root) — primary config read by both scanner and API:
