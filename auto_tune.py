@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import time
+import random
 import shutil
 import sqlite3
 import argparse
@@ -159,9 +160,31 @@ def get_portfolio_symbols(config: dict) -> list:
     return active
 
 
+def _slice_below_cutoff(df: pd.DataFrame, cutoff_naive: datetime, symbol: str, name: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    if df.index.dtype.kind != "M":
+        return df
+    sliced = df[df.index < cutoff_naive]
+    if not sliced.empty:
+        assert sliced.index.max() < cutoff_naive, (
+            f"no-leakage violation: {symbol} {name} max ts "
+            f"{sliced.index.max()} >= cutoff {cutoff_naive}"
+        )
+    return sliced
+
+
 def run_backtest_with_params(symbol: str, params: dict,
-                             sim_start: datetime, sim_end: datetime):
+                             sim_start: datetime, sim_end: datetime,
+                             *, cutoff: datetime = None):
     """Run a backtest for a symbol with given ATR params over a date range.
+
+    When ``cutoff`` is provided, all OHLCV bars with timestamp ``>= cutoff``
+    are stripped before the simulator runs, and an assertion verifies the
+    invariant (max bar time strictly < cutoff). The cutoff applies to F&G
+    and funding rate frames as well, since those are also consumed by the
+    regime detector. Defaults to ``None`` for backward compatibility — the
+    legacy code path is byte-identical.
 
     Returns (trades, metrics).
     """
@@ -178,6 +201,15 @@ def run_backtest_with_params(symbol: str, params: dict,
 
     df_fng = get_historical_fear_greed()
     df_funding = get_historical_funding_rate()
+
+    if cutoff is not None:
+        cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+        df1h = _slice_below_cutoff(df1h, cutoff_naive, symbol, "df1h")
+        df4h = _slice_below_cutoff(df4h, cutoff_naive, symbol, "df4h")
+        df5m = _slice_below_cutoff(df5m, cutoff_naive, symbol, "df5m")
+        df1d = _slice_below_cutoff(df1d, cutoff_naive, symbol, "df1d")
+        df_fng = _slice_below_cutoff(df_fng, cutoff_naive, symbol, "df_fng")
+        df_funding = _slice_below_cutoff(df_funding, cutoff_naive, symbol, "df_funding")
 
     if df1h.empty or df4h.empty or df5m.empty:
         return [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
@@ -202,7 +234,7 @@ def run_backtest_with_params(symbol: str, params: dict,
     return trades, metrics
 
 
-def optimize_symbol(symbol: str, config: dict, today=None) -> dict:
+def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime = None) -> dict:
     """Walk-forward optimization for a single symbol.
 
     1. Calculate train/validate periods
@@ -211,13 +243,18 @@ def optimize_symbol(symbol: str, config: dict, today=None) -> dict:
     4. Run top 5 on VALIDATE
     5. Check should_recommend for each
     6. Return result dict
+
+    ``cutoff`` (optional): no-leakage upper bound propagated to every
+    backtest call. When set, runners drop bars ``>= cutoff`` before
+    simulation and assert the invariant. The pre-holdout retune wrapper
+    sets this to the holdout start date.
     """
     train_start, train_end, val_start, val_end = calculate_periods(today)
     current_params = get_current_params(symbol, config)
 
     # Baseline: current params on validate period
     log.info(f"  {symbol}: baseline on validate ({val_start.date()} -> {val_end.date()})...")
-    _, baseline_metrics = run_backtest_with_params(symbol, current_params, val_start, val_end)
+    _, baseline_metrics = run_backtest_with_params(symbol, current_params, val_start, val_end, cutoff=cutoff)
     current_val_pnl = baseline_metrics.get("net_pnl", 0)
 
     # Grid search on train period
@@ -226,7 +263,7 @@ def optimize_symbol(symbol: str, config: dict, today=None) -> dict:
 
     train_results = []
     for combo in combos:
-        _, metrics = run_backtest_with_params(symbol, combo, train_start, train_end)
+        _, metrics = run_backtest_with_params(symbol, combo, train_start, train_end, cutoff=cutoff)
         train_results.append({
             "params": combo,
             "pnl": metrics.get("net_pnl", 0),
@@ -254,7 +291,7 @@ def optimize_symbol(symbol: str, config: dict, today=None) -> dict:
 
     for candidate in top_candidates:
         params = candidate["params"]
-        trades_val, val_metrics = run_backtest_with_params(symbol, params, val_start, val_end)
+        trades_val, val_metrics = run_backtest_with_params(symbol, params, val_start, val_end, cutoff=cutoff)
         val_pnl = val_metrics.get("net_pnl", 0)
         val_pf = val_metrics.get("profit_factor", 0)
         val_trades = val_metrics.get("total_trades", 0)
@@ -480,6 +517,25 @@ def apply_config(config_path: str, proposed_path: str, confirm: bool = False) ->
     return backup_path
 
 
+DEFAULT_SEED = 42
+
+
+def initialize_seed(config: dict) -> int:
+    """Seed Python ``random`` and NumPy from ``config['auto_tune']['seed']``.
+
+    Defensive: the current grid-search code path is fully deterministic
+    (full enumeration via itertools.product) and consumes no RNG, so this
+    has no behavioral effect today. It exists to blunt the impact of any
+    future change that introduces RNG (sampling, tie-breaking, shuffles)
+    by guaranteeing a reproducible seed is in scope before optimization
+    begins. Returns the seed used so callers can record it.
+    """
+    seed = int(config.get("auto_tune", {}).get("seed", DEFAULT_SEED))
+    random.seed(seed)
+    np.random.seed(seed)
+    return seed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Auto-Tune: Walk-forward parameter optimization",
@@ -488,6 +544,17 @@ def main():
     parser.add_argument("--symbol", type=str, help="Optimize single symbol")
     parser.add_argument("--apply", action="store_true", help="Apply config_proposed.json")
     parser.add_argument("--dry-run", action="store_true", help="Show what would change")
+    parser.add_argument(
+        "--max-date",
+        type=str,
+        default=None,
+        help=(
+            "ISO date (YYYY-MM-DD, UTC) treated as today's reference. "
+            "Walk-forward windows derive from this and OHLCV bars >= this "
+            "date are excluded from every backtest call (no-leakage "
+            "guarantee). Default: actual current UTC date."
+        ),
+    )
     args = parser.parse_args()
 
     if args.apply:
@@ -530,15 +597,26 @@ def main():
     config = load_config()
     symbols = [args.symbol.upper()] if args.symbol else get_portfolio_symbols(config)
 
+    seed = initialize_seed(config)
+
+    cutoff = None
+    today = None
+    if args.max_date:
+        cutoff = datetime.fromisoformat(args.max_date).replace(tzinfo=timezone.utc)
+        today = cutoff
+
     print(f"Auto-Tune: {len(symbols)} symbols, walk-forward optimization")
     print(f"Grid: {len(generate_combos())} combos per symbol")
+    print(f"Seed: {seed}")
+    if cutoff is not None:
+        print(f"Cutoff (--max-date): {cutoff.isoformat()} (no-leakage assertions enabled)")
 
     start_time = time.time()
     results = []
 
     for sym in symbols:
         try:
-            result = optimize_symbol(sym, config)
+            result = optimize_symbol(sym, config, today=today, cutoff=cutoff)
             results.append(result)
             rec = result["recommendation"]
             if rec == "CHANGE":
