@@ -302,6 +302,87 @@ class TestBuildParamsBlock:
             _build_params_block(results, {"BTC": "not-a-dict"})
 
 
+class TestParallelOrchestration:
+    """Cover the dispatch path of the wrapper. Cross-process determinism
+    is verified at the run-twice + diff layer (Phase 3, run 1 vs run 2);
+    these tests cover the in-process / orchestration logic that we can
+    reach without spawning subprocesses.
+    """
+
+    def test_run_optimizations_workers_1_preserves_order(self, monkeypatch):
+        from tools import retune_pre_holdout as rph
+
+        captured = []
+
+        def fake_worker(payload):
+            sym, _config, _cutoff = payload
+            captured.append(sym)
+            return {"symbol": sym, "recommendation": "KEEP",
+                    "current_params": {}, "current_val_pnl": 0,
+                    "proposed_params": None, "proposal_detail": None}
+
+        monkeypatch.setattr(rph, "_optimize_worker", fake_worker)
+        cutoff = datetime(2025, 4, 30, tzinfo=timezone.utc)
+        symbols = ["BTC", "ETH", "ADA", "AVAX"]
+        out = rph._run_optimizations(symbols, {}, cutoff, workers=1)
+        assert [r["symbol"] for r in out] == symbols
+        assert captured == symbols  # in-process loop preserves input order
+
+    def test_optimize_worker_reseeds_per_call(self, monkeypatch):
+        from tools import retune_pre_holdout as rph
+
+        seeded_with = []
+
+        def fake_initialize_seed(config):
+            seeded_with.append(int(config.get("auto_tune", {}).get("seed", 42)))
+            return seeded_with[-1]
+
+        def fake_optimize_symbol(symbol, config, *, today, cutoff):
+            return {"symbol": symbol, "recommendation": "KEEP",
+                    "current_params": {}, "current_val_pnl": 0,
+                    "proposed_params": None, "proposal_detail": None}
+
+        monkeypatch.setattr(auto_tune, "initialize_seed", fake_initialize_seed)
+        monkeypatch.setattr(auto_tune, "optimize_symbol", fake_optimize_symbol)
+
+        cutoff_iso = datetime(2025, 4, 30, tzinfo=timezone.utc).isoformat()
+        rph._optimize_worker(("BTC", {"auto_tune": {"seed": 7}}, cutoff_iso))
+        rph._optimize_worker(("ETH", {"auto_tune": {"seed": 7}}, cutoff_iso))
+        # Each invocation must call initialize_seed independently — the
+        # parent's seed call doesn't propagate to children under spawn.
+        assert seeded_with == [7, 7]
+
+    def test_optimize_worker_catches_exceptions(self, monkeypatch):
+        from tools import retune_pre_holdout as rph
+
+        def fake_optimize_symbol(symbol, config, *, today, cutoff):
+            raise RuntimeError("boom")
+
+        def fake_get_current_params(symbol, config):
+            return {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}
+
+        monkeypatch.setattr(auto_tune, "optimize_symbol", fake_optimize_symbol)
+        monkeypatch.setattr(auto_tune, "get_current_params", fake_get_current_params)
+        # Bypass the seed init to avoid touching real RNG state in the test.
+        monkeypatch.setattr(auto_tune, "initialize_seed", lambda cfg: 42)
+
+        cutoff_iso = datetime(2025, 4, 30, tzinfo=timezone.utc).isoformat()
+        out = rph._optimize_worker(("BTC", {}, cutoff_iso))
+        assert out["symbol"] == "BTC"
+        assert out["recommendation"] == "ERROR"
+        assert out["error"] == "boom"
+
+    def test_workers_flag_present_in_real_main_parser(self):
+        # Smoke check that the wrapper exposes --workers.
+        import subprocess
+        out = subprocess.check_output(
+            [sys.executable, "-m", "tools.retune_pre_holdout", "--help"],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
+        assert b"--workers" in out
+
+
 class TestArtefactReproducibility:
     """Belt-and-suspenders: the artefact JSON layer must be byte-stable
     across re-runs (sort_keys + indent enforced). This is a structural

@@ -40,6 +40,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 
 import auto_tune
@@ -52,6 +53,49 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OHLCV_DB = os.path.join(REPO_ROOT, "data", "ohlcv.db")
 
 TIMEFRAMES = ("5m", "1h", "4h", "1d")
+
+
+def _optimize_worker(payload: tuple) -> dict:
+    """Process-pool worker: re-seed in this child process, optimize one symbol.
+
+    Module-level for picklability. Exceptions are caught and converted to
+    ``recommendation=ERROR`` results so a single bad symbol doesn't crash
+    the pool.
+    """
+    symbol, config, cutoff_iso = payload
+    cutoff = datetime.fromisoformat(cutoff_iso)
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+    # Each child must re-seed: the parent's seed call only seeded the parent
+    # process. Per-symbol determinism requires the same seed at the start of
+    # each child invocation.
+    auto_tune.initialize_seed(config)
+    try:
+        return auto_tune.optimize_symbol(symbol, config, today=cutoff, cutoff=cutoff)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "symbol": symbol,
+            "recommendation": "ERROR",
+            "current_params": auto_tune.get_current_params(symbol, config),
+            "current_val_pnl": 0,
+            "proposed_params": None,
+            "proposal_detail": None,
+            "error": str(exc),
+        }
+
+
+def _run_optimizations(symbols: list, config: dict, cutoff: datetime, workers: int) -> list:
+    """Dispatch ``_optimize_worker`` over ``symbols``.
+
+    ``workers <= 1`` → in-process loop (testable with ordinary monkeypatching,
+    used by unit tests). Otherwise spawn a ``ProcessPoolExecutor``. Results
+    preserve input order regardless of completion order.
+    """
+    payloads = [(sym, config, cutoff.isoformat()) for sym in symbols]
+    if workers <= 1:
+        return [_optimize_worker(p) for p in payloads]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(_optimize_worker, payloads))
 
 
 def _resolve_git_commit() -> str:
@@ -277,6 +321,15 @@ def main(argv: list | None = None) -> int:
         default=None,
         help="Override output directory. Defaults to data/retune/<today>-pre-holdout/.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "Process pool size. Defaults to min(len(symbols), os.cpu_count()). "
+            "Use 1 for an in-process sequential run (slower but easier to debug)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     cutoff = datetime.fromisoformat(args.max_date).replace(tzinfo=timezone.utc)
@@ -297,30 +350,22 @@ def main(argv: list | None = None) -> int:
         out_dir = os.path.join(REPO_ROOT, "data", "retune", f"{run_date}-pre-holdout")
     os.makedirs(out_dir, exist_ok=True)
 
+    workers = args.workers if args.workers is not None else min(len(symbols), os.cpu_count() or 1)
+
     log.info("Pre-holdout re-tune starting")
     log.info("  cutoff:   %s", cutoff.isoformat())
     log.info("  symbols:  %s", ", ".join(symbols))
     log.info("  seed:     %d", seed)
+    log.info("  workers:  %d", workers)
     log.info("  out_dir:  %s", out_dir)
 
     start = time.time()
-    results = []
-    for sym in symbols:
-        try:
-            log.info("[%s] optimizing...", sym)
-            r = auto_tune.optimize_symbol(sym, config, today=cutoff, cutoff=cutoff)
-            results.append(r)
-        except Exception as exc:  # noqa: BLE001
-            log.error("[%s] failed: %s", sym, exc)
-            results.append({
-                "symbol": sym,
-                "recommendation": "ERROR",
-                "current_params": auto_tune.get_current_params(sym, config),
-                "current_val_pnl": 0,
-                "proposed_params": None,
-                "proposal_detail": None,
-                "error": str(exc),
-            })
+    results = _run_optimizations(symbols, config, cutoff, workers)
+    for r in results:
+        if r.get("recommendation") == "ERROR":
+            log.error("[%s] failed: %s", r.get("symbol"), r.get("error"))
+        else:
+            log.info("[%s] %s", r.get("symbol"), r.get("recommendation"))
     runtime_seconds = time.time() - start
 
     current_overrides = config.get("symbol_overrides", {}) or {}
@@ -342,6 +387,7 @@ def main(argv: list | None = None) -> int:
         "ohlcv_sha256": ohlcv_sha,
         "ohlcv_path_relative": os.path.relpath(OHLCV_DB, REPO_ROOT),
         "seed": seed,
+        "workers": workers,
         "ran_at_iso": datetime.now(timezone.utc).isoformat(),
         "runtime_seconds": round(runtime_seconds, 2),
         "leakage_check": leakage_check,
