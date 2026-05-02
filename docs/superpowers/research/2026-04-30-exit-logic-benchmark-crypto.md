@@ -20,6 +20,7 @@ Este doc es un **panorama de opciones**, no una recomendación cerrada. La decis
 - En PENDLE/AVAX/ADA, **fixed-horizon h=+5h captura `+0.46–0.55%` gross per-trade** vs `~0%` del ATR-based (medición real, train 18m). El exit logic ATR está destruyendo ~100% de la edge predictiva, *antes* de aplicar costos. Ver §2 + §6 de [`docs/superpowers/specs/es/2026-04-30-a02-diag-deep-dive.md`](../specs/es/2026-04-30-a02-diag-deep-dive.md) y la adenda en [#281](https://github.com/sssimon/trading-spacial/issues/281#issuecomment-4353692842).
 - **Fixed-horizon h=+5 simple es baseline validado en train.** El research busca variantes *superiores* a fixed-horizon, no si fixed-horizon vale la pena (eso ya se demostró).
 - **Análisis #8 (robustez temporal, dentro de [#281](https://github.com/sssimon/trading-spacial/issues/281)) quedó inconclusivo.** No está cerrado si la edge en train es real o artifact. Cualquier pattern que "casualmente coincida con la estructura del overrides previo" hereda el mismo riesgo de leakage que motivó re-tune de A.4. Aclaración: este "Análisis #8" es el §8 del thread de #281, **no** el GH issue #8 (que es otro tema, cerrado).
+- **Nota AVAX:** este doc se refiere a AVAX como parte del cluster con edge predictiva porque la medición original del fixed-horizon h=+5 lo trataba como tal. La reclasificación a Mundo C local — basada en el SL widening test del [Análisis #3 del diagnóstico](../specs/es/2026-04-30-a02-diag-deep-dive.md) (rescate ≤6.6%) — vive en el [pivot plan §1.2](../plans/2026-05-01-a4-strategic-pivot-plan.md). El benchmark **no la pre-asume**; futuras decisiones operacionales sobre AVAX deben referirse al pivot plan + parameter study, no a este doc.
 
 **Restricciones explícitas observadas en este research:**
 
@@ -47,7 +48,7 @@ Filas = frameworks. Columnas = primitivas de exit, marcadas como:
 | **Backtrader** | ✅ bracket orders | ➕ ATR indicator + custom Stop en `next()` | ✅ `Order.StopTrail` (% / abs, sin ATR) | 🟡 idiom `bar_executed + N` en quickstart | ➕ via `next()` close-on-signal | ➕ DIY | Sin chandelier nativo. ATR-trail es pattern comunitario. |
 | **NautilusTrader** | ✅ `OrderList` + `ContingencyType.OCO/OTO` | ➕ `Strategy.modify_order` por bar | ✅ `TrailingStopMarket/Limit` (PRICE/BPS/TICKS, sin ATR) | ✅ `clock.set_time_alert` + `close_position` | ➕ via `on_bar` | ➕ via OCO + time alert | Quant-grade event-driven. ATR-trail no nativo. |
 | **vectorbt (OSS)** | ✅ `sl_stop`, `tp_stop` (Decimal %) | ➕ `adjust_sl_func_nb` Numba callback | ✅ `sl_trail=True` (anchor en HWM) | ❌ **`td_stop` no existe en OSS** — se construye boolean exits array | ✅ `Portfolio.from_signals(exits=...)` first-class | 🟡 combinable vía exits + sl/tp | "Stop signal has priority" sobre signal exit. `td_stop`/`dt_stop` son **vectorbtpro paid**. |
-| **OctoBot** | ✅ `stop_loss_offset`, `take_profit_offset` | ❌ no encontrado | ❌ no en docs públicas (search) | ❌ no nativo | 🟡 evaluator-driven exit | ❌ no | Más orientado a DCA / signal-driven retail; menos relevante para nuestro caso. |
+| **OctoBot** | ✅ `stop_loss_offset`, `take_profit_offset` | ❓ time-budget | ❓ time-budget | ❓ time-budget | 🟡 evaluator-driven exit | ❓ time-budget | Cobertura limitada por 403 al loadear docs (ver §2.7); ❓ = no encontrado en time-budget, no asserción de ausencia. |
 
 **Observación cruzada de la tabla:**
 - **Tres frameworks tienen time-stop nativo de primer nivel**: Freqtrade (`minimal_roi: -1`), Hummingbot (`time_limit`), NautilusTrader (`set_time_alert`). vectorbt OSS lo soporta con un boolean array DIY.
@@ -108,7 +109,7 @@ class TripleBarrierConfig:
     # + per-barrier order types (LIMIT vs MARKET)
 ```
 
-Source: [`data_types.py`](https://github.com/hummingbot/hummingbot/blob/master/hummingbot/strategy_v2/executors/position_executor/data_types.py), [`position_executor.py`](https://github.com/hummingbot/hummingbot/blob/master/hummingbot/strategy_v2/executors/position_executor/position_executor.py). Docs: <https://hummingbot.org/v2-strategies/executors/positionexecutor/>.
+Source: [`data_types.py`](https://github.com/hummingbot/hummingbot/blob/master/hummingbot/strategy_v2/executors/position_executor/data_types.py) (canonical — verified live, matches the 4 fields above), [`position_executor.py`](https://github.com/hummingbot/hummingbot/blob/master/hummingbot/strategy_v2/executors/position_executor/position_executor.py).
 
 `close_type` enum: `STOP_LOSS | TAKE_PROFIT | TIME_LIMIT | TRAILING_STOP` — atribución first-class para diagnóstico.
 
@@ -185,7 +186,7 @@ Stack: Python + Numba, ~5k stars, vectorizado masivo, paradigma de batch backtes
 
 **Time-stop en vectorbt OSS:** patrón canónico = construir un `exits` boolean array que sea `True` en `entry_idx + N` (e.g. via `signals.vbt.fshift(N)` o un Numba routine custom) y pasarlo a `from_signals`. **No hay primitive nativo.**
 
-**Semántica crítica:** "Stop signal has priority" — un SL/TP setup tight preempte un signal-based exit en la misma bar. **Esto es exactamente el patrón que destruye edge en nuestro sistema** — es la versión vectorbt del finding #7.
+**Semántica crítica:** "Stop signal has priority" — un SL/TP setup tight preempte un signal-based exit en la misma bar. **Esto es exactamente el patrón que destruye edge en nuestro sistema** — es la versión vectorbt del finding del [addendum del operador a #281](https://github.com/sssimon/trading-spacial/issues/281#issuecomment-4353692842) (timer fijo h=+5 captura `+0.46–0.55%` vs ATR ~0%).
 
 **Para nuestro caso:** vectorbt es el framework **más eficiente para barrer un grid de patterns alternativos**. Si A.4 quisiera comparar h=+5 vs ATR-only vs h=+5+ATR híbrido vs signal-decay, vectorbt podría hacerlo en minutos sobre el mismo dataset. Pero el time-stop nativo no existe en OSS — habría que construir el array manualmente.
 
@@ -202,9 +203,9 @@ Sin documentación accesible de trailing-stop, ATR-stop, ni time-stop nativo en 
 
 ---
 
-## 3 · Patterns que nuestro sistema NO implementa pero podrían atacar el finding #7
+## 3 · Patterns que nuestro sistema NO implementa pero podrían atacar el finding del addendum a #281
 
-Los siguientes patterns son **candidatos para A.4 prototyping**. Cada uno se evalúa contra la edge predictiva conocida (h=+5h, gross +0.46–0.55% en PENDLE/AVAX/ADA) y el contexto del sistema (10 símbolos, R-multiple sizing, capital constraint, holdout intacto).
+Los siguientes patterns son **candidatos para A.4 prototyping**. Cada uno se evalúa contra la edge predictiva conocida (h=+5h, gross +0.46–0.55% en PENDLE/AVAX/ADA — *ver nota AVAX en §0*) y el contexto del sistema (10 símbolos, R-multiple sizing, capital constraint, holdout intacto).
 
 Tratamos **fixed-horizon h=+5 simple** como baseline validado; los siguientes son **variantes que podrían superarlo**.
 
@@ -330,7 +331,7 @@ Retornos de momentum cross-sectional pico y luego decaen — held ≤ 12 meses, 
 
 ### 4.3 — Almgren-Chriss optimal execution (2000)
 
-Schedule óptimo de liquidación trade-off market-impact vs price-volatility risk. No es exit-rule estrictamente, pero es el framework canónico para "cuando size importa, exit on schedule, not trigger". Source: Almgren & Chriss, "Optimal Execution of Portfolio Transactions", *Journal of Risk* 3(2), 2000: <https://www.smallake.kr/wp-content/uploads/2016/03/optliq.pdf>.
+Schedule óptimo de liquidación trade-off market-impact vs price-volatility risk. No es exit-rule estrictamente, pero es el framework canónico para "cuando size importa, exit on schedule, not trigger". Source: Almgren & Chriss, "Optimal Execution of Portfolio Transactions", *Journal of Risk* 3(2), 2000: <https://www.courant.nyu.edu/~almgren/papers/optliq.pdf> (Almgren's institutional copy at NYU — durable host).
 
 **Implicación:** a retail size, irrelevante. Si una posición fuera grande enough que slippage > 5bps, se schedulea exit en lugar de un único market order al timer.
 
