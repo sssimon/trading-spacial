@@ -77,6 +77,15 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DEFAULT_START = datetime(2021, 1, 1, tzinfo=timezone.utc)  # earliest data to cache
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.01  # 1% of capital per trade
+
+
+from strategy._validators import (
+    validated_time_limit_hours as _shared_validated_tl_hours,
+)
+
+
+def _validated_time_limit_hours(value, symbol: str) -> float | None:
+    return _shared_validated_tl_hours(value, symbol, "simulate_strategy", log)
 # 0.1% per side, Binance spot retail taker, no BNB discount. Conservative —
 # if production uses BNB discount (~0.075%), this overestimates fee cost.
 # Until A.0.2 (#277) the constant was defined here but never deducted from
@@ -546,8 +555,18 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 exit_price = position["tp"]
                 exit_reason = "TP"
             else:
-                exit_price = None
-                exit_reason = None
+                _tl_h = position.get("time_limit_hours")
+                if _tl_h is not None:
+                    hours_open = (bar_time - position["entry_time"]).total_seconds() / 3600
+                    if hours_open >= _tl_h:
+                        exit_price = float(bar["close"])
+                        exit_reason = "TIME_LIMIT"
+                    else:
+                        exit_price = None
+                        exit_reason = None
+                else:
+                    exit_price = None
+                    exit_reason = None
 
             if exit_price is not None:
                 trade = _close_position(
@@ -739,6 +758,16 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 tp_price = float(price * (1 + TP_PCT / 100))
             be_threshold = None
 
+        # Legacy atr_* kwargs path skips the time-limit barrier — those callers
+        # (auto_tune / grid_search) must opt in by passing symbol_overrides
+        # explicitly.
+        if legacy_override_active:
+            _tl_h = None
+        else:
+            _overrides_merged = symbol_overrides or (cfg or {}).get("symbol_overrides", {})
+            _tl_h_raw = _overrides_merged.get(symbol.upper(), {}).get("time_limit_hours")
+            _tl_h = _validated_time_limit_hours(_tl_h_raw, symbol)
+
         position = {
             "entry_price": price,
             "entry_time": bar_time,
@@ -752,6 +781,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             "atr_sl_mult_used": _sl_m_use,
             "atr_tp_mult_used": _tp_m_use,
             "atr_be_mult_used": _be_m_use,
+            "time_limit_hours": _tl_h,
         }
 
         # A.0.2 (#277): freeze cost inputs at entry. notional uses the

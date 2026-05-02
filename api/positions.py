@@ -35,12 +35,29 @@ POSITIONS_JSON_FILE = os.path.join(DATA_DIR, "positions_summary.json")
 router = APIRouter(prefix="/positions", tags=["positions"])
 
 
+from strategy._validators import (
+    validated_scan_interval_sec as _validated_scan_interval_sec,
+    validated_time_limit_hours as _shared_validated_tl_hours,
+)
+
+
+_EVENT_LOG_LABELS = {
+    "TP_HIT": "TAKE PROFIT",
+    "TIME_LIMIT_HIT": "TIME LIMIT",
+    "SL_HIT": "STOP LOSS",
+}
+
+
+def _validated_time_limit_hours(value, symbol: str) -> float | None:
+    return _shared_validated_tl_hours(value, symbol, "check_position_stops", log)
+
+
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
     try:
         _ensure_dirs()
         qty = pos.get("qty") or 0
         pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
-        emoji = "TAKE PROFIT" if reason == "TP_HIT" else "STOP LOSS"
+        emoji = _EVENT_LOG_LABELS.get(reason, "STOP LOSS")
         ts_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         lines = [
             "",
@@ -83,8 +100,13 @@ def update_positions_json():
         log.warning(f"update_positions_json error: {e}")
 
 
-def check_position_stops(symbol: str, price: float):
-    """Auto-cierra posiciones abiertas si el precio toca TP o SL. Sends notifications."""
+def check_position_stops(symbol: str, price: float, now: datetime | None = None):
+    """Auto-cierra posiciones abiertas si el precio toca TP, SL o time-limit. Sends notifications.
+
+    `now` is injectable for deterministic testing; defaults to current UTC time.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
     con = get_db()
     rows = con.execute(
         "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
@@ -138,6 +160,43 @@ def check_position_stops(symbol: str, price: float):
             elif pos["sl_price"] and price >= pos["sl_price"]:
                 reason, exit_price = "SL_HIT", pos["sl_price"]
 
+        if reason is None:
+            overrides = cfg.get("symbol_overrides", {}).get(symbol.upper(), {})
+            _tl_h = _validated_time_limit_hours(overrides.get("time_limit_hours"), symbol)
+            if _tl_h is not None and pos.get("entry_ts"):
+                try:
+                    entry_dt = datetime.fromisoformat(pos["entry_ts"])
+                    if entry_dt.tzinfo is None:
+                        entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError) as e:
+                    log.warning(
+                        f"check_position_stops: malformed entry_ts on position "
+                        f"#{pos['id']} ({symbol}): {pos.get('entry_ts')!r} — "
+                        f"skipping time-limit check (SL/TP unaffected). Error: {e}"
+                    )
+                    continue
+
+                hours_open = (now - entry_dt).total_seconds() / 3600
+                if hours_open >= _tl_h:
+                    # Stateless config resolution: a lowered time_limit_hours
+                    # edit applies retroactively to long-open positions. The
+                    # buffer (2× scan_interval) absorbs normal scanner lag —
+                    # warn only when we're materially past that.
+                    scan_interval_sec = _validated_scan_interval_sec(
+                        cfg, "check_position_stops", log
+                    )
+                    buffer_h = (scan_interval_sec / 3600) * 2
+                    if hours_open > _tl_h + buffer_h:
+                        log.warning(
+                            f"check_position_stops: TIME_LIMIT trigger fired "
+                            f"materially past horizon for #{pos['id']} {symbol} "
+                            f"(hours_open={hours_open:.1f} vs "
+                            f"time_limit_hours={_tl_h}, "
+                            f"buffer={buffer_h:.2f}h) — likely config edit "
+                            f"while position open"
+                        )
+                    reason, exit_price = "TIME_LIMIT_HIT", price
+
         if reason:
             db_close_position(pos["id"], exit_price, reason)
             log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
@@ -150,9 +209,12 @@ def check_position_stops(symbol: str, price: float):
 
             try:
                 from notifier import notify, PositionExitEvent  # noqa: PLC0415
-                # Map legacy reason strings ("SL_HIT"/"TP_HIT") to tier codes.
+                # Map legacy reason strings ("SL_HIT"/"TP_HIT"/"TIME_LIMIT_HIT")
+                # to tier codes used by the notifier templates.
                 exit_reason_code = "SL" if reason == "SL_HIT" else (
-                    "TP" if reason == "TP_HIT" else reason
+                    "TP" if reason == "TP_HIT" else (
+                        "TIME_LIMIT" if reason == "TIME_LIMIT_HIT" else reason
+                    )
                 )
                 notify(
                     PositionExitEvent(
