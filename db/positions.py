@@ -56,6 +56,29 @@ def db_create_position(data: dict) -> dict:
     return dict(row)
 
 
+def db_last_exit_ts(symbol: str) -> Optional[datetime]:
+    """Return last exit_ts (UTC, tz-aware) for symbol's closed positions, or None."""
+    # Naive ISO strings get tz=UTC attached so arithmetic vs
+    # datetime.now(timezone.utc) is well-defined; malformed ISO swallowed → None.
+    con = get_db()
+    row = con.execute(
+        "SELECT exit_ts FROM positions "
+        "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+        "ORDER BY exit_ts DESC LIMIT 1",
+        (symbol.upper(),),
+    ).fetchone()
+    con.close()
+    if not row or not row[0]:
+        return None
+    try:
+        dt = datetime.fromisoformat(row[0])
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def db_get_positions(status: Optional[str] = None) -> list:
     con = get_db()
     if status and status != "all":

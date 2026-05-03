@@ -114,14 +114,74 @@ except (AttributeError, io.UnsupportedOperation):
 log = logging.getLogger("btc_scanner")
 
 
-# Per-symbol participation cap wrapper around the shared validator.
 from strategy._validators import (
     validated_max_participation_rate as _shared_validated_max_pov,
+    validated_cooldown_hours as _shared_validated_cooldown_hours,
 )
 
 
 def _validated_max_participation_rate(value, symbol: str) -> float | None:
     return _shared_validated_max_pov(value, symbol, "scan", log)
+
+
+def _validated_cooldown_hours(value, symbol: str) -> float:
+    return _shared_validated_cooldown_hours(
+        value, caller="scan", symbol=symbol, logger=log, default=COOLDOWN_H,
+    )
+
+
+# Module-level throttle for DB-failure log emissions (warning OR error severity)
+# from _build_e5_cooldown. Keyed by (symbol, exception type name) — one log line
+# per (symbol, kind) per process.
+_db_fail_warned: set[tuple[str, str]] = set()
+
+
+def _build_e5_cooldown(symbol: str, cfg: dict) -> dict:
+    """Return E5_Cooldown dict (activo bool blocks trade when True)."""
+    # Lazy import of db_last_exit_ts dodges a module-load cycle. Fail-open on
+    # DB error: silently blocking legit signals on a transient query failure
+    # is worse than treating the symbol as cooldown-free + logging.
+    # Disabled symbol pattern: cfg.symbol_overrides[sym] can be `False` (not
+    # a dict) to disable trading on that symbol. Guard against `False.get(...)`.
+    raw = (cfg or {}).get("symbol_overrides", {}).get(symbol, {})
+    overrides = raw if isinstance(raw, dict) else {}
+    effective_cd = _validated_cooldown_hours(overrides.get("cooldown_hours"), symbol)
+
+    try:
+        from db.positions import db_last_exit_ts  # noqa: PLC0415
+        last_exit_dt = db_last_exit_ts(symbol)
+    except Exception as e:  # noqa: BLE001
+        # Throttle: one log line per (symbol, exc-type) per process.
+        # SQLite Operational/Database errors surface as `error` (real bug
+        # signal); other exceptions stay at `warning` (transient / config).
+        import sqlite3  # noqa: PLC0415
+        warn_key = (symbol, type(e).__name__)
+        if warn_key not in _db_fail_warned:
+            _db_fail_warned.add(warn_key)
+            # DatabaseError covers OperationalError (subclass). OSError catches
+            # disk-full / permission-denied / missing-parent-dir on DB open.
+            severe = isinstance(e, (sqlite3.DatabaseError, OSError))
+            (log.error if severe else log.warning)(
+                "scan: db_last_exit_ts failed for %s — treating as no prior exits",
+                symbol, exc_info=True,
+            )
+        last_exit_dt = None
+
+    if last_exit_dt is None:
+        return {
+            "activo": False,
+            "nota": "Sin trades previos — cooldown libre",
+            "hours_since_last_exit": None,
+            "cooldown_hours_required": effective_cd,
+        }
+
+    hours_since = (datetime.now(timezone.utc) - last_exit_dt).total_seconds() / 3600
+    return {
+        "activo": hours_since < effective_cd,
+        "nota": f"Han pasado {hours_since:.1f}h vs requirement {effective_cd}h",
+        "hours_since_last_exit": round(hours_since, 2),
+        "cooldown_hours_required": effective_cd,
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN
@@ -330,10 +390,7 @@ def scan(symbol: str = None):
             "activo": "VERIFICAR_MANUAL",
             "nota":   "Capital disponible > $100 (o > 10% del capital inicial)",
         },
-        "E5_Cooldown": {
-            "activo": "VERIFICAR_MANUAL",
-            "nota":   f"¿Han pasado ≥ {COOLDOWN_H}h desde el último trade?",
-        },
+        "E5_Cooldown": _build_e5_cooldown(symbol, _cfg),
         "E6_Divergencia_Bajista": {
             "activo": bear_div,
             "nota":   "Precio sube + RSI baja (1H) — peligro de reversión bajista",
@@ -539,6 +596,25 @@ def scan(symbol: str = None):
     if bull_div:
         blocks_short.append("E6S: Divergencia alcista RSI (1H) — agotamiento bajista")
 
+    # Derive cooldown-active flag from the E5 dict populated by
+    # _build_e5_cooldown. isinstance bool guard is defensive against
+    # future shape regressions.
+    _e5 = excl["E5_Cooldown"]
+    _e5_cooldown_active = isinstance(_e5.get("activo"), bool) and _e5["activo"]
+
+    if _e5_cooldown_active:
+        # Append to both direction lists for CLI + frontend visibility — the
+        # report's `blocks_auto` field shows the active direction's list.
+        # Done BEFORE the verdict ladder so the list is complete; the verdict
+        # branch on `_e5_cooldown_active` (below) will fire before `elif blocks`,
+        # so the more-informative cooldown estado wins precedence.
+        _e5_msg = (
+            f"E5: cooldown activo "
+            f"({_e5['hours_since_last_exit']}h vs {_e5['cooldown_hours_required']}h)"
+        )
+        blocks_long.append(_e5_msg)
+        blocks_short.append(_e5_msg)
+
     macro_long  = price_above_4h
     macro_short = not price_above_4h
     blocks   = blocks_long if direction == "LONG" else blocks_short if direction == "SHORT" else []
@@ -573,6 +649,20 @@ def scan(symbol: str = None):
                 "scan: liquidity_cap_skip %s %s (24h liquidity unobservable)",
                 symbol, direction,
             )
+        señal = False
+    elif _e5_cooldown_active:
+        # Operational pacing constraint — fires before signal-quality blocks
+        # because even a clean setup must wait for the cooldown to elapse.
+        estado = (
+            f"🚫 BLOQUEADA {direction} — cooldown activo "
+            f"({_e5['hours_since_last_exit']}h desde último exit vs "
+            f"{_e5['cooldown_hours_required']}h requeridas)"
+        )
+        log.info(
+            "scan: e5_cooldown_active %s %s hours_since=%s required=%s",
+            symbol, direction,
+            _e5["hours_since_last_exit"], _e5["cooldown_hours_required"],
+        )
         señal = False
     elif blocks:
         estado = f"🚫 BLOQUEADA {direction} — {len(blocks)} exclusión(es) automática"

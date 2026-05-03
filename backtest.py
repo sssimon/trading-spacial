@@ -82,6 +82,7 @@ RISK_PER_TRADE = 0.01  # 1% of capital per trade
 from strategy._validators import (
     validated_time_limit_hours as _shared_validated_tl_hours,
     validated_max_participation_rate as _shared_validated_max_pov,
+    validated_cooldown_hours as _shared_validated_cooldown_hours,
 )
 
 
@@ -91,6 +92,12 @@ def _validated_time_limit_hours(value, symbol: str) -> float | None:
 
 def _validated_max_participation_rate(value, symbol: str) -> float | None:
     return _shared_validated_max_pov(value, symbol, "simulate_strategy", log)
+
+
+def _validated_cooldown_hours(value, symbol: str) -> float:
+    return _shared_validated_cooldown_hours(
+        value, caller="simulate_strategy", symbol=symbol, logger=log, default=COOLDOWN_H,
+    )
 # 0.1% per side, Binance spot retail taker, no BNB discount. Conservative —
 # if production uses BNB discount (~0.075%), this overestimates fee cost.
 # Until A.0.2 (#277) the constant was defined here but never deducted from
@@ -650,10 +657,21 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         if _sim_start_ts and bar_time_naive < _sim_start_ts:
             continue
 
-        # ── Cooldown check ────────────────────────────────────────────────
+        # ── Cooldown check (per-symbol with COOLDOWN_H fallback) ──────────
+        # Default-fallback semantics: missing or invalid `cooldown_hours` →
+        # COOLDOWN_H global. Validator emits one throttled warning per
+        # (caller, symbol, error_kind) on rejection. Disabled symbols
+        # (`symbol_overrides[sym] = False`) guarded via isinstance.
+        _cd_overrides = symbol_overrides or (cfg or {}).get("symbol_overrides", {})
+        _so_raw = _cd_overrides.get(symbol.upper(), {})
+        _so_for_cd = _so_raw if isinstance(_so_raw, dict) else {}
+        _effective_cooldown = _validated_cooldown_hours(
+            _so_for_cd.get("cooldown_hours"), symbol,
+        )
+
         if last_exit_time is not None:
             hours_since = (bar_time - last_exit_time).total_seconds() / 3600
-            if hours_since < COOLDOWN_H:
+            if hours_since < _effective_cooldown:
                 continue
 
         # ── Evaluate entry signal via strategy.core.evaluate_signal (#186 A6) ─
@@ -792,7 +810,10 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         # Legacy atr_* kwargs path skips the time-limit barrier AND the
         # participation cap — those callers (auto_tune / grid_search) must
-        # opt in by passing symbol_overrides explicitly.
+        # opt in by passing symbol_overrides explicitly. Cooldown is NOT
+        # bypassed: the cooldown check upstream uses COOLDOWN_H global as
+        # default-fallback (via validated_cooldown_hours), so legacy paths
+        # still observe the legacy 6h global cooldown.
         if legacy_override_active:
             _tl_h = None
         else:
@@ -1077,12 +1098,23 @@ def classify_market_regime(df1h: pd.DataFrame, trades: list[dict]) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict],
-                    sim_start: datetime = None, sim_end: datetime = None) -> str:
+                    sim_start: datetime = None, sim_end: datetime = None,
+                    symbol_overrides: dict | None = None) -> str:
     """Generate markdown report."""
     m = metrics
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     period_start = sim_start.strftime("%Y-%m-%d") if sim_start else "N/A"
     period_end = sim_end.strftime("%Y-%m-%d") if sim_end else "present"
+
+    # Resolve effective per-symbol cooldown for the methodology section.
+    # Defaults to COOLDOWN_H global when no override or invalid value.
+    # Disabled-symbol guard (mirrors the simulate_strategy resolution):
+    # symbol_overrides[sym] can be `False` (not a dict).
+    _so_raw = (symbol_overrides or {}).get(symbol.upper(), {})
+    _so_for_eff = _so_raw if isinstance(_so_raw, dict) else {}
+    _eff_cd = _validated_cooldown_hours(
+        _so_for_eff.get("cooldown_hours"), symbol,
+    )
 
     report = f"""# Strategy Backtest Report — Spot V6
 
@@ -1116,7 +1148,7 @@ def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict
 - **Entry conditions:** LRC% <= 25 (1H) + Price > SMA100 (4H) + Bullish 5M trigger + No exclusions
 - **Exit:** Fixed SL at -{SL_PCT}% or TP at +{TP_PCT}% (whichever hit first)
 - **Position sizing:** 1% risk per trade, multiplied by score tier (0.5x / 1x / 1.5x)
-- **Constraints:** One position at a time, {COOLDOWN_H}h cooldown between trades
+- **Constraints:** One position at a time, {_eff_cd:g}h cooldown (default {COOLDOWN_H}h)
 - **Fees:** Not deducted from P&L (Binance spot = 0.1% per side)
 - **Indicators:** Same functions as live scanner (`btc_scanner.py`)
 
@@ -1325,7 +1357,8 @@ def main():
     print(f"{'='*60}\n")
 
     # Generate and save report
-    report = generate_report(symbol, metrics, regimes, trades, sim_start=sim_start, sim_end=sim_end)
+    report = generate_report(symbol, metrics, regimes, trades, sim_start=sim_start, sim_end=sim_end,
+                             symbol_overrides=symbol_overrides)
     report_path = os.path.join(SCRIPT_DIR, "docs", "strategy-backtest-report.md")
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:

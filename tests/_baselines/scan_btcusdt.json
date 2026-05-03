@@ -72,8 +72,10 @@
       "nota": "Capital disponible > $100 (o > 10% del capital inicial)"
     },
     "E5_Cooldown": {
-      "activo": "VERIFICAR_MANUAL",
-      "nota": "\u00bfHan pasado \u2265 6h desde el \u00faltimo trade?"
+      "activo": false,
+      "cooldown_hours_required": 6.0,
+      "hours_since_last_exit": null,
+      "nota": "Sin trades previos \u2014 cooldown libre"
     },
     "E6_Divergencia_Bajista": {
       "activo": false,

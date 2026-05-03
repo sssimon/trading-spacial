@@ -74,6 +74,16 @@ def test_smoke_sizing_cap_across_curated_symbols(tmp_path, monkeypatch):
             f"{sym} must have max_participation_rate in config.defaults.json"
         )
 
+    # Strip cooldown_hours so this smoke isolates cap-only delta. The pinned
+    # BASELINE_CLOSED_PRE_CAP was captured when cooldown was global (6h via
+    # COOLDOWN_H); per-symbol cooldown shifts BTC/ETH/AVAX baselines and would
+    # confound the cap-only retention assertion.
+    symbol_overrides = {
+        sym: {k: v for k, v in ov.items() if k != "cooldown_hours"}
+        for sym, ov in symbol_overrides.items()
+    }
+    cfg = {**cfg, "symbol_overrides": symbol_overrides}
+
     # Same window as the time-limit smoke for direct comparability.
     sim_start = datetime(2023, 10, 1, tzinfo=timezone.utc)
     sim_end = datetime(2025, 3, 31, tzinfo=timezone.utc)

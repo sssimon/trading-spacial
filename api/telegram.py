@@ -92,7 +92,7 @@ def build_telegram_message(rep: dict) -> str:
 
     lines += [
         "",
-        "*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY",
+        "*Verificar manualmente:* noticias macro, racha, capital, DXY",
         f"_{symbol} Spot 1H V6_",
     ]
     return "\n".join(lines)
