@@ -121,6 +121,13 @@ def test_smoke_time_limit_across_curated_symbols(tmp_path, monkeypatch):
         # Per-symbol ratio bounds. Lower bound 0% (some tight-TL symbols may
         # rarely trigger if SL/TP fire first); upper bound 60% guards against
         # time-limit dominating exit behavior.
+        # Skip the ratio assertion when closed < 30: floor-cap symbols
+        # (XLM/PENDLE under the participation cap) intentionally drop into
+        # single-digit territory, where the per-symbol ratio is unstable
+        # (each trade swings the percentage by 10+ points). The aggregate
+        # SL/TP floor below + the BTC pin carry the regression net at low N.
+        if len(closed) < 30:
+            continue
         tl_ratio = tl_count / len(closed)
         assert 0.0 <= tl_ratio <= 0.60, (
             f"{symbol} TIME_LIMIT ratio out of bounds [0%, 60%]: "
