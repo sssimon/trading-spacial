@@ -81,11 +81,16 @@ RISK_PER_TRADE = 0.01  # 1% of capital per trade
 
 from strategy._validators import (
     validated_time_limit_hours as _shared_validated_tl_hours,
+    validated_max_participation_rate as _shared_validated_max_pov,
 )
 
 
 def _validated_time_limit_hours(value, symbol: str) -> float | None:
     return _shared_validated_tl_hours(value, symbol, "simulate_strategy", log)
+
+
+def _validated_max_participation_rate(value, symbol: str) -> float | None:
+    return _shared_validated_max_pov(value, symbol, "simulate_strategy", log)
 # 0.1% per side, Binance spot retail taker, no BNB discount. Conservative —
 # if production uses BNB discount (~0.075%), this overestimates fee cost.
 # Until A.0.2 (#277) the constant was defined here but never deducted from
@@ -472,6 +477,33 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         _usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
         _liquidity_per_min = _usd_per_min.rolling(720, min_periods=120).mean()
 
+    # Rolling 24h MEDIAN of bar volume USD — liquidity proxy for the
+    # participation cap. Median tolerates dead overnight bars and rejects
+    # single-bar volume spikes. Materialized to a numpy array because per-bar
+    # `Series.loc[Timestamp]` lookups in the entry block were a measurable
+    # hot spot (~2x runtime over 35K bars).
+    _bar_volume_usd = df1h["close"] * df1h["volume"]
+    _liquidity_24h_median_np = (
+        _bar_volume_usd.rolling(24, min_periods=24).median().to_numpy()
+    )
+
+    # Short-window warning: a backtest with fewer than 24 1H bars cannot
+    # produce a valid 24h median for any bar — every cap-active entry will
+    # skip with NaN liquidity. Emit once instead of N per-bar debug logs so
+    # the structural mismatch surfaces clearly.
+    _cap_configured_for_symbol = (
+        (symbol_overrides or (cfg or {}).get("symbol_overrides", {}))
+        .get(symbol.upper(), {})
+        .get("max_participation_rate") is not None
+    )
+    if len(df1h) < 24 and _cap_configured_for_symbol:
+        log.warning(
+            "simulate_strategy: %s backtest window has %d 1H bars (< 24) — "
+            "rolling 24h liquidity median is NaN throughout; all cap-active "
+            "entries will skip",
+            symbol, len(df1h),
+        )
+
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
@@ -758,15 +790,41 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 tp_price = float(price * (1 + TP_PCT / 100))
             be_threshold = None
 
-        # Legacy atr_* kwargs path skips the time-limit barrier — those callers
-        # (auto_tune / grid_search) must opt in by passing symbol_overrides
-        # explicitly.
+        # Legacy atr_* kwargs path skips the time-limit barrier AND the
+        # participation cap — those callers (auto_tune / grid_search) must
+        # opt in by passing symbol_overrides explicitly.
         if legacy_override_active:
             _tl_h = None
         else:
             _overrides_merged = symbol_overrides or (cfg or {}).get("symbol_overrides", {})
             _tl_h_raw = _overrides_merged.get(symbol.upper(), {}).get("time_limit_hours")
             _tl_h = _validated_time_limit_hours(_tl_h_raw, symbol)
+
+            # Participation cap: skip entry when desired notional > max_pov ×
+            # 24h median liquidity. Skip rules pinned by validator + tests.
+            _max_pov_raw = _overrides_merged.get(symbol.upper(), {}).get("max_participation_rate")
+            _max_pov = _validated_max_participation_rate(_max_pov_raw, symbol)
+            if _max_pov is not None:
+                _sl_pct_actual = abs(price - sl_price) / price * 100.0
+                if _sl_pct_actual > 0:
+                    _desired_notional = (capital * RISK_PER_TRADE * size_mult) * 100.0 / _sl_pct_actual
+                    _liq_24h = float(_liquidity_24h_median_np[i])
+                    if pd.isna(_liq_24h) or _liq_24h <= 0:
+                        log.debug(
+                            "simulate_strategy: liquidity_cap_skip %s %s "
+                            "(unobservable liquidity at %s)",
+                            symbol, trade_dir, bar_time,
+                        )
+                        continue
+                    _cap_threshold = _max_pov * _liq_24h
+                    if _desired_notional > _cap_threshold:
+                        log.debug(
+                            "simulate_strategy: liquidity_cap_skip %s %s "
+                            "desired=%.2f > cap=%.2f (liq_24h=%.2f, max_pov=%.4f) at %s",
+                            symbol, trade_dir, _desired_notional, _cap_threshold,
+                            _liq_24h, _max_pov, bar_time,
+                        )
+                        continue
 
         position = {
             "entry_price": price,

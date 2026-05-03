@@ -40,15 +40,15 @@
     }
   },
   "symbol_overrides": {
-    "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14 },
-    "ETHUSDT":    { "atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14 },
-    "ADAUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5 },
-    "AVAXUSDT":   { "atr_sl_mult": 1.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 8 },
-    "DOGEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5 },
-    "UNIUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 1.5, "time_limit_hours": 5 },
-    "XLMUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5 },
-    "PENDLEUSDT": { "atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0, "time_limit_hours": 5 },
-    "JUPUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 2.5, "time_limit_hours": 5 },
-    "RUNEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 6.0, "atr_be_mult": 2.5, "time_limit_hours": 5 }
+    "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010 },
+    "ETHUSDT":    { "atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010 },
+    "ADAUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5,  "max_participation_rate": 0.003 },
+    "AVAXUSDT":   { "atr_sl_mult": 1.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 8,  "max_participation_rate": 0.005 },
+    "DOGEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5,  "max_participation_rate": 0.005 },
+    "UNIUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 1.5, "time_limit_hours": 5,  "max_participation_rate": 0.002 },
+    "XLMUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 5,  "max_participation_rate": 0.0015 },
+    "PENDLEUSDT": { "atr_sl_mult": 0.5, "atr_tp_mult": 3.0, "atr_be_mult": 2.0, "time_limit_hours": 5,  "max_participation_rate": 0.0015 },
+    "JUPUSDT":    { "atr_sl_mult": 0.5, "atr_tp_mult": 4.0, "atr_be_mult": 2.5, "time_limit_hours": 5,  "max_participation_rate": 0.005 },
+    "RUNEUSDT":   { "atr_sl_mult": 0.7, "atr_tp_mult": 6.0, "atr_be_mult": 2.5, "time_limit_hours": 5,  "max_participation_rate": 0.003 }
   }
 }

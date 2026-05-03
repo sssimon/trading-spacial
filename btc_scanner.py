@@ -113,6 +113,16 @@ except (AttributeError, io.UnsupportedOperation):
 
 log = logging.getLogger("btc_scanner")
 
+
+# Per-symbol participation cap wrapper around the shared validator.
+from strategy._validators import (
+    validated_max_participation_rate as _shared_validated_max_pov,
+)
+
+
+def _validated_max_participation_rate(value, symbol: str) -> float | None:
+    return _shared_validated_max_pov(value, symbol, "scan", log)
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,6 +488,36 @@ def scan(symbol: str = None):
         qty_btc = (capital * 0.98) / price
         val_pos  = qty_btc * price
 
+    # ── Participation cap ─────────────────────────────────────────────────────
+    # Per-symbol `max_participation_rate` caps `val_pos` against the rolling
+    # 24h MEDIAN of bar volume USD. Sits AFTER the 0.98 no-leverage cap so the
+    # participation check operates on the actually-tradable notional.
+    # Always populates `sizing_1h.liquidity_cap` for operator visibility; only
+    # blocks `señal_activa` when the cap binds AND a direction setup exists.
+    # iloc[-2] uses the last fully-closed bar — the trailing -1 bar is forming
+    # and its partial volume would oscillate the median 4-8% intraday.
+    _max_pov_raw = _so.get("max_participation_rate")
+    _max_pov = _validated_max_participation_rate(_max_pov_raw, symbol)
+    _liquidity_cap_hit = False
+    _liq_24h_median = None
+    _cap_threshold_usd = None
+    if _max_pov is not None and not df1h.empty:
+        _bar_volume_usd = df1h["close"] * df1h["volume"]
+        _liq_24h_series = _bar_volume_usd.rolling(24, min_periods=24).median()
+        # Use last fully-closed bar (-2) when available; fall back to -1 only
+        # if there isn't enough history for a -2 lookup.
+        _liq_idx = -2 if len(_liq_24h_series) >= 2 else -1
+        _liq_24h_val = float(_liq_24h_series.iloc[_liq_idx]) if len(_liq_24h_series) > 0 else float("nan")
+        _liq_24h_median = _liq_24h_val
+        if pd.isna(_liq_24h_val) or _liq_24h_val <= 0:
+            # Unobservable liquidity — cap-hit by conservative default.
+            _liquidity_cap_hit = True
+            _cap_threshold_usd = None
+        else:
+            _cap_threshold_usd = _max_pov * _liq_24h_val
+            if val_pos > _cap_threshold_usd:
+                _liquidity_cap_hit = True
+
     # ── Veredicto (estado string + señal flag) ────────────────────────────────
     # Reproduce the legacy branch structure:
     #   - direction is None        → SIN SETUP
@@ -507,6 +547,33 @@ def scan(symbol: str = None):
     if direction is None:
         estado = "⏳ SIN SETUP — LRC% fuera de zona (25%-75%)"
         señal  = False
+    elif _liquidity_cap_hit:
+        # Structural skip — market cannot absorb the position cleanly.
+        # Takes precedence over `blocks` because cap is a market-impact
+        # constraint, not a signal-quality exclusion: even a perfect setup
+        # with zero blocks must be skipped when liquidity is insufficient.
+        if _cap_threshold_usd is not None:
+            estado = (
+                f"🚫 BLOQUEADA {direction} — liquidity cap "
+                f"(notional=${val_pos:.0f} > cap=${_cap_threshold_usd:.0f}, "
+                f"max_pov={_max_pov:.4f})"
+            )
+            log.info(
+                "scan: liquidity_cap_hit %s %s notional=%.2f > cap=%.2f "
+                "(liq_24h=%.2f, max_pov=%.4f)",
+                symbol, direction, val_pos, _cap_threshold_usd,
+                _liq_24h_median, _max_pov,
+            )
+        else:
+            estado = (
+                f"🚫 BLOQUEADA {direction} — liquidity cap "
+                f"(24h median NaN/zero — unobservable)"
+            )
+            log.info(
+                "scan: liquidity_cap_skip %s %s (24h liquidity unobservable)",
+                symbol, direction,
+            )
+        señal = False
     elif blocks:
         estado = f"🚫 BLOQUEADA {direction} — {len(blocks)} exclusión(es) automática"
         señal  = False
@@ -565,6 +632,20 @@ def scan(symbol: str = None):
             "qty_btc":     round(qty_btc, 6),
             "valor_pos":   round(val_pos, 2),
             "pct_capital": round(val_pos / capital * 100, 1),
+            "liquidity_cap": {
+                "enabled":                  _max_pov is not None,
+                "max_participation_rate":   _max_pov,
+                "liquidity_24h_median_usd": (round(_liq_24h_median, 2) if _liq_24h_median is not None and not pd.isna(_liq_24h_median) else None),
+                "cap_threshold_usd":        (round(_cap_threshold_usd, 2) if _cap_threshold_usd is not None else None),
+                "desired_notional_usd":     round(val_pos, 2),
+                "passes_cap":               not _liquidity_cap_hit,
+                # Distinguish "operator did not configure cap" from "operator
+                # configured cap but value was rejected by validator". Both
+                # surface as enabled=False, but config_rejected lets debug
+                # tools tell them apart.
+                "config_rejected":          (_max_pov_raw is not None and _max_pov is None),
+                "max_participation_rate_raw": _max_pov_raw if (_max_pov_raw is not None and _max_pov is None) else None,
+            },
         },
     })
     # Convertir tipos numpy a tipos Python nativos para serialización JSON

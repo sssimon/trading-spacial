@@ -1,9 +1,10 @@
 """Shared config-value validators with throttled warnings.
 
-Both the live `api.positions.check_position_stops` path and the backtest's
-`simulate_strategy` resolver consume per-symbol `time_limit_hours` and the
+Both the live `api.positions.check_position_stops` path, the backtest's
+`simulate_strategy` resolver, and the production `btc_scanner.scan` path
+consume per-symbol `time_limit_hours` / `max_participation_rate` and the
 process-wide `scan_interval_sec` from cfg. Validation lives here so the same
-rules apply to both paths and a single throttle prevents log spam from a
+rules apply across paths and a single throttle prevents log spam from a
 long-running scanner that re-reads cfg every tick.
 
 `_validator_warned` is a module-level set keyed by `(caller, symbol, error_kind)`.
@@ -50,6 +51,58 @@ def validated_time_limit_hours(
         error_kind = "non-positive"
         msg = (
             f"{caller}: time_limit_hours for {symbol} must be > 0 "
+            f"(got {value}) — ignoring"
+        )
+
+    if error_kind is not None:
+        warn_key = (caller, symbol, error_kind)
+        if warn_key not in _validator_warned:
+            logger.warning(msg)
+            _validator_warned.add(warn_key)
+        return None
+
+    return float(value)
+
+
+def validated_max_participation_rate(
+    value, symbol: str, caller: str, logger: logging.Logger
+) -> float | None:
+    """Return value as float if valid in (0, 1.0], else None.
+
+    Same throttle pattern as `validated_time_limit_hours`. Rejects None
+    passthrough (caller decides the no-config default), bool (subclasses int
+    but is never a valid rate), non-numeric, NaN, Inf, ≤0, and >1.0
+    (sanity: 100% participation = whole bar volume; values >1 are nonsense
+    for retail).
+    """
+    if value is None:
+        return None
+
+    error_kind: str | None = None
+    msg: str | None = None
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        error_kind = f"type:{type(value).__name__}"
+        msg = (
+            f"{caller}: max_participation_rate for {symbol} has wrong type "
+            f"({type(value).__name__}, value={value!r}) — ignoring"
+        )
+    elif not math.isfinite(value):
+        error_kind = "non-finite"
+        msg = (
+            f"{caller}: max_participation_rate for {symbol} must be finite "
+            f"(got {value!r}) — ignoring"
+        )
+    elif value <= 0:
+        error_kind = "non-positive"
+        msg = (
+            f"{caller}: max_participation_rate for {symbol} must be > 0 "
+            f"(got {value}) — ignoring"
+        )
+    elif value > 1.0:
+        error_kind = "above-one"
+        msg = (
+            f"{caller}: max_participation_rate for {symbol} must be ≤ 1.0 "
             f"(got {value}) — ignoring"
         )
 

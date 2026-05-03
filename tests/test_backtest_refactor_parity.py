@@ -205,11 +205,11 @@ def test_simulate_strategy_parity_doge_2024_h1(tmp_path, monkeypatch):
 
     cfg = _btc_api.load_config()
     symbol_overrides = cfg.get("symbol_overrides", {}) if isinstance(cfg, dict) else {}
-    # Strip time_limit_hours so the pin (precision-fix invariant: no phantom
-    # SL profits) stays valid independent of the time-limit barrier. Barrier
-    # behavior is exercised separately in test_backtest_smoke_time_limit.py.
+    # Strip time_limit_hours and max_participation_rate so the pin (precision-fix
+    # invariant: no phantom SL profits) stays valid independent of the structural
+    # exit + sizing barriers. Those are exercised separately in their own smoke tests.
     cfg = {**cfg, "symbol_overrides": {
-        sym: {k: v for k, v in ov.items() if k != "time_limit_hours"}
+        sym: {k: v for k, v in ov.items() if k not in ("time_limit_hours", "max_participation_rate")}
         for sym, ov in symbol_overrides.items()
     }}
     symbol_overrides = cfg["symbol_overrides"]
@@ -276,9 +276,9 @@ def test_simulate_strategy_parity_xlm_2024_h1(tmp_path, monkeypatch):
 
     cfg = _btc_api.load_config()
     symbol_overrides = cfg.get("symbol_overrides", {}) if isinstance(cfg, dict) else {}
-    # Strip time_limit_hours — see DOGE test above for the full rationale.
+    # Strip time_limit_hours and max_participation_rate — see DOGE test above for the rationale.
     cfg = {**cfg, "symbol_overrides": {
-        sym: {k: v for k, v in ov.items() if k != "time_limit_hours"}
+        sym: {k: v for k, v in ov.items() if k not in ("time_limit_hours", "max_participation_rate")}
         for sym, ov in symbol_overrides.items()
     }}
     symbol_overrides = cfg["symbol_overrides"]
