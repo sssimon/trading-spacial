@@ -134,26 +134,26 @@ Los 9 caps no fueron tuneados sobre smoke results. Fueron derivados ex-ante de u
   - XLM/PENDLE (floor cap): 0.15%
 - **Evidencia de no-tuning post-smoke:** los smoke results de PR2 (BTC/ETH 100% retención, PENDLE 4%, etc.) NO motivaron ajustes a los valores. La distribución observed se reportó honestly como "the structural fix funcionando as designed", no como motivation para cambiar caps.
 
-**N effective contribution:** **N=1 trial** — los 9 caps cuentan como un único protocol-derived block, no como 9 trials independientes.
+**N effective contribution:** **N=1 trial** — los 9 valores numéricos del cap por tier cuentan como un único protocol-derived block (los anchors externos Almgren-Chriss / Bouchaud / Donier-Bonart / Kaiko / Binance LiquidityBoost).
 
-**Justificación del N=1 (NO N=9):**
+**Decomposición explícita (revisión 2026-05-03 post external reviewer feedback):** los caps tienen DOS componentes que merecen counting separado:
+
+- **(a) Cap values per tier** (1.0% / 0.5% / 0.3% / 0.2% / 0.15%): protocol-derived genuinely externo. Si el basket fuera otro, estos valores no cambiarían (vienen de literatura). Cuenta aquí en §2.5: **N=1**.
+- **(b) Asignación moneda → tier** (BTC/ETH=major, JUP/DOGE/AVAX=mid Tier-1, etc.): data-derived del basket — anchored en `cost_bps_mean` per-symbol del train segment. Si el basket fuera otro, las asignaciones serían diferentes. Cuenta separadamente en §2.8: **N=1 adicional**.
+
+Esta separación responde a la observación del external reviewer (3 mayo) que el bloque "protocol-derived" anteriormente colapsado contenía un componente data-derived (la asignación). El total caps section = 2 (1 cap-values + 1 tier-mapping). Strict alternative N=10 (cada cap como trial independiente) sigue rechazada.
+
+**Justificación de N=1 para cap-values (NO N=9):**
 - Los valores vienen de un único protocolo de research, ejecutado y documentado pre-implementation.
-- El tier mapping es deterministic en (cost_bps_mean, framework defaults) — input data del diagnóstico, no choice del designer.
-- Per-symbol assignment es directo del tier mapping, no per-symbol search.
-- Si fueran 9 trials independientes, requirirían search space declarado (e.g., "para BTC, búsqueda en {0.005, 0.010, 0.015}; para ETH, búsqueda en {...}; etc."). No hay tal search space — hay 1 protocol output.
-
-**Justificación honest del **NO N=0**:**
-- Los inputs del protocol incluyen data del train segment (cost spectrum per-symbol, observed first-trade participation per-symbol). En ese sentido, el protocol es data-aware, no completamente externo.
-- Si los inputs hubieran sido distintos (basket distinto, segmento de train distinto), los caps habrían sido distintos.
-- Esto es lo que diferencia N=1 de N=0: el protocol consume data, así que cuenta como 1 trial.
+- Si fueran 9 trials independientes, requirirían search space declarado (e.g., "para BTC, búsqueda en {0.005, 0.010, 0.015}; para ETH, búsqueda en {...}; etc."). No hay tal search space — hay 1 protocol output con 5 cells (un value por tier, no por symbol).
+- Per-symbol assignment es vía §2.8 tier mapping, no per-symbol search.
 
 **Riesgo si N estuviera mal estimado:**
-- Si N real es 9 (cada cap independiente) y nosotros usamos N=1: el threshold del Gate 3 será demasiado bajo. Holdout va a parecer pasar más fácil de lo legítimo.
-- Si N real es 1 (verdadero protocol-derived) y nosotros usamos N=9: threshold demasiado alto. Holdout puede fallar legítimo siendo válido.
+- Si N real total es 10 (cada cap independiente + tier mapping) y usamos N=3: threshold del Gate 3 será demasiado bajo. Holdout puede parecer pasar más fácil de lo legítimo.
+- Si N real es 2 (cap-values + tier-mapping verdadero protocol-derived) y usamos N=3: threshold demasiado alto. Holdout puede fallar legítimo siendo válido.
+- N=3 PRIMARY es el balance honest entre estos riesgos, surfaced por external reviewer.
 
-**Conservative reading alternative:** si el operador o un reviewer externo no acepta N=1 como defendible, fallback es **N=2** (1 protocol-derived block + 1 implicit data-awareness penalty). N=2 sigue siendo materially distinto de N=10.
-
-**Pre-registration commitment:** este spec fija **N=1 para los caps** como tratamiento. Si post-holdout alguien quiere argumentar N=9 (por que el resultado es desfavorable), eso es ajuste post-hoc y disqualifies el resultado como validación primaria. Si pre-holdout alguien quiere argumentar N=2 (por conservatismo), worth flagear ahora antes del threshold lock.
+**Pre-registration commitment (revisado 2026-05-03):** este spec fija **N=2 para la sección de caps** (1 cap-values en §2.5 + 1 tier-mapping en §2.8). Total con TL grid = 3. Si post-holdout alguien quiere argumentar N=10 (resultado desfavorable), eso es ajuste post-hoc y disqualifies el resultado como validación primaria. Si pre-holdout alguien quiere argumentar N=2 estricto (collapsing tier-mapping back into cap-values protocol), require reviewer override antes del threshold lock.
 
 ### 2.6 Regime detector
 
@@ -178,15 +178,22 @@ Los 9 caps no fueron tuneados sobre smoke results. Fueron derivados ex-ante de u
 
 **N effective contribution:** 0.
 
-### 2.8 Tier mapping (cost-based clustering)
+### 2.8 Tier mapping (cost-based clustering) — data-derived, separate N count
 
 **Estado actual:** documented en research §2.3 — major/mid Tier-1/mid Tier-2/small/floor, mapped por `cost_bps_mean` proxy. Usado para asignar `max_participation_rate` per-symbol.
 
 **Decisión pre-holdout:** **preservar.** El mapping es derived from data del diagnóstico, fijo en research §5.
 
-**Justificación:** mapping es protocol-output, ya cuenta en el N=1 de §2.5.
+**Justificación + N effective re-classification (2026-05-03 post external reviewer feedback):**
 
-**N effective contribution:** 0 adicional (incluido en N=1 de caps).
+Anteriormente esta sección listaba `N=0 adicional (incluido en N=1 de caps)`. La observación del external reviewer (3 mayo) corrigió ese counting: el tier mapping ES un grado de libertad real, separable de los cap-values.
+
+- **Cap values** (§2.5): genuinely external, anchored en literatura institucional. Independent del basket actual. **N=1 (protocol-derived).**
+- **Tier mapping** (esta sección): anchored en `cost_bps_mean` spectrum del basket actual. Si el basket fuera otro (otros 10 símbolos), las asignaciones de cada moneda a tier serían distintas. **N=1 (data-derived).**
+
+Es la asignación lo que es fitting a la data, no los valores numéricos.
+
+**N effective contribution:** **N=1** (data-derived block, separable from cap-values).
 
 ### 2.9 Per-symbol ATR multipliers (atr_sl_mult, atr_tp_mult, atr_be_mult)
 
@@ -226,24 +233,27 @@ Los 9 caps no fueron tuneados sobre smoke results. Fueron derivados ex-ante de u
 | 2.2 BE-move asimetría | preserve (symmetric) | 0 |
 | 2.3 R-multiple sizing | preserve | 0 |
 | 2.4 Time-limits per-symbol (PR1) | grid protocol-derived | **1** |
-| 2.5 Caps per-symbol (PR2) | priors protocol-derived | **1** |
+| 2.5 Caps per-symbol (PR2) — cap values | priors protocol-derived (external anchors) | **1** |
 | 2.6 Regime detector | preserve | 0 |
 | 2.7 Score → size mapping | preserve | 0 |
-| 2.8 Tier mapping | included en 2.5 | 0 |
+| 2.8 Tier mapping (cost-based) | data-derived (basket cost spectrum) | **1** |
 | 2.9 ATR multipliers per-symbol | preserve | 0 |
 
-**N effective propuesto: 2.**
+**N effective propuesto: 3 (PRIMARY).**
 
-**Conservative alternative:** N=3 si se acepta que el data-awareness de los caps merece penalty implícita extra (subiendo de 1 a 2 los caps). Total: 1 (TL) + 2 (caps) = 3.
+**Cambio histórico:** este spec inicialmente proponía N=2 (con tier mapping colapsado en §2.5). External reviewer (3 mayo) surfaced que el tier mapping es data-derived (anchored en basket cost_bps spectrum) y por tanto merece counting separado del cap-values protocol-derived. Elevation a N=3 PRIMARY refleja esa observación. Ver §2.5 + §2.8 para detalle decomposition.
 
-**Strict alternative:** N=10 si se trata cada cap como trial independiente. Total: 1 (TL) + 9 (caps) = 10. **Disagree** — los caps NO son 9 search choices independientes; son 1 protocol output con 9 cells.
+**Optimistic alternative:** N=2 si se argumenta que tier mapping debe colapsarse en cap-values protocol (treating la asignación moneda→tier como output puro del protocol, no como data fitting). **Discouraged** — el reviewer externo argumentó convincingly que la asignación SÍ es data-aware (el basket actual fija las asignaciones).
 
-**Recomendación operacional:** lock N=2 ex-ante. Esto es el commitment pre-holdout. Si reviewer externo o operador prefiere N=3 por conservatismo, flagear ahora; cambiar post-holdout es disqualifying.
+**Strict alternative:** N=10 si se trata cada cap como trial independiente (1 TL + 9 caps independent). **Disagree** — los cap-values NO son 9 search choices independientes; son 5 tier values (un value por tier) con asignación per-symbol determinada por §2.8.
+
+**Recomendación operacional:** lock N=3 ex-ante. Esto es el commitment pre-holdout. Cambiar post-holdout es disqualifying.
 
 **Implicación para Gate 3 threshold (#249):**
 - Per Lopez de Prado DSR formula: `DSR = (SR_observed - E[max SR | N trials]) / σ_SR`
-- E[max SR | N=2] vs E[max SR | N=10] difiere significantly. N=2 produce threshold ~0.25-0.35 lower que N=10 (rough calibration; #249 va a calcular exact con sus formulas).
-- Threshold lower = más fácil de pasar legitimately. Que N=2 sea el correcto count requiere defensibilidad ex-ante (este spec).
+- E[max SR | N=3] vs E[max SR | N=10] difiere significantly. N=3 produce threshold materially lower que N=10 (rough calibration; #249 va a calcular exact con sus formulas).
+- N=3 vs N=2: el incremento marginal del threshold (~0.05-0.10 rough) es honest cost de reconocer el data-awareness del tier mapping. Threshold ligeramente más alto = harder de pasar = mayor confianza si pasa.
+- Threshold lower = más fácil de pasar legitimately. Que N=3 sea el correcto count requiere defensibilidad ex-ante (este spec).
 
 ---
 
@@ -352,3 +362,4 @@ Antes de circular este spec a stakeholders más allá del operador (e.g., al sen
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-05-03 | reviewer agent (drafted), sssamuelll to approve | Initial draft per Decisión 9 commitment + senior reviewer feedback on (4) caps as DOFs |
+| 2026-05-03 (later) | reviewer agent (drafted), external reviewer (raised), sssamuelll to approve | **N effective elevated 2 → 3 PRIMARY.** External reviewer surfaced que el tier mapping (§2.8) es data-derived (anchored en basket cost_bps spectrum), separable de los cap-values (§2.5) que son protocol-derived externally. Sections affected: §2.5 (decomposition explicit), §2.8 (N=0 → N=1), §3 (table updated, N=3 PRIMARY, N=2 demoted to "optimistic alternative — discouraged"). Pre-holdout commitment integrity preservada: el spec se actualiza ANTES del holdout, alineado con su propio §1 ("este doc fija los commits ex-ante; lo que pase después se evalúa contra estos commits"). |
