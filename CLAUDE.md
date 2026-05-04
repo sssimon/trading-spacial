@@ -145,6 +145,19 @@ The repo contains a **locked holdout dataset** at `data/holdout/` that must NOT 
 ### Caveats heredados — A.4 (#250) MUST honor
 
 1. **Re-tune required.** The current `atr_sl_mult/tp/be` were tuned over the full history including the holdout range. A.4 must re-tune over `[earliest, holdout_start - 1 bar]` BEFORE evaluating against the holdout (else: leakage).
+
+   **Audit of leakage scope** (verified 5 mayo 2026 in spec D9 §2.9 amendment review):
+
+   | Param | Source | Window | Leaked into holdout? |
+   |-------|--------|--------|----------------------|
+   | ATR multipliers (10 × {sl, tp, be} = 30 values) | Iterative tuning pre-A.4 (#121 + iterations) | Full history (incl. holdout range) | **YES** — being fixed by A.4-1 |
+   | Time-limits per-symbol (10) | #281 diagnostic, "winner-median holding" + research §5 | `[2023-10-29, 2025-04-29]` (sim_end un día antes del corte locked) | NO |
+   | Max participation rate per-symbol (10) | Almgren-Chriss + Donier-Bonart academic anchors | N/A (no data fit) | NO |
+   | Cooldown per-symbol (10) | Rule: `max(time_limit, NW=4, floor=6)` | Transitive of TL (not leaked) | NO |
+   | Tier mapping (cost-based per-symbol cap assignment) | #281 cost spectrum | `[2023-10-29, 2025-04-29]` | NO |
+   | Score tiers `{0.5, 1.0, 1.5}`, regime thresholds `{>60, <40}`, RISK_PER_TRADE = 0.01 | Hardcoded constants | N/A | NO |
+
+   Hardcoded constants en esta categoría son rule/principle-derived (operator-chosen partitions, convention-derived risk percentages), no data-derived-then-frozen. Si ese supuesto resulta incorrecto para alguna constante específica, abrir issue separado pre-holdout ANTES de Phase 3 run.
 2. **Regime composition not guaranteed.** The 12-month window may not cover all regimes. A.4 must report bull/bear/neutral mix and call out gaps.
 3. **Drift not auto-detectable.** F&G and funding rate hashes freeze the snapshot at fetch time. A.4 must re-fetch + diff against source APIs to detect provider revisions.
 
