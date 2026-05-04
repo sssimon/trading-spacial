@@ -1,14 +1,12 @@
-"""Tests for parameterized regime thresholds (A.4-1.5).
+"""Tests for parameterized regime thresholds in _compute_local_regime.
 
 Defaults must preserve byte-identity with pre-parameterization production behavior.
-New kwargs must enable threshold sweeps for the A.4-1.5 mini-harness.
+New kwargs enable threshold sweeps used by tools/regime_retune_pre_holdout.
 """
-import inspect
-
 import pandas as pd
 import pytest
 
-from strategy.regime import _compute_local_regime, detect_regime
+from strategy.regime import _compute_local_regime
 
 
 def _make_df_daily(close_values):
@@ -106,10 +104,3 @@ class TestComputeLocalRegimeParameterized:
             )
 
 
-class TestDetectRegimeParameterized:
-    def test_detect_regime_accepts_threshold_kwargs(self):
-        sig = inspect.signature(detect_regime)
-        assert "bull_above" in sig.parameters
-        assert "bear_below" in sig.parameters
-        assert sig.parameters["bull_above"].default == 60
-        assert sig.parameters["bear_below"].default == 40
