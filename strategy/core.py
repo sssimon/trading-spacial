@@ -127,7 +127,13 @@ def _regime_to_direction_token(regime_label: str | None) -> str:
     Mirrors the logic in `btc_scanner.scan()`:
         `regime = "LONG" if regime == "BULL" else "SHORT" if regime == "BEAR" else "LONG"`
     i.e. both BULL and NEUTRAL/unknown allow LONG; only BEAR enables SHORT.
+
+    A.4-1.5 (regime_disabled bypass): "BYPASS" → "ANY", which the gating
+    block treats as "permit either direction by zone alone" — used when the
+    regime detector is disabled to evaluate the no-detector configuration.
     """
+    if regime_label == "BYPASS":
+        return "ANY"
     if regime_label == "BEAR":
         return "SHORT"
     # BULL, NEUTRAL, missing, or unknown all fall back to LONG-enabled
@@ -347,10 +353,11 @@ def evaluate_signal(
 
     # LONG when in low zone AND regime is LONG or NEUTRAL (mapped to LONG).
     # SHORT only when in high zone AND regime is BEAR → SHORT.
+    # ANY (BYPASS, A.4-1.5): direction follows zone alone.
     # Everything else → NONE (middle band, or mismatched zone/regime pair).
-    if in_long_zone and regime_token in ("LONG", "NEUTRAL"):
+    if in_long_zone and regime_token in ("LONG", "NEUTRAL", "ANY"):
         direction = "LONG"
-    elif in_short_zone and regime_token == "SHORT":
+    elif in_short_zone and regime_token in ("SHORT", "ANY"):
         direction = "SHORT"
     else:
         direction = "NONE"

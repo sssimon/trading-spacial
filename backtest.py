@@ -227,6 +227,9 @@ def _regime_at_time(
     df_funding,
     regime_mode: str = "global",
     df1d_btc=None,
+    *,
+    bull_above: int = 60,
+    bear_below: int = 40,
 ) -> dict:
     """Compute regime for this bar_time (no look-ahead).
 
@@ -288,6 +291,7 @@ def _regime_at_time(
     return _compute_local_regime(
         symbol, regime_mode, window_price,
         fng_score, funding_score, rsi_score, adx_score,
+        bull_above=bull_above, bear_below=bear_below,
     )
 
 
@@ -439,6 +443,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       enable_spread: bool = True,        # NEW (A.0.2, #277)
                       enable_fees: bool = True,          # NEW (A.0.2, #277)
                       cost_calibration=None,             # NEW (A.0.2, #277)
+                      regime_thresholds: tuple[int, int] | None = None,  # NEW (A.4-1.5)
+                      regime_disabled: bool = False,                     # NEW (A.4-1.5)
                       ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy.
 
@@ -692,10 +698,24 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         # Regime detection via _regime_at_time helper (#152) — kept as
         # backtest-local because scan() fetches its regime from a cache /
         # per-symbol detector, not the bar-aligned helper used here.
-        regime_info = _regime_at_time(
-            bar_time, symbol, df1d, df_fng, df_funding,
-            regime_mode=regime_mode, df1d_btc=df1d_btc,
-        )
+        # A.4-1.5: regime_disabled bypasses the helper entirely; downstream
+        # _regime_to_direction_token maps "BYPASS" → "ANY" so direction is
+        # gated by zone alone.
+        if regime_disabled:
+            regime_info = {
+                "regime": "BYPASS",
+                "score": 50.0,
+                "mode": "disabled",
+                "symbol": symbol,
+                "components": {},
+            }
+        else:
+            ba, bb = (regime_thresholds if regime_thresholds is not None else (60, 40))
+            regime_info = _regime_at_time(
+                bar_time, symbol, df1d, df_fng, df_funding,
+                regime_mode=regime_mode, df1d_btc=df1d_btc,
+                bull_above=ba, bear_below=bb,
+            )
 
         # Merge `symbol_overrides` (legacy kwarg) into cfg so evaluate_signal
         # can resolve per-direction ATR mults via its built-in resolver.
