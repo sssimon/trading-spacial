@@ -443,8 +443,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       enable_spread: bool = True,        # NEW (A.0.2, #277)
                       enable_fees: bool = True,          # NEW (A.0.2, #277)
                       cost_calibration=None,             # NEW (A.0.2, #277)
-                      regime_thresholds: tuple[int, int] | None = None,  # NEW (A.4-1.5)
-                      regime_disabled: bool = False,                     # NEW (A.4-1.5)
+                      regime_thresholds: tuple[int, int] | None = None,
+                      regime_disabled: bool = False,
                       ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy.
 
@@ -462,7 +462,19 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
     `cfg` is the merged config dict (`btc_api.load_config()` shape); used for
     the KillSwitchSimulator bootstrap when `shared_simulator` is not supplied.
+
+    regime_thresholds (tuple[int, int] | None): override (bull_above, bear_below)
+        for regime classification. None → (60, 40) production behavior.
+    regime_disabled (bool): when True, skip _regime_at_time entirely and emit a
+        regime dict with regime="BYPASS" so direction is gated by zone alone.
+        Mutually exclusive with regime_thresholds.
     """
+    if regime_disabled and regime_thresholds is not None:
+        raise ValueError(
+            "regime_disabled=True is mutually exclusive with regime_thresholds — "
+            "bypass mode skips threshold logic entirely."
+        )
+
     # #186 A6: lazy imports keep backtest.py importable even when `strategy/`
     # or `backtest_kill_switch` has its own transient import issues.
     from backtest_kill_switch import KillSwitchSimulator
@@ -698,16 +710,14 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         # Regime detection via _regime_at_time helper (#152) — kept as
         # backtest-local because scan() fetches its regime from a cache /
         # per-symbol detector, not the bar-aligned helper used here.
-        # A.4-1.5: regime_disabled bypasses the helper entirely; downstream
-        # _regime_to_direction_token maps "BYPASS" → "ANY" so direction is
-        # gated by zone alone.
         if regime_disabled:
             regime_info = {
                 "regime": "BYPASS",
-                "score": 50.0,
+                "score": None,
                 "mode": "disabled",
                 "symbol": symbol,
                 "components": {},
+                "bypass": True,
             }
         else:
             ba, bb = (regime_thresholds if regime_thresholds is not None else (60, 40))

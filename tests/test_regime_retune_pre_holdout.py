@@ -126,7 +126,8 @@ class TestRunOneBacktest:
                                             app_config={"symbol_overrides": {}})
         assert result["net_pnl"] == 74.5
         assert result["trades"] == 2
-        assert captured.get("regime_disabled") is False or "regime_disabled" not in captured
+        # Threshold configs must NOT pass regime_disabled to simulate_strategy.
+        assert "regime_disabled" not in captured
         assert captured.get("regime_thresholds") == (60, 40)
 
     def test_70_30_config_forwards_thresholds(self, monkeypatch, stub_frames):
@@ -144,6 +145,7 @@ class TestRunOneBacktest:
         harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
                                    app_config={"symbol_overrides": {}})
         assert captured.get("regime_thresholds") == (70, 30)
+        assert "regime_disabled" not in captured
 
     def test_empty_frames_short_circuit(self, monkeypatch):
         empty_frames = {
@@ -164,20 +166,52 @@ class TestRunOneBacktest:
         assert result["trades"] == 0
         assert result["error"] == "empty_ohlcv_below_cutoff"
 
-    def test_simulate_exception_caught_and_logged(self, monkeypatch, stub_frames):
+    def test_io_error_caught_with_io_prefix_and_logged(self, monkeypatch, stub_frames, caplog):
+        import sqlite3 as sq
         def fake_simulate(*args, **kwargs):
-            raise RuntimeError("boom")
+            raise sq.DatabaseError("db locked")
 
         monkeypatch.setattr(harness, "_load_frames", lambda sym, cutoff: stub_frames)
         import backtest
         monkeypatch.setattr(backtest, "simulate_strategy", fake_simulate)
 
         cfg = {"name": "60_40", "bull_above": 60, "bear_below": 40, "disabled": False}
-        result = harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
-                                            app_config={})
+        with caplog.at_level("ERROR"):
+            result = harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
+                                                app_config={})
         assert result["net_pnl"] == 0.0
         assert result["trades"] == 0
-        assert "boom" in result["error"]
+        assert result["error"].startswith("io:")
+        assert any("I/O failure" in rec.message for rec in caplog.records)
+
+    def test_data_error_caught_with_data_prefix_and_logged(self, monkeypatch, stub_frames, caplog):
+        def fake_simulate(*args, **kwargs):
+            raise ValueError("bad input")
+
+        monkeypatch.setattr(harness, "_load_frames", lambda sym, cutoff: stub_frames)
+        import backtest
+        monkeypatch.setattr(backtest, "simulate_strategy", fake_simulate)
+
+        cfg = {"name": "60_40", "bull_above": 60, "bear_below": 40, "disabled": False}
+        with caplog.at_level("WARNING"):
+            result = harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
+                                                app_config={})
+        assert result["error"].startswith("data:")
+        assert any("data/assertion error" in rec.message for rec in caplog.records)
+
+    def test_programming_errors_propagate(self, monkeypatch, stub_frames):
+        """AttributeError / KeyError / TypeError must propagate (not be swallowed)."""
+        def fake_simulate(*args, **kwargs):
+            raise AttributeError("typo")
+
+        monkeypatch.setattr(harness, "_load_frames", lambda sym, cutoff: stub_frames)
+        import backtest
+        monkeypatch.setattr(backtest, "simulate_strategy", fake_simulate)
+
+        cfg = {"name": "60_40", "bull_above": 60, "bear_below": 40, "disabled": False}
+        with pytest.raises(AttributeError):
+            harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
+                                       app_config={})
 
 
 class TestAggregate:
@@ -267,7 +301,6 @@ class TestArtefactWriters:
         harness._write_regime_params(str(path), self._make_agg(winner="70_30"))
         payload = json.loads(path.read_text())
         assert payload == {
-            "format_version": 1,
             "regime_thresholds": {"bull_above": 70, "bear_below": 30},
         }
 
@@ -276,7 +309,6 @@ class TestArtefactWriters:
         harness._write_regime_params(str(path), self._make_agg(winner="60_40"))
         payload = json.loads(path.read_text())
         assert payload == {
-            "format_version": 1,
             "regime_thresholds": {"bull_above": 60, "bear_below": 40},
         }
 
@@ -285,7 +317,6 @@ class TestArtefactWriters:
         harness._write_regime_params(str(path), self._make_agg(winner="80_20"))
         payload = json.loads(path.read_text())
         assert payload == {
-            "format_version": 1,
             "regime_thresholds": {"bull_above": 80, "bear_below": 20},
         }
 
@@ -294,9 +325,28 @@ class TestArtefactWriters:
         harness._write_regime_params(str(path), self._make_agg(winner="no_detector"))
         payload = json.loads(path.read_text())
         assert payload == {
-            "format_version": 1,
             "regime_disabled": True,
         }
+
+    @pytest.mark.parametrize("winner", ["60_40", "70_30", "80_20", "no_detector"])
+    def test_regime_params_spec_compliance_keys(self, tmp_path, winner):
+        """Spec compliance — decoupled from impl shape:
+          - exactly one of {"regime_thresholds", "regime_disabled"} present (XOR)
+          - no other top-level keys
+        """
+        path = tmp_path / f"p_{winner}.json"
+        harness._write_regime_params(str(path), self._make_agg(winner=winner))
+        payload = json.loads(path.read_text())
+        keys = set(payload.keys())
+        has_thresholds = "regime_thresholds" in keys
+        has_disabled = "regime_disabled" in keys
+        assert has_thresholds ^ has_disabled, (
+            f"regime_params must have exactly one of regime_thresholds / regime_disabled; "
+            f"got keys={keys}"
+        )
+        assert keys <= {"regime_thresholds", "regime_disabled"}, (
+            f"regime_params must have no extra top-level keys; got {keys}"
+        )
 
     def test_regime_params_byte_deterministic_across_runs(self, tmp_path):
         agg = self._make_agg(winner="60_40")
@@ -309,18 +359,23 @@ class TestArtefactWriters:
     def test_manifest_byte_deterministic_across_runs(self, tmp_path):
         agg = self._make_agg(winner="60_40")
         cutoff = datetime(2025, 4, 30, tzinfo=timezone.utc)
+        overrides = {"BTCUSDT": {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0}}
         # ran_at_iso varies per call — must be excluded from byte-comparison.
         m1 = harness._build_manifest(agg=agg, cutoff=cutoff, cutoff_ms=1000,
                                       ohlcv_sha="abc", code_commit="def",
                                       ranges={}, runtime_seconds=1.0,
-                                      leakage_check="PASS", symbols=["BTC"])
+                                      leakage_check="PASS", symbols=["BTC"],
+                                      symbol_overrides=overrides)
         m2 = harness._build_manifest(agg=agg, cutoff=cutoff, cutoff_ms=1000,
                                       ohlcv_sha="abc", code_commit="def",
                                       ranges={}, runtime_seconds=1.0,
-                                      leakage_check="PASS", symbols=["BTC"])
-        # Strip ran_at_iso for the comparison
+                                      leakage_check="PASS", symbols=["BTC"],
+                                      symbol_overrides=overrides)
         m1.pop("ran_at_iso")
         m2.pop("ran_at_iso")
+        # Verify the new symbol_overrides_sha256 field is present and stable
+        assert "symbol_overrides_sha256" in m1
+        assert m1["symbol_overrides_sha256"] == m2["symbol_overrides_sha256"]
         path1 = tmp_path / "m1.json"
         path2 = tmp_path / "m2.json"
         harness._atomic_write_json(str(path1), m1)
@@ -385,11 +440,10 @@ class TestCLI:
         assert (tmp_path / "regime_report.md").exists()
 
         params = json.loads((tmp_path / "regime_params.json").read_text())
-        assert params == {"format_version": 1,
-                          "regime_thresholds": {"bull_above": 60, "bear_below": 40}}
+        assert params == {"regime_thresholds": {"bull_above": 60, "bear_below": 40}}
 
-    def test_sanity_check_returns_rc_3(self, monkeypatch, tmp_path):
-        """When no_detector wins, main() returns 3 (HALT signal)."""
+    def test_sanity_check_returns_rc_3_and_refuses_canonical_artefacts(self, monkeypatch, tmp_path):
+        """When no_detector wins, main() returns 3 AND does NOT write canonical artefacts."""
         def fake_run(symbol, config, cutoff, app_config=None):
             pnl_map = {"60_40": 50.0, "70_30": 30.0, "80_20": 20.0, "no_detector": 200.0}
             return {"symbol": symbol, "config": config["name"],
@@ -399,6 +453,36 @@ class TestCLI:
 
         rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
         assert rc == 3
+        # Canonical artefacts must NOT be written.
+        assert not (tmp_path / "regime_params.json").exists()
+        assert not (tmp_path / "regime_manifest.json").exists()
+        assert not (tmp_path / "regime_report.md").exists()
+        # Halted summary IS written for post-mortem.
+        assert (tmp_path / "halted_summary.json").exists()
+        halted = json.loads((tmp_path / "halted_summary.json").read_text())
+        assert halted["reason"] == "sanity_check_fired"
+        assert halted["agg"]["winner"] == "no_detector"
+
+    def test_errored_cells_return_rc_4_and_dump_sweep_errors(self, monkeypatch, tmp_path):
+        """When any cell errors, main() returns 4 and writes sweep_errors.json — does NOT aggregate."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            if symbol == "ETHUSDT" and config["name"] == "70_30":
+                return {"symbol": symbol, "config": config["name"],
+                        "net_pnl": 0.0, "trades": 0, "error": "io:db locked"}
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": 100.0, "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 4
+        assert (tmp_path / "sweep_errors.json").exists()
+        # Canonical artefacts NOT written.
+        assert not (tmp_path / "regime_params.json").exists()
+        errors = json.loads((tmp_path / "sweep_errors.json").read_text())
+        assert len(errors["errored_cells"]) >= 1
+        assert any(c["symbol"] == "ETHUSDT" and c["config"] == "70_30"
+                   for c in errors["errored_cells"])
 
     def test_missing_ohlcv_db_returns_rc_2(self, monkeypatch, tmp_path):
         original_exists = os.path.exists
@@ -406,3 +490,24 @@ class TestCLI:
                             lambda p: False if p == harness.OHLCV_DB else original_exists(p))
         rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
         assert rc == 2
+
+    def test_missing_config_hard_errors(self, monkeypatch, tmp_path):
+        """_load_config raises FileNotFoundError when config.json is missing."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": 0.0, "trades": 0, "error": None}
+
+        original_exists = os.path.exists
+
+        def fake_exists(p):
+            if p == harness.OHLCV_DB:
+                return True
+            if p == os.path.join(harness.REPO_ROOT, "config.json"):
+                return False
+            return original_exists(p)
+
+        monkeypatch.setattr(harness, "_run_one_backtest", fake_run)
+        monkeypatch.setattr(harness.os.path, "exists", fake_exists)
+
+        with pytest.raises(FileNotFoundError, match="config.json not found"):
+            harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])

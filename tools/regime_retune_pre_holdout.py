@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Pre-holdout regime threshold re-tune (A.4-1.5).
+"""Pre-holdout regime threshold re-tune mini-harness.
 
-Sweeps the 4 configurations locked by historical record (commit bf581f1)
-over the pre-holdout window [earliest, 2025-04-30T00:00:00Z), aggregates
-net_pnl per config across the 10 portfolio symbols, identifies the
-winner, and applies pre-registered decision flags (CHANGE detection,
-sanity check, stability check).
+Sweeps the 4 configurations locked by historical record over the pre-holdout
+window [earliest, 2025-04-30T00:00:00Z), aggregates net_pnl per config across
+the 10 portfolio symbols, identifies the winner, and applies pre-registered
+decision flags (CHANGE detection, sanity check, stability check).
 
-Mirrors the shape of tools/retune_pre_holdout.py (A.4-1) but runs a
-single backtest per (symbol, config) instead of a grid search — the
-grid + objective here are locked by spec D9 §2.10, not optimized.
+Runs a single backtest per (symbol, config) — grid + objective are locked by
+the methodology spec, not optimized. Implemented inline (no shared helpers
+from sister harnesses) because this harness must run before its sibling
+re-tune (#287) is merged — see spec §2.10 sequencing.
 
 Usage:
     python -m tools.regime_retune_pre_holdout --max-date 2025-04-30
@@ -53,7 +53,9 @@ def _resolve_git_commit() -> str:
             stderr=subprocess.DEVNULL,
         )
         return out.decode().strip()
-    except Exception:
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        log.error("Could not resolve git commit (manifest will record 'UNKNOWN'): %s",
+                  exc, exc_info=True)
         return "UNKNOWN"
 
 
@@ -71,10 +73,9 @@ def _sha256_file(path: str, block_size: int = 1024 * 1024) -> str:
 def _slice_below_cutoff(df: pd.DataFrame, cutoff: datetime) -> pd.DataFrame:
     """Return the subset of df whose index is strictly < cutoff.
 
-    Self-contained (does not import auto_tune._slice_below_cutoff) so this
-    module is independent of A.4-1's PR #287 helper — A.4-1 Phase 3 is
-    GATED on this harness closing, so depending on its branch would be a
-    circular dependency.
+    Implemented inline (no import from auto_tune) because this harness must
+    run before the sibling re-tune (#287) is merged — see spec §2.10
+    sequencing.
     """
     if df is None or df.empty:
         return df
@@ -135,10 +136,19 @@ def _verify_no_leakage(ranges: dict, cutoff_ms: int) -> str:
 
 
 def _load_config() -> dict:
-    """Load config.json from repo root. Returns empty dict if missing."""
+    """Load config.json from repo root.
+
+    Hard-errors when missing: the harness pulls production symbol_overrides
+    from this file so that the regime threshold is the only varying input
+    across the sweep. Running without it silently substitutes empty overrides
+    and contaminates the comparison.
+    """
     cfg_path = os.path.join(REPO_ROOT, "config.json")
     if not os.path.exists(cfg_path):
-        return {}
+        raise FileNotFoundError(
+            f"config.json not found at {cfg_path}. Harness requires production "
+            "symbol_overrides to ensure regime threshold is the sole varying input."
+        )
     with open(cfg_path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -215,10 +225,14 @@ def _run_one_backtest(symbol: str, config: dict, cutoff: datetime,
 
     try:
         trades, _equity = simulate_strategy(**kwargs)
-    except Exception as exc:  # noqa: BLE001
-        log.error("[%s][%s] simulate_strategy raised: %s", symbol, config["name"], exc)
+    except (sqlite3.DatabaseError, OSError) as exc:
+        log.error("[%s][%s] I/O failure: %s", symbol, config["name"], exc, exc_info=True)
         return {"symbol": symbol, "config": config["name"], "net_pnl": 0.0,
-                "trades": 0, "error": str(exc)}
+                "trades": 0, "error": f"io:{exc}"}
+    except (ValueError, AssertionError) as exc:
+        log.warning("[%s][%s] data/assertion error: %s", symbol, config["name"], exc, exc_info=True)
+        return {"symbol": symbol, "config": config["name"], "net_pnl": 0.0,
+                "trades": 0, "error": f"data:{exc}"}
 
     net_pnl = sum(t.get("pnl_usd", 0.0) for t in trades)
     return {"symbol": symbol, "config": config["name"], "net_pnl": float(net_pnl),
@@ -273,18 +287,24 @@ def _atomic_write_json(path: str, payload: dict) -> None:
     os.replace(tmp, path)
 
 
+def _atomic_write_text(path: str, content: str) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(tmp, path)
+
+
 def _write_regime_params(path: str, agg: dict) -> None:
     """Write regime_params.json. Shape depends on winner:
-      - threshold winner:   {"format_version": 1, "regime_thresholds": {"bull_above": <int>, "bear_below": <int>}}
-      - no_detector winner: {"format_version": 1, "regime_disabled": true}
+      - threshold winner:   {"regime_thresholds": {"bull_above": <int>, "bear_below": <int>}}
+      - no_detector winner: {"regime_disabled": true}
     """
     winner = agg["winner"]
     if winner == "no_detector":
-        payload = {"format_version": 1, "regime_disabled": True}
+        payload = {"regime_disabled": True}
     else:
         cfg = next(c for c in GRID if c["name"] == winner)
         payload = {
-            "format_version": 1,
             "regime_thresholds": {
                 "bull_above": cfg["bull_above"],
                 "bear_below": cfg["bear_below"],
@@ -296,7 +316,11 @@ def _write_regime_params(path: str, agg: dict) -> None:
 def _build_manifest(agg: dict, cutoff: datetime, cutoff_ms: int,
                     ohlcv_sha: str, code_commit: str,
                     ranges: dict, runtime_seconds: float,
-                    leakage_check: str, symbols: list) -> dict:
+                    leakage_check: str, symbols: list,
+                    symbol_overrides: dict | None = None) -> dict:
+    overrides_sha = hashlib.sha256(
+        json.dumps(symbol_overrides or {}, sort_keys=True).encode()
+    ).hexdigest()
     return {
         "harness": "regime_retune_pre_holdout",
         "spec_ref": "docs/superpowers/specs/es/2026-05-03-asunciones-tecnicas-pre-holdout.md §2.10",
@@ -305,6 +329,7 @@ def _build_manifest(agg: dict, cutoff: datetime, cutoff_ms: int,
         "code_commit": code_commit,
         "ohlcv_sha256": ohlcv_sha,
         "ohlcv_path_relative": os.path.relpath(OHLCV_DB, REPO_ROOT),
+        "symbol_overrides_sha256": overrides_sha,
         "ran_at_iso": datetime.now(timezone.utc).isoformat(),
         "runtime_seconds": round(runtime_seconds, 2),
         "leakage_check": leakage_check,
@@ -409,7 +434,7 @@ def _build_report(agg: dict, cells: list, cutoff: datetime,
 
 
 def _get_symbols() -> list[str]:
-    """Return the 10 portfolio symbols (mirror of A.4-1's basket)."""
+    """Return the 10 portfolio symbols from btc_scanner.DEFAULT_SYMBOLS."""
     from btc_scanner import DEFAULT_SYMBOLS
     return list(DEFAULT_SYMBOLS)
 
@@ -443,7 +468,7 @@ def main(argv: list | None = None) -> int:
         out_dir = os.path.join(REPO_ROOT, "data", "retune", f"{run_date}-pre-holdout")
     os.makedirs(out_dir, exist_ok=True)
 
-    log.info("A.4-1.5 regime threshold re-tune starting")
+    log.info("Regime threshold re-tune starting")
     log.info("  cutoff:  %s", cutoff.isoformat())
     log.info("  symbols: %s", ", ".join(symbols))
     log.info("  configs: %s", ", ".join(c["name"] for c in GRID))
@@ -462,6 +487,23 @@ def main(argv: list | None = None) -> int:
             cells.append(cell)
     runtime_seconds = time.time() - start
 
+    # Refuse to aggregate if any cell errored — masking failures in the sweep
+    # would corrupt the comparison silently. Dump diagnostics + return rc=4
+    # so the caller can route to debug rather than retry blindly.
+    errored = [c for c in cells if c.get("error") is not None]
+    if errored:
+        log.error("Sweep had %d errored cells; refusing to aggregate. Errors: %s",
+                  len(errored),
+                  [(c["symbol"], c["config"], c["error"]) for c in errored])
+        _atomic_write_json(
+            os.path.join(out_dir, "sweep_errors.json"),
+            {
+                "errored_cells": errored,
+                "successful_cells": [c for c in cells if c.get("error") is None],
+            },
+        )
+        return 4
+
     agg = _aggregate_results(cells)
 
     log.info("Computing per-symbol data ranges from ohlcv.db...")
@@ -478,6 +520,7 @@ def main(argv: list | None = None) -> int:
         ohlcv_sha=ohlcv_sha, code_commit=code_commit,
         ranges=ranges, runtime_seconds=runtime_seconds,
         leakage_check=leakage_check, symbols=symbols,
+        symbol_overrides=app_config.get("symbol_overrides"),
     )
 
     report_md = _build_report(
@@ -485,21 +528,34 @@ def main(argv: list | None = None) -> int:
         ranges=ranges, runtime_seconds=runtime_seconds, symbols=symbols,
     )
 
-    _write_regime_params(os.path.join(out_dir, "regime_params.json"), agg)
-    _atomic_write_json(os.path.join(out_dir, "regime_manifest.json"), manifest)
-    with open(os.path.join(out_dir, "regime_report.md"), "w", encoding="utf-8") as f:
-        f.write(report_md)
-
-    log.info("Artefacts written to %s", out_dir)
-    log.info("  regime_params.json   — winner config, byte-deterministic")
-    log.info("  regime_manifest.json — cutoff, hashes, decision flags, no-leakage proof")
-    log.info("  regime_report.md     — human-readable side-by-side + caveats")
     log.info("Decision flags: %s", agg["decision_flags"])
 
+    # Sanity check is fail-closed: if no_detector wins, do NOT write the
+    # canonical artefacts. Dump halted_summary.json with the diagnostic
+    # bundle for post-mortem and return rc=3.
     if agg["decision_flags"]["sanity_check"]:
         log.error("SANITY CHECK FIRED: no_detector wins on pre-holdout window. "
-                  "HALT + DEBUG before promoting this artefact.")
+                  "Refusing to write canonical artefacts. See halted_summary.json.")
+        _atomic_write_json(
+            os.path.join(out_dir, "halted_summary.json"),
+            {
+                "reason": "sanity_check_fired",
+                "agg": agg,
+                "manifest": manifest,
+            },
+        )
         return 3
+
+    # Order: report + manifest first, regime_params.json LAST as the
+    # durability marker for downstream consumers.
+    _atomic_write_text(os.path.join(out_dir, "regime_report.md"), report_md)
+    _atomic_write_json(os.path.join(out_dir, "regime_manifest.json"), manifest)
+    _write_regime_params(os.path.join(out_dir, "regime_params.json"), agg)
+
+    log.info("Artefacts written to %s", out_dir)
+    log.info("  regime_report.md     — human-readable side-by-side + caveats")
+    log.info("  regime_manifest.json — cutoff, hashes, decision flags, no-leakage proof")
+    log.info("  regime_params.json   — winner config (durability marker, written last)")
 
     return 0
 

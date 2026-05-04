@@ -55,11 +55,11 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     "scripts/lock_holdout.py",
     # this scanner — contains the patterns it looks for
     "tests/test_holdout_isolation.py",
-    # A.4-1.5 regime threshold pre-holdout re-tune mini-harness (#305).
-    # Reads data/ohlcv.db only — does NOT read data/holdout/. The output dir
-    # name contains the literal '-pre-holdout' suffix for human discoverability;
-    # the AST scanner sees that string in the source and would flag it without
-    # this whitelist. Sister module to tools/retune_pre_holdout.py (A.4-1, #287).
+    # Regime threshold pre-holdout re-tune mini-harness (#305). Reads
+    # data/ohlcv.db only — does NOT read data/holdout/. Output dir name
+    # contains the literal '-pre-holdout' suffix for human discoverability;
+    # the AST scanner sees that string in the source and would flag it
+    # without this whitelist.
     "tools/regime_retune_pre_holdout.py",
     # A.2 walk-forward harness modules and A.4 evaluation modules will be
     # added here when those tickets land.

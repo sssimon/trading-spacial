@@ -11,9 +11,10 @@ notifications.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -121,22 +122,27 @@ def _score_label(score: int) -> str:
     return "INSUFICIENTE"
 
 
-def _regime_to_direction_token(regime_label: str | None) -> str:
-    """Map regime label → direction token used by scan().
+log = logging.getLogger("strategy.core")
 
-    Mirrors the logic in `btc_scanner.scan()`:
-        `regime = "LONG" if regime == "BULL" else "SHORT" if regime == "BEAR" else "LONG"`
-    i.e. both BULL and NEUTRAL/unknown allow LONG; only BEAR enables SHORT.
+KNOWN_REGIME_LABELS: frozenset[str] = frozenset({"BULL", "BEAR", "NEUTRAL", "BYPASS"})
+_unknown_regime_warned: set[str] = set()
 
-    A.4-1.5 (regime_disabled bypass): "BYPASS" → "ANY", which the gating
-    block treats as "permit either direction by zone alone" — used when the
-    regime detector is disabled to evaluate the no-detector configuration.
+
+def _regime_to_direction_token(regime_label: str | None) -> Literal["LONG", "SHORT", "ANY"]:
+    """Map regime label → direction token.
+
+    BEAR → SHORT, BYPASS → ANY (both directions permitted, gated by zone alone),
+    BULL/NEUTRAL/missing → LONG. Unknown labels emit a once-per-label warning
+    and fall back to LONG.
     """
+    if regime_label is not None and regime_label not in KNOWN_REGIME_LABELS:
+        if regime_label not in _unknown_regime_warned:
+            _unknown_regime_warned.add(regime_label)
+            log.warning("Unknown regime_label %r; falling back to LONG", regime_label)
     if regime_label == "BYPASS":
         return "ANY"
     if regime_label == "BEAR":
         return "SHORT"
-    # BULL, NEUTRAL, missing, or unknown all fall back to LONG-enabled
     return "LONG"
 
 
@@ -351,11 +357,10 @@ def evaluate_signal(
     regime_label = (regime or {}).get("regime")
     regime_token = _regime_to_direction_token(regime_label)
 
-    # LONG when in low zone AND regime is LONG or NEUTRAL (mapped to LONG).
-    # SHORT only when in high zone AND regime is BEAR → SHORT.
-    # ANY (BYPASS, A.4-1.5): direction follows zone alone.
+    # LONG when in low zone AND regime allows LONG (LONG or ANY).
+    # SHORT when in high zone AND regime allows SHORT (SHORT or ANY).
     # Everything else → NONE (middle band, or mismatched zone/regime pair).
-    if in_long_zone and regime_token in ("LONG", "NEUTRAL", "ANY"):
+    if in_long_zone and regime_token in ("LONG", "ANY"):
         direction = "LONG"
     elif in_short_zone and regime_token in ("SHORT", "ANY"):
         direction = "SHORT"
