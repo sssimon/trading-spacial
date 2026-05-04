@@ -262,6 +262,43 @@ La elección post-pause es post-hoc dada la distribución del output; el trigger
 
 **Caveat heredado:** los valores actuales del table de arriba fueron tuneados pre-PR1/PR2 sobre data leakeada. Post-retune, esos valores son históricos — el snapshot pre-tune queda en commit history. Los valores re-tuneados quedan en `data/retune/2026-05-04-pre-holdout/params.json` y se promueven a `config.json` en Phase 5 separate PR.
 
+### 2.10 Regime detector thresholds (>60/<40 BULL/BEAR partition)
+
+**Estado actual:** thresholds `composite > 60 → BULL`, `composite < 40 → BEAR`, `40 ≤ composite ≤ 60 → NEUTRAL`. Implementación en `strategy/regime.py:372-377` y `backtest.py:404-409`.
+
+**Origen documentado:** commit `bf581f1` (sssamuelll, 2026-04-18) cambió `>70/<30` → `>60/<40` post-backtest comparison. Commit body literal listó 4 configurations (60/40, 70/30, 80/20, no detector) con net_pnl P&L sobre 10 portfolio symbols; commit body claim "5 configurations" tratado como typo del original (archaeology revela solo 4 documentadas, sin script/CSV/notebook preservado).
+
+**Decisión pre-holdout (registrada 5 mayo 2026):** **re-tune mecánico requerido** sobre ventana `[earliest, 2025-04-30T00:00:00Z)` antes de la evaluación holdout. Implementación: A.4-1.5 mini-harness paralelo a A.4-1 (#287, ATR re-tune).
+
+**Justificación de la inclusión en pre-holdout closure:**
+- Los thresholds 60/40 fueron **data-derived** vía backtest. Window de optimización: undocumented en commit/changelog/script. Inferred to include data through ~2026-04-18 based on commit timestamp and absence of cutoff specification. If the inferred window is incorrect, the leakage analysis may differ — but absence of documentation is itself the methodological problem we're correcting.
+- Esto es leakage en la misma categoría que ATR multipliers — escape clause de CLAUDE.md caveat #1 activada, mini-harness es la respuesta operacional.
+- Detected en archaeology depth-2 del closure paquete A.4-1 (5 mayo 2026) — captured pre-merge per Option α discipline + escape clause.
+
+**Window de re-tune:** `[earliest, 2025-04-30T00:00:00Z)`. Cutoff = holdout_start. Strict `<` slicing.
+
+**Grid (locked-by-historical-record):** 4 configurations from commit `bf581f1`:
+- `(60, 40)` — current production
+- `(70, 30)` — pre-bf581f1 value (operator memory: convention paralela a F&G index thresholds, industry standard para composites 0-100; calibrated as rule-derived con confianza no-absoluta — "no recuerdo haber abierto histogramas o backtests del proyecto antes de elegirlo en commit `4ee580c`" no equivale a "estoy seguro que no lo hice")
+- `(80, 20)` — conservative alternative
+- No detector — bypass regime gating completamente
+
+**Objective (locked-by-historical-record):** maximize net_pnl per backtest comparison sobre 10 portfolio symbols (mismo basket que A.4-1).
+
+**Output artifact:** `data/retune/2026-05-04-pre-holdout/regime_params.json` con shape `{"regime_thresholds": {"bull_above": <int>, "bear_below": <int>}}` o `{"regime_disabled": true}` si "no detector" gana. Manifest sibling con cutoff + ohlcv hash + leakage_check.
+
+**Decision flags pre-registered (paralelo a §2.9 J_primary/J_total/K, adapted to 4-config universe):**
+
+- **Decision flag — CHANGE detection:** si el winner del re-tune ≠ `(60, 40)` actual, registrar como CHANGE substantivo. **Require review explícito antes de promover en Phase 5; NO auto-promote.**
+- **Sanity check — degenerate winner:** si "no detector" gana sobre la window pre-holdout, **halt y debug.** Esa configuración fue last-place tied con `(80, 20)` en bf581f1; si gana sobre pre-holdout-only window, alta probabilidad de bug en harness o dataset slicing. Investigate antes de cualquier acción.
+- **Stability check — flat optimum:** si la segunda-mejor configuración tiene net_pnl dentro de 5% del winner, **registrar como informational caveat** (regime detection is operating in a flat region of parameter space; choice is somewhat arbitrary; production decision should consider qualitative tradeoffs además del marginal P&L).
+
+**N effective contribution:** 0. Mismo argumento que §2.9 — grid + objective locked-by-historical-record (commit `bf581f1` los preserva), única variable es dataset window (pre-holdout vs full history del backtest original). Re-correr protocolo determinístico sobre dataset distinto NO es trial nuevo en sentido DSR. Decision flag + sanity check + stability check son rule-derived triggers procedurales, no DOFs. El N efectivo del Section 3 se mantiene en 3 PRIMARY.
+
+**Caveat heredado:** thresholds 60/40 actuales fueron data-derived sobre data leakeada. Post-retune, esos valores son históricos — el snapshot pre-tune queda en commit `bf581f1` + en código actual hasta Phase 5 promotion. Los valores re-tuneados quedan en `data/retune/2026-05-04-pre-holdout/regime_params.json` y se promueven a `strategy/regime.py` + `backtest.py` en Phase 5 separate PR.
+
+**Sequencing:** A.4-1.5 mini-harness ejecuta antes de A.4-1 Phase 3 (#287). Phase 3 ATR retune está GATED en el cierre exitoso de A.4-1.5 (no halt, no critical pause). Si A.4-1.5 dispara halt + debug o decision flag substantivo, Phase 3 espera la resolución del análisis correspondiente.
+
 ---
 
 ## 3 · N efectivo del DSR — propuesta pre-registered
