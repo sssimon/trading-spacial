@@ -406,3 +406,103 @@ def _build_report(agg: dict, cells: list, cutoff: datetime,
             )
     lines.append("")
     return "\n".join(lines)
+
+
+def _get_symbols() -> list[str]:
+    """Return the 10 portfolio symbols (mirror of A.4-1's basket)."""
+    from btc_scanner import DEFAULT_SYMBOLS
+    return list(DEFAULT_SYMBOLS)
+
+
+def main(argv: list | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Pre-holdout regime threshold re-tune mini-harness (A.4-1.5).",
+    )
+    parser.add_argument("--max-date", type=str, required=True,
+                        help="ISO date (YYYY-MM-DD, UTC). Holdout starts on this day; "
+                             "tune sees only bars strictly before it.")
+    parser.add_argument("--out-dir", type=str, default=None,
+                        help="Override output directory. "
+                             "Defaults to data/retune/<today>-pre-holdout/.")
+    args = parser.parse_args(argv)
+
+    cutoff = datetime.fromisoformat(args.max_date).replace(tzinfo=timezone.utc)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    if not os.path.exists(OHLCV_DB):
+        log.error("OHLCV DB not found at %s", OHLCV_DB)
+        return 2
+
+    symbols = _get_symbols()
+    app_config = _load_config()
+
+    if args.out_dir:
+        out_dir = args.out_dir
+    else:
+        run_date = datetime.now(timezone.utc).date().isoformat()
+        out_dir = os.path.join(REPO_ROOT, "data", "retune", f"{run_date}-pre-holdout")
+    os.makedirs(out_dir, exist_ok=True)
+
+    log.info("A.4-1.5 regime threshold re-tune starting")
+    log.info("  cutoff:  %s", cutoff.isoformat())
+    log.info("  symbols: %s", ", ".join(symbols))
+    log.info("  configs: %s", ", ".join(c["name"] for c in GRID))
+    log.info("  out_dir: %s", out_dir)
+
+    start = time.time()
+    cells = []
+    for symbol in symbols:
+        for config in GRID:
+            cell = _run_one_backtest(symbol, config, cutoff, app_config=app_config)
+            if cell["error"]:
+                log.warning("[%s][%s] error: %s", symbol, config["name"], cell["error"])
+            else:
+                log.info("[%s][%s] net_pnl=$%+,.2f trades=%d",
+                         symbol, config["name"], cell["net_pnl"], cell["trades"])
+            cells.append(cell)
+    runtime_seconds = time.time() - start
+
+    agg = _aggregate_results(cells)
+
+    log.info("Computing per-symbol data ranges from ohlcv.db...")
+    ranges = _per_symbol_data_ranges(OHLCV_DB, symbols, cutoff_ms)
+    leakage_check = _verify_no_leakage(ranges, cutoff_ms)
+    log.info("Leakage check: %s", leakage_check)
+
+    log.info("Hashing ohlcv.db...")
+    ohlcv_sha = _sha256_file(OHLCV_DB)
+    code_commit = _resolve_git_commit()
+
+    manifest = _build_manifest(
+        agg=agg, cutoff=cutoff, cutoff_ms=cutoff_ms,
+        ohlcv_sha=ohlcv_sha, code_commit=code_commit,
+        ranges=ranges, runtime_seconds=runtime_seconds,
+        leakage_check=leakage_check, symbols=symbols,
+    )
+
+    report_md = _build_report(
+        agg=agg, cells=cells, cutoff=cutoff,
+        ranges=ranges, runtime_seconds=runtime_seconds, symbols=symbols,
+    )
+
+    _write_regime_params(os.path.join(out_dir, "regime_params.json"), agg)
+    _atomic_write_json(os.path.join(out_dir, "regime_manifest.json"), manifest)
+    with open(os.path.join(out_dir, "regime_report.md"), "w", encoding="utf-8") as f:
+        f.write(report_md)
+
+    log.info("Artefacts written to %s", out_dir)
+    log.info("  regime_params.json   — winner config, byte-deterministic")
+    log.info("  regime_manifest.json — cutoff, hashes, decision flags, no-leakage proof")
+    log.info("  regime_report.md     — human-readable side-by-side + caveats")
+    log.info("Decision flags: %s", agg["decision_flags"])
+
+    if agg["decision_flags"]["sanity_check"]:
+        log.error("SANITY CHECK FIRED: no_detector wins on pre-holdout window. "
+                  "HALT + DEBUG before promoting this artefact.")
+        return 3
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

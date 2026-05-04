@@ -347,3 +347,62 @@ class TestArtefactWriters:
         assert "Stability check" in report
         assert "BTCUSDT" in report
         assert "JUPUSDT" in report  # caveat mentioned
+
+
+class TestCLI:
+    def test_max_date_required(self):
+        with pytest.raises(SystemExit):
+            harness.main([])
+
+    def _common_stubs(self, monkeypatch, fake_run):
+        """Stub the slow / IO-bound parts of main() so tests can exercise control flow."""
+        original_exists = os.path.exists  # capture before patching
+
+        monkeypatch.setattr(harness, "_run_one_backtest", fake_run)
+        monkeypatch.setattr(harness, "_per_symbol_data_ranges",
+                            lambda *a, **kw: {sym: {} for sym in harness._get_symbols()})
+        monkeypatch.setattr(harness, "_verify_no_leakage", lambda *a, **kw: "PASS")
+        monkeypatch.setattr(harness, "_sha256_file", lambda *a, **kw: "deadbeef")
+        monkeypatch.setattr(harness, "_resolve_git_commit", lambda: "abcdef0")
+        monkeypatch.setattr(harness, "_load_config", lambda: {"symbol_overrides": {}})
+        # Force the OHLCV_DB existence check to pass without reaching the filesystem.
+        monkeypatch.setattr(harness.os.path, "exists",
+                            lambda p: True if p == harness.OHLCV_DB else original_exists(p))
+
+    def test_full_run_with_stubs(self, monkeypatch, tmp_path):
+        """End-to-end CLI run with stubbed _run_one_backtest. 60_40 wins."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            pnl_map = {"60_40": 200.0, "70_30": 100.0, "80_20": 50.0, "no_detector": 30.0}
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": pnl_map[config["name"]], "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 0
+        assert (tmp_path / "regime_params.json").exists()
+        assert (tmp_path / "regime_manifest.json").exists()
+        assert (tmp_path / "regime_report.md").exists()
+
+        params = json.loads((tmp_path / "regime_params.json").read_text())
+        assert params == {"format_version": 1,
+                          "regime_thresholds": {"bull_above": 60, "bear_below": 40}}
+
+    def test_sanity_check_returns_rc_3(self, monkeypatch, tmp_path):
+        """When no_detector wins, main() returns 3 (HALT signal)."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            pnl_map = {"60_40": 50.0, "70_30": 30.0, "80_20": 20.0, "no_detector": 200.0}
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": pnl_map[config["name"]], "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 3
+
+    def test_missing_ohlcv_db_returns_rc_2(self, monkeypatch, tmp_path):
+        original_exists = os.path.exists
+        monkeypatch.setattr(harness.os.path, "exists",
+                            lambda p: False if p == harness.OHLCV_DB else original_exists(p))
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 2
