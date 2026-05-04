@@ -212,16 +212,18 @@ Es la asignación lo que es fitting a la data, no los valores numéricos.
 | JUP | 0.5 | 4.0 | 2.5 |
 | RUNE | 0.7 | 6.0 | 2.5 |
 
-**Decisión pre-holdout:** **preservar valores actuales.** NO re-tunear (#272 deferred per Sam, A.4-1 retune harness #287 stays open draft).
+**Decisión pre-holdout (revisada 5 mayo 2026):** **re-tune mecánico requerido** sobre ventana `[earliest, 2025-04-30T00:00:00Z]` antes de la evaluación holdout. Implementación: A.4-1 retune harness (#287, Phase 3).
 
-**Justificación:**
-- Valores fueron tuneados pre-A.4 v1 (epic #121 + iterative). Per #272, los números baseline están inflados pre-#223/#224 phantom-fix — pero el operador decidió NO re-baseline antes del structural fix epic.
-- Re-tunear estos valores ahora introduce DOFs y mezcla scope con el structural fix.
-- Si holdout falla, una de las hipótesis a investigar es que los ATR multipliers son los wrong numbers para el nuevo exit logic (Triple Barrier per-cluster). Esa investigación es post-holdout.
+**Justificación del cambio respecto a la pre-registration original:**
+- Los valores actuales fueron tuneados sobre full history que **incluye** el rango holdout [2025-04-30 → 2026-04-30]. Esto es leakage: el holdout no está fuera-de-muestra para esos parámetros. CLAUDE.md "Caveats heredados — A.4 (#250) MUST honor" caveat #1 reconoce el leakage explícitamente.
+- El re-tune es **mecánico**, no introduce DOFs nuevos: grid + objective function están locked-at-Phase-2 (`auto_tune.py`); el harness solo restringe el dataset de entrada al pre-holdout window y re-corre el grid existente. No hay decisión humana en los 30 valores resultantes.
+- El §2.9 original prescribió "NO re-tunear" bajo el razonamiento de que cualquier re-tune introduce DOFs. Este razonamiento conflaba dos casos: iterar sobre grid/objective (introduce DOFs) vs. re-correr grid locked sobre dataset restringido (no introduce DOFs — output mecánico determinístico). Combinado con el caveat de leakage en CLAUDE.md, la prescripción correcta era el segundo caso, no la preservación. Corregimos esta pre-registration error antes de la ejecución del holdout.
 
-**N effective contribution:** 0 (valores preserved sin search).
+**Status del cambio:** el analista externo será notificado en el doc thread del 4 mayo antes del inicio de la ejecución del re-tune. Si el analista objeta la metodología, el re-tune se pausa para discutir.
 
-**Caveat heredado:** estos valores fueron tuneados pre-PR1/PR2. El nuevo exit logic (con time-limit + cap) puede tener interacciones con los ATR multipliers que cambien la performance. Esto es exactamente parte de lo que el holdout va a revelar. Pre-registered como "valores preservados, interaction con structural fix es input al holdout, no DOF."
+**N effective contribution:** 0 (sin search; output mecánico determinístico del harness sobre dataset restringido). El N efectivo del Section 3 se mantiene en 3 PRIMARY.
+
+**Caveat heredado:** los valores actuales del table de arriba fueron tuneados pre-PR1/PR2 sobre data leakeada. Post-retune, esos valores son históricos — el snapshot pre-tune queda en commit history. Los valores re-tuneados quedan en `data/retune/2026-05-04-pre-holdout/params.json` y se promueven a `config.json` en Phase 5 separate PR.
 
 ---
 
@@ -273,7 +275,7 @@ Lista explícita de valores que NO se mueven post-holdout. Cualquier ajuste a es
 - BTC=14, ETH=14, ADA=6, PENDLE=6, AVAX=8, DOGE=6, UNI=6, XLM=6, JUP=6, RUNE=6 (hours)
 
 **ATR multipliers (per §2.9):**
-- (Los 30 valores in `config.json["symbol_overrides"]` actuales)
+- 30 valores **re-tuneados** por A.4-1 harness sobre ventana `[earliest, 2025-04-30Z]`. Lock-at-retune, no lock-at-current-value. Snapshot del artefact en `data/retune/2026-05-04-pre-holdout/params.json` con SHA-256 en manifest. Cualquier movimiento post-holdout disqualifies.
 
 **Other policy:** RISK_PER_TRADE=0.01, score tiers {0.5, 1.0, 1.5}, regime thresholds {>60, <40}, tier mapping (per research §2.3).
 
