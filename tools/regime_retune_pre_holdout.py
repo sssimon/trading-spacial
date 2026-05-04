@@ -7,6 +7,14 @@ pre-registered decision flags; writes byte-deterministic artefacts.
 
 Usage:
     python -m tools.regime_retune_pre_holdout --max-date 2025-04-30
+
+Exit codes:
+  0 — success, canonical artefacts written
+  2 — no OHLCV DB
+  3 — sanity halt (no_detector wins; refuses canonical writes)
+  4 — sweep had errored cells
+  5 — manifest/canonical write failure (raw_results.json fallback)
+  6 — degenerate zero-pnl sweep (refuses canonical writes)
 """
 from __future__ import annotations
 
@@ -20,6 +28,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from typing import Literal
 
 import pandas as pd
 
@@ -387,12 +396,16 @@ def _build_report(agg: dict, cells: list, cutoff: datetime,
     eq = "==" if agg['winner'] == '60_40' else "!="
     sanity_msg = "→ HALT + DEBUG required before any commit" if agg['decision_flags']['sanity_check'] else ""
     stab_msg = "→ informational caveat: regime is operating in a flat region" if agg['decision_flags']['stability_check'] else ""
+    degen_flag = agg['decision_flags'].get('degenerate_zero_pnl', False)
+    degen_msg = "→ HALT: winner is lex tie-break, not signal-driven" if degen_flag else ""
     lines.append(f"- **CHANGE detection:** `{agg['decision_flags']['change_detection']}` "
                  f"(winner {eq} current production `60_40`)")
     lines.append(f"- **Sanity check (no-detector wins):** "
                  f"`{agg['decision_flags']['sanity_check']}` {sanity_msg}")
     lines.append(f"- **Stability check (margin < 5%):** "
                  f"`{agg['decision_flags']['stability_check']}` {stab_msg}")
+    lines.append(f"- **Degenerate zero-pnl (all per-config sums ≈ 0):** "
+                 f"`{degen_flag}` {degen_msg}")
     lines.append("")
     lines.append("## Per-symbol breakdown")
     lines.append("")
@@ -458,44 +471,81 @@ def _clear_stale_artefacts(out_dir: str) -> None:
     place and the operator believes run-2 succeeded.
 
     Also clears orphan .tmp files from prior interrupted runs.
+    Permission errors are logged but don't abort cleanup.
     """
+    removed: list[str] = []
     for stale_name in _CANONICAL_ARTEFACTS:
+        stale_path = os.path.join(out_dir, stale_name)
         try:
-            os.remove(os.path.join(out_dir, stale_name))
+            os.remove(stale_path)
+            removed.append(stale_name)
         except FileNotFoundError:
             pass
+        except PermissionError as exc:
+            log.warning("Could not remove stale artefact %s: %s", stale_path, exc)
     try:
         for entry in os.listdir(out_dir):
             if entry.endswith(".tmp"):
+                tmp_path = os.path.join(out_dir, entry)
                 try:
-                    os.remove(os.path.join(out_dir, entry))
+                    os.remove(tmp_path)
+                    removed.append(entry)
                 except FileNotFoundError:
                     pass
+                except PermissionError as exc:
+                    log.warning("Could not remove orphan tmp %s: %s", tmp_path, exc)
     except FileNotFoundError:
         pass
+    if removed:
+        log.info("Cleared %d stale artefact(s) from %s: %s",
+                 len(removed), out_dir, ", ".join(removed))
 
 
-def _emergency_write(path: str, payload: dict, kind: str) -> None:
-    """Best-effort write for diagnostic artefacts. On primary failure, falls
-    back to /tmp; on fallback failure, logs and continues. Never raises —
-    preserves the caller's rc contract under disk-full / permission errors.
+def _emergency_write(
+    path: str,
+    payload: dict,
+    kind: Literal["halted_summary", "sweep_errors", "raw_results"],
+) -> None:
+    """Best-effort write for diagnostic artefacts. Never raises — preserves
+    caller's rc contract under disk-full / permission errors.
+
+    On primary failure, falls back to /tmp/regime_retune_<kind>_<ts>.json.
+    Fallback uses ``default=str`` to tolerate non-JSON-serializable payloads
+    (e.g. class instances accidentally stashed in agg dicts during
+    diagnostic flows). On fallback failure, logs and continues.
+
+    Catches Exception broadly because a diagnostic write must succeed at
+    documenting the *original* error — narrowing the catch (and accidentally
+    propagating, say, a recursive serialization MemoryError) would break the
+    rc contract that the docstring promises.
     """
     try:
         _atomic_write_json(path, payload)
-    except (OSError, TypeError, ValueError) as exc:
+        return
+    except Exception as exc:  # noqa: BLE001 — see docstring rationale
         log.error("Failed to write %s artefact at %s: %s", kind, path, exc, exc_info=True)
-        fallback = f"/tmp/regime_retune_{kind}_{int(time.time())}.json"
-        try:
-            with open(fallback, "w", encoding="utf-8") as f:
-                json.dump(payload, f, sort_keys=True, indent=2, default=str)
-            log.error("Fallback %s written to %s", kind, fallback)
-        except (OSError, TypeError, ValueError) as fallback_exc:
-            log.error("Fallback write also failed: %s", fallback_exc, exc_info=True)
+    fallback = f"/tmp/regime_retune_{kind}_{int(time.time())}.json"
+    try:
+        with open(fallback, "w", encoding="utf-8") as f:
+            json.dump(payload, f, sort_keys=True, indent=2, default=str)
+        log.error("Fallback %s written to %s", kind, fallback)
+    except Exception as fallback_exc:  # noqa: BLE001
+        log.error("Fallback write also failed: %s", fallback_exc, exc_info=True)
 
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Pre-holdout regime threshold re-tune mini-harness.",
+        epilog=(
+            "Exit codes: "
+            "0=success | "
+            "2=no OHLCV DB | "
+            "3=sanity halt (no_detector wins) | "
+            "4=sweep had errored cells | "
+            "5=manifest/canonical write failure (raw_results.json fallback) | "
+            "6=degenerate zero-pnl sweep"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--max-date", type=str, required=True,
                         help="ISO date (YYYY-MM-DD, UTC). Holdout starts on this day; "
@@ -606,6 +656,32 @@ def main(argv: list | None = None) -> int:
             kind="halted_summary",
         )
         return 3
+
+    # Degenerate sweep: every per-config sum is below the 1e-9 threshold.
+    # The winner becomes a lex tie-break (60_40 by alphabetical order) rather
+    # than signal-driven. Refuse to write canonical artefacts — operator
+    # should investigate whether all symbols are disabled, OHLCV is corrupt,
+    # or signal generation is broken before treating the result as authoritative.
+    # Sanity (no_detector wins) takes priority above; a dataset that produces
+    # both flags simultaneously is sanity-first.
+    if agg["decision_flags"].get("degenerate_zero_pnl", False):
+        log.error(
+            "DEGENERATE SWEEP: all per-config net_pnl below 1e-9 threshold. "
+            "Winner is lex tie-break, not signal-driven. Refusing to write "
+            "canonical artefacts. Possible causes: all symbols disabled, "
+            "OHLCV corruption, signal generation broken. See halted_summary.json."
+        )
+        _emergency_write(
+            os.path.join(out_dir, "halted_summary.json"),
+            {
+                "reason": "degenerate_zero_pnl",
+                "agg": agg,
+                "manifest": manifest,
+                "report_md": report_md,
+            },
+            kind="halted_summary",
+        )
+        return 6
 
     # Order: report + manifest first, regime_params.json LAST as the
     # durability marker for downstream consumers. If any write fails (disk

@@ -84,6 +84,15 @@ class TestMutuallyExclusiveKwargs:
                 regime_thresholds=(70, 30),
             )
 
+    # Downstream errors expected on empty frames (insufficient bars for warmup,
+    # missing required indicator columns, etc.). Narrow the catch to known
+    # downstream failure modes so a contract-violation bug (e.g. a new
+    # RegimeKwargError variant) wouldn't be silently swallowed.
+    _EXPECTED_DOWNSTREAM = (
+        IndexError, KeyError, ValueError, AttributeError,
+        AssertionError, RuntimeError, TypeError,
+    )
+
     def test_only_disabled_does_not_raise_at_entry(self):
         """Positive case: regime_disabled=True alone should not raise the
         mutex/shape validation. Downstream errors due to empty frames are
@@ -97,8 +106,8 @@ class TestMutuallyExclusiveKwargs:
             )
         except RegimeKwargError:
             pytest.fail("regime_disabled=True alone should not raise RegimeKwargError")
-        except Exception:
-            pass  # any other downstream error is fine
+        except self._EXPECTED_DOWNSTREAM:
+            pass
 
     def test_only_thresholds_does_not_raise_at_entry(self):
         from backtest import RegimeKwargError
@@ -110,7 +119,7 @@ class TestMutuallyExclusiveKwargs:
             )
         except RegimeKwargError:
             pytest.fail("regime_thresholds alone should not raise RegimeKwargError")
-        except Exception:
+        except self._EXPECTED_DOWNSTREAM:
             pass
 
     def test_neither_kwarg_does_not_raise_at_entry(self):
@@ -122,7 +131,7 @@ class TestMutuallyExclusiveKwargs:
             )
         except RegimeKwargError:
             pytest.fail("default kwargs should not raise RegimeKwargError")
-        except Exception:
+        except self._EXPECTED_DOWNSTREAM:
             pass
 
 

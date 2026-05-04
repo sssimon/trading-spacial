@@ -492,7 +492,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 and all(isinstance(x, int) and not isinstance(x, bool)
                         for x in regime_thresholds)):
             raise RegimeKwargError(
-                f"regime_thresholds must be tuple[int, int]; got "
+                f"regime_thresholds must be tuple[int, int] (bool excluded — "
+                f"True/False are int subclasses in Python); got "
                 f"{regime_thresholds!r}"
             )
 

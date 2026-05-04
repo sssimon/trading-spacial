@@ -552,6 +552,112 @@ class TestCLI:
         assert "report_md" in halted
         assert "Pre-holdout Regime Threshold Re-tune Report" in halted["report_md"]
 
+    def test_degenerate_zero_pnl_returns_rc_6_and_refuses_canonical_artefacts(
+            self, monkeypatch, tmp_path):
+        """When all per-config sums ≈ 0, refuse canonical writes; rc=6, halted_summary present."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": 0.0, "trades": 0, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 6
+        assert not (tmp_path / "regime_params.json").exists()
+        assert not (tmp_path / "regime_manifest.json").exists()
+        assert not (tmp_path / "regime_report.md").exists()
+        assert (tmp_path / "halted_summary.json").exists()
+        halted = json.loads((tmp_path / "halted_summary.json").read_text())
+        assert halted["reason"] == "degenerate_zero_pnl"
+        assert "report_md" in halted
+
+    def test_sanity_takes_priority_over_degenerate(self, monkeypatch, tmp_path):
+        """If both flags would fire (no_detector wins AND all sums tiny), sanity wins (rc=3)."""
+        # All cells effectively zero except no_detector winning by 1e-12.
+        # In practice all_zero check uses 1e-9 threshold, so 1e-12 still triggers degenerate.
+        # We engineer a case where degenerate_zero_pnl=True AND winner=no_detector.
+        def fake_run(symbol, config, cutoff, app_config=None):
+            # All zero across the board → all_zero=True. Sanity check fires when
+            # winner == "no_detector"; with all-zero PnL the winner is lex tie-break
+            # which is "60_40", NOT no_detector. So this scenario can't actually
+            # produce both flags via the realistic path.
+            # For the priority test, we instead verify sanity priority by mocking
+            # _aggregate_results to return both flags. Skip this engineered case
+            # in favor of a direct unit test on the priority order.
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": 0.0, "trades": 0, "error": None}
+
+        # Mock _aggregate_results to return both flags simultaneously.
+        original_aggregate = harness._aggregate_results
+
+        def both_flags_aggregate(cells):
+            agg = original_aggregate(cells)
+            agg["winner"] = "no_detector"
+            agg["decision_flags"]["sanity_check"] = True
+            agg["decision_flags"]["degenerate_zero_pnl"] = True
+            return agg
+
+        self._common_stubs(monkeypatch, fake_run)
+        monkeypatch.setattr(harness, "_aggregate_results", both_flags_aggregate)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 3, "sanity_check must take priority over degenerate_zero_pnl"
+        halted = json.loads((tmp_path / "halted_summary.json").read_text())
+        assert halted["reason"] == "sanity_check_fired"
+
+    def test_rc_5_on_canonical_write_failure(self, monkeypatch, tmp_path):
+        """Simulate _atomic_write_text raising on canonical writes; verify rc=5 +
+        raw_results.json fallback."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": 100.0, "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        # Force the first canonical write (regime_report.md) to fail.
+        monkeypatch.setattr(harness, "_atomic_write_text", boom)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 5
+        # raw_results.json fallback (via _emergency_write) should land somewhere —
+        # either at out_dir or in /tmp. Verify out_dir path first; if absent the
+        # _emergency_write fallback in /tmp is acceptable per its contract.
+        # Here the OSError("disk full") only affects _atomic_write_text; the
+        # raw_results _emergency_write call uses _atomic_write_json which is NOT
+        # patched, so it should succeed at out_dir.
+        assert (tmp_path / "raw_results.json").exists()
+        raw = json.loads((tmp_path / "raw_results.json").read_text())
+        assert "cells" in raw
+        assert "agg" in raw
+
+    def test_degenerate_flag_rendered_in_report(self):
+        """_build_report must include degenerate_zero_pnl in the decision flags section."""
+        agg = {
+            "winner": "60_40", "winner_pnl": 0.0, "runner_up": "70_30",
+            "runner_up_pnl": 0.0, "winner_margin_pct": 0.0,
+            "per_config_pnl": {"60_40": 0.0, "70_30": 0.0, "80_20": 0.0, "no_detector": 0.0},
+            "per_config_trades": {"60_40": 0, "70_30": 0, "80_20": 0, "no_detector": 0},
+            "decision_flags": {
+                "change_detection": False,
+                "sanity_check": False,
+                "stability_check": True,
+                "degenerate_zero_pnl": True,
+            },
+        }
+        cells = [{"symbol": "BTCUSDT", "config": c, "net_pnl": 0.0, "trades": 0, "error": None}
+                 for c in ("60_40", "70_30", "80_20", "no_detector")]
+        cutoff = datetime(2025, 4, 30, tzinfo=timezone.utc)
+        ranges = {"BTCUSDT": {tf: {"min_ts_iso": "—", "max_ts_iso": "—", "count": 0}
+                              for tf in harness.TIMEFRAMES}}
+        report = harness._build_report(agg=agg, cells=cells, cutoff=cutoff,
+                                        ranges=ranges, runtime_seconds=1.0,
+                                        symbols=["BTCUSDT"])
+        assert "Degenerate zero-pnl" in report
+        assert "lex tie-break" in report
+
 
 class TestEmergencyWrite:
     def test_emergency_write_falls_back_to_tmp_on_oserror(self, monkeypatch, tmp_path, caplog):
