@@ -107,6 +107,15 @@ def _validated_cooldown_hours(value, symbol: str) -> float:
 FEE_PCT = 0.001
 
 
+class RegimeKwargError(Exception):
+    """Raised when regime kwargs are passed in an incoherent combination
+    (contract violation by caller, not a data error). Subclasses Exception
+    rather than ValueError so the harness's narrow data-error catch does
+    not swallow it — propagates as a programming error, surfacing the bug
+    to the operator instead of silently shrinking the sweep.
+    """
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  DATA DOWNLOAD
 # ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +246,9 @@ def _regime_at_time(
                               Fallback: if df1d_btc is None -> uses df1d_sym.
     mode='hybrid':           uses df1d_sym + F&G + funding (50/25/25).
     mode='hybrid_momentum':  uses df1d_sym + RSI + ADX + F&G + funding (30/15/20/20/15).
+
+    bull_above / bear_below: regime classification thresholds. Defaults 60/40
+        preserve byte-identity to legacy production behavior.
     """
     bar_time_naive = bar_time.tz_localize(None) if bar_time.tzinfo else bar_time
 
@@ -470,10 +482,19 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         Mutually exclusive with regime_thresholds.
     """
     if regime_disabled and regime_thresholds is not None:
-        raise ValueError(
+        raise RegimeKwargError(
             "regime_disabled=True is mutually exclusive with regime_thresholds — "
             "bypass mode skips threshold logic entirely."
         )
+    if regime_thresholds is not None:
+        if not (isinstance(regime_thresholds, tuple)
+                and len(regime_thresholds) == 2
+                and all(isinstance(x, int) and not isinstance(x, bool)
+                        for x in regime_thresholds)):
+            raise RegimeKwargError(
+                f"regime_thresholds must be tuple[int, int]; got "
+                f"{regime_thresholds!r}"
+            )
 
     # #186 A6: lazy imports keep backtest.py importable even when `strategy/`
     # or `backtest_kill_switch` has its own transient import issues.
@@ -707,9 +728,10 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         if len(slice_1h) < LRC_PERIOD:
             continue
 
-        # Regime detection via _regime_at_time helper (#152) — kept as
-        # backtest-local because scan() fetches its regime from a cache /
-        # per-symbol detector, not the bar-aligned helper used here.
+        # Regime detection — bypass branch synthesizes a regime dict for the
+        # no-detector configuration; else delegates to _regime_at_time helper
+        # (kept backtest-local because scan() fetches its regime from a 24h
+        # cache, not the bar-aligned helper used here).
         if regime_disabled:
             regime_info = {
                 "regime": "BYPASS",
@@ -717,7 +739,6 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 "mode": "disabled",
                 "symbol": symbol,
                 "components": {},
-                "bypass": True,
             }
         else:
             ba, bb = (regime_thresholds if regime_thresholds is not None else (60, 40))

@@ -273,8 +273,12 @@ def evaluate_signal(
             override resolution in `cfg["symbol_overrides"]`.
         cfg: Config dict (typically the merged `load_config()` result). Reads
             `symbol_overrides` for ATR multipliers.
-        regime: Regime detector output shape:
-            `{"regime": "BULL"|"BEAR"|"NEUTRAL", "score": float, "details": {}}`
+        regime: Regime detector output. Shape:
+            `{"regime": "BULL"|"BEAR"|"NEUTRAL"|"BYPASS",
+              "score": float | None,  # None when regime == "BYPASS"
+              ...}`
+            (Extra source-specific fields like `details` or `components` may
+            be present; this function only reads `regime["regime"]`.)
         health_state: Kill-switch tier for this symbol. Currently PAUSED short-
             circuits to NONE; other tiers affect size (handled by caller).
         now: Timestamp context (not currently used inside the pure function;

@@ -1,4 +1,4 @@
-"""Tests for the A.4-1.5 regime threshold pre-holdout re-tune harness."""
+"""Tests for the regime threshold pre-holdout re-tune harness."""
 import json
 import os
 from datetime import datetime, timezone
@@ -511,3 +511,136 @@ class TestCLI:
 
         with pytest.raises(FileNotFoundError, match="config.json not found"):
             harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+
+    def test_stale_canonical_artefacts_removed_on_rerun(self, monkeypatch, tmp_path):
+        """Run-1 success → run-2 halt: stale regime_params.json must NOT survive."""
+        # Pre-seed run-1 canonical artefacts.
+        (tmp_path / "regime_params.json").write_text('{"stale": "from_run1"}')
+        (tmp_path / "regime_manifest.json").write_text('{"stale": "from_run1"}')
+        (tmp_path / "regime_report.md").write_text("stale run-1 content")
+        (tmp_path / "leftover.tmp").write_text("orphan tmp")
+
+        # Run-2 setup: no_detector wins → halt branch.
+        def fake_run(symbol, config, cutoff, app_config=None):
+            pnl_map = {"60_40": 50.0, "70_30": 30.0, "80_20": 20.0, "no_detector": 200.0}
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": pnl_map[config["name"]], "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+
+        rc = harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        assert rc == 3
+        # Stale canonical artefacts MUST be cleaned up.
+        assert not (tmp_path / "regime_params.json").exists()
+        assert not (tmp_path / "regime_manifest.json").exists()
+        assert not (tmp_path / "regime_report.md").exists()
+        # Orphan tmp files cleaned.
+        assert not (tmp_path / "leftover.tmp").exists()
+        # Halted summary IS written.
+        assert (tmp_path / "halted_summary.json").exists()
+
+    def test_halted_summary_includes_report_md(self, monkeypatch, tmp_path):
+        """halted_summary.json must include the rendered report markdown."""
+        def fake_run(symbol, config, cutoff, app_config=None):
+            pnl_map = {"60_40": 50.0, "70_30": 30.0, "80_20": 20.0, "no_detector": 200.0}
+            return {"symbol": symbol, "config": config["name"],
+                    "net_pnl": pnl_map[config["name"]], "trades": 1, "error": None}
+
+        self._common_stubs(monkeypatch, fake_run)
+        harness.main(["--max-date", "2025-04-30", "--out-dir", str(tmp_path)])
+        halted = json.loads((tmp_path / "halted_summary.json").read_text())
+        assert "report_md" in halted
+        assert "Pre-holdout Regime Threshold Re-tune Report" in halted["report_md"]
+
+
+class TestEmergencyWrite:
+    def test_emergency_write_falls_back_to_tmp_on_oserror(self, monkeypatch, tmp_path, caplog):
+        """When primary atomic write fails, _emergency_write must fall back to /tmp."""
+        bad_path = str(tmp_path / "nonexistent_subdir" / "x.json")  # missing parent
+        with caplog.at_level("ERROR"):
+            harness._emergency_write(bad_path, {"k": "v"}, kind="test_kind")
+        # Primary path didn't exist, fallback should have been attempted.
+        assert any("Failed to write test_kind" in r.message for r in caplog.records)
+
+    def test_emergency_write_does_not_raise_on_unserializable(self, tmp_path):
+        """Non-serializable payloads must not crash the harness."""
+        path = str(tmp_path / "out.json")
+        # Class instances aren't JSON serializable by default; default=str in
+        # the fallback handles them. Primary atomic_write_json will fail; that's
+        # the path we're exercising.
+        class Foo:
+            pass
+        # Should not raise, even if the fallback also can't serialize.
+        harness._emergency_write(path, {"obj": Foo()}, kind="test_kind")
+
+
+class TestLoadConfigEmptyOverrides:
+    def test_empty_overrides_raises(self, tmp_path, monkeypatch):
+        """_load_config raises ValueError when symbol_overrides is empty."""
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"webhook_url": "x", "symbol_overrides": {}}))
+        monkeypatch.setattr(harness, "REPO_ROOT", str(tmp_path))
+        with pytest.raises(ValueError, match="symbol_overrides"):
+            harness._load_config()
+
+    def test_missing_overrides_key_raises(self, tmp_path, monkeypatch):
+        """_load_config raises ValueError when symbol_overrides key absent."""
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"webhook_url": "x"}))
+        monkeypatch.setattr(harness, "REPO_ROOT", str(tmp_path))
+        with pytest.raises(ValueError, match="symbol_overrides"):
+            harness._load_config()
+
+    def test_non_empty_overrides_passes(self, tmp_path, monkeypatch):
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "symbol_overrides": {"BTCUSDT": {"atr_sl_mult": 1.0}}
+        }))
+        monkeypatch.setattr(harness, "REPO_ROOT", str(tmp_path))
+        cfg = harness._load_config()
+        assert "BTCUSDT" in cfg["symbol_overrides"]
+
+
+class TestRegimeKwargErrorPropagates:
+    """RegimeKwargError is a programming-error exception; the harness's narrow
+    catch (ValueError, AssertionError) must NOT swallow it — it must propagate
+    out of _run_one_backtest so the operator sees the bug."""
+
+    def test_regime_kwarg_error_propagates_from_run_one_backtest(self, monkeypatch):
+        from backtest import RegimeKwargError
+        idx = pd.date_range("2024-01-01", periods=10, freq="1h", tz="UTC")
+        stub_frames = {
+            "df1h": pd.DataFrame({"close": [1.0]*10, "volume": [1.0]*10}, index=idx),
+            "df4h": pd.DataFrame({"close": [1.0]*10, "volume": [1.0]*10}, index=idx),
+            "df5m": pd.DataFrame({"close": [1.0]*10, "volume": [1.0]*10}, index=idx),
+            "df1d": pd.DataFrame({"close": [1.0]*10}, index=idx),
+            "df1d_btc": pd.DataFrame({"close": [1.0]*10}, index=idx),
+            "df_fng": pd.DataFrame({"fng": [50]*10}, index=idx),
+            "df_funding": pd.DataFrame({"rate": [0.0]*10}, index=idx),
+        }
+        monkeypatch.setattr(harness, "_load_frames", lambda sym, cutoff: stub_frames)
+
+        def fake_simulate(*args, **kwargs):
+            raise RegimeKwargError("bad combo")
+
+        import backtest
+        monkeypatch.setattr(backtest, "simulate_strategy", fake_simulate)
+
+        cfg = {"name": "60_40", "bull_above": 60, "bear_below": 40, "disabled": False}
+        with pytest.raises(RegimeKwargError):
+            harness._run_one_backtest("BTCUSDT", cfg, datetime(2025, 4, 30, tzinfo=timezone.utc),
+                                       app_config={"symbol_overrides": {"BTCUSDT": {}}})
+
+
+class TestAggregateZeroPnl:
+    def test_degenerate_zero_pnl_flag(self):
+        cells = [{"symbol": "X", "config": c, "net_pnl": 0, "trades": 0, "error": None}
+                 for c in ("60_40", "70_30", "80_20", "no_detector")]
+        agg = harness._aggregate_results(cells)
+        assert agg["decision_flags"]["degenerate_zero_pnl"] is True
+
+    def test_degenerate_zero_pnl_flag_inactive_when_any_nonzero(self):
+        cells = [{"symbol": "X", "config": c, "net_pnl": pnl, "trades": 1, "error": None}
+                 for c, pnl in [("60_40", 100), ("70_30", 50), ("80_20", 30), ("no_detector", 20)]]
+        agg = harness._aggregate_results(cells)
+        assert agg["decision_flags"]["degenerate_zero_pnl"] is False

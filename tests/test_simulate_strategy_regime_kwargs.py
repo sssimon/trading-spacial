@@ -74,48 +74,158 @@ class TestRegimeToDirectionToken:
 
 
 class TestMutuallyExclusiveKwargs:
-    def test_both_kwargs_raises(self):
+    def test_both_kwargs_raises_regime_kwarg_error(self):
+        from backtest import RegimeKwargError
         empty = pd.DataFrame({"close": [], "volume": []})
-        with pytest.raises(ValueError, match="mutually exclusive"):
+        with pytest.raises(RegimeKwargError, match="mutually exclusive"):
             backtest.simulate_strategy(
                 df1h=empty, df4h=empty, df5m=empty, symbol="BTCUSDT",
                 regime_disabled=True,
                 regime_thresholds=(70, 30),
             )
 
+    def test_only_disabled_does_not_raise_at_entry(self):
+        """Positive case: regime_disabled=True alone should not raise the
+        mutex/shape validation. Downstream errors due to empty frames are
+        unrelated to entry-validation."""
+        from backtest import RegimeKwargError
+        empty = pd.DataFrame({"close": [], "volume": []})
+        try:
+            backtest.simulate_strategy(
+                df1h=empty, df4h=empty, df5m=empty, symbol="BTCUSDT",
+                regime_disabled=True,
+            )
+        except RegimeKwargError:
+            pytest.fail("regime_disabled=True alone should not raise RegimeKwargError")
+        except Exception:
+            pass  # any other downstream error is fine
+
+    def test_only_thresholds_does_not_raise_at_entry(self):
+        from backtest import RegimeKwargError
+        empty = pd.DataFrame({"close": [], "volume": []})
+        try:
+            backtest.simulate_strategy(
+                df1h=empty, df4h=empty, df5m=empty, symbol="BTCUSDT",
+                regime_thresholds=(70, 30),
+            )
+        except RegimeKwargError:
+            pytest.fail("regime_thresholds alone should not raise RegimeKwargError")
+        except Exception:
+            pass
+
+    def test_neither_kwarg_does_not_raise_at_entry(self):
+        from backtest import RegimeKwargError
+        empty = pd.DataFrame({"close": [], "volume": []})
+        try:
+            backtest.simulate_strategy(
+                df1h=empty, df4h=empty, df5m=empty, symbol="BTCUSDT",
+            )
+        except RegimeKwargError:
+            pytest.fail("default kwargs should not raise RegimeKwargError")
+        except Exception:
+            pass
+
+
+class TestRegimeThresholdsShape:
+    """I11: regime_thresholds must be tuple[int, int]; malformed shapes raise."""
+
+    @pytest.fixture
+    def empty_frames(self):
+        empty = pd.DataFrame({"close": [], "volume": []})
+        return {"df1h": empty, "df4h": empty, "df5m": empty}
+
+    def test_list_rejected(self, empty_frames):
+        from backtest import RegimeKwargError
+        with pytest.raises(RegimeKwargError, match="tuple"):
+            backtest.simulate_strategy(
+                **empty_frames, symbol="BTCUSDT",
+                regime_thresholds=[60, 40],  # list, not tuple
+            )
+
+    def test_wrong_length_rejected(self, empty_frames):
+        from backtest import RegimeKwargError
+        with pytest.raises(RegimeKwargError, match="tuple"):
+            backtest.simulate_strategy(
+                **empty_frames, symbol="BTCUSDT",
+                regime_thresholds=(60,),
+            )
+
+    def test_dict_rejected(self, empty_frames):
+        from backtest import RegimeKwargError
+        with pytest.raises(RegimeKwargError, match="tuple"):
+            backtest.simulate_strategy(
+                **empty_frames, symbol="BTCUSDT",
+                regime_thresholds={"bull": 60, "bear": 40},
+            )
+
+    def test_string_elements_rejected(self, empty_frames):
+        from backtest import RegimeKwargError
+        with pytest.raises(RegimeKwargError, match="tuple"):
+            backtest.simulate_strategy(
+                **empty_frames, symbol="BTCUSDT",
+                regime_thresholds=("60", "40"),
+            )
+
+    def test_bool_elements_rejected(self, empty_frames):
+        """True is an int subclass in Python — explicit isinstance(bool) guard."""
+        from backtest import RegimeKwargError
+        with pytest.raises(RegimeKwargError, match="tuple"):
+            backtest.simulate_strategy(
+                **empty_frames, symbol="BTCUSDT",
+                regime_thresholds=(True, False),
+            )
+
 
 class TestBypassEmitsBypassRegime:
     """When regime_disabled=True, the regime dict passed downstream must have
-    regime="BYPASS" and the helper _regime_at_time must NOT be called."""
+    regime="BYPASS" and the helper _regime_at_time must NOT be called.
+
+    Frames sized > simulate_strategy's warmup (LRC_PERIOD + buffer) so the bar
+    loop actually enters and the regime branch is exercised. Sanity asserted
+    in test setup; the test would be vacuous with insufficient bars."""
+
+    BARS_1H = 140  # > warmup (LRC_PERIOD=100 + buffer); bar loop iterates ≥30 times
 
     def _build_minimal_frames(self):
-        """Build the smallest set of frames that gets the bar loop to invoke
-        the regime branch. simulate_strategy needs LRC_PERIOD bars in df1h
-        before it processes anything; we give it a 110-bar window so the loop
-        enters at least once."""
-        idx_1h = pd.date_range("2024-01-01", periods=110, freq="1h", tz="UTC").tz_localize(None)
+        idx_1h = pd.date_range("2024-01-01", periods=self.BARS_1H, freq="1h", tz="UTC").tz_localize(None)
         df1h = pd.DataFrame({
-            "open":  [100.0] * 110,
-            "high":  [101.0] * 110,
-            "low":   [99.0] * 110,
-            "close": [100.0] * 110,
-            "volume": [1000.0] * 110,
+            "open":  [100.0] * self.BARS_1H,
+            "high":  [101.0] * self.BARS_1H,
+            "low":   [99.0] * self.BARS_1H,
+            "close": [100.0] * self.BARS_1H,
+            "volume": [1000.0] * self.BARS_1H,
         }, index=idx_1h)
-        idx_4h = pd.date_range("2024-01-01", periods=30, freq="4h", tz="UTC").tz_localize(None)
-        df4h = df1h.iloc[:30].copy().set_index(idx_4h)
-        idx_5m = pd.date_range("2024-01-01", periods=210, freq="5min", tz="UTC").tz_localize(None)
+        idx_4h = pd.date_range("2024-01-01", periods=40, freq="4h", tz="UTC").tz_localize(None)
+        df4h = pd.DataFrame({
+            "open":  [100.0] * 40,
+            "high":  [101.0] * 40,
+            "low":   [99.0] * 40,
+            "close": [100.0] * 40,
+            "volume": [1000.0] * 40,
+        }, index=idx_4h)
+        idx_5m = pd.date_range("2024-01-01", periods=300, freq="5min", tz="UTC").tz_localize(None)
         df5m = pd.DataFrame({
-            "open":  [100.0] * 210,
-            "high":  [101.0] * 210,
-            "low":   [99.0] * 210,
-            "close": [100.0] * 210,
-            "volume": [1000.0] * 210,
+            "open":  [100.0] * 300,
+            "high":  [101.0] * 300,
+            "low":   [99.0] * 300,
+            "close": [100.0] * 300,
+            "volume": [1000.0] * 300,
         }, index=idx_5m)
         return df1h, df4h, df5m
 
+    def test_setup_actually_exercises_bar_loop(self):
+        """Sanity: confirm the test fixture is large enough for the bar loop
+        to enter. Without this, the bypass test below is vacuous."""
+        df1h, _, _ = self._build_minimal_frames()
+        from strategy.constants import LRC_PERIOD
+        assert len(df1h) > LRC_PERIOD + 10, (
+            f"test setup invalid — bar loop won't enter "
+            f"(len(df1h)={len(df1h)}, need > LRC_PERIOD+10 = {LRC_PERIOD + 10})"
+        )
+
     def test_bypass_branch_runtime_skips_regime_at_time(self, monkeypatch):
         """Runtime check: with regime_disabled=True, _regime_at_time MUST NOT
-        be called even if the bar loop enters."""
+        be called even though the bar loop enters."""
         called = {"count": 0}
 
         def fake_regime_at_time(*args, **kwargs):
@@ -126,10 +236,6 @@ class TestBypassEmitsBypassRegime:
 
         df1h, df4h, df5m = self._build_minimal_frames()
 
-        # Run with regime_disabled=True. The simulator may still raise downstream
-        # (no F&G / funding data, no df1d) — we only care that the bypass branch
-        # was taken before any potential downstream error, i.e. _regime_at_time
-        # was never reached.
         try:
             backtest.simulate_strategy(
                 df1h=df1h, df4h=df4h, df5m=df5m, symbol="BTCUSDT",
@@ -141,4 +247,31 @@ class TestBypassEmitsBypassRegime:
         assert called["count"] == 0, (
             f"_regime_at_time was called {called['count']} times under regime_disabled=True; "
             "bypass branch did not skip the helper."
+        )
+
+    def test_default_path_DOES_call_regime_at_time(self, monkeypatch):
+        """Counter-test: without regime_disabled, _regime_at_time SHOULD be
+        called. Proves the bypass test above is non-vacuous (a bug that
+        always called _regime_at_time would fail this counter-test)."""
+        called = {"count": 0}
+
+        def fake_regime_at_time(*args, **kwargs):
+            called["count"] += 1
+            return {"regime": "BULL", "score": 80.0, "mode": "global", "symbol": "X", "components": {}}
+
+        monkeypatch.setattr(backtest, "_regime_at_time", fake_regime_at_time)
+
+        df1h, df4h, df5m = self._build_minimal_frames()
+
+        try:
+            backtest.simulate_strategy(
+                df1h=df1h, df4h=df4h, df5m=df5m, symbol="BTCUSDT",
+                # default: regime_disabled=False
+            )
+        except Exception:
+            pass
+
+        assert called["count"] > 0, (
+            "_regime_at_time was never called even under default (non-bypass) "
+            "configuration; bypass test above is vacuous."
         )

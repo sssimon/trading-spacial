@@ -17,6 +17,24 @@ if TESTS_DIR not in sys.path:
     sys.path.insert(0, TESTS_DIR)
 
 
+@pytest.fixture(autouse=True)
+def _reset_unknown_regime_warned():
+    """Auto-clear strategy.core._unknown_regime_warned between tests so the
+    once-per-label warning suppression doesn't leak state across test runs.
+    Imported lazily so this fixture costs nothing for tests that don't touch
+    strategy.core."""
+    try:
+        from strategy.core import _unknown_regime_warned
+    except ImportError:
+        yield
+        return
+    _unknown_regime_warned.clear()
+    try:
+        yield
+    finally:
+        _unknown_regime_warned.clear()
+
+
 # ─── Auth test setup (added 2026-04-29 with the JWT auth system) ───────────
 #
 # The auth middleware enforces JWT cookies on every non-public path. Without

@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Pre-holdout regime threshold re-tune mini-harness.
 
-Sweeps the 4 configurations locked by historical record over the pre-holdout
-window [earliest, 2025-04-30T00:00:00Z), aggregates net_pnl per config across
-the 10 portfolio symbols, identifies the winner, and applies pre-registered
-decision flags (CHANGE detection, sanity check, stability check).
-
-Runs a single backtest per (symbol, config) — grid + objective are locked by
-the methodology spec, not optimized. Implemented inline (no shared helpers
-from sister harnesses) because this harness must run before its sibling
-re-tune (#287) is merged — see spec §2.10 sequencing.
+Sweeps 4 configurations from D9 §2.10 over [earliest, cutoff) window;
+aggregates net_pnl per config across 10 portfolio symbols; applies
+pre-registered decision flags; writes byte-deterministic artefacts.
 
 Usage:
     python -m tools.regime_retune_pre_holdout --max-date 2025-04-30
@@ -53,7 +47,7 @@ def _resolve_git_commit() -> str:
             stderr=subprocess.DEVNULL,
         )
         return out.decode().strip()
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+    except (subprocess.SubprocessError, OSError, UnicodeDecodeError) as exc:
         log.error("Could not resolve git commit (manifest will record 'UNKNOWN'): %s",
                   exc, exc_info=True)
         return "UNKNOWN"
@@ -71,12 +65,6 @@ def _sha256_file(path: str, block_size: int = 1024 * 1024) -> str:
 
 
 def _slice_below_cutoff(df: pd.DataFrame, cutoff: datetime) -> pd.DataFrame:
-    """Return the subset of df whose index is strictly < cutoff.
-
-    Implemented inline (no import from auto_tune) because this harness must
-    run before the sibling re-tune (#287) is merged — see spec §2.10
-    sequencing.
-    """
     if df is None or df.empty:
         return df
     cutoff_ts = pd.Timestamp(cutoff)
@@ -138,10 +126,10 @@ def _verify_no_leakage(ranges: dict, cutoff_ms: int) -> str:
 def _load_config() -> dict:
     """Load config.json from repo root.
 
-    Hard-errors when missing: the harness pulls production symbol_overrides
-    from this file so that the regime threshold is the only varying input
-    across the sweep. Running without it silently substitutes empty overrides
-    and contaminates the comparison.
+    Hard-errors when missing OR when symbol_overrides is empty: the harness
+    pulls production overrides from this file so the regime threshold is the
+    only varying input across the sweep. Running without them silently
+    contaminates the comparison.
     """
     cfg_path = os.path.join(REPO_ROOT, "config.json")
     if not os.path.exists(cfg_path):
@@ -150,7 +138,14 @@ def _load_config() -> dict:
             "symbol_overrides to ensure regime threshold is the sole varying input."
         )
     with open(cfg_path, encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+    if not cfg.get("symbol_overrides"):
+        raise ValueError(
+            "config.json missing or empty 'symbol_overrides'; harness "
+            "invariant requires production overrides so the only varying "
+            "input across the sweep is the regime threshold."
+        )
+    return cfg
 
 
 def _load_frames(symbol: str, cutoff: datetime) -> dict:
@@ -253,18 +248,23 @@ def _aggregate_results(cells: list) -> dict:
         per_config_trades[cfg] = per_config_trades.get(cfg, 0) + int(cell["trades"])
 
     sorted_configs = sorted(per_config_pnl.items(), key=lambda kv: (-kv[1], kv[0]))
+    assert len(sorted_configs) >= 2, (
+        f"_aggregate_results requires ≥2 configs; got {len(sorted_configs)}"
+    )
     winner_name, winner_pnl = sorted_configs[0]
     runner_up_name, runner_up_pnl = sorted_configs[1]
 
+    all_zero = all(abs(p) < 1e-9 for p in per_config_pnl.values())
     if abs(winner_pnl) > 1e-9:
         margin_pct = (winner_pnl - runner_up_pnl) / abs(winner_pnl) * 100.0
     else:
         margin_pct = 0.0
 
     decision_flags = {
-        "change_detection": winner_name != "60_40",
-        "sanity_check":     winner_name == "no_detector",
-        "stability_check":  margin_pct < 5.0,
+        "change_detection":   winner_name != "60_40",
+        "sanity_check":       winner_name == "no_detector",
+        "stability_check":    margin_pct < 5.0,
+        "degenerate_zero_pnl": all_zero,
     }
 
     return {
@@ -355,7 +355,7 @@ def _build_manifest(agg: dict, cutoff: datetime, cutoff_ms: int,
 def _build_report(agg: dict, cells: list, cutoff: datetime,
                   ranges: dict, runtime_seconds: float, symbols: list) -> str:
     lines = []
-    lines.append("# Pre-holdout Regime Threshold Re-tune Report (A.4-1.5)")
+    lines.append("# Pre-holdout Regime Threshold Re-tune Report")
     lines.append("")
     lines.append(f"- **Cutoff (`--max-date`):** {cutoff.isoformat()}")
     lines.append(f"- **Symbols:** {', '.join(symbols)}")
@@ -439,9 +439,63 @@ def _get_symbols() -> list[str]:
     return list(DEFAULT_SYMBOLS)
 
 
+_CANONICAL_ARTEFACTS = (
+    "regime_params.json",
+    "regime_manifest.json",
+    "regime_report.md",
+    "halted_summary.json",
+    "sweep_errors.json",
+    "raw_results.json",
+)
+
+
+def _clear_stale_artefacts(out_dir: str) -> None:
+    """Atomically remove any pre-existing canonical artefacts from out_dir.
+
+    Required because the default out_dir is `data/retune/<today>-pre-holdout/`
+    — a re-run on the same day reuses the directory. Without this, a
+    successful run-1 + halted run-2 leaves run-1's canonical artefacts in
+    place and the operator believes run-2 succeeded.
+
+    Also clears orphan .tmp files from prior interrupted runs.
+    """
+    for stale_name in _CANONICAL_ARTEFACTS:
+        try:
+            os.remove(os.path.join(out_dir, stale_name))
+        except FileNotFoundError:
+            pass
+    try:
+        for entry in os.listdir(out_dir):
+            if entry.endswith(".tmp"):
+                try:
+                    os.remove(os.path.join(out_dir, entry))
+                except FileNotFoundError:
+                    pass
+    except FileNotFoundError:
+        pass
+
+
+def _emergency_write(path: str, payload: dict, kind: str) -> None:
+    """Best-effort write for diagnostic artefacts. On primary failure, falls
+    back to /tmp; on fallback failure, logs and continues. Never raises —
+    preserves the caller's rc contract under disk-full / permission errors.
+    """
+    try:
+        _atomic_write_json(path, payload)
+    except (OSError, TypeError, ValueError) as exc:
+        log.error("Failed to write %s artefact at %s: %s", kind, path, exc, exc_info=True)
+        fallback = f"/tmp/regime_retune_{kind}_{int(time.time())}.json"
+        try:
+            with open(fallback, "w", encoding="utf-8") as f:
+                json.dump(payload, f, sort_keys=True, indent=2, default=str)
+            log.error("Fallback %s written to %s", kind, fallback)
+        except (OSError, TypeError, ValueError) as fallback_exc:
+            log.error("Fallback write also failed: %s", fallback_exc, exc_info=True)
+
+
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Pre-holdout regime threshold re-tune mini-harness (A.4-1.5).",
+        description="Pre-holdout regime threshold re-tune mini-harness.",
     )
     parser.add_argument("--max-date", type=str, required=True,
                         help="ISO date (YYYY-MM-DD, UTC). Holdout starts on this day; "
@@ -460,6 +514,10 @@ def main(argv: list | None = None) -> int:
 
     symbols = _get_symbols()
     app_config = _load_config()
+    # Resolve git commit early — late-stage failure shouldn't waste 30min of
+    # work and the value goes into manifest regardless of which exit branch
+    # we hit.
+    code_commit = _resolve_git_commit()
 
     if args.out_dir:
         out_dir = args.out_dir
@@ -467,6 +525,7 @@ def main(argv: list | None = None) -> int:
         run_date = datetime.now(timezone.utc).date().isoformat()
         out_dir = os.path.join(REPO_ROOT, "data", "retune", f"{run_date}-pre-holdout")
     os.makedirs(out_dir, exist_ok=True)
+    _clear_stale_artefacts(out_dir)
 
     log.info("Regime threshold re-tune starting")
     log.info("  cutoff:  %s", cutoff.isoformat())
@@ -495,12 +554,13 @@ def main(argv: list | None = None) -> int:
         log.error("Sweep had %d errored cells; refusing to aggregate. Errors: %s",
                   len(errored),
                   [(c["symbol"], c["config"], c["error"]) for c in errored])
-        _atomic_write_json(
+        _emergency_write(
             os.path.join(out_dir, "sweep_errors.json"),
             {
                 "errored_cells": errored,
                 "successful_cells": [c for c in cells if c.get("error") is None],
             },
+            kind="sweep_errors",
         )
         return 4
 
@@ -513,7 +573,6 @@ def main(argv: list | None = None) -> int:
 
     log.info("Hashing ohlcv.db...")
     ohlcv_sha = _sha256_file(OHLCV_DB)
-    code_commit = _resolve_git_commit()
 
     manifest = _build_manifest(
         agg=agg, cutoff=cutoff, cutoff_ms=cutoff_ms,
@@ -532,25 +591,39 @@ def main(argv: list | None = None) -> int:
 
     # Sanity check is fail-closed: if no_detector wins, do NOT write the
     # canonical artefacts. Dump halted_summary.json with the diagnostic
-    # bundle for post-mortem and return rc=3.
+    # bundle (including the rendered report markdown) for post-mortem.
     if agg["decision_flags"]["sanity_check"]:
         log.error("SANITY CHECK FIRED: no_detector wins on pre-holdout window. "
                   "Refusing to write canonical artefacts. See halted_summary.json.")
-        _atomic_write_json(
+        _emergency_write(
             os.path.join(out_dir, "halted_summary.json"),
             {
                 "reason": "sanity_check_fired",
                 "agg": agg,
                 "manifest": manifest,
+                "report_md": report_md,
             },
+            kind="halted_summary",
         )
         return 3
 
     # Order: report + manifest first, regime_params.json LAST as the
-    # durability marker for downstream consumers.
-    _atomic_write_text(os.path.join(out_dir, "regime_report.md"), report_md)
-    _atomic_write_json(os.path.join(out_dir, "regime_manifest.json"), manifest)
-    _write_regime_params(os.path.join(out_dir, "regime_params.json"), agg)
+    # durability marker for downstream consumers. If any write fails (disk
+    # full, JSON-non-serializable manifest field, etc.) dump cells + agg to
+    # raw_results.json so the run isn't lost and return rc=5.
+    try:
+        _atomic_write_text(os.path.join(out_dir, "regime_report.md"), report_md)
+        _atomic_write_json(os.path.join(out_dir, "regime_manifest.json"), manifest)
+        _write_regime_params(os.path.join(out_dir, "regime_params.json"), agg)
+    except (TypeError, ValueError, OSError) as exc:
+        log.error("Manifest serialization or canonical artefact write failed: %s",
+                  exc, exc_info=True)
+        _emergency_write(
+            os.path.join(out_dir, "raw_results.json"),
+            {"cells": cells, "agg": agg},
+            kind="raw_results",
+        )
+        return 5
 
     log.info("Artefacts written to %s", out_dir)
     log.info("  regime_report.md     — human-readable side-by-side + caveats")
