@@ -31,7 +31,6 @@ fixes for ATR multipliers. Documented in CLAUDE.md "Caveats heredados — A.4
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 
 import pytest
@@ -284,7 +283,11 @@ def test_nan_exit_price_does_not_phantom_profit():
 
     Without the guard, NaN would propagate through min/max/multiply into
     pnl_usd = NaN, then into capital += NaN = NaN, breaking all subsequent
-    `if capital <= 0` comparisons (NaN comparisons evaluate False)."""
+    `if capital <= 0` comparisons (NaN comparisons evaluate False).
+
+    Sister-variable check: the trade dict's pnl_pct is ALSO zeroed (not left
+    as NaN), since pnl_pct flows directly into Sharpe / Sortino aggregation
+    in calculate_metrics."""
     from backtest import _close_position
 
     trade = _close_position(
@@ -295,6 +298,7 @@ def test_nan_exit_price_does_not_phantom_profit():
         capital=10_000.0,
     )
     assert trade["pnl_usd"] == 0.0
+    assert trade["pnl_pct"] == 0.0
     assert trade["overshoot_clamped"] is False
 
 
@@ -334,15 +338,16 @@ def test_neg_inf_exit_price_clamps_correctly():
     assert trade["overshoot_clamped"] is True
 
 
-def test_nan_pnl_pct_via_inf_division_handled():
-    """inf/inf path: pnl_pct = +inf, sl_pct_actual = +inf → ratio = NaN.
+def test_long_inf_inputs_route_to_malformed_sl_guard():
+    """LONG with sl_orig=+inf → sl_pct_actual = (entry - +inf)/entry × 100 = -inf.
 
-    pnl_pct is +inf (not NaN), so the pre-clamp pnl_pct NaN guard does NOT
-    fire. But the post-division raw_ratio = +inf / +inf = NaN, which the
-    inner NaN guard catches and forces pnl_usd = 0.0.
+    -inf > 0 is False, so this LONG fixture routes to the **else (malformed-SL)
+    branch**, NOT the inner NaN guard. Documents the actual route taken; the
+    SHORT-fixture mirror (`test_short_inf_pnl_pct_inf_sl_pct_routes_through_inner_guard`)
+    is the one that exercises the inner guard.
 
-    Constructed by setting sl_orig = +inf (so sl_pct_actual = +inf, passes the
-    `> 0` gate) and exit_price = +inf (so pnl_pct = +inf)."""
+    Both routes produce the same conservative output: pnl_usd = 0.0,
+    pnl_pct = 0.0, overshoot_clamped = False."""
     from backtest import _close_position
 
     position = _build_long_position()
@@ -356,6 +361,34 @@ def test_nan_pnl_pct_via_inf_division_handled():
         capital=10_000.0,
     )
     assert trade["pnl_usd"] == 0.0
+    assert trade["pnl_pct"] == 0.0
+    assert trade["overshoot_clamped"] is False
+
+
+def test_short_inf_pnl_pct_inf_sl_pct_routes_through_inner_guard():
+    """SHORT inf/inf actually exercises the inner NaN guard (post-division
+    raw_ratio = NaN). Verifies the inner guard is reached, not the else branch.
+
+    Trace:
+      - SHORT sl_pct_actual = (sl_orig - entry_price) / entry_price × 100
+                            = (+inf - 100) / 100 × 100 = +inf
+      - +inf > 0 is True → enter the elif branch (clamp logic)
+      - SHORT pnl_pct = (entry_price - exit_price) / entry_price × 100
+                      = (100 - (-inf)) / 100 × 100 = +inf
+      - raw_ratio = +inf / +inf = NaN
+      - math.isnan(raw_ratio) catches it → inner NaN guard fires"""
+    from backtest import _close_position
+
+    position = _build_short_position()
+    position["sl"] = float("inf")
+    position["sl_orig"] = float("inf")
+    trade = _close_position(
+        position, exit_price=float("-inf"),
+        exit_time=datetime(2024, 1, 1, 1, tzinfo=timezone.utc),
+        exit_reason="TIME_LIMIT", capital=10_000.0,
+    )
+    assert trade["pnl_usd"] == 0.0
+    assert trade["pnl_pct"] == 0.0
     assert trade["overshoot_clamped"] is False
 
 
@@ -416,7 +449,13 @@ def test_inf_sl_pct_actual_finite_pnl_pct_clamps_to_zero():
 
 def test_negative_capital_still_zero_pnl():
     """capital ≤ 0 → effective_capital = 0 → risk_amount = 0 → pnl_usd = 0
-    regardless of overshoot. Cap is moot when risk_amount is zero."""
+    regardless of raw ratio. The cap is *moot* (not binding) when
+    risk_amount = 0.
+
+    AND-gate semantic on overshoot_clamped: only True when the cap actually
+    bound pnl_usd below its raw R-multiple value. With risk_amount = 0,
+    pnl_usd is 0 from the floor, NOT from the cap — overshoot_clamped is
+    therefore False."""
     from backtest import _close_position
 
     trade = _close_position(
@@ -428,11 +467,7 @@ def test_negative_capital_still_zero_pnl():
     )
     # effective_capital = max(0, -5000) = 0 → risk_amount = 0 → pnl_usd = 0
     assert trade["pnl_usd"] == 0.0
-    # overshoot_clamped reflects the unbounded ratio test, NOT the capital
-    # floor. With ratio = -50 (above cap), the clamped flag is True even
-    # though pnl_usd is zero from the capital floor — these are independent
-    # invariants surfacing different facts about the trade.
-    assert trade["overshoot_clamped"] is True
+    assert trade["overshoot_clamped"] is False  # AND-gate: cap not binding
 
 
 def test_zero_capital_still_zero_pnl():
@@ -536,27 +571,29 @@ def test_calculate_metrics_clamped_trade_count_aggregation():
     output schema; bypasses the simulator to isolate the aggregation logic."""
     from backtest import calculate_metrics
 
-    # Stagger timestamps across days so calculate_metrics' trades_per_year
-    # division (`days / 365.25`) is non-zero. Same-day fixtures trigger a
-    # pre-existing ZeroDivisionError in calculate_metrics — out of scope per
-    # the R1 framing (entry_price=0 sibling).
     def _t(day_offset, hour_offset=0):
         return datetime(2024, 1, 1 + day_offset, hour_offset, tzinfo=timezone.utc)
 
-    base = lambda i: {
-        "entry_time": _t(i, 0),
-        "exit_time": _t(i, 1),
-        "entry_price": 100.0, "exit_price": 105.0,
-        "direction": "LONG", "pnl_pct": 5.0, "pnl_usd": 500.0,
-        "score": 2, "size_mult": 1.0, "duration_hours": 1.0,
-    }
+    # Trade fixtures: pnl_pct aligned with pnl_usd sign+magnitude so the
+    # synthetic trade dict mirrors what _close_position would actually emit.
+    # (Pre-R2 fixture had pnl_pct=5.0 hardcoded across negative-pnl_usd
+    # overrides — internally inconsistent.)
+    def _make(i, exit_reason, overshoot_clamped, pnl_usd, pnl_pct):
+        return {
+            "entry_time": _t(i, 0), "exit_time": _t(i, 1),
+            "entry_price": 100.0, "exit_price": 105.0,
+            "direction": "LONG", "pnl_pct": pnl_pct, "pnl_usd": pnl_usd,
+            "score": 2, "size_mult": 1.0, "duration_hours": 1.0,
+            "exit_reason": exit_reason, "overshoot_clamped": overshoot_clamped,
+        }
+
     trades = [
-        {**base(0), "exit_reason": "TP", "overshoot_clamped": False},
-        {**base(1), "exit_reason": "SL", "overshoot_clamped": False, "pnl_usd": -100.0},
-        {**base(2), "exit_reason": "TIME_LIMIT", "overshoot_clamped": True, "pnl_usd": -1000.0},
-        {**base(3), "exit_reason": "TIME_LIMIT", "overshoot_clamped": True, "pnl_usd": 1000.0},
+        _make(0, "TP", False, 500.0, 5.0),
+        _make(1, "SL", False, -100.0, -1.0),
+        _make(2, "TIME_LIMIT", True, -1000.0, -10.0),
+        _make(3, "TIME_LIMIT", True, 1000.0, 10.0),
         # OPEN trade must be excluded from the clamped count:
-        {**base(4), "exit_reason": "OPEN", "overshoot_clamped": True, "pnl_usd": 1000.0},
+        _make(4, "OPEN", True, 1000.0, 10.0),
     ]
     equity_curve = [
         {"time": _t(0, 0), "equity": 10_000.0},
@@ -623,3 +660,130 @@ def test_calculate_metrics_handles_legacy_trades_without_flag():
     ]
     metrics = calculate_metrics([legacy_trade], equity_curve)
     assert metrics["clamped_trade_count"] == 0
+
+
+def test_calculate_metrics_empty_trades_returns_clamped_zero():
+    """Empty-trades early-return path must include `clamped_trade_count: 0` so
+    downstream consumers can read the field unconditionally without KeyError."""
+    from backtest import calculate_metrics
+
+    metrics = calculate_metrics([], [])
+    assert metrics.get("clamped_trade_count") == 0
+    assert metrics.get("error") == "No trades generated"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# I3 — calculate_metrics ZeroDivisionError regression. Same-day fixtures must
+# not raise on the trades_per_year computation (was line 1047 pre-R2-fix).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_calculate_metrics_same_day_fixtures_dont_raise():
+    """Same-day fixtures (`(exit_time - entry_time).days == 0`) used to trigger
+    ZeroDivisionError at the trades_per_year computation. Post-R2-fix the
+    div-by-zero is guarded; Sharpe falls back to 0 (annualization undefined)."""
+    from backtest import calculate_metrics
+
+    same_day = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    trades = [
+        {
+            "entry_time": same_day, "exit_time": same_day,
+            "entry_price": 100.0, "exit_price": 105.0,
+            "exit_reason": "TP", "direction": "LONG",
+            "pnl_pct": 5.0, "pnl_usd": 500.0,
+            "score": 2, "size_mult": 1.0, "duration_hours": 0.0,
+            "overshoot_clamped": False,
+        },
+        {
+            "entry_time": same_day, "exit_time": same_day,
+            "entry_price": 100.0, "exit_price": 99.0,
+            "exit_reason": "SL", "direction": "LONG",
+            "pnl_pct": -1.0, "pnl_usd": -100.0,
+            "score": 2, "size_mult": 1.0, "duration_hours": 0.0,
+            "overshoot_clamped": False,
+        },
+    ]
+    equity_curve = [
+        {"time": same_day, "equity": 10_000.0},
+        {"time": same_day, "equity": 10_400.0},
+    ]
+    # Must not raise ZeroDivisionError.
+    metrics = calculate_metrics(trades, equity_curve)
+    # Annualization undefined when window is < 1 day → Sharpe falls back to 0,
+    # consistent with the existing `len(closed) > 1` else branch.
+    assert metrics["sharpe_ratio"] == 0
+    assert metrics["clamped_trade_count"] == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sister-bug-class extension (R2 framing scan): _apply_costs_to_trade's
+# `entry_notional <= 0` guard had the same NaN-comparison-class bug as the
+# original _close_position guard. NaN entry_notional must short-circuit
+# rather than corrupting cost computation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_apply_costs_to_trade_skips_on_nan_entry_notional():
+    """`entry_notional <= 0` evaluates False for NaN (NaN comparisons return
+    False); the pre-R2 guard would NOT short-circuit and would propagate NaN
+    through the cost computation. Post-R2 guard `not (entry_notional > 0)`
+    flips NaN to True (since `NaN > 0` is False) and returns early.
+
+    Currently transitively unreachable post-C1+I1 (capital can't go NaN with
+    the close-side guards in place), but defensive parity with the same-bug-
+    class fix in `_close_position`."""
+    from backtest import _apply_costs_to_trade
+
+    trade = {"pnl_usd": -100.0, "pnl_pct": -1.0}
+    position = {
+        "entry_notional_usd": float("nan"),
+        "entry_price": 100.0,
+        "entry_liquidity_per_min": 10_000.0,
+    }
+    cost_calls = {"count": 0}
+
+    def fake_cost_fn(*args, **kwargs):
+        cost_calls["count"] += 1
+        return {"total_cost_usd": 100.0, "total_cost_bps": 50.0}
+
+    _apply_costs_to_trade(
+        trade, position, exit_price_actual=101.0,
+        exit_liquidity_per_min=10_000.0,
+        compute_trade_costs_fn=fake_cost_fn,
+        tier_params=None,
+        enable_slippage=True, enable_spread=True, enable_fees=True,
+    )
+    assert cost_calls["count"] == 0, (
+        "_apply_costs_to_trade should short-circuit on NaN entry_notional, "
+        "not call compute_trade_costs."
+    )
+    # Trade dict unchanged: cost mutations did not occur
+    assert "gross_pnl_usd" not in trade
+    assert "total_cost_usd" not in trade
+    assert trade["pnl_usd"] == -100.0
+    assert trade["pnl_pct"] == -1.0
+
+
+def test_apply_costs_to_trade_skips_on_zero_entry_notional():
+    """Pre-R2 behavior preserved: zero entry_notional still short-circuits.
+    `not (0 > 0)` is `not False` is True → return. Same outcome as the legacy
+    `entry_notional <= 0` guard for the zero case."""
+    from backtest import _apply_costs_to_trade
+
+    trade = {"pnl_usd": -100.0, "pnl_pct": -1.0}
+    position = {"entry_notional_usd": 0.0, "entry_price": 100.0}
+    cost_calls = {"count": 0}
+
+    def fake_cost_fn(*args, **kwargs):
+        cost_calls["count"] += 1
+        return {"total_cost_usd": 100.0, "total_cost_bps": 50.0}
+
+    _apply_costs_to_trade(
+        trade, position, exit_price_actual=101.0,
+        exit_liquidity_per_min=10_000.0,
+        compute_trade_costs_fn=fake_cost_fn,
+        tier_params=None,
+        enable_slippage=True, enable_spread=True, enable_fees=True,
+    )
+    assert cost_calls["count"] == 0
+    assert "gross_pnl_usd" not in trade

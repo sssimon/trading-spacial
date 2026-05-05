@@ -368,15 +368,19 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
     risk_amount = effective_capital * RISK_PER_TRADE * position["size_mult"]
     if math.isnan(pnl_pct):
         # NaN-propagation guard: a NaN exit_price (or entry_price) makes
-        # pnl_pct NaN, which would silently flow into capital via NaN PnL,
-        # corrupting all downstream metrics and breaking `if capital <= 0`
-        # comparisons (NaN comparisons always evaluate False). Refuse to
-        # propagate; record real-money zero PnL and log the anomaly.
+        # pnl_pct NaN, which would silently flow into capital via NaN PnL
+        # AND into the trade dict's pnl_pct field — corrupting downstream
+        # metrics (Sharpe / Sortino consume pnl_pct directly in
+        # calculate_metrics) and breaking `if capital <= 0` comparisons
+        # (NaN comparisons always evaluate False). Force BOTH pnl_usd and
+        # pnl_pct to 0.0 in the trade dict so consumers downstream see a
+        # consistent real-money-zero record, not a partial NaN payload.
         log.warning(
             "_close_position: NaN pnl_pct detected for %s %s — entry=%.6f, "
-            "exit=%.6f. pnl_usd forced to 0.",
+            "exit=%.6f. pnl_usd and pnl_pct forced to 0.",
             position.get("entry_time"), direction, entry_price, exit_price,
         )
+        pnl_pct = 0.0
         pnl_usd = 0.0
         overshoot_clamped = False
     elif sl_pct_actual > 0:
@@ -388,30 +392,40 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
             # inf/inf or other NaN-producing division (e.g., +inf pnl_pct
             # divided by +inf sl_pct_actual). Bypasses both the pnl_pct NaN
             # check above and the sl_pct_actual > 0 gate. Same conservative
-            # response as the pre-clamp NaN guard.
+            # response as the pre-clamp NaN guard: zero out BOTH pnl fields.
             log.warning(
                 "_close_position: NaN ratio (%.6f / %.6f) for %s %s. "
-                "pnl_usd forced to 0.",
+                "pnl_usd and pnl_pct forced to 0.",
                 pnl_pct, sl_pct_actual,
                 position.get("entry_time"), direction,
             )
+            pnl_pct = 0.0
             pnl_usd = 0.0
             overshoot_clamped = False
         else:
-            overshoot_clamped = abs(raw_ratio) > MAX_OVERSHOOT_RATIO
+            # AND-gate: only mark clamped when the cap actually bound pnl_usd
+            # below its raw R-multiple value. With risk_amount = 0 (capital ≤ 0
+            # via the effective_capital floor), pnl_usd is zero regardless of
+            # raw_ratio magnitude — the cap is moot, not binding.
+            overshoot_clamped = (
+                abs(raw_ratio) > MAX_OVERSHOOT_RATIO
+                and risk_amount > 0
+            )
             overshoot_ratio = max(-MAX_OVERSHOOT_RATIO,
                                   min(MAX_OVERSHOOT_RATIO, raw_ratio))
             pnl_usd = risk_amount * overshoot_ratio
     else:
-        # Inverted or zero-distance SL (malformed setup), or NaN sl_pct_actual
-        # from a NaN sl_orig / entry_price. NaN > 0 is False, so this branch
-        # also catches the NaN-sl path. Refuse to amplify a phantom profit;
-        # record real-money zero PnL and log the anomaly.
+        # Malformed SL: inverted (LONG with sl_orig > entry, SHORT with
+        # sl_orig < entry), zero-distance (sl_orig == entry), or NaN
+        # (NaN sl_orig / entry_price → NaN sl_pct_actual; NaN > 0 is False so
+        # this branch also catches the NaN-sl path). Refuse to amplify a
+        # phantom profit; record a real-money zero PnL and log the anomaly.
         log.warning(
-            "_close_position: inverted SL detected for %s %s — entry=%.6f, "
-            "sl_orig=%.6f (sl on wrong side or coincident). pnl_usd forced to 0.",
+            "_close_position: malformed SL (inverted, zero-distance, or NaN) "
+            "for %s %s — entry=%.6f, sl_orig=%.6f. pnl_usd and pnl_pct forced to 0.",
             position.get("entry_time"), direction, entry_price, sl_orig,
         )
+        pnl_pct = 0.0
         pnl_usd = 0.0
         overshoot_clamped = False
     return {
@@ -450,7 +464,13 @@ def _apply_costs_to_trade(
     SL — already handled upstream by the phantom-profit guard).
     """
     entry_notional = position.get("entry_notional_usd", 0.0)
-    if entry_notional <= 0:
+    # Same NaN-comparison-class bug as the C1 _close_position guard: `entry_notional <= 0`
+    # evaluates False when entry_notional is NaN (NaN comparisons always return False),
+    # so the guard would NOT short-circuit and would propagate NaN through all cost
+    # computations. Use `not (entry_notional > 0)` so NaN flips to True and short-circuits.
+    # Currently transitively unreachable post-C1+I1 (capital can't go NaN with the close-side
+    # guards in place), but defensive parity with the same-bug-class fix in _close_position.
+    if not (entry_notional > 0):
         return
     entry_price = position["entry_price"]
     exit_notional = entry_notional * (exit_price_actual / entry_price) if entry_price else 0.0
@@ -1013,7 +1033,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     """Calculate comprehensive trading metrics."""
     if not trades:
-        return {"error": "No trades generated"}
+        # Empty-trades early return — preserve schema parity for the
+        # clamped_trade_count field so downstream consumers don't KeyError.
+        return {"error": "No trades generated", "clamped_trade_count": 0}
 
     df = pd.DataFrame(trades)
     closed = df[df["exit_reason"] != "OPEN"]
@@ -1043,8 +1065,12 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     # Sharpe ratio (annualized)
     if len(closed) > 1:
         returns = closed["pnl_pct"].values / 100
-        # Annualize based on trades per year (not hourly)
-        trades_per_year = len(closed) / ((closed["exit_time"].iloc[-1] - closed["entry_time"].iloc[0]).days / 365.25) if len(closed) > 1 else 0
+        # Annualize based on trades per year (not hourly). When all trades
+        # share a single day, span_y == 0; mirror the trades_per_month guard
+        # at line 1083 so we don't divide by zero (Sharpe falls back to 0,
+        # consistent with the legacy `len(closed) > 1` else branch).
+        span_y = (closed["exit_time"].iloc[-1] - closed["entry_time"].iloc[0]).days / 365.25
+        trades_per_year = len(closed) / span_y if span_y > 0 else 0
         sharpe = np.mean(returns) / np.std(returns) * np.sqrt(trades_per_year) if np.std(returns) > 0 and trades_per_year > 0 else 0
         sortino_returns = returns[returns < 0]
         downside_std = np.std(sortino_returns) if len(sortino_returns) > 1 else 0
@@ -1118,11 +1144,10 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
             ),
         }
 
-    # Overshoot-clamp aggregate: count of closed trades where the unbounded
-    # |pnl_pct / sl_pct_actual| exceeded MAX_OVERSHOOT_RATIO and was clamped.
-    # Surfaces the per-symbol vs portfolio aggregation gap (CLAUDE.md "Caveats
-    # heredados" #4) at metrics-output level so A.4 holdout review can see
-    # whether the cap was binding without parsing the per-trade list.
+    # Overshoot-clamp aggregate: count of closed trades where the cap actually
+    # bound pnl_usd below its raw R-multiple value. Surfaces cap-binding
+    # incidence at metrics-output level so consumers can detect simulator
+    # edge-case execution without parsing the per-trade list.
     clamped_trade_count = int(
         sum(t.get("overshoot_clamped", False) for t in trades
             if t.get("exit_reason") != "OPEN")
@@ -1464,6 +1489,7 @@ def main():
     print(f"  Max Drawdown:  {metrics['max_drawdown_pct']:.1f}%")
     print(f"  Sharpe Ratio:  {metrics['sharpe_ratio']}")
     print(f"  Final Equity:  ${metrics['final_equity']:,.2f}")
+    print(f"  Clamped Trades:{metrics.get('clamped_trade_count', 0):>4}  (cap bound pnl below raw R-multiple)")
     print(f"{'='*60}\n")
 
     # Generate and save report
