@@ -77,6 +77,11 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DEFAULT_START = datetime(2021, 1, 1, tzinfo=timezone.utc)  # earliest data to cache
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.01  # 1% of capital per trade
+# Rule-derived cap on |pnl_pct / sl_pct_actual| in _close_position. A 10× SL
+# move is absurd; a real trader exits manually well before that. See CLAUDE.md
+# "Caveats heredados — A.4 (#250) MUST honor" #4 (per-symbol vs portfolio
+# aggregation gap; single-trade overshoot via amplification).
+MAX_OVERSHOOT_RATIO = 10
 
 
 from strategy._validators import (
@@ -358,7 +363,13 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
     effective_capital = max(0.0, capital)
     risk_amount = effective_capital * RISK_PER_TRADE * position["size_mult"]
     if sl_pct_actual > 0:
-        pnl_usd = risk_amount * (pnl_pct / sl_pct_actual)
+        # Cap |pnl_pct / sl_pct_actual| at MAX_OVERSHOOT_RATIO so single-trade
+        # overshoot on TIME_LIMIT exits / gap-through-SL cannot exceed the per-
+        # symbol $10K capital floor. See CLAUDE.md "Caveats heredados" #4.
+        overshoot_ratio = max(-MAX_OVERSHOOT_RATIO,
+                              min(MAX_OVERSHOOT_RATIO,
+                                  pnl_pct / sl_pct_actual))
+        pnl_usd = risk_amount * overshoot_ratio
     else:
         # Inverted or zero-distance SL (malformed setup). Refuse to amplify
         # a phantom profit; record a real-money zero PnL and log the anomaly.
