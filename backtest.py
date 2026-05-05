@@ -464,12 +464,7 @@ def _apply_costs_to_trade(
     SL — already handled upstream by the phantom-profit guard).
     """
     entry_notional = position.get("entry_notional_usd", 0.0)
-    # Same NaN-comparison-class bug as the C1 _close_position guard: `entry_notional <= 0`
-    # evaluates False when entry_notional is NaN (NaN comparisons always return False),
-    # so the guard would NOT short-circuit and would propagate NaN through all cost
-    # computations. Use `not (entry_notional > 0)` so NaN flips to True and short-circuits.
-    # Currently transitively unreachable post-C1+I1 (capital can't go NaN with the close-side
-    # guards in place), but defensive parity with the same-bug-class fix in _close_position.
+    # `<= 0` evaluates False for NaN; use `not (... > 0)` to short-circuit.
     if not (entry_notional > 0):
         return
     entry_price = position["entry_price"]
@@ -1033,8 +1028,8 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     """Calculate comprehensive trading metrics."""
     if not trades:
-        # Empty-trades early return — preserve schema parity for the
-        # clamped_trade_count field so downstream consumers don't KeyError.
+        # Empty-trades early return — emit clamped_trade_count: 0 for shape
+        # consistency. CLI consumer below already defaults via .get(..., 0).
         return {"error": "No trades generated", "clamped_trade_count": 0}
 
     df = pd.DataFrame(trades)
@@ -1067,7 +1062,7 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
         returns = closed["pnl_pct"].values / 100
         # Annualize based on trades per year (not hourly). When all trades
         # share a single day, span_y == 0; mirror the trades_per_month guard
-        # at line 1083 so we don't divide by zero (Sharpe falls back to 0,
+        # below so we don't divide by zero (Sharpe falls back to 0,
         # consistent with the legacy `len(closed) > 1` else branch).
         span_y = (closed["exit_time"].iloc[-1] - closed["entry_time"].iloc[0]).days / 365.25
         trades_per_year = len(closed) / span_y if span_y > 0 else 0
