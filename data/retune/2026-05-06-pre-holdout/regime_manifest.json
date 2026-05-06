@@ -358,6 +358,7 @@
   "runtime_seconds": 3623.21,
   "scope_notes": {
     "n_effective_contribution": 0,
+    "operator_override": "Promoted 60_40 despite no_detector nominal win due to Bankruptcy Bias in JUPUSDT (fixed-notional proof confirmed 63% risk reduction).",
     "promotion_to_strategy_regime_py_and_backtest_py": "deferred_to_phase_5_post_holdout_PR"
   },
   "spec_ref": "docs/superpowers/specs/es/2026-05-03-asunciones-tecnicas-pre-holdout.md §2.10",
