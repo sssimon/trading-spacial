@@ -661,6 +661,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
     capital = INITIAL_CAPITAL
+    _bankrupt = False  # #280: sticky flag — once True, no further entries open
     equity_curve = []
 
     # Resolve ATR multipliers
@@ -770,6 +771,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                     )
                 trades.append(trade)
                 capital += trade["pnl_usd"]
+                # #280: per-symbol bankruptcy halt. Detect breach + emit
+                # synthetic BANKRUPT record exactly once; entry gate below
+                # then short-circuits further entries.
+                _bk_rec = _emit_bankrupt_if_breached(capital, bar_time)
+                if _bk_rec is not None and not _bankrupt:
+                    trades.append(_bk_rec)
+                    _bankrupt = True
                 position = None
                 last_exit_time = bar_time
                 # #186 A6: feed the simulator so tier can evolve mid-backtest.
@@ -797,6 +805,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
         # ── Skip if already in a position ─────────────────────────────────
         if position is not None:
+            continue
+
+        # #280: per-symbol bankruptcy halt — no new entries past the
+        # BANKRUPTCY_THRESHOLD breach. Existing open positions are not
+        # affected (they close naturally on SL/TP/TIME_LIMIT via the
+        # branch above).
+        if _bankrupt:
             continue
 
         # ── Skip if before simulation start (warmup period) ──────────────
@@ -1061,6 +1076,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             )
         trades.append(trade)
         capital += trade["pnl_usd"]
+        # #280: tail-close path — detect bankruptcy on the final-bar close
+        # as well. The sticky flag prevents double-emission if the bar-loop
+        # site already fired during the run.
+        _bk_rec = _emit_bankrupt_if_breached(capital, trade["exit_time"])
+        if _bk_rec is not None and not _bankrupt:
+            trades.append(_bk_rec)
+            _bankrupt = True
 
     return trades, equity_curve
 

@@ -84,3 +84,111 @@ def test_bankrupt_record_is_emitted_when_capital_crosses_threshold():
     # The breach capital should be carried for forensic visibility.
     assert "breach_capital" in emitted[0]
     assert emitted[0]["breach_capital"] == pytest.approx(500.0)
+
+
+def _build_losing_streak_frames(n_hours: int = 24 * 60):
+    """Return (df1h, df4h, df5m, df1d, df_fng, df_funding) for a monotonic
+    downtrend large enough to bankrupt a $10K account under forced entries.
+
+    The frames are syntactically valid OHLCV with strictly positive volume;
+    real signal generation is bypassed via monkeypatched evaluate_signal.
+    """
+    start = pd.Timestamp("2024-01-01", tz="UTC")
+    hours = pd.date_range(start, periods=n_hours, freq="1h", tz="UTC")
+    # 2% drop per bar — drives consecutive SL hits past the bankruptcy floor.
+    close = 100.0 * (0.98 ** np.arange(len(hours)))
+    df1h = pd.DataFrame(
+        {
+            "open": close,
+            "high": close * 1.0005,
+            "low": close * 0.97,
+            "close": close,
+            "volume": np.full(len(hours), 1_000_000.0),
+        },
+        index=hours,
+    )
+    df4h = (
+        df1h.resample("4h")
+        .agg({"open": "first", "high": "max", "low": "min",
+              "close": "last", "volume": "sum"})
+        .dropna()
+    )
+    df5m = df1h.resample("5min").ffill()
+    df1d = (
+        df1h.resample("1D")
+        .agg({"open": "first", "high": "max", "low": "min",
+              "close": "last", "volume": "sum"})
+        .dropna()
+    )
+    df_fng = pd.DataFrame({"value": np.full(len(df1d), 50)}, index=df1d.index)
+    df_funding = pd.DataFrame({"funding_rate": np.zeros(len(df1d))}, index=df1d.index)
+    return df1h, df4h, df5m, df1d, df_fng, df_funding
+
+
+def _forced_long_signal_factory():
+    """Build a stand-in for strategy.core.evaluate_signal that always
+    returns a strong LONG entry at the bar's close price. The simulator
+    invokes evaluate_signal once per bar after warmup — this guarantees
+    a continuous stream of losing trades on the downtrend fixture."""
+    from strategy.core import SignalDecision
+
+    def fake(df1h, df4h, df5m, df1d, *, symbol, cfg, regime,
+             health_state="NORMAL", now=None):
+        price = float(df1h.iloc[-1]["close"])
+        atr_val = price * 0.01
+        return SignalDecision(
+            is_signal=True,
+            is_setup=False,
+            direction="LONG",
+            score=4,
+            score_label="PREMIUM",
+            entry_price=price,
+            sl_price=price - atr_val * 1.0,
+            tp_price=price + atr_val * 4.0,
+            indicators={"atr_1h": atr_val},
+            reasons={
+                "atr_sl_mult": 1.0,
+                "atr_tp_mult": 4.0,
+                "atr_be_mult": 1.5,
+            },
+            estado="forced-test-entry",
+        )
+
+    return fake
+
+
+def test_simulate_strategy_halts_entries_after_bankruptcy(monkeypatch):
+    """End-to-end: when monkeypatched evaluate_signal forces a LONG every
+    bar on a monotonic downtrend, simulate_strategy emits exactly one
+    BANKRUPT record and opens no further positions afterwards."""
+    import strategy.core as strategy_core
+    from backtest import simulate_strategy
+
+    df1h, df4h, df5m, df1d, df_fng, df_funding = _build_losing_streak_frames()
+    monkeypatch.setattr(
+        strategy_core, "evaluate_signal", _forced_long_signal_factory(),
+    )
+
+    trades, equity_curve = simulate_strategy(
+        df1h=df1h, df4h=df4h, df5m=df5m, df1d=df1d,
+        df_fng=df_fng, df_funding=df_funding,
+        symbol="TESTUSDT",
+        enable_slippage=False, enable_spread=False, enable_fees=False,
+        regime_disabled=True,
+        cfg={"symbol_overrides": {}},
+    )
+
+    bankrupt_records = [t for t in trades if t["exit_reason"] == "BANKRUPT"]
+    assert len(bankrupt_records) == 1, (
+        f"expected exactly 1 BANKRUPT record, got {len(bankrupt_records)}: "
+        f"{[t['exit_time'] for t in bankrupt_records]}"
+    )
+    breach_time = bankrupt_records[0]["exit_time"]
+    later_entries = [
+        t for t in trades
+        if t["exit_reason"] not in ("BANKRUPT", "OPEN")
+        and t["entry_time"] > breach_time
+    ]
+    assert later_entries == [], (
+        f"simulator opened {len(later_entries)} entries after bankruptcy"
+    )
