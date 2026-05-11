@@ -203,6 +203,25 @@ Detallado:
 
 **My recommendation: (a) for conservatism.** A tightened symbol's failure to reach ≥30 trades cannot disambiguate "signal sin edge" from "gates too tight even after R2". Excluding it from the conjuntivo preserves R2's discriminative power.
 
+### §5.1 · Degenerate case guard (operator-locked 2026-05-11)
+
+**Pre-registered safeguard:** If `tightened_count ≥ 5` (i.e., ≥5 of 8 currently-bankrupt symbols have `new_TL < current_TL` and are excluded from the conjuntive per §5), R2 is declared **INVALID as test of the hypothesis**, NOT passed-by-default.
+
+**Rationale:** the conjuntive aggregation "≥6 of 8 in EACH sub-window" cannot apply vacuously over <3 remaining eligible symbols. Without this guard, universal tightening would silently produce a false positive (e.g., "1 of 1 remaining symbols passes = 100% success").
+
+**Branches on degenerate case:**
+- (a) Re-do R2 with modified methodology — e.g., constrain `new_TL_constrained = max(new_TL_raw, current_TL)` so the ATR derivation only relaxes, never tightens. Operator-approval required for re-run.
+- (b) Advance to R1/R3 with explicit acknowledgment that the gates question remains unresolved within Phase 2. H7 from the audit stays unresolved; #317 stays open.
+
+Operator decides between (a) and (b) when the guard fires.
+
+**Enforcement in `tools/r2_gates_rederivation.py`:** before invoking ANY sub-window sweep, the script checks `tightened_count`. If ≥5, the script:
+1. Emits `data/retune/2026-05-11-r2-gates/degenerate_guard_fired.txt` with the per-symbol comparison `(current_TL, new_TL_raw, tightening_flag)`.
+2. Aborts the sweep with non-zero exit code.
+3. Logs `R2 ABORTED — degenerate case (tightened_count={N}/8) — see degenerate_guard_fired.txt`.
+
+No "salvar" the sweep with post-hoc adjustments (per operator instruction).
+
 ---
 
 ## §6 · Deliverable structure
@@ -244,6 +263,7 @@ Resumen de las 4 branch points donde la metodología tiene rule explícita:
 | Branch point | Rule | Reference |
 |---|---|---|
 | Tightening (new_TL < current) | Exclude symbol from §4 conjuntivo (mark "inconclusive") | §5 recommendation (a) |
+| **Degenerate tightening (≥5 of 8 tightened)** | **R2 declared INVALID; abort sweep; emit `degenerate_guard_fired.txt`; operator decides re-do (a) or advance (b)** | **§5.1 (operator-locked safeguard)** |
 | Pathological TL value (< 4h o > 48h pre-clamp) | Clamp + WARN log; symbol still eligible for §4 | §2.1 |
 | Tier mapping verification fails | Halt R2 promotion; open separate issue | §2.4 |
 | R2 failure (≤2 of 3 sub-windows) | Document + escalate per §4 table | §4 + §A.4 prior re-eval checkpoint |
@@ -254,22 +274,24 @@ Cada branch point tiene rule pre-registered ANTES de ver el data, eliminando rat
 
 ---
 
-## §9 · Open questions before execution
+## §9 · Operator confirmations (2026-05-11) — open questions resolved
 
-(Si operator confirma estas 3, R2 execution comienza sin más review:)
+Las 3 open questions de la iteración anterior fueron resueltas por operator review (2026-05-11) + 1 safeguard adicional añadido:
 
-1. **Cooldown floor-dominated scenarios:** la propuesta es (a) accept floor-domination y dejar que sub-window validation arbitra. Operator's review propuso esto como aceptable pero pidió documentación. ¿OK con (a) o querés (c) re-derivar cooldown independent?
+1. **Cooldown floor-dominated cases: OK as-is.** Transitive rule `max(new_TL, NW=4, floor=6)` preserva design intent original. Re-derivación independent es follow-up post-R2 si necesario, no scope de este PR.
 
-2. **NW=4 provenance:** la value `NW=4` en `max(TL, NW=4, floor=6)` no está documentada por origen. Acción propuesta: investigar y documentar en derivation_audit.md (5 min de grep). ¿OK que esa investigación corra dentro de R2 execution, o querés que se haga ahora?
+2. **NW=4 provenance: OK investigar durante execution.** Se documenta resultado en `derivation_audit.md`. Si hay anchor teórico (paper/convención) → documentar; si es operator-chosen sin trazabilidad → flag como deferred follow-up, no bloquea R2.
 
-3. **Tightening risk handling:** propuesta es (a) "exclude symbol from conjuntivo, mark inconclusive". Operator's preference dictada arriba como "mi sugerencia"; ¿confirmar lock-in?
+3. **Tightening exclude "inconclusive": APPROVED + new safeguard §5.1.** Regla locked: tightened symbols (`new_TL < current_TL`) excluded del conjuntive. **Plus** degenerate guard: si ≥5 of 8 tightened, R2 abort (no false-positive vacuous pass). Ver §5.1 + §8 decision branches table.
 
-Si las 3 son "OK proceder", el siguiente commit en este PR ejecuta:
-- `tools/r2_gates_rederivation.py` implementation
+**Status:** ready for R2 execution. Next commits sobre #324:
+- `tools/r2_gates_rederivation.py` (deriva TL+PoV+cooldown; enforces §5.1 guard ANTES del sweep)
 - Actual derivación per symbol
-- Sweep over 3 sub-windows
-- derivation_audit.md
-- README con verdict
+- Sweep over 3 sub-windows (A, B, C)
+- `derivation_audit.md` con math + NW=4 provenance + tier verification
+- `per_symbol_gates.json` (drop-in para `config.defaults.json:symbol_overrides`, NOT yet promoted)
+- README con verdict + interpretación
+- PR comment con conjuntive table + degenerate guard status + prior re-eval per §A.4
 
 ---
 
