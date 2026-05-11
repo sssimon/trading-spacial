@@ -1,0 +1,409 @@
+{
+  "agg": {
+    "decision_flags": {
+      "change_detection": true,
+      "degenerate_zero_pnl": false,
+      "sanity_check": true,
+      "stability_check": true
+    },
+    "per_config_pnl": {
+      "60_40": -99550.25,
+      "70_30": -99535.99,
+      "80_20": -99553.13,
+      "no_detector": -97407.95
+    },
+    "per_config_trades": {
+      "60_40": 418,
+      "70_30": 447,
+      "80_20": 408,
+      "no_detector": 567
+    },
+    "runner_up": "70_30",
+    "runner_up_pnl": -99535.99,
+    "winner": "no_detector",
+    "winner_margin_pct": 2.184667678562179,
+    "winner_pnl": -97407.95
+  },
+  "manifest": {
+    "code_commit": "47a1956fa50b09824db6953ea9df6b347ce1d3e6",
+    "cutoff_effective_iso": "2025-04-30T00:00:00+00:00",
+    "cutoff_effective_ms": 1745971200000,
+    "decision_flags": {
+      "change_detection": true,
+      "degenerate_zero_pnl": false,
+      "sanity_check": true,
+      "stability_check": true
+    },
+    "grid": [
+      {
+        "bear_below": 40,
+        "bull_above": 60,
+        "disabled": false,
+        "name": "60_40"
+      },
+      {
+        "bear_below": 30,
+        "bull_above": 70,
+        "disabled": false,
+        "name": "70_30"
+      },
+      {
+        "bear_below": 20,
+        "bull_above": 80,
+        "disabled": false,
+        "name": "80_20"
+      },
+      {
+        "bear_below": null,
+        "bull_above": null,
+        "disabled": true,
+        "name": "no_detector"
+      }
+    ],
+    "harness": "regime_retune_pre_holdout",
+    "leakage_check": "PASS",
+    "ohlcv_path_relative": "data/ohlcv.db",
+    "ohlcv_sha256": "5c3fd66caa77aaf0c43b41a8961f10b4deeaf082198cec0759fe4722ca5cc856",
+    "per_config_pnl": {
+      "60_40": -99550.25,
+      "70_30": -99535.99,
+      "80_20": -99553.13,
+      "no_detector": -97407.95
+    },
+    "per_config_trades": {
+      "60_40": 418,
+      "70_30": 447,
+      "80_20": 408,
+      "no_detector": 567
+    },
+    "per_symbol_data_ranges": {
+      "ADAUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "AVAXUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "BTCUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "DOGEUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "ETHUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "JUPUSDT": {
+        "1d": {
+          "count": 455,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2024-01-31T00:00:00+00:00",
+          "min_ts_ms": 1706659200000
+        },
+        "1h": {
+          "count": 10904,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2024-01-31T16:00:00+00:00",
+          "min_ts_ms": 1706716800000
+        },
+        "4h": {
+          "count": 2726,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2024-01-31T16:00:00+00:00",
+          "min_ts_ms": 1706716800000
+        },
+        "5m": {
+          "count": 130848,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2024-01-31T16:00:00+00:00",
+          "min_ts_ms": 1706716800000
+        }
+      },
+      "PENDLEUSDT": {
+        "1d": {
+          "count": 667,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2023-07-03T00:00:00+00:00",
+          "min_ts_ms": 1688342400000
+        },
+        "1h": {
+          "count": 15998,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2023-07-03T10:00:00+00:00",
+          "min_ts_ms": 1688378400000
+        },
+        "4h": {
+          "count": 4000,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2023-07-03T08:00:00+00:00",
+          "min_ts_ms": 1688371200000
+        },
+        "5m": {
+          "count": 191976,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2023-07-03T10:00:00+00:00",
+          "min_ts_ms": 1688378400000
+        }
+      },
+      "RUNEUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "UNIUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      },
+      "XLMUSDT": {
+        "1d": {
+          "count": 1580,
+          "max_ts_iso": "2025-04-29T00:00:00+00:00",
+          "max_ts_ms": 1745884800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "1h": {
+          "count": 37906,
+          "max_ts_iso": "2025-04-29T23:00:00+00:00",
+          "max_ts_ms": 1745967600000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "4h": {
+          "count": 9480,
+          "max_ts_iso": "2025-04-29T20:00:00+00:00",
+          "max_ts_ms": 1745956800000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        },
+        "5m": {
+          "count": 454827,
+          "max_ts_iso": "2025-04-29T23:55:00+00:00",
+          "max_ts_ms": 1745970900000,
+          "min_ts_iso": "2021-01-01T00:00:00+00:00",
+          "min_ts_ms": 1609459200000
+        }
+      }
+    },
+    "ran_at_iso": "2026-05-11T09:53:01.555152+00:00",
+    "runner_up": "70_30",
+    "runner_up_pnl": -99535.99,
+    "runtime_seconds": 625.84,
+    "scope_notes": {
+      "n_effective_contribution": 0,
+      "promotion_to_strategy_regime_py_and_backtest_py": "deferred_to_phase_5_post_holdout_PR"
+    },
+    "spec_ref": "docs/superpowers/specs/es/2026-05-03-asunciones-tecnicas-pre-holdout.md §2.10",
+    "symbol_overrides_sha256": "da2bd8943aa197f09a621d1d7cfd7da88848e99d734753f74b1b70380279e80a",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "PENDLEUSDT",
+      "JUPUSDT",
+      "RUNEUSDT"
+    ],
+    "winner": "no_detector",
+    "winner_margin_pct": 2.1847,
+    "winner_pnl": -97407.95
+  },
+  "reason": "sanity_check_fired",
+  "report_md": "# Pre-holdout Regime Threshold Re-tune Report\n\n- **Cutoff (`--max-date`):** 2025-04-30T00:00:00+00:00\n- **Symbols:** BTCUSDT, ETHUSDT, ADAUSDT, AVAXUSDT, DOGEUSDT, UNIUSDT, XLMUSDT, PENDLEUSDT, JUPUSDT, RUNEUSDT\n- **Runtime:** 626s\n- **Spec ref:** D9 §2.10 (locked grid, locked objective)\n\n## Per-config aggregate\n\n| Config | Sum net_pnl (USD) | Total trades | Margin to winner |\n|--------|-------------------|--------------|------------------|\n| 60_40 | $-99,550.25 | 418 | -2.20% |\n| 70_30 | $-99,535.99 | 447 | -2.18% |\n| 80_20 | $-99,553.13 | 408 | -2.20% |\n| no_detector | $-97,407.95 | 567 | **winner** |\n\n**Winner:** `no_detector` (sum net_pnl = $-97,407.95)\n**Runner-up:** `70_30` (sum net_pnl = $-99,535.99)\n**Margin:** 2.18% of |winner|\n\n## Decision flags (pre-registered per D9 §2.10)\n\n- **CHANGE detection:** `True` (winner != current production `60_40`)\n- **Sanity check (no-detector wins):** `True` → HALT + DEBUG required before any commit\n- **Stability check (margin < 5%):** `True` → informational caveat: regime is operating in a flat region\n- **Degenerate zero-pnl (all per-config sums ≈ 0):** `False` \n\n## Per-symbol breakdown\n\n| Symbol | 60_40 | 70_30 | 80_20 | no_detector |\n|--------|-------|-------|-------|-------------|\n| BTCUSDT | $-9,016 | $-9,000 | $-9,009 | $-9,004 |\n| ETHUSDT | $-9,006 | $-9,008 | $-9,016 | $-9,009 |\n| ADAUSDT | $-9,004 | $-9,004 | $-9,004 | $-9,011 |\n| AVAXUSDT | $-9,002 | $-9,002 | $-9,002 | $-9,061 |\n| DOGEUSDT | $-9,020 | $-9,020 | $-9,020 | $-9,087 |\n| UNIUSDT | $-9,070 | $-9,070 | $-9,070 | $-9,033 |\n| XLMUSDT | $-9,006 | $-9,006 | $-9,006 | $-9,019 |\n| PENDLEUSDT | $-15,171 | $-15,171 | $-15,171 | $-15,171 |\n| JUPUSDT | $-11,953 | $-11,953 | $-11,953 | $-9,712 |\n| RUNEUSDT | $-9,301 | $-9,301 | $-9,301 | $-9,301 |\n\n## Caveats\n\n- **JUPUSDT** — earliest OHLCV bar is 2024-01-31. SMA200 (1d) and SMA100 (1h) yield NaN over the first ~4 days of JUP train data. Same warmup degradation applies here as in A.4-1; results for JUP are reported but should be interpreted with this caveat.\n\n## Data ranges (per symbol × tf, all bars below cutoff)\n\n| Symbol | TF | Min ts (UTC) | Max ts (UTC) | Bars |\n|--------|----|---------------|---------------|------|\n| ADAUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| ADAUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| ADAUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| ADAUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| AVAXUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| AVAXUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| AVAXUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| AVAXUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| BTCUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| BTCUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| BTCUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| BTCUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| DOGEUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| DOGEUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| DOGEUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| DOGEUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| ETHUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| ETHUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| ETHUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| ETHUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| JUPUSDT | 5m | 2024-01-31T16:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 130848 |\n| JUPUSDT | 1h | 2024-01-31T16:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 10904 |\n| JUPUSDT | 4h | 2024-01-31T16:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 2726 |\n| JUPUSDT | 1d | 2024-01-31T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 455 |\n| PENDLEUSDT | 5m | 2023-07-03T10:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 191976 |\n| PENDLEUSDT | 1h | 2023-07-03T10:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 15998 |\n| PENDLEUSDT | 4h | 2023-07-03T08:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 4000 |\n| PENDLEUSDT | 1d | 2023-07-03T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 667 |\n| RUNEUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| RUNEUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| RUNEUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| RUNEUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| UNIUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| UNIUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| UNIUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| UNIUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n| XLMUSDT | 5m | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:55:00+00:00 | 454827 |\n| XLMUSDT | 1h | 2021-01-01T00:00:00+00:00 | 2025-04-29T23:00:00+00:00 | 37906 |\n| XLMUSDT | 4h | 2021-01-01T00:00:00+00:00 | 2025-04-29T20:00:00+00:00 | 9480 |\n| XLMUSDT | 1d | 2021-01-01T00:00:00+00:00 | 2025-04-29T00:00:00+00:00 | 1580 |\n"
+}
