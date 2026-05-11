@@ -192,3 +192,43 @@ def test_simulate_strategy_halts_entries_after_bankruptcy(monkeypatch):
     assert later_entries == [], (
         f"simulator opened {len(later_entries)} entries after bankruptcy"
     )
+
+
+def test_calculate_metrics_excludes_bankrupt_from_win_pf_sharpe():
+    """BANKRUPT records are event markers, not trades. They must not
+    contribute to win_rate / profit_factor / Sharpe / Sortino / streaks
+    / score-tier breakdowns.
+
+    The equity-curve-derived max_drawdown and net_pnl are computed from
+    the equity_curve list and reflect the actual capital path — those
+    are unaffected by this filter."""
+    trades = [
+        _trade(0, 1, pnl_usd=+100, exit_reason="TP"),
+        _trade(2, 3, pnl_usd=-50, exit_reason="SL"),
+        # Synthetic BANKRUPT event — must be filtered.
+        {
+            **_trade(4, 4, pnl_usd=0, exit_reason="BANKRUPT", score=0, size_mult=0.0),
+            "breach_capital": 500.0,
+        },
+    ]
+    equity_curve = [
+        {"time": pd.Timestamp("2024-01-01", tz="UTC") + pd.Timedelta(hours=h),
+         "equity": eq}
+        for h, eq in [(0, 10_000), (1, 10_100), (3, 10_050), (4, 500)]
+    ]
+    metrics = calculate_metrics(trades, equity_curve)
+
+    # With 1 win + 1 loss (BANKRUPT excluded), win_rate must be 50.0%,
+    # NOT 33.3 (which would mean BANKRUPT was counted as a loss).
+    # calculate_metrics returns win_rate as a rounded percentage.
+    assert metrics["win_rate"] == pytest.approx(50.0)
+    assert metrics["total_trades"] == 2, (
+        f"BANKRUPT leaked into total_trades: got {metrics['total_trades']}"
+    )
+    # max_drawdown_pct still reflects the bankruptcy via equity_curve.
+    assert metrics["max_drawdown_pct"] < -90, (
+        f"equity curve dropped 95% but max_drawdown_pct reads "
+        f"{metrics['max_drawdown_pct']}"
+    )
+    # Forensic field surfaced for operator visibility.
+    assert metrics["bankruptcy_count"] == 1

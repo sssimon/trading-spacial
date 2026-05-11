@@ -1094,12 +1094,23 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     """Calculate comprehensive trading metrics."""
     if not trades:
-        # Empty-trades early return — emit clamped_trade_count: 0 for shape
-        # consistency. CLI consumer below already defaults via .get(..., 0).
-        return {"error": "No trades generated", "clamped_trade_count": 0}
+        # Empty-trades early return — emit clamped_trade_count: 0 and
+        # bankruptcy_count: 0 for shape consistency. CLI consumer below
+        # already defaults via .get(..., 0).
+        return {
+            "error": "No trades generated",
+            "clamped_trade_count": 0,
+            "bankruptcy_count": 0,
+        }
 
     df = pd.DataFrame(trades)
-    closed = df[df["exit_reason"] != "OPEN"]
+    # #280: BANKRUPT records are event markers (capital fell below
+    # BANKRUPTCY_THRESHOLD), not trades. Exclude them from every aggregate
+    # that consumes per-trade pnl — win-rate, PF, Sharpe, Sortino, streaks,
+    # score-tier breakdowns. The equity_curve still reflects the bankruptcy
+    # path so drawdown and total_return_pct are unaffected.
+    closed = df[~df["exit_reason"].isin(["OPEN", "BANKRUPT"])]
+    bankruptcy_count = int((df["exit_reason"] == "BANKRUPT").sum())
 
     wins = closed[closed["pnl_usd"] > 0]
     losses = closed[closed["pnl_usd"] <= 0]
@@ -1220,6 +1231,7 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
         "losses": loss_count,
         "win_rate": round(win_rate * 100, 1),
         "clamped_trade_count": clamped_trade_count,
+        "bankruptcy_count": bankruptcy_count,
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
         "net_pnl": round(net_pnl, 2),
