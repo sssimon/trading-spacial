@@ -1,0 +1,8744 @@
+{
+  "criterion": {
+    "absolute_floor_usd": 200.0,
+    "boundary_be": [
+      1.5,
+      2.5
+    ],
+    "boundary_sl": [
+      0.5,
+      2.5
+    ],
+    "boundary_tp": [
+      2.0,
+      6.0
+    ],
+    "sigma_multiplier": 2.0,
+    "symbols_threshold_for_expansion": 6,
+    "total_symbols": 10
+  },
+  "cutoff_iso": "2025-04-30T00:00:00+00:00",
+  "expansion_justified": false,
+  "grid": {
+    "be": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "sl": [
+      0.5,
+      0.7,
+      1.0,
+      1.2,
+      1.5,
+      2.0,
+      2.5
+    ],
+    "total_points_per_symbol": 105,
+    "tp": [
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0
+    ]
+  },
+  "harness": "tools.q2_grid_topology_diag",
+  "n_symbols_meeting_criterion": 0,
+  "per_symbol": [
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11852.88,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11852.88,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11852.88,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11786.73,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12020.24,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12020.24,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11993.96,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12020.24,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -13908.29,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -13908.29,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -13908.29,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -13823.94,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14148.19,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14148.19,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14094.81,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14148.19,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10895.97,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10895.97,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10895.97,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10814.97,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11120.54,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11120.54,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11073.65,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11120.54,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.11,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9022.69,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9022.69,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9009.08,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9007.53,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9007.53,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9007.53,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.54,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 75
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9014.57,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 78
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9002.09,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 78
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9000.21,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9018.63,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 74
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9005.63,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 80
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9013.04,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9004.09,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 73
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9011.29,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 79
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.43,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9014.15,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9001.72,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 78
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.86,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9003.85,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 72
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9005.09,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 79
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8597.43,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 100
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8551.69,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 100
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8539.63,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 100
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8621.22,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 99
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8588.77,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 99
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8532.58,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 97
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8579.94,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 96
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8517.77,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 96
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8439.31,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 94
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8659.63,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 95
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8591.17,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 95
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8490.14,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 94
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8655.57,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 95
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8576.71,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 95
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8467.43,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 94
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7919.9,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 99
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7864.42,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 99
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7850.09,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 99
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7957.89,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 97
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7912.98,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 97
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7833.38,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 96
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7888.72,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 94
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7821.87,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 94
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7718.87,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7987.24,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7911.25,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7781.97,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7982.85,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7893.98,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 93
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7755.09,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 93
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": true,
+        "tp": false
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_plus": 103.0,
+        "sl_plus": 720.44
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 2063.85,
+      "symbol": "BTCUSDT",
+      "threshold_used_usd": 4127.69,
+      "top_candidate": {
+        "bankruptcy_count": 0,
+        "be": 2.5,
+        "pnl": -7718.87,
+        "sl": 2.5,
+        "tp": 4.0,
+        "trades": 93
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.67,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9043.67,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9043.67,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9002.11,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9031.84,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9001.03,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9147.7,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9014.02,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9009.48,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9009.48,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9009.48,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9129.89,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9114.93,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9110.14,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9092.36,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9092.36,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9086.04,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9110.49,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9110.49,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9102.95,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9125.22,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9125.22,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9116.5,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 28
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.28,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9030.28,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.99,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.48,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9020.47,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9017.24,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 47
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9002.94,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 49
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9002.94,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 49
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9006.64,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 49
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9029.75,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 50
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9029.75,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 50
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9002.0,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 49
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9015.03,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 50
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9015.03,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 50
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9016.53,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 50
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9011.65,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 63
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9046.79,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 65
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9031.06,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 65
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9035.12,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 63
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.29,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9031.87,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9027.56,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 63
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9035.88,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9045.64,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9025.55,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 63
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9033.98,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9042.9,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9016.48,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 63
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9025.37,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9033.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 64
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9008.93,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8956.34,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 89
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8944.61,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 89
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9021.48,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 87
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8940.47,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8945.06,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9002.54,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 87
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8955.22,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8962.09,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9003.79,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8944.62,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8950.57,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9033.7,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 89
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8937.37,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8942.39,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 88
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8325.77,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8154.89,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8138.92,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8396.45,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 85
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8204.08,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8171.45,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8419.55,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 85
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8254.02,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8213.54,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8412.21,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 85
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8246.16,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8235.83,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -8411.74,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 85
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -8245.43,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -8233.17,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7546.33,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7375.92,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 82
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7355.59,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 82
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7621.8,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7420.3,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7401.37,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7591.17,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7417.23,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7394.17,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7583.35,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7409.18,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7317.97,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 82
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 1.5,
+          "pnl": -7577.74,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 84
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.0,
+          "pnl": -7402.95,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 83
+        },
+        {
+          "bankruptcy_count": 0,
+          "be": 2.5,
+          "pnl": -7308.06,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 82
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": true,
+        "tp": true
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_plus": 94.89,
+        "sl_plus": 925.11,
+        "tp_plus": 9.91
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 584.01,
+      "symbol": "ETHUSDT",
+      "threshold_used_usd": 1168.02,
+      "top_candidate": {
+        "bankruptcy_count": 0,
+        "be": 2.5,
+        "pnl": -7308.06,
+        "sl": 2.5,
+        "tp": 6.0,
+        "trades": 82
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -16280.94,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10698.56,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10713.69,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10713.69,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10713.69,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10707.45,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10713.69,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9258.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9058.56,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.13,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9296.08,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9296.08,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9296.08,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9297.29,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9297.29,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9297.29,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9295.08,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.39,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9043.76,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9043.76,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.74,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9044.07,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9038.75,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.9,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9044.23,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9039.39,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.9,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9044.23,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9039.39,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9043.9,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9044.23,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9039.39,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 21
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": true,
+        "tp": false
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_plus": 5.32,
+        "sl_plus": 258.54
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 2477.6,
+      "symbol": "ADAUSDT",
+      "threshold_used_usd": 4955.2,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.5,
+        "pnl": -9038.75,
+        "sl": 2.5,
+        "tp": 3.0,
+        "trades": 21
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -19017.85,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -19224.14,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -19224.14,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -19017.85,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -19017.85,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -19017.85,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -19017.85,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -19256.33,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -18086.55,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -18288.18,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -18288.18,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -18086.55,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -18086.55,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -18086.55,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -18086.55,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -18312.88,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11711.88,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11796.33,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11796.33,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11711.88,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11711.88,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11711.88,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11711.88,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11805.9,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.86,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9065.12,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9065.12,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.86,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.86,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.86,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.86,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9068.06,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9023.21,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.19,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.19,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9023.21,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9023.21,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9023.21,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9023.21,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.22,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9027.51,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9023.6,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9023.6,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9027.62,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9020.15,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9020.15,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9012.91,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9009.77,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9009.77,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9012.46,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9009.33,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9009.33,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9012.46,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 31
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9009.33,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9009.33,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9007.92,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 42
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9008.17,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 42
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9008.17,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 42
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9005.42,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9003.79,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9003.79,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9029.81,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9029.81,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9029.81,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 39
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9028.37,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 39
+        }
+      ],
+      "at_boundary": {
+        "be": false,
+        "sl": true,
+        "tp": false
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "sl_plus": 16.36
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 4252.75,
+      "symbol": "AVAXUSDT",
+      "threshold_used_usd": 8505.51,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.0,
+        "pnl": -9003.79,
+        "sl": 2.5,
+        "tp": 3.0,
+        "trades": 39
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14372.46,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -30488.65,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12435.39,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -10350.14,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -17215.68,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -22181.18,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -14200.45,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 1
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": false,
+        "tp": true
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_minus": 0.0,
+        "tp_minus": 0.0
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 6444.06,
+      "symbol": "DOGEUSDT",
+      "threshold_used_usd": 12888.13,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 1.5,
+        "pnl": -10350.14,
+        "sl": 1.2,
+        "tp": 2.0,
+        "trades": 2
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12032.51,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.88,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.88,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.88,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9036.62,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.62,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9036.62,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9034.31,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9054.41,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9054.41,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9054.41,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9041.04,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9041.04,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9041.04,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9028.27,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9028.27,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9028.27,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9077.38,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9019.46,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9019.46,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9019.46,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9012.04,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9012.04,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.04,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9005.04,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9005.04,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9005.04,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9032.19,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9334.63,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9334.63,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9334.63,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9334.58,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9334.58,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9334.58,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9334.56,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9334.56,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9334.56,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9334.81,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 16
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.01,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9033.76,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9031.26,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9032.57,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9032.32,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9102.5,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.21,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9030.95,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.35,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9036.38,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.13,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.9,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 22
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9036.38,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.13,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 23
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.9,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 22
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.39,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9038.29,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9037.07,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9037.52,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9037.42,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9015.9,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9036.69,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.6,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9015.03,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9039.77,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9039.66,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9018.24,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9039.77,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9039.66,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9018.24,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 26
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": false,
+        "tp": false
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_plus": 35.23
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 1041.19,
+      "symbol": "UNIUSDT",
+      "threshold_used_usd": 2082.39,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.5,
+        "pnl": -9000.9,
+        "sl": 2.0,
+        "tp": 5.0,
+        "trades": 22
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9057.55,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9034.7,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9034.7,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9059.97,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9026.74,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9026.74,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9046.65,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9046.65,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9046.65,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.67,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.99,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9023.8,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9023.8,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.86,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9019.63,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9019.63,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.66,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.66,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.66,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9019.39,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11740.6,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9298.29,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9155.9,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9101.39,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 10
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9040.03,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 10
+        }
+      ],
+      "at_boundary": {
+        "be": false,
+        "sl": true,
+        "tp": false
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "sl_minus": 6.72
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 929.92,
+      "symbol": "XLMUSDT",
+      "threshold_used_usd": 1859.85,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.0,
+        "pnl": -9012.67,
+        "sl": 0.5,
+        "tp": 4.0,
+        "trades": 13
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15170.71,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9399.18,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 5
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9090.74,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9090.93,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.93,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9091.16,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9091.36,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.96,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9091.16,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9091.36,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.96,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9091.16,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9091.36,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.96,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9091.16,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9091.36,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9090.96,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9116.3,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9112.93,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9112.93,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9123.83,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9121.91,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9072.31,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9123.83,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9121.91,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9071.53,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9123.83,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9121.91,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.78,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9123.83,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9121.91,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 14
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.01,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 13
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9034.42,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9032.11,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9032.11,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 25
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.01,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.54,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9201.88,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.01,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.54,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9201.63,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.01,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.54,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9201.36,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9038.01,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9036.54,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9201.13,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 24
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9144.26,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9142.12,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9142.12,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9144.88,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9142.73,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9142.13,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9144.88,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9142.73,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9142.13,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9144.88,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9142.73,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9142.13,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9144.88,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9142.73,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9142.13,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 15
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9006.62,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9000.95,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.95,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9011.47,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9008.92,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9002.49,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9011.47,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9008.92,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.89,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9011.47,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9008.92,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9001.89,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 30
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9011.47,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9008.92,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 27
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.33,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 30
+        }
+      ],
+      "at_boundary": {
+        "be": true,
+        "sl": true,
+        "tp": true
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "be_plus": 8.59,
+        "sl_plus": 141.8,
+        "tp_plus": 1.56
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 2124.5,
+      "symbol": "PENDLEUSDT",
+      "threshold_used_usd": 4249.0,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.5,
+        "pnl": -9000.33,
+        "sl": 2.5,
+        "tp": 6.0,
+        "trades": 30
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11913.61,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11913.61,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11913.61,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11913.61,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -11913.61,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -11952.62,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12293.42,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12293.42,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12293.42,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12293.42,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -12293.42,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -12398.38,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 2
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9062.4,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9000.02,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 19
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.02,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 19
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9060.01,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9068.33,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9068.33,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9060.01,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9060.01,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9060.01,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 21
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9000.26,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 18
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9105.41,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9044.86,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9044.86,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9113.06,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9052.0,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9048.61,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9113.06,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9053.52,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9050.12,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9113.06,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9053.52,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9050.12,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9113.06,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9053.52,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9050.12,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 26
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9146.45,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9122.08,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9122.08,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9149.63,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9124.82,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9123.48,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9149.63,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9125.57,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9124.23,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9149.63,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9125.57,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9124.23,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9149.63,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9125.57,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9124.23,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 29
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9039.03,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9025.78,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9025.78,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.79,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9027.27,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9026.51,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.79,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9027.81,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9027.05,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.79,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9027.81,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9027.05,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9040.79,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9027.81,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9027.05,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 32
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9030.37,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9015.47,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9015.47,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.38,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9013.04,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.6,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.38,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9013.25,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.8,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.38,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9013.25,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.8,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9031.38,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9013.25,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 36
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9012.8,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 36
+        }
+      ],
+      "at_boundary": {
+        "be": false,
+        "sl": false,
+        "tp": true
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "tp_minus": 68.31
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 1410.11,
+      "symbol": "JUPUSDT",
+      "threshold_used_usd": 2820.22,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.0,
+        "pnl": -9000.02,
+        "sl": 1.0,
+        "tp": 2.0,
+        "trades": 19
+      }
+    },
+    {
+      "all_results": [
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -29833.84,
+          "sl": 0.5,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 2.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 3.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 4.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 5.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -15245.17,
+          "sl": 0.7,
+          "tp": 6.0,
+          "trades": 1
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9468.56,
+          "sl": 1.0,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 2.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 3.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 4.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 5.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9204.5,
+          "sl": 1.2,
+          "tp": 6.0,
+          "trades": 3
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9299.86,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 2.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9299.86,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 3.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9299.86,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 4.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9299.86,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 5.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9299.86,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9310.89,
+          "sl": 1.5,
+          "tp": 6.0,
+          "trades": 4
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9328.01,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 2.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9328.01,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 3.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9328.01,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 4.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9328.01,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 5.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9328.01,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9330.0,
+          "sl": 2.0,
+          "tp": 6.0,
+          "trades": 6
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9084.08,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 2.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9084.08,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 3.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9084.08,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 4.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9084.08,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 5.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 1.5,
+          "pnl": -9084.08,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 9
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.0,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 8
+        },
+        {
+          "bankruptcy_count": 1,
+          "be": 2.5,
+          "pnl": -9070.04,
+          "sl": 2.5,
+          "tp": 6.0,
+          "trades": 8
+        }
+      ],
+      "at_boundary": {
+        "be": false,
+        "sl": true,
+        "tp": true
+      },
+      "criterion_a_met": true,
+      "criterion_b_met": false,
+      "expansion_axis_candidates": [],
+      "gradients_toward_boundary": {
+        "sl_plus": 259.96,
+        "tp_minus": 0.0
+      },
+      "meets_combined_criterion": false,
+      "n_grid_points": 105,
+      "sigma_pnl_usd": 7183.55,
+      "symbol": "RUNEUSDT",
+      "threshold_used_usd": 14367.1,
+      "top_candidate": {
+        "bankruptcy_count": 1,
+        "be": 2.0,
+        "pnl": -9070.04,
+        "sl": 2.5,
+        "tp": 2.0,
+        "trades": 8
+      }
+    }
+  ],
+  "ran_at_iso": "2026-05-11T18:40:26.343673+00:00",
+  "spec_ref": "issue #318",
+  "train_window_iso": [
+    "2024-01-30T00:00:00+00:00",
+    "2025-01-30T00:00:00+00:00"
+  ]
+}
