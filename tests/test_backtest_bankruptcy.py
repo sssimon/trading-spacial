@@ -232,3 +232,31 @@ def test_calculate_metrics_excludes_bankrupt_from_win_pf_sharpe():
     )
     # Forensic field surfaced for operator visibility.
     assert metrics["bankruptcy_count"] == 1
+
+
+def test_simulate_strategy_smoke_bankruptcy_no_errors(monkeypatch):
+    """End-to-end smoke: simulate_strategy + calculate_metrics complete
+    without exception on the bankruptcy fixture; metrics carry
+    bankruptcy_count >= 1 and win_rate stays bounded."""
+    import strategy.core as strategy_core
+    from backtest import simulate_strategy
+
+    df1h, df4h, df5m, df1d, df_fng, df_funding = _build_losing_streak_frames()
+    monkeypatch.setattr(
+        strategy_core, "evaluate_signal", _forced_long_signal_factory(),
+    )
+
+    trades, equity_curve = simulate_strategy(
+        df1h=df1h, df4h=df4h, df5m=df5m, df1d=df1d,
+        df_fng=df_fng, df_funding=df_funding,
+        symbol="TESTUSDT",
+        enable_slippage=False, enable_spread=False, enable_fees=False,
+        regime_disabled=True,
+        cfg={"symbol_overrides": {}},
+    )
+    metrics = calculate_metrics(trades, equity_curve)
+    assert isinstance(metrics, dict)
+    assert metrics.get("bankruptcy_count", 0) >= 1
+    if metrics.get("total_trades", 0) > 0:
+        # calculate_metrics returns win_rate as a rounded percentage (0–100).
+        assert 0.0 <= metrics["win_rate"] <= 100.0
