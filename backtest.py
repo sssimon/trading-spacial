@@ -346,6 +346,38 @@ def _ensure_tz_aware(ts) -> datetime:
     return ts
 
 
+def _emit_bankrupt_if_breached(capital: float, bar_time) -> dict | None:
+    """Return a synthetic BANKRUPT trade record when `capital` falls below
+    BANKRUPTCY_THRESHOLD; None otherwise. Stateless — callers own the
+    sticky flag that prevents re-emission.
+
+    The record carries a zero pnl payload (the event is a marker, not a
+    trade) plus `breach_capital` for forensic visibility. exit_time and
+    entry_time both point at the breach bar; duration is zero by design
+    (this is an event, not a held position).
+    """
+    if capital >= BANKRUPTCY_THRESHOLD:
+        return None
+    return {
+        "entry_time": bar_time,
+        "exit_time": bar_time,
+        "entry_price": 0.0,
+        "exit_price": 0.0,
+        "exit_reason": "BANKRUPT",
+        "direction": "NONE",
+        "pnl_pct": 0.0,
+        "pnl_usd": 0.0,
+        "overshoot_clamped": False,
+        "score": 0,
+        "size_mult": 0.0,
+        "duration_hours": 0.0,
+        "atr_sl_mult_used": None,
+        "atr_tp_mult_used": None,
+        "atr_be_mult_used": None,
+        "breach_capital": round(float(capital), 2),
+    }
+
+
 def _close_position(position: dict, exit_price: float, exit_time, exit_reason: str,
                     capital: float) -> dict:
     """Compute P&L + trade dict for closing `position` at exit_price.
