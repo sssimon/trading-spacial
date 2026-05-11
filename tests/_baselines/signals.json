@@ -56,7 +56,7 @@
       "setup": 0,
       "se\u00f1al": 1,
       "symbol": "BTCUSDT",
-      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, DXY\n_BTCUSDT Spot 1H V6_",
       "ts": "2026-01-15T10:05:00Z"
     },
     "status": 200
@@ -74,14 +74,14 @@
       "score_label": "premium",
       "sizing": {},
       "symbol": "BTCUSDT",
-      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, DXY\n_BTCUSDT Spot 1H V6_",
       "ts": "2026-01-15T10:05:00Z"
     },
     "status": 200
   },
   "GET /signals/latest/message": {
     "body": {
-      "message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, DXY\n_BTCUSDT Spot 1H V6_",
       "scan_id": 2,
       "symbol": "BTCUSDT",
       "ts": "2026-01-15T10:05:00Z"
@@ -101,7 +101,7 @@
       "score_label": "premium",
       "sizing": {},
       "symbol": "BTCUSDT",
-      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, cooldown 6h, DXY\n_BTCUSDT Spot 1H V6_",
+      "telegram_message": "*Scanner Update BTCUSDT*\n``\n\n``\n\n*Precio:* `$0.00`\n*LRC 1H:* `None%`  _(zona <= 25% = LONG)_\n*Score:* `0/9`  __\n*Macro 4H:* `Adversa`  _(Precio vs SMA100)_\n\n\n*Verificar manualmente:* noticias macro, racha, capital, DXY\n_BTCUSDT Spot 1H V6_",
       "ts": "2026-01-15T10:05:00Z"
     },
     "status": 200

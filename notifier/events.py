@@ -106,7 +106,7 @@ class PositionExitEvent(_BaseEvent):
     _send_telegram_raw TP/SL notification in btc_api.py (#138 PR 4 TODO, #162 PR B)."""
     symbol: str = ""
     direction: str = "LONG"
-    exit_reason: str = ""     # 'TP' | 'SL' | 'BE' | 'MANUAL'
+    exit_reason: str = ""     # 'TP' | 'SL' | 'BE' | 'TIME_LIMIT' | 'MANUAL'
     entry_price: float = 0.0
     exit_price: float = 0.0
     pnl_usd: float = 0.0

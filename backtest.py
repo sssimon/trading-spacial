@@ -12,8 +12,28 @@ Usage:
     python backtest.py                  # Run backtest, generate report
     python backtest.py --download-only  # Only download/cache data
     python backtest.py --symbol ETHUSDT # Backtest a different symbol
+
+Cost model (A.0.2, #277)
+------------------------
+simulate_strategy applies a tier-based cost model when
+`enable_slippage` / `enable_spread` / `enable_fees` are True (default). The
+model is **v1 linear** in participation rate:
+
+    slippage_bps = base_bps + size_factor * (order_usd / liquidity_usd_per_min)
+
+This deliberately over-penalizes small orders and under-penalizes large ones
+relative to the empirically-better Almgren-Chriss `sqrt(participation)`
+baseline. **v2 should migrate to sqrt**; the v1 simplification is documented
+both here and in backtest_costs.py so it does not get forgotten. Per-tier
+parameters and source citations live in `costs_calibration.json`.
+
+Pre-A.0.2 the FEE_PCT constant was defined but never deducted from pnl_usd —
+A.0.2 is the first revision to actually apply costs. Backtests prior to this
+revision should be considered cost-blind; numbers in older docs (e.g.
+2026-04-17-formula-ganadora) are pre-cost.
 """
 
+import math
 import os
 import sys
 import json
@@ -22,6 +42,7 @@ import argparse
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Final
 
 import pandas as pd
 import numpy as np
@@ -58,7 +79,62 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DEFAULT_START = datetime(2021, 1, 1, tzinfo=timezone.utc)  # earliest data to cache
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.01  # 1% of capital per trade
-FEE_PCT = 0.001  # 0.1% per trade (Binance spot)
+# Rule-derived cap on |pnl_pct / sl_pct_actual| in _close_position. K=10:
+# a 10× SL move is absurd; a real trader exits manually well before that.
+# Bounds per-trade overshoot relative to current capital, NOT initial capital:
+#   |pnl_usd| ≤ K × risk_amount = K × max(0, capital) × RISK_PER_TRADE × size_mult
+# See CLAUDE.md "Caveats heredados — A.4 (#250) MUST honor" #4 (per-symbol vs
+# portfolio aggregation gap; single-trade overshoot via amplification).
+MAX_OVERSHOOT_RATIO: Final[float] = 10.0
+
+# Per-symbol bankruptcy threshold (#280). Rule-derived 90%-drawdown convention
+# from the issue body: once simulated capital falls below 10% of INITIAL_CAPITAL,
+# any real account would be force-liquidated and the kill switch would have
+# fired in production. In simulation, the existing effective_capital = max(0,
+# capital) floor (A.0.2 / #277) prevented NaN math but kept the bar loop
+# running — those subsequent zero-risk_amount trades distort aggregate metrics
+# (Bankruptcy Bias, demonstrated in data/retune/2026-05-06-pre-holdout
+# regime_report.md). This constant + the _bankrupt sticky flag wired below
+# halt new entries for the affected symbol. Portfolio-level bankruptcy is
+# deferred to its own epic when a portfolio-level simulator lands.
+BANKRUPTCY_THRESHOLD: Final[float] = 0.1 * INITIAL_CAPITAL  # $1000 at INITIAL_CAPITAL=10_000
+
+
+from strategy._validators import (
+    validated_time_limit_hours as _shared_validated_tl_hours,
+    validated_max_participation_rate as _shared_validated_max_pov,
+    validated_cooldown_hours as _shared_validated_cooldown_hours,
+)
+
+
+def _validated_time_limit_hours(value, symbol: str) -> float | None:
+    return _shared_validated_tl_hours(value, symbol, "simulate_strategy", log)
+
+
+def _validated_max_participation_rate(value, symbol: str) -> float | None:
+    return _shared_validated_max_pov(value, symbol, "simulate_strategy", log)
+
+
+def _validated_cooldown_hours(value, symbol: str) -> float:
+    return _shared_validated_cooldown_hours(
+        value, caller="simulate_strategy", symbol=symbol, logger=log, default=COOLDOWN_H,
+    )
+# 0.1% per side, Binance spot retail taker, no BNB discount. Conservative —
+# if production uses BNB discount (~0.075%), this overestimates fee cost.
+# Until A.0.2 (#277) the constant was defined here but never deducted from
+# pnl_usd; the cost model in backtest_costs.py + the enable_fees flag in
+# simulate_strategy now apply it. costs_calibration.json mirrors this value
+# under tiers.*.fee_bps_per_side (10 bps).
+FEE_PCT = 0.001
+
+
+class RegimeKwargError(Exception):
+    """Raised when regime kwargs are passed in an incoherent combination
+    (contract violation by caller, not a data error). Subclasses Exception
+    rather than ValueError so the harness's narrow data-error catch does
+    not swallow it — propagates as a programming error, surfacing the bug
+    to the operator instead of silently shrinking the sweep.
+    """
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,6 +257,9 @@ def _regime_at_time(
     df_funding,
     regime_mode: str = "global",
     df1d_btc=None,
+    *,
+    bull_above: int = 60,
+    bear_below: int = 40,
 ) -> dict:
     """Compute regime for this bar_time (no look-ahead).
 
@@ -188,6 +267,9 @@ def _regime_at_time(
                               Fallback: if df1d_btc is None -> uses df1d_sym.
     mode='hybrid':           uses df1d_sym + F&G + funding (50/25/25).
     mode='hybrid_momentum':  uses df1d_sym + RSI + ADX + F&G + funding (30/15/20/20/15).
+
+    bull_above / bear_below: regime classification thresholds. Defaults 60/40
+        preserve byte-identity to legacy production behavior.
     """
     bar_time_naive = bar_time.tz_localize(None) if bar_time.tzinfo else bar_time
 
@@ -242,6 +324,7 @@ def _regime_at_time(
     return _compute_local_regime(
         symbol, regime_mode, window_price,
         fng_score, funding_score, rsi_score, adx_score,
+        bull_above=bull_above, bear_below=bear_below,
     )
 
 
@@ -261,6 +344,38 @@ def _ensure_tz_aware(ts) -> datetime:
     if getattr(ts, "tzinfo", None) is None:
         return ts.replace(tzinfo=timezone.utc)
     return ts
+
+
+def _emit_bankrupt_if_breached(capital: float, bar_time) -> dict | None:
+    """Return a synthetic BANKRUPT trade record when `capital` falls below
+    BANKRUPTCY_THRESHOLD; None otherwise. Stateless — callers own the
+    sticky flag that prevents re-emission.
+
+    The record carries a zero pnl payload (the event is a marker, not a
+    trade) plus `breach_capital` for forensic visibility. exit_time and
+    entry_time both point at the breach bar; duration is zero by design
+    (this is an event, not a held position).
+    """
+    if capital >= BANKRUPTCY_THRESHOLD:
+        return None
+    return {
+        "entry_time": bar_time,
+        "exit_time": bar_time,
+        "entry_price": 0.0,
+        "exit_price": 0.0,
+        "exit_reason": "BANKRUPT",
+        "direction": "NONE",
+        "pnl_pct": 0.0,
+        "pnl_usd": 0.0,
+        "overshoot_clamped": False,
+        "score": 0,
+        "size_mult": 0.0,
+        "duration_hours": 0.0,
+        "atr_sl_mult_used": None,
+        "atr_tp_mult_used": None,
+        "atr_be_mult_used": None,
+        "breach_capital": round(float(capital), 2),
+    }
 
 
 def _close_position(position: dict, exit_price: float, exit_time, exit_reason: str,
@@ -286,18 +401,77 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
         pnl_pct = (exit_price - entry_price) / entry_price * 100
         # Valid LONG: sl_orig < entry_price → sl_pct_actual > 0.
         sl_pct_actual = (entry_price - sl_orig) / entry_price * 100
-    risk_amount = capital * RISK_PER_TRADE * position["size_mult"]
-    if sl_pct_actual > 0:
-        pnl_usd = risk_amount * (pnl_pct / sl_pct_actual)
-    else:
-        # Inverted or zero-distance SL (malformed setup). Refuse to amplify
-        # a phantom profit; record a real-money zero PnL and log the anomaly.
+    # Floor capital at 0 (A.0.2 #277): under realistic costs a streak of
+    # losses can drive the simulated capital negative. With negative capital,
+    # the R-multiple `risk_amount * (pnl_pct / sl_pct)` flips sign and
+    # reports losing trades as positive pnl — silently corrupting metrics
+    # downstream. Bankruptcy is a sharper signal than "negative R-multiples":
+    # cap risk at zero and let calculate_metrics observe the trades that
+    # actually contributed pnl. (Pre-cost runs cannot reach this branch.)
+    effective_capital = max(0.0, capital)
+    risk_amount = effective_capital * RISK_PER_TRADE * position["size_mult"]
+    if math.isnan(pnl_pct):
+        # NaN-propagation guard: a NaN exit_price (or entry_price) makes
+        # pnl_pct NaN, which would silently flow into capital via NaN PnL
+        # AND into the trade dict's pnl_pct field — corrupting downstream
+        # metrics (Sharpe / Sortino consume pnl_pct directly in
+        # calculate_metrics) and breaking `if capital <= 0` comparisons
+        # (NaN comparisons always evaluate False). Force BOTH pnl_usd and
+        # pnl_pct to 0.0 in the trade dict so consumers downstream see a
+        # consistent real-money-zero record, not a partial NaN payload.
         log.warning(
-            "_close_position: inverted SL detected for %s %s — entry=%.6f, "
-            "sl_orig=%.6f (sl on wrong side or coincident). pnl_usd forced to 0.",
+            "_close_position: NaN pnl_pct detected for %s %s — entry=%.6f, "
+            "exit=%.6f. pnl_usd and pnl_pct forced to 0.",
+            position.get("entry_time"), direction, entry_price, exit_price,
+        )
+        pnl_pct = 0.0
+        pnl_usd = 0.0
+        overshoot_clamped = False
+    elif sl_pct_actual > 0:
+        # Cap |pnl_pct / sl_pct_actual| at MAX_OVERSHOOT_RATIO so single-trade
+        # overshoot on TIME_LIMIT exits / gap-through-SL cannot exceed
+        # K × risk_amount. See CLAUDE.md "Caveats heredados" #4.
+        raw_ratio = pnl_pct / sl_pct_actual
+        if math.isnan(raw_ratio):
+            # inf/inf or other NaN-producing division (e.g., +inf pnl_pct
+            # divided by +inf sl_pct_actual). Bypasses both the pnl_pct NaN
+            # check above and the sl_pct_actual > 0 gate. Same conservative
+            # response as the pre-clamp NaN guard: zero out BOTH pnl fields.
+            log.warning(
+                "_close_position: NaN ratio (%.6f / %.6f) for %s %s. "
+                "pnl_usd and pnl_pct forced to 0.",
+                pnl_pct, sl_pct_actual,
+                position.get("entry_time"), direction,
+            )
+            pnl_pct = 0.0
+            pnl_usd = 0.0
+            overshoot_clamped = False
+        else:
+            # AND-gate: only mark clamped when the cap actually bound pnl_usd
+            # below its raw R-multiple value. With risk_amount = 0 (capital ≤ 0
+            # via the effective_capital floor), pnl_usd is zero regardless of
+            # raw_ratio magnitude — the cap is moot, not binding.
+            overshoot_clamped = (
+                abs(raw_ratio) > MAX_OVERSHOOT_RATIO
+                and risk_amount > 0
+            )
+            overshoot_ratio = max(-MAX_OVERSHOOT_RATIO,
+                                  min(MAX_OVERSHOOT_RATIO, raw_ratio))
+            pnl_usd = risk_amount * overshoot_ratio
+    else:
+        # Malformed SL: inverted (LONG with sl_orig > entry, SHORT with
+        # sl_orig < entry), zero-distance (sl_orig == entry), or NaN
+        # (NaN sl_orig / entry_price → NaN sl_pct_actual; NaN > 0 is False so
+        # this branch also catches the NaN-sl path). Refuse to amplify a
+        # phantom profit; record a real-money zero PnL and log the anomaly.
+        log.warning(
+            "_close_position: malformed SL (inverted, zero-distance, or NaN) "
+            "for %s %s — entry=%.6f, sl_orig=%.6f. pnl_usd and pnl_pct forced to 0.",
             position.get("entry_time"), direction, entry_price, sl_orig,
         )
-        pnl_usd = 0
+        pnl_pct = 0.0
+        pnl_usd = 0.0
+        overshoot_clamped = False
     return {
         "entry_time": position["entry_time"],
         "exit_time": exit_time,
@@ -307,6 +481,7 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
         "direction": position.get("direction", "LONG"),
         "pnl_pct": round(pnl_pct, 4),
         "pnl_usd": round(pnl_usd, 2),
+        "overshoot_clamped": overshoot_clamped,
         "score": position["score"],
         "size_mult": position["size_mult"],
         "duration_hours": (exit_time - position["entry_time"]).total_seconds() / 3600,
@@ -314,6 +489,53 @@ def _close_position(position: dict, exit_price: float, exit_time, exit_reason: s
         "atr_tp_mult_used": position.get("atr_tp_mult_used"),
         "atr_be_mult_used": position.get("atr_be_mult_used"),
     }
+
+
+def _apply_costs_to_trade(
+    trade: dict,
+    position: dict,
+    exit_price_actual: float,
+    exit_liquidity_per_min: float,
+    compute_trade_costs_fn,
+    tier_params,
+    enable_slippage: bool,
+    enable_spread: bool,
+    enable_fees: bool,
+) -> None:
+    """Mutate `trade` in place: append cost-component fields and reduce
+    pnl_usd by total_cost_usd (preserving the original gross value as
+    `gross_pnl_usd`). No-op when entry_notional is non-positive (malformed
+    SL — already handled upstream by the phantom-profit guard).
+    """
+    entry_notional = position.get("entry_notional_usd", 0.0)
+    # `<= 0` evaluates False for NaN; use `not (... > 0)` to short-circuit.
+    if not (entry_notional > 0):
+        return
+    entry_price = position["entry_price"]
+    exit_notional = entry_notional * (exit_price_actual / entry_price) if entry_price else 0.0
+
+    cost = compute_trade_costs_fn(
+        entry_notional_usd=entry_notional,
+        exit_notional_usd=exit_notional,
+        entry_liquidity_usd_per_min=position.get("entry_liquidity_per_min", float("nan")),
+        exit_liquidity_usd_per_min=exit_liquidity_per_min,
+        tier_params=tier_params,
+        enable_slippage=enable_slippage,
+        enable_spread=enable_spread,
+        enable_fees=enable_fees,
+    )
+    trade.update(cost)
+    trade["gross_pnl_usd"] = trade["pnl_usd"]
+    trade["gross_pnl_pct"] = trade["pnl_pct"]
+    trade["entry_notional_usd"] = entry_notional
+    trade["pnl_usd"] = round(trade["pnl_usd"] - cost["total_cost_usd"], 2)
+    # pnl_pct is the per-trade % return used downstream by Sharpe / Sortino in
+    # calculate_metrics. Subtracting cost in absolute % terms (cost_usd /
+    # entry_notional × 100) keeps risk-adjusted metrics consistent with net
+    # pnl_usd and avoids the misleading "Sharpe unchanged but PnL collapsed"
+    # output that gross-pct returns would produce.
+    cost_pct = cost["total_cost_usd"] / entry_notional * 100.0
+    trade["pnl_pct"] = round(trade["pnl_pct"] - cost_pct, 4)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -335,6 +557,12 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       kill_switch_cfg: dict | None = None,  # NEW (#138 PR 3)
                       shared_simulator=None,             # NEW (#186 A6)
                       cfg: dict | None = None,           # NEW (#186 A6)
+                      enable_slippage: bool = True,      # NEW (A.0.2, #277)
+                      enable_spread: bool = True,        # NEW (A.0.2, #277)
+                      enable_fees: bool = True,          # NEW (A.0.2, #277)
+                      cost_calibration=None,             # NEW (A.0.2, #277)
+                      regime_thresholds: tuple[int, int] | None = None,
+                      regime_disabled: bool = False,
                       ) -> list[dict]:
     """Run bar-by-bar simulation of the Spot V6 strategy.
 
@@ -352,15 +580,88 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 
     `cfg` is the merged config dict (`btc_api.load_config()` shape); used for
     the KillSwitchSimulator bootstrap when `shared_simulator` is not supplied.
+
+    regime_thresholds (tuple[int, int] | None): override (bull_above, bear_below)
+        for regime classification. None → (60, 40) production behavior.
+    regime_disabled (bool): when True, skip _regime_at_time entirely and emit a
+        regime dict with regime="BYPASS" so direction is gated by zone alone.
+        Mutually exclusive with regime_thresholds.
     """
+    if regime_disabled and regime_thresholds is not None:
+        raise RegimeKwargError(
+            "regime_disabled=True is mutually exclusive with regime_thresholds — "
+            "bypass mode skips threshold logic entirely."
+        )
+    if regime_thresholds is not None:
+        if not (isinstance(regime_thresholds, tuple)
+                and len(regime_thresholds) == 2
+                and all(isinstance(x, int) and not isinstance(x, bool)
+                        for x in regime_thresholds)):
+            raise RegimeKwargError(
+                f"regime_thresholds must be tuple[int, int] (bool excluded — "
+                f"True/False are int subclasses in Python); got "
+                f"{regime_thresholds!r}"
+            )
+
     # #186 A6: lazy imports keep backtest.py importable even when `strategy/`
     # or `backtest_kill_switch` has its own transient import issues.
     from backtest_kill_switch import KillSwitchSimulator
+
+    # A.0.2 (#277): cost-model bootstrap. Loaded lazily so non-cost callers
+    # (and historical tests with all flags off) skip the calibration JSON
+    # entirely. `_costs_active` short-circuits the per-trade augmentation when
+    # all flags are False — preserving byte-identical behavior on the
+    # legacy path.
+    _costs_active = bool(enable_slippage or enable_spread or enable_fees)
+    _tier_params = None
+    _liquidity_per_min = None
+    if _costs_active:
+        from backtest_costs import (
+            tier_for_symbol, load_calibration, compute_trade_costs,
+        )
+        _calibration = cost_calibration if cost_calibration is not None else load_calibration()
+        _tier_params = _calibration.tiers[tier_for_symbol(symbol)]
+        # 30-day rolling USD volume per minute on the 1H timeframe. Each 1H bar
+        # contributes (close × volume) USD over 60 minutes; we divide by 60 to
+        # convert to per-minute, then take a 720-bar (30-day) rolling mean to
+        # smooth single-bar spikes. min_periods=120 (5 days) avoids degenerate
+        # rolling outputs at the very start of the series; bars before that
+        # produce NaN, which compute_slippage_bps treats as fallback territory.
+        _usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
+        _liquidity_per_min = _usd_per_min.rolling(720, min_periods=120).mean()
+
+    # Rolling 24h MEDIAN of bar volume USD — liquidity proxy for the
+    # participation cap. Median tolerates dead overnight bars and rejects
+    # single-bar volume spikes. Materialized to a numpy array because per-bar
+    # `Series.loc[Timestamp]` lookups in the entry block were a measurable
+    # hot spot (~2x runtime over 35K bars).
+    _bar_volume_usd = df1h["close"] * df1h["volume"]
+    _liquidity_24h_median_np = (
+        _bar_volume_usd.rolling(24, min_periods=24).median().to_numpy()
+    )
+
+    # Short-window warning: a backtest with fewer than 24 1H bars cannot
+    # produce a valid 24h median for any bar — every cap-active entry will
+    # skip with NaN liquidity. Emit once instead of N per-bar debug logs so
+    # the structural mismatch surfaces clearly.
+    _cap_configured_for_symbol = (
+        (symbol_overrides or (cfg or {}).get("symbol_overrides", {}))
+        .get(symbol.upper(), {})
+        .get("max_participation_rate") is not None
+    )
+    if len(df1h) < 24 and _cap_configured_for_symbol:
+        log.warning(
+            "simulate_strategy: %s backtest window has %d 1H bars (< 24) — "
+            "rolling 24h liquidity median is NaN throughout; all cap-active "
+            "entries will skip",
+            symbol, len(df1h),
+        )
 
     trades = []
     position = None  # {entry_price, entry_time, score, sl, tp, size_mult}
     last_exit_time = None
     capital = INITIAL_CAPITAL
+    _bankrupt = False  # #280: sticky flag — once True, no further entries open
     equity_curve = []
 
     # Resolve ATR multipliers
@@ -440,16 +741,43 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 exit_price = position["tp"]
                 exit_reason = "TP"
             else:
-                exit_price = None
-                exit_reason = None
+                _tl_h = position.get("time_limit_hours")
+                if _tl_h is not None:
+                    hours_open = (bar_time - position["entry_time"]).total_seconds() / 3600
+                    if hours_open >= _tl_h:
+                        exit_price = float(bar["close"])
+                        exit_reason = "TIME_LIMIT"
+                    else:
+                        exit_price = None
+                        exit_reason = None
+                else:
+                    exit_price = None
+                    exit_reason = None
 
             if exit_price is not None:
                 trade = _close_position(
                     position, exit_price=exit_price, exit_time=bar_time,
                     exit_reason=exit_reason, capital=capital,
                 )
+                if _costs_active:
+                    try:
+                        _exit_liq = float(_liquidity_per_min.loc[bar_time])
+                    except (KeyError, IndexError):
+                        _exit_liq = float("nan")
+                    _apply_costs_to_trade(
+                        trade, position, exit_price, _exit_liq,
+                        compute_trade_costs, _tier_params,
+                        enable_slippage, enable_spread, enable_fees,
+                    )
                 trades.append(trade)
                 capital += trade["pnl_usd"]
+                # #280: per-symbol bankruptcy halt. Detect breach + emit
+                # synthetic BANKRUPT record exactly once; entry gate below
+                # then short-circuits further entries.
+                _bk_rec = _emit_bankrupt_if_breached(capital, bar_time)
+                if _bk_rec is not None and not _bankrupt:
+                    trades.append(_bk_rec)
+                    _bankrupt = True
                 position = None
                 last_exit_time = bar_time
                 # #186 A6: feed the simulator so tier can evolve mid-backtest.
@@ -479,14 +807,32 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         if position is not None:
             continue
 
+        # #280: per-symbol bankruptcy halt — no new entries past the
+        # BANKRUPTCY_THRESHOLD breach. Existing open positions are not
+        # affected (they close naturally on SL/TP/TIME_LIMIT via the
+        # branch above).
+        if _bankrupt:
+            continue
+
         # ── Skip if before simulation start (warmup period) ──────────────
         if _sim_start_ts and bar_time_naive < _sim_start_ts:
             continue
 
-        # ── Cooldown check ────────────────────────────────────────────────
+        # ── Cooldown check (per-symbol with COOLDOWN_H fallback) ──────────
+        # Default-fallback semantics: missing or invalid `cooldown_hours` →
+        # COOLDOWN_H global. Validator emits one throttled warning per
+        # (caller, symbol, error_kind) on rejection. Disabled symbols
+        # (`symbol_overrides[sym] = False`) guarded via isinstance.
+        _cd_overrides = symbol_overrides or (cfg or {}).get("symbol_overrides", {})
+        _so_raw = _cd_overrides.get(symbol.upper(), {})
+        _so_for_cd = _so_raw if isinstance(_so_raw, dict) else {}
+        _effective_cooldown = _validated_cooldown_hours(
+            _so_for_cd.get("cooldown_hours"), symbol,
+        )
+
         if last_exit_time is not None:
             hours_since = (bar_time - last_exit_time).total_seconds() / 3600
-            if hours_since < COOLDOWN_H:
+            if hours_since < _effective_cooldown:
                 continue
 
         # ── Evaluate entry signal via strategy.core.evaluate_signal (#186 A6) ─
@@ -504,13 +850,25 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         if len(slice_1h) < LRC_PERIOD:
             continue
 
-        # Regime detection via _regime_at_time helper (#152) — kept as
-        # backtest-local because scan() fetches its regime from a cache /
-        # per-symbol detector, not the bar-aligned helper used here.
-        regime_info = _regime_at_time(
-            bar_time, symbol, df1d, df_fng, df_funding,
-            regime_mode=regime_mode, df1d_btc=df1d_btc,
-        )
+        # Regime detection — bypass branch synthesizes a regime dict for the
+        # no-detector configuration; else delegates to _regime_at_time helper
+        # (kept backtest-local because scan() fetches its regime from a 24h
+        # cache, not the bar-aligned helper used here).
+        if regime_disabled:
+            regime_info = {
+                "regime": "BYPASS",
+                "score": None,
+                "mode": "disabled",
+                "symbol": symbol,
+                "components": {},
+            }
+        else:
+            ba, bb = (regime_thresholds if regime_thresholds is not None else (60, 40))
+            regime_info = _regime_at_time(
+                bar_time, symbol, df1d, df_fng, df_funding,
+                regime_mode=regime_mode, df1d_btc=df1d_btc,
+                bull_above=ba, bear_below=bb,
+            )
 
         # Merge `symbol_overrides` (legacy kwarg) into cfg so evaluate_signal
         # can resolve per-direction ATR mults via its built-in resolver.
@@ -623,6 +981,45 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 tp_price = float(price * (1 + TP_PCT / 100))
             be_threshold = None
 
+        # Legacy atr_* kwargs path skips the time-limit barrier AND the
+        # participation cap — those callers (auto_tune / grid_search) must
+        # opt in by passing symbol_overrides explicitly. Cooldown is NOT
+        # bypassed: the cooldown check upstream uses COOLDOWN_H global as
+        # default-fallback (via validated_cooldown_hours), so legacy paths
+        # still observe the legacy 6h global cooldown.
+        if legacy_override_active:
+            _tl_h = None
+        else:
+            _overrides_merged = symbol_overrides or (cfg or {}).get("symbol_overrides", {})
+            _tl_h_raw = _overrides_merged.get(symbol.upper(), {}).get("time_limit_hours")
+            _tl_h = _validated_time_limit_hours(_tl_h_raw, symbol)
+
+            # Participation cap: skip entry when desired notional > max_pov ×
+            # 24h median liquidity. Skip rules pinned by validator + tests.
+            _max_pov_raw = _overrides_merged.get(symbol.upper(), {}).get("max_participation_rate")
+            _max_pov = _validated_max_participation_rate(_max_pov_raw, symbol)
+            if _max_pov is not None:
+                _sl_pct_actual = abs(price - sl_price) / price * 100.0
+                if _sl_pct_actual > 0:
+                    _desired_notional = (capital * RISK_PER_TRADE * size_mult) * 100.0 / _sl_pct_actual
+                    _liq_24h = float(_liquidity_24h_median_np[i])
+                    if pd.isna(_liq_24h) or _liq_24h <= 0:
+                        log.debug(
+                            "simulate_strategy: liquidity_cap_skip %s %s "
+                            "(unobservable liquidity at %s)",
+                            symbol, trade_dir, bar_time,
+                        )
+                        continue
+                    _cap_threshold = _max_pov * _liq_24h
+                    if _desired_notional > _cap_threshold:
+                        log.debug(
+                            "simulate_strategy: liquidity_cap_skip %s %s "
+                            "desired=%.2f > cap=%.2f (liq_24h=%.2f, max_pov=%.4f) at %s",
+                            symbol, trade_dir, _desired_notional, _cap_threshold,
+                            _liq_24h, _max_pov, bar_time,
+                        )
+                        continue
+
         position = {
             "entry_price": price,
             "entry_time": bar_time,
@@ -636,7 +1033,28 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             "atr_sl_mult_used": _sl_m_use,
             "atr_tp_mult_used": _tp_m_use,
             "atr_be_mult_used": _be_m_use,
+            "time_limit_hours": _tl_h,
         }
+
+        # A.0.2 (#277): freeze cost inputs at entry. notional uses the
+        # per-trade risk budget translated into USD via the SL distance —
+        # mirrors how live execution would size the order. Liquidity is the
+        # 30-day rolling proxy at the entry bar; NaN here flows through to
+        # compute_slippage_bps' fallback path (punitive default 100 bps),
+        # which is the desired conservative behavior when liquidity is
+        # unobservable.
+        if _costs_active:
+            _sl_pct_actual = abs(price - sl_price) / price * 100.0
+            _risk_amount = capital * RISK_PER_TRADE * size_mult
+            position["entry_notional_usd"] = (
+                _risk_amount * 100.0 / _sl_pct_actual if _sl_pct_actual > 0 else 0.0
+            )
+            try:
+                position["entry_liquidity_per_min"] = float(
+                    _liquidity_per_min.loc[bar_time]
+                )
+            except (KeyError, IndexError):
+                position["entry_liquidity_per_min"] = float("nan")
 
     # Close any open position at last bar price
     if position is not None:
@@ -646,8 +1064,25 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
             position, exit_price=exit_price, exit_time=df1h.index[-1],
             exit_reason="OPEN", capital=capital,
         )
+        if _costs_active:
+            try:
+                _exit_liq_final = float(_liquidity_per_min.loc[df1h.index[-1]])
+            except (KeyError, IndexError):
+                _exit_liq_final = float("nan")
+            _apply_costs_to_trade(
+                trade, position, exit_price, _exit_liq_final,
+                compute_trade_costs, _tier_params,
+                enable_slippage, enable_spread, enable_fees,
+            )
         trades.append(trade)
         capital += trade["pnl_usd"]
+        # #280: tail-close path — detect bankruptcy on the final-bar close
+        # as well. The sticky flag prevents double-emission if the bar-loop
+        # site already fired during the run.
+        _bk_rec = _emit_bankrupt_if_breached(capital, trade["exit_time"])
+        if _bk_rec is not None and not _bankrupt:
+            trades.append(_bk_rec)
+            _bankrupt = True
 
     return trades, equity_curve
 
@@ -659,10 +1094,23 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     """Calculate comprehensive trading metrics."""
     if not trades:
-        return {"error": "No trades generated"}
+        # Empty-trades early return — emit clamped_trade_count: 0 and
+        # bankruptcy_count: 0 for shape consistency. CLI consumer below
+        # already defaults via .get(..., 0).
+        return {
+            "error": "No trades generated",
+            "clamped_trade_count": 0,
+            "bankruptcy_count": 0,
+        }
 
     df = pd.DataFrame(trades)
-    closed = df[df["exit_reason"] != "OPEN"]
+    # #280: BANKRUPT records are event markers (capital fell below
+    # BANKRUPTCY_THRESHOLD), not trades. Exclude them from every aggregate
+    # that consumes per-trade pnl — win-rate, PF, Sharpe, Sortino, streaks,
+    # score-tier breakdowns. The equity_curve still reflects the bankruptcy
+    # path so drawdown and total_return_pct are unaffected.
+    closed = df[~df["exit_reason"].isin(["OPEN", "BANKRUPT"])]
+    bankruptcy_count = int((df["exit_reason"] == "BANKRUPT").sum())
 
     wins = closed[closed["pnl_usd"] > 0]
     losses = closed[closed["pnl_usd"] <= 0]
@@ -689,8 +1137,12 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
     # Sharpe ratio (annualized)
     if len(closed) > 1:
         returns = closed["pnl_pct"].values / 100
-        # Annualize based on trades per year (not hourly)
-        trades_per_year = len(closed) / ((closed["exit_time"].iloc[-1] - closed["entry_time"].iloc[0]).days / 365.25) if len(closed) > 1 else 0
+        # Annualize based on trades per year (not hourly). When all trades
+        # share a single day, span_y == 0; mirror the trades_per_month guard
+        # below so we don't divide by zero (Sharpe falls back to 0,
+        # consistent with the legacy `len(closed) > 1` else branch).
+        span_y = (closed["exit_time"].iloc[-1] - closed["entry_time"].iloc[0]).days / 365.25
+        trades_per_year = len(closed) / span_y if span_y > 0 else 0
         sharpe = np.mean(returns) / np.std(returns) * np.sqrt(trades_per_year) if np.std(returns) > 0 and trades_per_year > 0 else 0
         sortino_returns = returns[returns < 0]
         downside_std = np.std(sortino_returns) if len(sortino_returns) > 1 else 0
@@ -743,11 +1195,43 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
                 "total_pnl_usd": round(tier["pnl_usd"].sum(), 2),
             }
 
+    # A.0.2 (#277): cost aggregates surface only when trades carry the per-
+    # component fields populated by simulate_strategy with cost flags on. The
+    # gate keeps legacy callers (cost-flags-off) on the original metrics shape
+    # so downstream consumers do not see zero-valued fields they would have
+    # to reason about. Mini-contract names locked here; A.0.3 (#278) reserves
+    # the deflated/Calmar names and must not collide.
+    cost_metrics: dict = {}
+    if "total_cost_bps" in closed.columns:
+        cost_metrics = {
+            "total_cost_bps_mean": round(float(closed["total_cost_bps"].mean()), 2),
+            "total_cost_usd_sum": round(float(closed["total_cost_usd"].sum()), 2),
+            "entry_slippage_bps_mean": round(float(closed["entry_slippage_bps"].mean()), 2),
+            "exit_slippage_bps_mean": round(float(closed["exit_slippage_bps"].mean()), 2),
+            "entry_spread_bps_mean": round(float(closed["entry_spread_bps"].mean()), 2),
+            "exit_spread_bps_mean": round(float(closed["exit_spread_bps"].mean()), 2),
+            "fee_bps_mean": round(float(closed["fee_bps"].mean()), 2),
+            "gross_net_pnl_diff_usd": round(
+                float((closed["gross_pnl_usd"] - closed["pnl_usd"]).sum()), 2
+            ),
+        }
+
+    # Overshoot-clamp aggregate: count of closed trades where the cap actually
+    # bound pnl_usd below its raw R-multiple value. Surfaces cap-binding
+    # incidence at metrics-output level so consumers can detect simulator
+    # edge-case execution without parsing the per-trade list.
+    clamped_trade_count = int(
+        sum(t.get("overshoot_clamped", False) for t in trades
+            if t.get("exit_reason") != "OPEN")
+    )
+
     return {
         "total_trades": total_trades,
         "wins": win_count,
         "losses": loss_count,
         "win_rate": round(win_rate * 100, 1),
+        "clamped_trade_count": clamped_trade_count,
+        "bankruptcy_count": bankruptcy_count,
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
         "net_pnl": round(net_pnl, 2),
@@ -767,6 +1251,7 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
         "median_trade_pct": round(closed["pnl_pct"].median(), 2) if len(closed) > 0 else 0,
         "final_equity": round(INITIAL_CAPITAL + net_pnl, 2),
         "score_tiers": score_tiers,
+        **cost_metrics,
     }
 
 
@@ -821,12 +1306,23 @@ def classify_market_regime(df1h: pd.DataFrame, trades: list[dict]) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict],
-                    sim_start: datetime = None, sim_end: datetime = None) -> str:
+                    sim_start: datetime = None, sim_end: datetime = None,
+                    symbol_overrides: dict | None = None) -> str:
     """Generate markdown report."""
     m = metrics
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     period_start = sim_start.strftime("%Y-%m-%d") if sim_start else "N/A"
     period_end = sim_end.strftime("%Y-%m-%d") if sim_end else "present"
+
+    # Resolve effective per-symbol cooldown for the methodology section.
+    # Defaults to COOLDOWN_H global when no override or invalid value.
+    # Disabled-symbol guard (mirrors the simulate_strategy resolution):
+    # symbol_overrides[sym] can be `False` (not a dict).
+    _so_raw = (symbol_overrides or {}).get(symbol.upper(), {})
+    _so_for_eff = _so_raw if isinstance(_so_raw, dict) else {}
+    _eff_cd = _validated_cooldown_hours(
+        _so_for_eff.get("cooldown_hours"), symbol,
+    )
 
     report = f"""# Strategy Backtest Report — Spot V6
 
@@ -860,7 +1356,7 @@ def generate_report(symbol: str, metrics: dict, regimes: dict, trades: list[dict
 - **Entry conditions:** LRC% <= 25 (1H) + Price > SMA100 (4H) + Bullish 5M trigger + No exclusions
 - **Exit:** Fixed SL at -{SL_PCT}% or TP at +{TP_PCT}% (whichever hit first)
 - **Position sizing:** 1% risk per trade, multiplied by score tier (0.5x / 1x / 1.5x)
-- **Constraints:** One position at a time, {COOLDOWN_H}h cooldown between trades
+- **Constraints:** One position at a time, {_eff_cd:g}h cooldown (default {COOLDOWN_H}h)
 - **Fees:** Not deducted from P&L (Binance spot = 0.1% per side)
 - **Indicators:** Same functions as live scanner (`btc_scanner.py`)
 
@@ -1066,10 +1562,12 @@ def main():
     print(f"  Max Drawdown:  {metrics['max_drawdown_pct']:.1f}%")
     print(f"  Sharpe Ratio:  {metrics['sharpe_ratio']}")
     print(f"  Final Equity:  ${metrics['final_equity']:,.2f}")
+    print(f"  Clamped Trades:{metrics.get('clamped_trade_count', 0):>4}  (cap bound pnl below raw R-multiple)")
     print(f"{'='*60}\n")
 
     # Generate and save report
-    report = generate_report(symbol, metrics, regimes, trades, sim_start=sim_start, sim_end=sim_end)
+    report = generate_report(symbol, metrics, regimes, trades, sim_start=sim_start, sim_end=sim_end,
+                             symbol_overrides=symbol_overrides)
     report_path = os.path.join(SCRIPT_DIR, "docs", "strategy-backtest-report.md")
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:

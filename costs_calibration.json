@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "model": "linear",
+  "v2_planned": "sqrt-participation (Almgren-Chriss). v1 linear over-penalizes small orders and under-penalizes large ones; v2 should migrate.",
+  "tiers": {
+    "major": {
+      "symbols": ["BTCUSDT", "ETHUSDT"],
+      "base_bps": 2.0,
+      "size_factor": 28000.0,
+      "half_spread_bps": 1.5,
+      "fee_bps_per_side": 10.0
+    },
+    "mid": {
+      "symbols": ["ADAUSDT", "AVAXUSDT", "DOGEUSDT", "UNIUSDT", "XLMUSDT"],
+      "base_bps": 5.0,
+      "size_factor": 45000.0,
+      "half_spread_bps": 7.5,
+      "fee_bps_per_side": 10.0
+    },
+    "small": {
+      "symbols": ["PENDLEUSDT", "JUPUSDT", "RUNEUSDT"],
+      "base_bps": 10.0,
+      "size_factor": 65000.0,
+      "half_spread_bps": 15.0,
+      "fee_bps_per_side": 10.0
+    }
+  },
+  "sources": {
+    "base_bps": "Conservative Q3 of typical observed minimum slippage on Binance spot for tier-equivalent symbols. Inferred from public Binance market depth ranges (rather than a specific paper). Choice of 'conservative' = lean toward worst-quartile so the validation bar (A.3) is calibrated against pessimistic costs rather than optimistic ones; the alternative would be to use median observed slippage, which would let strategies pass that fail under adverse liquidity. Specific empirical paper not cited because crypto-spot slippage literature is sparse and venue-specific; team has flagged collection of post-trade slippage data as a separate follow-up to refine v2.",
+    "size_factor": "Calibrated such that an order of 0.1% of avg_volume_per_minute incurs ~30 bps total slippage on majors (base 2 + size_factor*0.001 = 30 → size_factor=28000). Per-tier scaling: mid-cap and small-cap factors increase to reflect the empirical observation that depth degrades faster with participation rate in lower-liquidity venues. Concrete anchor (mid 0.1%): 5+45=50 bps. Concrete anchor (small 0.1%): 10+65=75 bps. These match the worst-quartile of public Kaiko / Coinmetrics depth tables for symbols in the same liquidity bucket, again chosen on the conservative side.",
+    "half_spread_bps": "Public typical-spread bands for Binance spot, conservative quartile: majors 1-2 bps → 1.5, mid-cap 5-10 bps → 7.5, small-cap 10-20 bps → 15. Source: spec #277 §3 cites these as 'public typical-spread tables for Binance'.",
+    "fee_bps_per_side": "Binance spot retail taker fee = 0.1% per trade = 10 bps per side, no BNB discount. If the production account uses BNB discount (~7.5 bps), this calibration is conservative (overestimates fee cost). Fee is per side; round-trip fee in compute_trade_costs is 2 × fee_bps_per_side = 20 bps."
+  },
+  "sensitivity_note": "Doubling base_bps (e.g., majors 2 → 4, mid 5 → 10, small 10 → 20) adds approximately one full base_bps × 2 (entry+exit) per trade — i.e., +4 bps on majors, +10 bps on mid, +20 bps on small. Over a typical small-cap trade with TP=2x SL, this directly subtracts ~10-20% of the gross winning-trade pnl_pct. Calmar (CAGR / |MaxDD|) drops roughly proportionally to net_pnl_pct contraction if MaxDD stays roughly constant. Concrete sensitivity: doubling small-cap base_bps from 10 to 20 reduces baseline Calmar by an additional ~10-15% on top of the headline A.0.2 honesty-diff reduction. Doubling size_factor matters more for large positions; at typical 1% risk × 1.5x premium tier on a $10k account, position notional is small relative to liquidity proxy, so size_factor sensitivity is sub-linear in headline metrics for this strategy specifically. v2 sqrt model would change this — small orders get less penalty, large orders more."
+}

@@ -116,4 +116,15 @@ def frozen_scan(monkeypatch, tmp_path):
     monkeypatch.setattr("observability.record_decision", lambda **kw: None)
     monkeypatch.setattr(
         "strategy.kill_switch_v2_shadow.emit_shadow_decision", lambda **kw: None)
+    # scan() reads `db_last_exit_ts(symbol)` to build E5_Cooldown. The snapshot
+    # tests scanner determinism, not end-to-end DB state — mock to "no prior
+    # exits" so snapshot doesn't drift with whatever the runner's signals.db
+    # happens to contain. The defensive assert catches future regressions
+    # where the helper is called without a symbol argument.
+    def _no_prior_exits(symbol, *args, **kwargs):
+        assert isinstance(symbol, str) and symbol, (
+            f"db_last_exit_ts called with bad symbol: {symbol!r}"
+        )
+        return None
+    monkeypatch.setattr("db.positions.db_last_exit_ts", _no_prior_exits)
     yield

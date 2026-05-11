@@ -143,6 +143,9 @@ def _compute_local_regime(
     funding_score: int,
     rsi_score: int = 50,
     adx_score: int = 50,
+    *,
+    bull_above: int = 60,
+    bear_below: int = 40,
 ) -> dict:
     """Compose final regime score per mode. Returns {ts, regime, score, mode, symbol, components}.
 
@@ -151,8 +154,14 @@ def _compute_local_regime(
       mode='hybrid':           50% price + 25% F&G + 25% funding
       mode='hybrid_momentum':  30% price + 15% RSI + 20% ADX + 20% F&G + 15% funding
 
-    Thresholds: score > 60 = BULL; score < 40 = BEAR; else NEUTRAL.
+    Thresholds: score > bull_above → BULL; score < bear_below → BEAR; else NEUTRAL.
+    Defaults 60/40 preserve byte-identity to legacy production behavior.
     """
+    if not (bear_below < bull_above):
+        raise ValueError(
+            f"bear_below must be < bull_above (got bear_below={bear_below}, "
+            f"bull_above={bull_above})"
+        )
     price_score = _compute_price_score(df_daily_sym)
 
     if mode == "global":
@@ -171,9 +180,9 @@ def _compute_local_regime(
     else:
         raise ValueError(f"Unknown regime mode: {mode}")
 
-    if composite > 60:
+    if composite > bull_above:
         regime = "BULL"
-    elif composite < 40:
+    elif composite < bear_below:
         regime = "BEAR"
     else:
         regime = "NEUTRAL"
@@ -278,7 +287,7 @@ def detect_regime() -> dict:
       - Market (30%): Binance funding rate
 
     Returns dict with regime ("BULL"/"BEAR"/"NEUTRAL"), score (0-100), details.
-    Score > 70 = BULL, Score < 30 = BEAR, 30-70 = NEUTRAL.
+    Score > 60 = BULL, Score < 40 = BEAR, 40-60 = NEUTRAL.
     """
     details = {}
     score_components = []

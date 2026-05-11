@@ -60,6 +60,10 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # '-pre-holdout' suffix for human discoverability. The output path
     # carries the literal token; no holdout data is consumed.
     "tools/retune_pre_holdout.py",
+    # A.4-1.5 regime threshold retune wrapper (#305). Same rationale as
+    # above — reads data/ohlcv.db only; artefact dir carries the literal
+    # '-pre-holdout' suffix.
+    "tools/regime_retune_pre_holdout.py",
     # A.2 walk-forward harness modules and A.4 evaluation modules will be
     # added here when those tickets land.
 }

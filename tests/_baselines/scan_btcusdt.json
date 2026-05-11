@@ -72,8 +72,10 @@
       "nota": "Capital disponible > $100 (o > 10% del capital inicial)"
     },
     "E5_Cooldown": {
-      "activo": "VERIFICAR_MANUAL",
-      "nota": "\u00bfHan pasado \u2265 6h desde el \u00faltimo trade?"
+      "activo": false,
+      "cooldown_hours_required": 6.0,
+      "hours_since_last_exit": null,
+      "nota": "Sin trades previos \u2014 cooldown libre"
     },
     "E6_Divergencia_Bajista": {
       "activo": false,
@@ -137,6 +139,16 @@
     "atr_sl_mult": 1.0,
     "atr_tp_mult": 4.0,
     "capital_usd": 1000.0,
+    "liquidity_cap": {
+      "cap_threshold_usd": null,
+      "config_rejected": false,
+      "desired_notional_usd": 980.0,
+      "enabled": false,
+      "liquidity_24h_median_usd": null,
+      "max_participation_rate": null,
+      "max_participation_rate_raw": null,
+      "passes_cap": true
+    },
     "pct_capital": 98.0,
     "qty_btc": 0.012794,
     "riesgo_usd": 10.0,

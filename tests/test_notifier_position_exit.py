@@ -46,6 +46,22 @@ def test_position_exit_telegram_template_sl_loser():
     assert "-50.00" in msg
 
 
+def test_position_exit_telegram_template_time_limit():
+    """TIME_LIMIT exit_reason renders the time-limit branch (not the generic else)."""
+    from notifier._templates import render
+    from notifier import PositionExitEvent
+    ev = PositionExitEvent(symbol="ADAUSDT", direction="LONG", exit_reason="TIME_LIMIT",
+                            entry_price=0.50, exit_price=0.51,
+                            pnl_usd=20.0, pnl_pct=2.0)
+    msg = render(ev, channel="telegram")
+    assert "⏰" in msg
+    assert "Time-limit hit" in msg
+    assert "ADAUSDT" in msg
+    assert "Position closed" not in msg, (
+        "TIME_LIMIT must hit its own branch, not fall through to the else"
+    )
+
+
 def test_position_exit_dedupe_key_includes_exit_price():
     """Two closures on the same symbol with different exit prices must dedupe
     independently (otherwise a second close after re-entry would be suppressed)."""
