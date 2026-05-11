@@ -87,6 +87,18 @@ RISK_PER_TRADE = 0.01  # 1% of capital per trade
 # portfolio aggregation gap; single-trade overshoot via amplification).
 MAX_OVERSHOOT_RATIO: Final[float] = 10.0
 
+# Per-symbol bankruptcy threshold (#280). Rule-derived 90%-drawdown convention
+# from the issue body: once simulated capital falls below 10% of INITIAL_CAPITAL,
+# any real account would be force-liquidated and the kill switch would have
+# fired in production. In simulation, the existing effective_capital = max(0,
+# capital) floor (A.0.2 / #277) prevented NaN math but kept the bar loop
+# running — those subsequent zero-risk_amount trades distort aggregate metrics
+# (Bankruptcy Bias, demonstrated in data/retune/2026-05-06-pre-holdout
+# regime_report.md). This constant + the _bankrupt sticky flag wired below
+# halt new entries for the affected symbol. Portfolio-level bankruptcy is
+# deferred to its own epic when a portfolio-level simulator lands.
+BANKRUPTCY_THRESHOLD: Final[float] = 0.1 * INITIAL_CAPITAL  # $1000 at INITIAL_CAPITAL=10_000
+
 
 from strategy._validators import (
     validated_time_limit_hours as _shared_validated_tl_hours,
