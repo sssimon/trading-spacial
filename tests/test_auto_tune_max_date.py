@@ -240,6 +240,113 @@ class TestRunBacktestCutoff:
         assert captured["df1h"].index.max() > datetime(2025, 4, 30)
 
 
+class TestRunBacktestGateActivation:
+    """When ``cutoff`` AND ``app_config`` are both set (pre-holdout flow),
+    the simulator must be invoked via the cfg + symbol_overrides path so
+    time-limit + participation cap gates are ACTIVE. The grid-candidate
+    ATR multipliers must land in ``symbol_overrides[symbol]`` while the
+    legacy ``atr_*`` kwargs must NOT be passed.
+
+    Comparability contract: this matches the regime sweep harness
+    (``tools/regime_retune_pre_holdout.py``) — both produce artefacts
+    measured under identical live-equivalent gates.
+    """
+
+    def test_overrides_path_active_with_cutoff_and_config(self, monkeypatch, fixed_cutoff):
+        sim_start = datetime(2024, 1, 30, tzinfo=timezone.utc)
+        sim_end = datetime(2025, 1, 30, tzinfo=timezone.utc)
+
+        ts = pd.date_range("2024-02-01", "2025-04-29", freq="1h").tolist()
+        captured: dict = {}
+
+        def fake_get_cached_data(symbol, interval, start_date=None):
+            return _ohlcv_df(ts)
+
+        def fake_simulate(*a, **kw):
+            captured["kwargs"] = kw
+            captured["args_positional"] = a
+            return [], []
+
+        def fake_metrics(*a, **kw):
+            return {"net_pnl": 0, "total_trades": 0, "profit_factor": 0}
+
+        import backtest as bt
+        monkeypatch.setattr(bt, "get_cached_data", fake_get_cached_data)
+        monkeypatch.setattr(bt, "get_historical_fear_greed", lambda: _ohlcv_df([datetime(2025, 4, 29)]))
+        monkeypatch.setattr(bt, "get_historical_funding_rate", lambda: _ohlcv_df([datetime(2025, 4, 29)]))
+        monkeypatch.setattr(bt, "simulate_strategy", fake_simulate)
+        monkeypatch.setattr(bt, "calculate_metrics", fake_metrics)
+
+        app_config = {
+            "symbol_overrides": {
+                "BTCUSDT": {
+                    "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5,
+                    "time_limit_hours": 24,
+                    "max_participation_rate": 0.02,
+                    "cooldown_hours": 6,
+                },
+                "ETHUSDT": {"atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5},
+            },
+        }
+        params = {"atr_sl_mult": 0.7, "atr_tp_mult": 3.0, "atr_be_mult": 2.0}
+
+        auto_tune.run_backtest_with_params(
+            "BTCUSDT", params, sim_start, sim_end,
+            cutoff=fixed_cutoff, app_config=app_config,
+        )
+
+        kwargs = captured["kwargs"]
+        # Legacy atr_* kwargs MUST NOT be present — that's the gate-bypass path.
+        assert "atr_sl_mult" not in kwargs
+        assert "atr_tp_mult" not in kwargs
+        assert "atr_be_mult" not in kwargs
+        # Standard cfg + symbol_overrides path active.
+        assert kwargs["cfg"] is app_config
+        overrides = kwargs["symbol_overrides"]
+        # Grid candidate injected into the target symbol.
+        assert overrides["BTCUSDT"]["atr_sl_mult"] == 0.7
+        assert overrides["BTCUSDT"]["atr_tp_mult"] == 3.0
+        assert overrides["BTCUSDT"]["atr_be_mult"] == 2.0
+        # Other per-symbol gates preserved (NOT stripped).
+        assert overrides["BTCUSDT"]["time_limit_hours"] == 24
+        assert overrides["BTCUSDT"]["max_participation_rate"] == 0.02
+        assert overrides["BTCUSDT"]["cooldown_hours"] == 6
+        # Untouched symbols retain their entries verbatim.
+        assert overrides["ETHUSDT"] == {"atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}
+
+    def test_legacy_path_when_cutoff_none_even_with_config(self, monkeypatch):
+        """Backward compat: existing auto_tune CLI callers (cutoff=None)
+        stay on the legacy kwargs path regardless of app_config presence."""
+        sim_start = datetime(2024, 1, 30, tzinfo=timezone.utc)
+        sim_end = datetime(2025, 1, 30, tzinfo=timezone.utc)
+        ts = pd.date_range("2024-02-01", "2025-05-15", freq="1h").tolist()
+        captured: dict = {}
+
+        def fake_simulate(*a, **kw):
+            captured["kwargs"] = kw
+            return [], []
+
+        import backtest as bt
+        monkeypatch.setattr(bt, "get_cached_data", lambda *a, **kw: _ohlcv_df(ts))
+        monkeypatch.setattr(bt, "get_historical_fear_greed", lambda: pd.DataFrame())
+        monkeypatch.setattr(bt, "get_historical_funding_rate", lambda: pd.DataFrame())
+        monkeypatch.setattr(bt, "simulate_strategy", fake_simulate)
+        monkeypatch.setattr(bt, "calculate_metrics", lambda *a, **kw: {"net_pnl": 0, "total_trades": 0, "profit_factor": 0})
+
+        params = {"atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5}
+        auto_tune.run_backtest_with_params(
+            "BTCUSDT", params, sim_start, sim_end,
+            cutoff=None, app_config={"symbol_overrides": {"BTCUSDT": {"time_limit_hours": 24}}},
+        )
+        kwargs = captured["kwargs"]
+        # Legacy kwargs present, cfg + symbol_overrides not passed.
+        assert kwargs["atr_sl_mult"] == 1.0
+        assert kwargs["atr_tp_mult"] == 4.0
+        assert kwargs["atr_be_mult"] == 1.5
+        assert "cfg" not in kwargs
+        assert "symbol_overrides" not in kwargs
+
+
 class TestBuildParamsBlock:
     """``_build_params_block`` must refuse to emit a partial params.json
     when a portfolio symbol has no usable override in the current config.

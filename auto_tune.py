@@ -176,7 +176,8 @@ def _slice_below_cutoff(df: pd.DataFrame, cutoff_naive: datetime, symbol: str, n
 
 def run_backtest_with_params(symbol: str, params: dict,
                              sim_start: datetime, sim_end: datetime,
-                             *, cutoff: datetime = None):
+                             *, cutoff: datetime = None,
+                             app_config: dict | None = None):
     """Run a backtest for a symbol with given ATR params over a date range.
 
     When ``cutoff`` is provided, all OHLCV bars with timestamp ``>= cutoff``
@@ -185,6 +186,21 @@ def run_backtest_with_params(symbol: str, params: dict,
     and funding rate frames as well, since those are also consumed by the
     regime detector. Defaults to ``None`` for backward compatibility — the
     legacy code path is byte-identical.
+
+    Gate-activation path (pre-holdout flow): when BOTH ``cutoff`` and
+    ``app_config`` are provided, the simulator is invoked via the standard
+    cfg + symbol_overrides path. The grid-candidate ATR multipliers are
+    injected into ``symbol_overrides[symbol]`` so they take effect while
+    the rest of the per-symbol settings (time_limit_hours,
+    max_participation_rate, cooldown_hours, tier) remain active. This
+    mirrors how production runs and matches the comparability contract
+    with the regime sweep harness (``tools/regime_retune_pre_holdout.py``).
+
+    Legacy path (``cutoff is None`` OR ``app_config is None``): preserves
+    pre-#287 behavior byte-for-byte. The legacy ``atr_*`` kwargs path in
+    ``backtest.simulate_strategy`` bypasses time-limit + participation cap
+    by design (see CLAUDE.md and ``backtest.py``); existing auto_tune CLI
+    callers stay on this path unless they opt in.
 
     Returns (trades, metrics).
     """
@@ -214,18 +230,48 @@ def run_backtest_with_params(symbol: str, params: dict,
     if df1h.empty or df4h.empty or df5m.empty:
         return [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
 
-    trades, equity_curve = simulate_strategy(
-        df1h, df4h, df5m, symbol,
-        sl_mode="atr",
-        atr_sl_mult=params["atr_sl_mult"],
-        atr_tp_mult=params["atr_tp_mult"],
-        atr_be_mult=params["atr_be_mult"],
-        df1d=df1d,
-        sim_start=sim_start,
-        sim_end=sim_end,
-        df_fng=df_fng,
-        df_funding=df_funding,
-    )
+    use_overrides_path = cutoff is not None and app_config is not None
+    if use_overrides_path:
+        # Standard path: cfg + symbol_overrides — gates active (time-limit,
+        # participation cap). Inject the grid candidate into the target
+        # symbol's overrides while preserving other per-symbol settings.
+        base_overrides = app_config.get("symbol_overrides", {}) or {}
+        sym_key = symbol.upper()
+        sym_base = base_overrides.get(sym_key, {})
+        sym_base = sym_base if isinstance(sym_base, dict) else {}
+        candidate_overrides = dict(base_overrides)
+        candidate_overrides[sym_key] = {
+            **sym_base,
+            "atr_sl_mult": params["atr_sl_mult"],
+            "atr_tp_mult": params["atr_tp_mult"],
+            "atr_be_mult": params["atr_be_mult"],
+        }
+        trades, equity_curve = simulate_strategy(
+            df1h, df4h, df5m, symbol,
+            sl_mode="atr",
+            df1d=df1d,
+            sim_start=sim_start,
+            sim_end=sim_end,
+            df_fng=df_fng,
+            df_funding=df_funding,
+            cfg=app_config,
+            symbol_overrides=candidate_overrides,
+        )
+    else:
+        # Legacy path: byte-identical to pre-#287 behavior. Time-limit +
+        # participation cap are bypassed by design (see CLAUDE.md).
+        trades, equity_curve = simulate_strategy(
+            df1h, df4h, df5m, symbol,
+            sl_mode="atr",
+            atr_sl_mult=params["atr_sl_mult"],
+            atr_tp_mult=params["atr_tp_mult"],
+            atr_be_mult=params["atr_be_mult"],
+            df1d=df1d,
+            sim_start=sim_start,
+            sim_end=sim_end,
+            df_fng=df_fng,
+            df_funding=df_funding,
+        )
 
     if not trades:
         return [], {"error": "No trades", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
@@ -254,7 +300,10 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
 
     # Baseline: current params on validate period
     log.info(f"  {symbol}: baseline on validate ({val_start.date()} -> {val_end.date()})...")
-    _, baseline_metrics = run_backtest_with_params(symbol, current_params, val_start, val_end, cutoff=cutoff)
+    _, baseline_metrics = run_backtest_with_params(
+        symbol, current_params, val_start, val_end,
+        cutoff=cutoff, app_config=config,
+    )
     current_val_pnl = baseline_metrics.get("net_pnl", 0)
 
     # Grid search on train period
@@ -263,7 +312,10 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
 
     train_results = []
     for combo in combos:
-        _, metrics = run_backtest_with_params(symbol, combo, train_start, train_end, cutoff=cutoff)
+        _, metrics = run_backtest_with_params(
+            symbol, combo, train_start, train_end,
+            cutoff=cutoff, app_config=config,
+        )
         train_results.append({
             "params": combo,
             "pnl": metrics.get("net_pnl", 0),
@@ -291,7 +343,10 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
 
     for candidate in top_candidates:
         params = candidate["params"]
-        trades_val, val_metrics = run_backtest_with_params(symbol, params, val_start, val_end, cutoff=cutoff)
+        trades_val, val_metrics = run_backtest_with_params(
+            symbol, params, val_start, val_end,
+            cutoff=cutoff, app_config=config,
+        )
         val_pnl = val_metrics.get("net_pnl", 0)
         val_pf = val_metrics.get("profit_factor", 0)
         val_trades = val_metrics.get("total_trades", 0)
