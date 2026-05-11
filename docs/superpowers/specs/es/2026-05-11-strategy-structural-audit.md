@@ -421,10 +421,149 @@ for s in d['per_symbol']:
 
 ---
 
+## §A · Amendment 2026-05-11 — operator review feedback (sssamuelll)
+
+Esta sección incorpora 5 modificaciones + 2 sub-decisiones que sssamuelll levantó en review del draft §1–§10. El draft original se preserva como historical record. **Phase 2 readers MUST read §A en conjunción con §1–§10 para tener la imagen operacional completa.** Cuando §A y §6 entran en conflicto, §A prevalece.
+
+### §A.1 — R2 success criterion extendido: post-R2 TP-sensitivity re-check
+
+[Criterio R2 original en §6 se preserva.] Después de re-correr q2 grid topology con los gates re-derivados de R2, y ANTES de declarar R2 success o avanzar a R1, ejecutar el mismo análisis de TP-sensitivity de §4 H2 sobre el nuevo grid:
+
+- **Si TP-independence persiste** (variación de mean P&L a lo largo del eje TP fijando SL sigue siendo <1% del cell magnitude): R1 sigue siendo estructuralmente necesaria. Proceder a R1 como planeado.
+- **Si TP-independence se disuelve** (variación de mean P&L distingue cells con TP=2 vs TP=6 por >5% del cell magnitude, indicando que TP ahora SÍ se alcanza): R1 puede ser innecesaria o sustancialmente simplificada. Pre-registrar la decisión de skip-R1 explícitamente con la tabla de datos que la justifica antes de avanzar.
+
+**Rationale:** La evidencia de TP-independence en §4 H2 fue medida bajo los gates TL=5h contaminados para 8/10 símbolos. La interpretación "TP no se alcanza" es CONDICIONAL en esos gates. R2 re-deriva los gates → el condicional debe re-testearse. Si extender TL a, e.g., 14-48h, hace que algunas trades efectivamente lleguen a TP, el problema de B8 (exit logic) se evapora — sin necesidad de R1.
+
+Costo del check: trivial (re-cómputo del mismo análisis de §4 H2 sobre el output de R2). Beneficio si TP-independence se disuelve: ahorra el sweep entero de R1 (~1.5h paralelizado × 3 sub-windows).
+
+### §A.2 — H5 (basket contamination) elevada de parking lot a conditional caveat
+
+[Ranking de H5 en §5 (rank 7) y placement en §8 parking lot se preservan.] La amendment es **operacional para la closure de Phase 2**:
+
+**Conditional caveat para Phase 2 closure:**
+
+Cualquier outcome negativo de Phase 2 (i.e., R1+R2+R3 todos fallan sus success criteria) es CONDICIONAL en que **el basket curado por epic #135 sea válido**. Porque epic #135 corrió sobre el simulador pre-#223 (con el mismo phantom-profit bug que contaminó todo lo demás), el basket en sí puede haber sido seleccionado por artefacto y no por signal-symbol fit genuino.
+
+Si Phase 2 falla:
+1. **NO** concluir inmediatamente "la estrategia no tiene edge".
+2. **SÍ** concluir "la estrategia no tiene edge **sobre este basket**".
+3. H5 se activa como **Phase 3 inmediato (no parking lot)**: re-validar selección de basket sobre un universo amplio (e.g., top-50 por 24h volume) bajo el simulador post-fix + los R1/R2/R3 components de Phase 2 ya implementados.
+
+Esta distinción importa para:
+- **Issue #271** user-invitation guardrail — "Epic A falla sobre basket X" no es lo mismo que "Epic A falla universalmente".
+- Cualquier operator decision sobre archivar el proyecto vs continuar investigación.
+- La narrativa hacia Simón si Phase 2 falla.
+
+### §A.3 — Walk-forward sobre ≥3 sub-windows non-overlapping es non-negotiable para Phase 2
+
+[§8 Q3 marcaba walk-forward como open question. La respuesta queda comprometida.]
+
+Los success criteria de R1, R2, y R3 (versiones tanto originales §6 como las refinadas en §A.6) cada uno requieren validación sobre **≥3 sub-windows non-overlapping pre-holdout**. Single train/validate es **insuficiente evidencia** y NO puede usarse como justificación de R-success bajo este spec amendado.
+
+**Sub-window specification (Phase 2 pre-registration debe refinar):**
+- Cada sub-window debe ser ≥3 meses de longitud.
+- Sub-windows must be non-overlapping y pre-registered ANTES de cualquier sweep Phase 2.
+- Juntos los sub-windows NO pueden extender past `holdout_start − 1 bar = 2025-04-29T23:55:00 UTC`.
+- Un Phase 2 R succeeds **solo si** su success criterion se cumple en ≥2 de 3 sub-windows AND falla en ≤1.
+
+**Compute budget:** Phase 2 sweep × 3 sub-windows ≈ 3× el tiempo de Q2 diagnostic (≈1.5h paralelizado en la misma máquina). Operator-acceptable.
+
+**Rationale (del review operator):** Resultados marginales single-run sesgan hacia "casi success → seguir refinando". Walk-forward sobre 3 sub-windows hace "casi success" mucho más difícil de manufacturar y aumenta la confianza per-finding categóricamente.
+
+### §A.4 — Prior estimation: P(R1+R2+R3 → viable strategy)
+
+[Sección nueva, no estaba en §1–§10.]
+
+**Auditor (Claude Opus 4.7) prior estimate: 15–25%.**
+
+**Reasoning (probability tree):**
+
+| Step | Conditional probability | Cumulative |
+|---|---|---|
+| P(R2 produces ≥6/8 symbols with ≥30 trades sobre 3 sub-windows) | ≈ 60% | 60% |
+| P(R1 produces ≥1 symbol con net P&L > 0 sobre 3 sub-windows \| R2 worked) | ≈ 40% | 24% |
+| P(R3 produces ≥3 symbols net positive Y avg PF > 1.2 \| R1+R2 worked) | ≈ 35% | 8.4% |
+| (loosen to "individual R criteria met"; partial successes still useful) | — | round to **15–25%** |
+
+P(full clean pass through to A.4-3 holdout pass) ≈ 4.7%. Pero "viable strategy" no requiere A.4-3 pass para ser operator-actionable.
+
+**Operator's prior:** 25–35% (declared en review). **Gap analysis:** El operator weights "fix the 4 failure modes" optimistically — si las 4 se arreglan, una estrategia debería emerger. Mi estimate weights la R3 difficulty (signal redesign dentro de un single pre-registered alternative) más pesimistically — encontrar la alternativa correcta al primer intento es el unknown dominante.
+
+**Sub-prior dominante:** R3 es ~35% en mi estimate. Si el operator tiene razón de que es ~50% (e.g., porque trend-pullback en crypto majors está bien documentado en literatura), el prior global sube a 25-30%. Si yo tengo razón en que es ~25%, baja a 10-15%. La verdad probablemente está en el medio, pero **R3 es la fuente de incertidumbre más grande**.
+
+**Operational implications:**
+
+- Phase 2 budget de 3-4 semanas es razonable.
+- **R2 es el cheapest test infiable** — si R2 falla (gates re-derivados NO producen ≥30 trades en 6/8 símbolos), prior debe drop bajo 10% y operator puede preferir escalar a H5 (basket re-validation) antes de invertir en R1+R3.
+- **R1 sub-windows tests son intermedios** — si R1 falla con R2 already passed, prior cae a 5-10% pero R3 todavía vale el test (signal alternative puede rescatar lo que el exit no puede).
+
+**Pre-registered prior re-evaluation checkpoints:**
+
+- Después de R2: re-estimar P(strategy viable | R2 result).
+- Después de R1: re-estimar P(strategy viable | R2+R1 result).
+- Antes de R3: explicit go/no-go basado en updated prior. Si estimate < 10%, **escalar a H5** en lugar de invertir Phase 2-R3.
+
+### §A.5 — Phase 2 success path completo (steps 4–6) y branches de re-validation failure
+
+[Original §7 sólo describía Phase 2 trigger conditions, no el success path completo.]
+
+**Success path Phase 2 → A.4-3 holdout:**
+
+1. **R2 ✓** — Re-derive per-symbol gates desde teoría. Re-correr q2 grid topology con new gates. **R2 success criterion:** bankruptcy rate baja a <50% en los 8 currently-bankrupt symbols, AND ≥6/8 símbolos muestran ≥30 trades sobre el 12-month pre-holdout window. (Per §A.3: validated sobre ≥3 sub-windows.) (Per §A.1: post-R2 TP-sensitivity re-check antes de avanzar.)
+
+2. **R1 ✓** — Implementar dynamic exit. Sweep análogo a A.4-1 pero variando `atr_trail_mult` (o equivalent para el exit elegido) en lugar de `atr_tp_mult`. **R1 success criterion:** ≥1 símbolo con avg per-trade net P&L > 0 sobre ≥3 sub-windows AND ≥20 trades por sub-window para el symbol afectado. (Skippable si §A.1 lo justifica.)
+
+3. **R3 ✓** — Pre-register y correr UN single alternative signal (per §A.6). Comparar contra LRC-mean-reversion baseline. **R3 success criterion:** alternative signal produces ≥3 símbolos net positive AND avg PF > 1.2 sobre el positive subset, validated sobre ≥3 sub-windows (success en ≥2 de 3).
+
+4. **Integrated re-run.** Si R1+R2+R3 pasan individualmente, re-correr A.4-1.5 (regime sweep) + A.4-1 (ATR sweep) con la integrated strategy (R1+R2+R3 stack activo). Check que el resultado original A.4-1 NO_DATA esté reversed para ≥3 símbolos.
+
+5. **A.4-2 walk-forward extendido.** Con la integrated strategy fixed (post-step 4 outputs), correr el formal A.4-2 walk-forward (más sub-windows, e.g., 6 non-overlapping × 3 months each, rolling). Check que los params seleccionados en step 4 generalicen.
+
+6. **A.4-3 holdout (single shot, bala única).** Per issue #322 closure criteria. Requiere steps 1–5 all green + drift check on holdout snapshots (per CLAUDE.md caveat #3) + operator green-light explícita.
+
+**Branches de re-validation failure (qué hacer si las R's pasan pero la integration o walk-forward falla):**
+
+| Failure point | Diagnóstico | Acción |
+|---|---|---|
+| Step 4 (integrated re-run) falla pero steps 1-3 pasaron | "Individual successes were sub-window-specific noise; R-stack no compone" | **PAUSAR Phase 2.** Abrir issue para investigar param interactions / sub-window bias. NO avanzar a step 5 sin resolución. Considerar si los sub-windows de steps 1-3 fueron mal seleccionados. |
+| Step 5 (A.4-2 walk-forward) falla pero step 4 pasó | "Individual R wins eran within-pre-holdout-window stochasticity; no generaliza" | **NO declarar failure todavía.** Abrir ticket para considerar H5 (basket re-validation) antes de declare failure. Si H5 también falla, entonces strategy es no-generalizable. |
+| Step 6 (A.4-3 holdout) falla | "Strategy no generaliza out-of-sample" | **Issue #322 cierra con resultado negativo.** Path (a) de issue #321 se activa definitively. #271 guardrail queda enforced. |
+| Step 6 pasa | "Strategy validada sobre holdout" | **Epic A completa.** #322 cierra. Considerar A.6 (publicación) y desbloquear #271 según roadmap. |
+
+Pre-registrar estos branches **ahora** previene rationalización post-hoc en cada branching point.
+
+### §A.6 — R3 specification: single alternative, criterion refined
+
+[Sintetiza §8 Q4 y §8 Q2 operator decisions.]
+
+**R3 pre-registration constraints (vinculantes):**
+
+1. **Single alternative signal, no iteration.** Pre-register UN concrete alternative entry frame ANTES de cualquier Phase 2-R3 sweep. Si la alternative falla su criterion, **eso ES el signal informativo** — NO probar otras alternativas en la misma Phase 2.
+
+2. **Refined success criterion (reemplaza §6 R3 criterion):**
+   - ≥3 símbolos con net P&L > 0 sobre los affected sub-windows, AND
+   - **avg PF > 1.2 sobre el subset of positive-net-P&L symbols** (PF = gross_winnings / gross_losses; PF=1.0 es break-even gross, necesitamos margen sobre costos para ser defendible), AND
+   - Per §A.3: validated sobre ≥3 non-overlapping sub-windows (success en ≥2 de 3).
+
+3. **Failure criterion (explicit):** si alternative signal produces <3 net-positive symbols OR avg PF ≤ 1.2 sobre positive subset OR falla en ≥2 de 3 sub-windows, R3 fails. **NO iterar**. R3 failure con R1+R2 success significa "el problema estructural NO está en B8 ni en B9, está en B2/B3 (signal). La primera alternative no funcionó. Operator decide path forward — probablemente H5 o path (a) de #321."
+
+**Candidate alternative signals** (operator escoge UN — pre-registered):
+
+| Candidate | Descripción | Implementation cost | Literature support |
+|---|---|---|---|
+| **Momentum breakout** | Entry cuando price cierra > BB upper band con 5m bullish confirmation. Opuesto a LRC mean-reversion. | Bajo (reutiliza calc_bb, calc_rsi 5m existentes) | Moderado — breakouts conocidamente fragile en crypto |
+| **Trend-pullback** | Entry cuando SMA50 > SMA200 (uptrend confirmed) AND price retraces a SMA20 ± 0.5 ATR. Captura pullbacks intra-trend. | Bajo (SMA50/200 ya están en indicadores) | **Alto** — best literature support para retail crypto majors |
+| **Volatility expansion** | Entry cuando ATR(14) > 1.5 × ATR(50) (vol regime shift) en dirección del 4H close precedente. | Medio (cómputo ATR multi-period nuevo) | Moderado |
+
+**Auditor recommendation (no vinculante):** pre-registrar **trend-pullback**. Razones: mejor literature anchor + cheaper implementation + complementa naturalmente con R1's dynamic exit (trailing). Operator final choice prevails.
+
+---
+
 ## §10 · Historial de actualización
 
 | Fecha | Cambio | Autor |
 |---|---|---|
-| 2026-05-11 | Draft inicial Phase 1 | Claude Opus 4.7 (sesión audit) + sssamuelll |
+| 2026-05-11 | Draft inicial Phase 1 (§1–§10) | Claude Opus 4.7 (sesión audit) + sssamuelll |
+| 2026-05-11 | §A amendment — 5 modifications + 2 §8 sub-decisions from operator review | sssamuelll + Claude Opus 4.7 (esta sesión) |
 
-Reservar líneas adicionales para feedback iterativo en el PR y revisión externa si aplica.
+Reservar líneas adicionales para feedback iterativo en el PR y revisión externa adicional si aplica.
