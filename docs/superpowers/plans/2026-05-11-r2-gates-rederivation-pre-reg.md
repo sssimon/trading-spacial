@@ -58,20 +58,46 @@ Este sub-spec pre-registra la metodología EXACTA con que R2 va a re-derivar `ti
 - Si `tl_anchor_raw > 48`: clamp a 48, log similar. Cont.
 - Si una distribución de `Δt` tiene `<100 samples` (símbolo con muy pocos bars), abort para ese símbolo. JUP (start 2024-01-31) puede caer cerca de este threshold según el sub-window.
 
-### §2.2 — PoV re-derivation: Almgren-Chriss inverse for 30 bps slippage target
+### §2.2 — PoV: DECOUPLED from R2 (locked at current values pending cost model v2)
 
-**Anchor:** target slippage anchor del cost model. `costs_calibration.json:sources.size_factor` documenta el calibration target: *"an order of 0.1% of avg_volume_per_minute incurs ~30 bps total slippage on majors"*. Operating point donde el linear cost model es most trustworthy.
+**Amendment 2026-05-11 (pre-execution):** La derivación A-C inverse del original §2.2 produce universal tightening de PoV (100–1000× más restrictivo que current values). Eso conflate R2's H7 test con H8 (cost model v1 limitations) y colapsa la posibilidad misma de evaluar el TL effect aisladamente. Operator approved decoupling.
 
-**Pasos por tier (tier mapping definido en §2.4):**
-1. Per tier, leer `base_bps` y `size_factor` de `costs_calibration.json`.
-2. Resolver `participation_ratio_per_min` tal que `base_bps + size_factor × participation_ratio_per_min = 30`. Es decir: `participation_ratio_per_min = (30 − base_bps) / size_factor`.
-3. Convert `participation_ratio_per_min` (notional / liquidity_per_min) a `max_participation_rate` (notional / 24h_median_bar_volume) — conversión que depende de la definition exacta de `liquidity_per_min` en `backtest_costs.py`. La derivation debe documentar la conversión paso-a-paso.
-4. Per-symbol value = tier value (i.e., no per-symbol customization within a tier — A-C theory anchors per-tier, no per-symbol).
+**Math table que motivó el decouple:**
 
-**Caveat documentado (per operator pedido):** El target 30 bps es el cost model v1's calibration anchor. Esto hereda toda la incertidumbre del cost model v1 (linear, conocidamente flawed en thin liquidity per H8 del audit). Una alternativa sería **15 bps** (más conservador, menos slippage tolerated) — pero también significaría PoV más conservador → menos trades → potencialmente bajo el threshold de "≥30 trades" del success criterion. Si R2 falla con 30 bps, considerar 15 bps como ablación en una iteración separada.
+| Tier | Current max_pov | A-C 30bps strict | Direction |
+|------|-----------------|------------------|-----------|
+| major (BTC/ETH) | 0.01 (1%) | 0.0000167 (0.0017%) | Current 600× **looser** |
+| mid (5 symbols) | 0.002–0.005 | 0.0000093 (0.00093%) | Current 200–500× **looser** |
+| small (3 symbols) | 0.0015–0.005 | 0.0000051 (0.00051%) | Current 300–1000× **looser** |
 
-**Pre-registered alternatives if 30 bps fails:**
-- Si R2 falla con 30 bps, NO iterar a 15 bps sin operator approval. Reportar resultado de 30 bps primero. Ablación es un decision branch, no automatic.
+(Conversion: `liquidity_per_min = bar_volume_usd / 60` per `backtest.py:625-641`; max_pov = pov_per_min / 60.)
+
+**Hallazgo retroactivo sobre H7:** Current PoV es looser, no tighter, que A-C strict — la bankruptcy en 8/10 símbolos NO es por PoV over-restriction. Drivers reales son TL=5h + slippage destruction (H8) + signal expectancy negativa (H1). Audit spec §A.7 documenta la H7 reformulation completa.
+
+**Decision (operator-locked 2026-05-11):**
+
+- **PoV stays at current `config.defaults.json:symbol_overrides` values** durante R2 execution. No re-derivation, no change.
+- **R2 testea solo la TL dimension** (§2.1 unchanged). Cooldown derives transitively de new_TL (§2.3 unchanged).
+- **Issue separado abierto:** "PoV re-derivation deferred — depends on cost model v2 (sqrt-participation)" — referenced in deliverable manifest. Linked to H8 + `costs_calibration.json:v2_planned` comment.
+
+**Implicación para `per_symbol_gates.json` output:**
+
+El drop-in para `config.defaults.json:symbol_overrides` que R2 emita debe contener:
+- `time_limit_hours`: new value (per §2.1 derivation)
+- `max_participation_rate`: **unchanged** from current config (copied through)
+- `cooldown_hours`: new value (per §2.3 transitive rule on new TL)
+- `atr_sl_mult`, `atr_tp_mult`, `atr_be_mult`: unchanged (out of R2 scope; that's A.4-1 territory)
+
+**Implicación para script (`tools/r2_gates_rederivation.py`):**
+
+PoV computation block (lines that would have computed A-C inverse) replaced con:
+```python
+# §2.2 amendment 2026-05-11: PoV decoupled from R2 (operator-approved).
+# Copy current max_participation_rate through. See spec §A.7 + new issue.
+new_gates[sym]["max_participation_rate"] = current_gates[sym]["max_participation_rate"]
+```
+
+Plus a sanity assertion that current values match what's in the manifest's `current_max_participation_rate_snapshot` field (forensic check that nobody edited config mid-run).
 
 ### §2.3 — Cooldown derivation: maintain transitive rule + floor
 
@@ -189,6 +215,48 @@ Detallado:
 
 **Audit §A.4 sub-prior re-evaluation checkpoint:** Después de R2 (regardless of outcome), update `P(R1+R2+R3 → viable strategy)` based on R2 result. Document in R2 PR description.
 
+### §4.1 · Secondary observational criterion (operator-locked 2026-05-11)
+
+**Amendment trigger:** Con PoV decoupled (§2.2 amendment), TL is the only gate dimension changing. Cooldown propagation (transitive rule §2.3) puede partially compensate TL extension — más cooldown → menos entries per unit time. Es plausible que trade count NO suba significativamente incluso si TL relaja correctamente la "5h cutoff" problem.
+
+**Primary criterion (no change):** conjuntive `≥6 of 8 currently-bankrupt symbols con ≥30 trades EN CADA sub-window` (§4 above).
+
+**Secondary observational criterion (additive, not replacement):**
+
+Para cada (currently-bankrupt symbol, sub-window) pair eligible per §3.1, computar:
+```
+Δtrade_count[sym][sw] = trade_count_with_new_TL[sym][sw] − trade_count_with_current_TL[sym][sw]
+```
+
+Pre-registered reading rule:
+
+| Primary | Secondary (Δ > 0 in N/M eligible pairs) | Verdict | Interpretation |
+|---|---|---|---|
+| ✓ passes (≥6/8 in 3 sub-windows) | (any) | **R2 SUCCESS** | TL fix worked; advance to R1 (per §A.1 TP-sensitivity re-check). |
+| ✗ fails | ≥6 of 8 sub-window-symbol pairs show Δ > 0 | **R2 INCONCLUSIVE** | Directional improvement observed but magnitude insufficient. TL fix is correct direction; magnitude bounded by cooldown propagation OR by slippage tax (H8) consuming the extra holding window. Phase 2 R3 evaluates signal con TL fix incorporated al baseline; not pretending TL alone resolves. |
+| ✗ fails | <6 of 8 sub-window-symbol pairs show Δ > 0 | **R2 FAIL** | Direction not consistently improving. TL re-derivation didn't help. Strong signal under-trading is NOT TL-induced. Per §A.4 prior recalibration: drop estimate <10%; consider H5 escalation. |
+
+Notas:
+- "Eligible sub-window-symbol pairs" considers §3.1 coverage rules (JUP, PENDLE excluded from sub-windows without enough data). Para 8 symbols × 3 sub-windows = 24 max pairs; JUP missing 2, PENDLE missing 1 → typically 24 − 3 = 21 eligible. "≥6 of 8 pairs" en este context significa "≥6 of 8 unique symbols show Δ>0 in al menos 1 of their eligible sub-windows" (re-interpretación per-symbol; no double-count).
+
+### §4.2 · Pre-registered auditor prior on R2 outcome
+
+[Trigger por operator pedido en review 2026-05-11.]
+
+**Auditor (Claude Opus 4.7) prior antes de execution:**
+
+- **Most likely outcome:** R2 **INCONCLUSIVE** (~50% probability).
+  - Razón: TL extension genuinely helps las 8 symbols con TL=5h actualmente (e.g., si new_TL = 12h, holding window 2.4× larger). Pero cooldown extension proporcional (transitive rule §2.3 → new_cooldown ≈ new_TL ≥ 8h) reduces entry frequency proportionally. Net effect: trade count puede subir 10-40% (directional improvement), no 200%+ needed for ≥30 trades absolute in 3-month sub-windows.
+- **R2 SUCCESS:** ~20% probability. Requeriría que current TL=5h sea TAN restrictive que new TL produce dramatically more trades incluso con cooldown propagation. Posible si current cooldown floor (6h) ya estaba dominant.
+- **R2 FAIL:** ~30% probability. Si TL re-derivation produce values close to current (i.e., ATR-based median ≈ 4-6h for the 8 symbols), entonces gates effectively no relax → trade count unchanged.
+
+**Honest prediction notes:**
+- ETH/BTC (currently TL=14h) likely tightened by ATR-based median (probably 8-10h for major caps with stable bar volume). Tightening for these would trigger §5 exclusion (mark inconclusive for the 2 majors); but §5.1 degenerate guard requires ≥5 of **8 currently-bankrupt** symbols to fire, so ETH/BTC tightening doesn't trip the guard.
+- PENDLE/JUP/RUNE (small tier, more volatile) likely have longer ATR time-to-1-ATR median due to higher per-bar variance — possibly TL > 24h. That extends cooldown to match → trade frequency floor bites.
+- DOGE may have anomalously low or high TL due to its meme-coin volatility profile. Watch for clamp warnings.
+
+**Bayesian update plan:** After derivation step (before sweep), update prior on TL distribution observed. If new_TLs uniformly close to current_TLs, prior on "R2 SUCCESS" drops sharply.
+
 ---
 
 ## §5 · Tightening risk: pre-registered rule
@@ -285,13 +353,27 @@ Las 3 open questions de la iteración anterior fueron resueltas por operator rev
 3. **Tightening exclude "inconclusive": APPROVED + new safeguard §5.1.** Regla locked: tightened symbols (`new_TL < current_TL`) excluded del conjuntive. **Plus** degenerate guard: si ≥5 of 8 tightened, R2 abort (no false-positive vacuous pass). Ver §5.1 + §8 decision branches table.
 
 **Status:** ready for R2 execution. Next commits sobre #324:
-- `tools/r2_gates_rederivation.py` (deriva TL+PoV+cooldown; enforces §5.1 guard ANTES del sweep)
+- `tools/r2_gates_rederivation.py` (deriva TL + cooldown solo; PoV passthrough per §2.2 amendment; enforces §5.1 guard ANTES del sweep)
 - Actual derivación per symbol
-- Sweep over 3 sub-windows (A, B, C)
-- `derivation_audit.md` con math + NW=4 provenance + tier verification
-- `per_symbol_gates.json` (drop-in para `config.defaults.json:symbol_overrides`, NOT yet promoted)
-- README con verdict + interpretación
-- PR comment con conjuntive table + degenerate guard status + prior re-eval per §A.4
+- Sweep over 3 sub-windows (A, B, C) con new gates (new TL/cooldown, PoV unchanged)
+- `derivation_audit.md` con math + NW=4 provenance + tier verification + PoV-decouple math table (§A.7 reference)
+- `per_symbol_gates.json` (drop-in para `config.defaults.json:symbol_overrides`, NOT yet promoted; PoV unchanged from current per §2.2)
+- README con verdict + interpretación (primary + secondary criterion per §4.1)
+- PR comment con conjuntive table + Δtrade_count table + degenerate guard status + prior re-eval per §A.4
+
+### §9.1 · Amendment 2026-05-11 (post pre-execution math sanity check) — H7 PoV reformulated
+
+Pre-execution math discovery (math table en §2.2) revealed that A-C 30bps inverse produces universal PoV tightening (100-1000× restrictiver que current). Current PoV es **looser**, no tighter, que cost-model-v1 calibration supports. Audit spec §A.7 documenta la H7 reformulation completa retroactively.
+
+**Implication for R2 framing:**
+- R2 testea solo TL dimension (§2.1 + §2.3 cooldown propagation).
+- PoV stays at current values per §2.2 amendment.
+- Issue separado abierto: "PoV re-derivation deferred — depends on cost model v2".
+- §4 + §4.1 success criteria amended para considerar that el secondary observational criterion permite "INCONCLUSIVE" verdict (directional improvement on TL even si magnitude insuficiente).
+
+**Implication for R2 success criterion interpretability:**
+
+Si R2 INCONCLUSIVE (per §4.1), eso NO significa que R1+R3 no valen ejecutarse. R3 puede evaluar signal con TL fix as baseline; the directional improvement de TL es informativo even si conjuntive criterion falla on the absolute trade-count threshold.
 
 ---
 
@@ -300,5 +382,6 @@ Las 3 open questions de la iteración anterior fueron resueltas por operator rev
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-11 | Pre-reg sub-spec inicial (post-operator-review methodology v2) | Claude Opus 4.7 + sssamuelll |
+| 2026-05-11 | §2.2 PoV decoupled + §4.1 secondary criterion + §4.2 prior + §9.1 H7 reformulation — post pre-execution math sanity check | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas para iteración del pre-reg si necesario antes de R2 execution.
