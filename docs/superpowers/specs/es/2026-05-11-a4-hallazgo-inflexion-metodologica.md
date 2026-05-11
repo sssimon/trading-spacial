@@ -243,10 +243,70 @@ Todos visibles en este PR y/o el PR de evidencia regime:
 
 ---
 
+## §A · Amendment 2026-05-11 — 3 meta observations from external review
+
+Esta sección incorpora las tres observaciones meta de la revisión externa (sesión Claude fresh, registrada en el comment chain de PR #316). El draft original sub-comunicaba estos puntos; el amendment los hace explícitos para que cualquier lector futuro (humano u otra sesión Claude) los encuentre sin tener que reconstruir el contexto del review.
+
+### §A.1 — La "live-equivalent simulation" es una cadena de calibraciones, no un veredicto del simulador
+
+El draft original presentaba el sweep del 2026-05-11 como "el primero que mide la estrategia bajo condiciones live-equivalent" y trataba esa propiedad como atómica. Es más preciso decir que el resultado depende de una **cadena de decisiones de calibración**, cada una con su propia banda de incertidumbre:
+
+| Calibración | Origen | Naturaleza | Incertidumbre |
+|---|---|---|---|
+| `MAX_OVERSHOOT_RATIO = K = 10` (#309) | Rule-derived ("no realistic execution holds through a 10× SL move") | Modeling decision | Subject to revision under pre-registration; specific K=10 chosen as canonical conservative anchor |
+| `BANKRUPTCY_THRESHOLD = 0.1 × INITIAL_CAPITAL` (#313, #280) | Convention (90% drawdown = practical force-liquidation) | Rule-derived | Stable; reviewed under pre-registration if revised |
+| `time_limit_hours` per symbol | #281 "winner-median holding" computed on pre-#223 simulator output | Empirically derived | **Contamination real** — derivation input was buggy; see Issue #317 |
+| `cooldown_hours` per symbol | `max(time_limit_hours, NW=4, floor=6)` | Rule-derived transitively from `time_limit_hours` | Inherits contamination of `time_limit_hours` |
+| Tier mapping per symbol | #281 cost-spectrum analysis on pre-#223 simulator | Empirically derived | Contamination real (same pre-#223 source) |
+| `max_participation_rate` per tier — value | Almgren-Chriss + Donier-Bonart anchors | Theoretical / anchor | Open question per Issue #317 Step 1: is it strict A-C-applied or operator-chosen anchor? |
+
+La conclusión "no edge demostrable bajo simulación live-equivalent" **hereda la incertidumbre acumulada de esta cadena**, no es un único veredicto del simulador. Esto importa porque un stakeholder externo (Simón, futuro reviewer, futuro contribuyente) leyendo el hallazgo debe ver explícitamente qué supuestos estructurales lo sostienen y dónde está el ground potencialmente firme vs blando.
+
+### §A.2 — Bug fixes vs modeling decisions, distintos en narrativa
+
+El draft original enumera tres correcciones estructurales como un grupo:
+
+> "(...) las correcciones estructurales (#223/#224, #309, #313) (...)"
+
+Estas correcciones son **tres cosas distintas de naturaleza distinta**, y agruparlas sub-comunica la fuerza del finding:
+
+- **#223 / #224 — Bug fix.** Error de signo en `_close_position`: la fórmula LONG se aplicaba unconditionally, lo que invertía P&L para SHORT; `abs()` faltaba en `sl_pct_actual`, lo que strip-eaba el signo y producía "phantom profit" igual a `risk_amount`. **Esto no es "calibración imprecisa", es aritmética incorrecta.** Los números pre-fix en `formula-ganadora` no eran "tuneados bajo un modelo más simple"; eran resultados de un cálculo equivocado.
+- **#313 (#280) — Bug fix.** Post-bankruptcy ghost trades: el simulador seguía procesando entries con `risk_amount = 0` después del floor `effective_capital = max(0, capital)`, inflando trade counts y win rates con eventos ficticios. **También error de cálculo, no decisión de modelo.**
+- **#309 — Modeling decision.** K=10 cap como respuesta al overshoot vía amplification ratio. Es una elección de modelo (no un bug); tiene su propia banda de incertidumbre; está sujeto a revisión bajo pre-registración.
+
+El framing correcto, que reemplaza al sub-truthful "we made the simulator more realistic":
+
+> **"Los backtests previos (incluidos los 4-year results y el `formula-ganadora` doc) reflejaban bugs del simulador, no comportamiento de la estrategia."**
+
+Esta narrativa es más fuerte, más incómoda, y más precisa. Es la que va a la comunicación con Simón si la decisión de §5 termina escalando.
+
+### §A.3 — Pre-registration gap: caso NO_DATA no contemplado en D9
+
+El spec D9 (`2026-05-03-asunciones-tecnicas-pre-holdout.md`) pre-registró la secuencia A.4-1 → A.4-2 → A.4-3 bajo el supuesto implícito de que el re-tune produciría candidatos viables. **El caso "0 de 10 símbolos producen P&L positivo en ningún punto del grid" no estaba contemplado.**
+
+Esto **no es violación** de D9 — D9 se está siguiendo exactamente. Es **incompletud** en la pre-registración misma.
+
+Consecuencia operativa: "expandir el grid" se siente como continuación natural de A.4-1 porque la pre-registración no contempló el caso NO_DATA. Pero formalmente, **expandir el grid es un cambio metodológico post-hoc** — el tipo exacto de cosa que los pre-registers existen para prevenir.
+
+Por eso, cualquier expansión del grid:
+
+1. **DEBE estar justificada por criterio falsificable pre-registrado** (Issue #318 lo formaliza con el criterio "≥6 de 10 símbolos en borde + gradiente > max(2σ, $200)").
+2. **DEBE estar tagged en el historial del spec** como ajuste metodológico post-hoc, con fecha y trigger.
+3. **NO modifica D9** — los pre-registers son inmutables por disciplina. El amendment vive en este spec inflection-point.
+
+Si el criterio de Issue #318 falla y NO_DATA se acepta como conclusión, no hay ajuste post-hoc — A.4-1 concluye dentro del marco pre-registrado original (resultado: no candidates). La rama post-hoc se activa solo si el criterio pasa y el grid se expande.
+
+### Cierre del amendment
+
+Estas tres observaciones fueron incorporadas como amendment, no como edición de §1–8 originales. La versión original del draft (§1–8 + §9 historial inicial) se conserva como historical record del estado pre-revisión. Cualquier lector futuro debe leer §A en conjunción con §1–8 para tener el marco metodológico completo.
+
+---
+
 ## 9 · Historial de actualización
 
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-11 | Draft inicial post-sweeps | Claude Opus 4.7 |
+| 2026-05-11 | Amendment §A — 3 meta observations from external review (sesión Claude fresh) | sssamuelll + Claude Opus 4.7 (esta sesión) |
 
-(Reservar líneas adicionales para registrar revisión externa, cambios pre-registered, decisión final del operador.)
+(Reservar líneas adicionales para registrar revisión externa adicional, cambios pre-registered, decisión final del operador.)
