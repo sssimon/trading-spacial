@@ -381,6 +381,8 @@ def main(argv: list | None = None) -> int:
     code_commit = _resolve_git_commit()
 
     manifest = {
+        "harness": "tools.retune_pre_holdout",
+        "spec_ref": "D9 §2.9 (ATR re-tune pre-holdout, A.4-1)",
         "cutoff_effective_iso": cutoff.isoformat(),
         "cutoff_effective_ms": cutoff_ms,
         "code_commit": code_commit,
@@ -396,6 +398,7 @@ def main(argv: list | None = None) -> int:
         "scope_notes": {
             "per_direction": "out_of_scope_A41_option_b",
             "promotion_to_config": "deferred_to_post_A42_A43_PR",
+            "gates_active": "time_limit + participation_cap (via cfg + symbol_overrides path post-#287 review)",
         },
     }
 
