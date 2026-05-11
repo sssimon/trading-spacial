@@ -559,11 +559,51 @@ Pre-registrar estos branches **ahora** previene rationalización post-hoc en cad
 
 ---
 
+### §A.7 — H7's PoV component reformulated retroactively (2026-05-11 amendment, post-R2 pre-execution math sanity check)
+
+[Discovered durante pre-execution math sanity check de R2 — PR #324 conversation, 2026-05-11.]
+
+**Original H7 claim (§4 H7):** "Per-symbol gates over-restrict 8/10 symbols." Citó dos evidence streams: (a) low `time_limit_hours` (5h en 8/10), Y (b) low `max_participation_rate` (≤0.5% en 8/10).
+
+**Revised H7 claim (post-2026-05-11):** "Per-symbol gates over-restrict 8/10 symbols **on the TL dimension only**. The PoV dimension is currently *looser*, not tighter, than what cost model v1 calibration anchor (A-C 30bps) supports."
+
+**Math evidence (descubierto pre-execution R2):**
+
+Aplicando A-C inverse for 30 bps slippage target per tier al pre-reg #324 produce:
+
+| Tier | Current max_pov | A-C 30bps strict max_pov | Direction vs current |
+|------|-----------------|--------------------------|----------------------|
+| major (BTC/ETH) | 0.01 (1%) | 0.0000167 (0.0017%) | Current 600× **looser** |
+| mid (5 symbols) | 0.002–0.005 | 0.0000093 (0.00093%) | Current 200–500× **looser** |
+| small (3 symbols) | 0.0015–0.005 | 0.0000051 (0.00051%) | Current 300–1000× **looser** |
+
+Conversion derivada de `backtest.py:625-641` (`liquidity_per_min = bar_volume_usd / 60`).
+
+**Mechanism revised:**
+
+La bancarrota en 8/10 símbolos NO es por PoV over-restriction. El driver más probable es la conjunción de:
+- **TL=5h** cortando trades antes de que alcancen TP (TL piece de H7 — sigue válido)
+- **Slippage destruyendo P&L** (H8 — already confirmed; current PoV permite slippage de ~280-680 bps per side at strategy's typical notional, well outside cost model v1's validity range)
+- **Signal expectancy negativa** (H1 — already confirmed)
+
+**Implicación para Phase 2 R2:**
+
+R2's PoV component se **decouples** (locked at current values pending H8 resolution / cost model v2 migration). R2 testea solamente la TL dimension. Ver PR #324 §2.2 + nuevo issue "PoV re-derivation deferred — depends on cost model v2".
+
+**Implicación retroactiva para audit framing:**
+
+Las priorizaciones de §5 y §6 R2 quedan razonables porque la dimensión que R2 testea (TL) sigue siendo el componente most likely actionable de H7. Pero la audit's claim que "los gates over-restrigen en AMBAS dimensiones" se revisa a "TL only".
+
+**Nota metodológica:** Este amendment fue trigger-eado por pre-execution math sanity check durante R2 pre-reg. El claim original de H7 no estaba wrong sobre TL — estaba over-specified al claim también PoV over-restriction. Pre-execution math caught it antes de 2h de compute confirmar algo ya derivable del cost model calibration.
+
+---
+
 ## §10 · Historial de actualización
 
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-11 | Draft inicial Phase 1 (§1–§10) | Claude Opus 4.7 (sesión audit) + sssamuelll |
 | 2026-05-11 | §A amendment — 5 modifications + 2 §8 sub-decisions from operator review | sssamuelll + Claude Opus 4.7 (esta sesión) |
+| 2026-05-11 | §A.7 — H7 PoV component reformulated post pre-execution math sanity check on R2 (PR #324) | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas adicionales para feedback iterativo en el PR y revisión externa adicional si aplica.
