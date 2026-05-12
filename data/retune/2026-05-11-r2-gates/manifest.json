@@ -1,0 +1,105 @@
+{
+  "audit_ref": "docs/superpowers/specs/es/2026-05-11-strategy-structural-audit.md (\u00a7A.7)",
+  "current_max_participation_rate_snapshot": {
+    "ADAUSDT": 0.003,
+    "AVAXUSDT": 0.005,
+    "BTCUSDT": 0.01,
+    "DOGEUSDT": 0.005,
+    "ETHUSDT": 0.01,
+    "JUPUSDT": 0.005,
+    "PENDLEUSDT": 0.0015,
+    "RUNEUSDT": 0.003,
+    "UNIUSDT": 0.002,
+    "XLMUSDT": 0.0015
+  },
+  "guard_result": {
+    "comparison": [
+      {
+        "current_TL": 5,
+        "new_TL": 5,
+        "symbol": "ADAUSDT",
+        "tightened": false
+      },
+      {
+        "current_TL": 8,
+        "new_TL": 5,
+        "symbol": "AVAXUSDT",
+        "tightened": true
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 5,
+        "symbol": "DOGEUSDT",
+        "tightened": false
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 5,
+        "symbol": "UNIUSDT",
+        "tightened": false
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 5,
+        "symbol": "XLMUSDT",
+        "tightened": false
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 4,
+        "symbol": "PENDLEUSDT",
+        "tightened": true
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 4,
+        "symbol": "JUPUSDT",
+        "tightened": true
+      },
+      {
+        "current_TL": 5,
+        "new_TL": 4,
+        "symbol": "RUNEUSDT",
+        "tightened": true
+      }
+    ],
+    "fires": false,
+    "threshold": 5,
+    "tightened_count": 4,
+    "tightened_symbols": [
+      "AVAXUSDT",
+      "PENDLEUSDT",
+      "JUPUSDT",
+      "RUNEUSDT"
+    ]
+  },
+  "harness": "tools.r2_gates_rederivation",
+  "holdout_start_iso": "2025-04-30T00:00:00+00:00",
+  "pov_decoupled_issue_ref": "#325",
+  "pre_reg_constants": {
+    "atr_period": 14,
+    "cooldown_floor": 6,
+    "cooldown_nw": 4,
+    "degenerate_guard_threshold": 5,
+    "lookahead_max_hours": 72,
+    "min_observations": 100,
+    "tl_clamp": [
+      4,
+      48
+    ]
+  },
+  "ran_at_iso": "2026-05-11T21:25:10.230777+00:00",
+  "spec_ref": "docs/superpowers/plans/2026-05-11-r2-gates-rederivation-pre-reg.md",
+  "tier_map": {
+    "ADAUSDT": "mid",
+    "AVAXUSDT": "mid",
+    "BTCUSDT": "major",
+    "DOGEUSDT": "mid",
+    "ETHUSDT": "major",
+    "JUPUSDT": "small",
+    "PENDLEUSDT": "small",
+    "RUNEUSDT": "small",
+    "UNIUSDT": "mid",
+    "XLMUSDT": "mid"
+  }
+}
