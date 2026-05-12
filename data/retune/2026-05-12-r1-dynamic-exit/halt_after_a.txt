@@ -1,0 +1,6 @@
+§10 HALT FIRED at 2026-05-12T14:59:13.473127+00:00
+TIME_LIMIT% > 35.0% on argmax cell for 7 symbols (threshold: >6).
+Symbols breaching: ['ADAUSDT', 'AVAXUSDT', 'DOGEUSDT', 'ETHUSDT', 'RUNEUSDT', 'UNIUSDT', 'XLMUSDT']
+
+Aborting sweep windows B+C. Operator review required per pre-reg §10.
+Likely causes (per pre-reg §10): LRC computation mismatch, bug in tie-break order.

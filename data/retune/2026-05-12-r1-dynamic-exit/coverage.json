@@ -1,0 +1,38 @@
+{
+  "A": {
+    "ADAUSDT": 2184,
+    "AVAXUSDT": 2184,
+    "BTCUSDT": 2184,
+    "DOGEUSDT": 2184,
+    "ETHUSDT": 2184,
+    "JUPUSDT": 0,
+    "PENDLEUSDT": 0,
+    "RUNEUSDT": 2184,
+    "UNIUSDT": 2184,
+    "XLMUSDT": 2184
+  },
+  "B": {
+    "ADAUSDT": 2184,
+    "AVAXUSDT": 2184,
+    "BTCUSDT": 2184,
+    "DOGEUSDT": 2184,
+    "ETHUSDT": 2184,
+    "JUPUSDT": 0,
+    "PENDLEUSDT": 0,
+    "RUNEUSDT": 2184,
+    "UNIUSDT": 2184,
+    "XLMUSDT": 2184
+  },
+  "C": {
+    "ADAUSDT": 2160,
+    "AVAXUSDT": 2160,
+    "BTCUSDT": 2160,
+    "DOGEUSDT": 2160,
+    "ETHUSDT": 2160,
+    "JUPUSDT": 2160,
+    "PENDLEUSDT": 2160,
+    "RUNEUSDT": 2160,
+    "UNIUSDT": 2160,
+    "XLMUSDT": 2160
+  }
+}

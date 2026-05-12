@@ -1,0 +1,307 @@
+{
+  "analyses": {
+    "A": {
+      "per_symbol_argmax_cell": {
+        "ADAUSDT": {
+          "avg_pnl_per_trade": -177.70804347826086,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 5,
+            "SL": 5,
+            "TIME_LIMIT": 34,
+            "TP": 2
+          },
+          "lrc_thr": 45.0,
+          "n_trades": 46,
+          "net_pnl": -8174.57,
+          "profit_factor": 0.01,
+          "signal_exit_pct": 10.869565217391305,
+          "sl": 2.5,
+          "time_limit_pct": 73.91304347826087
+        },
+        "AVAXUSDT": {
+          "avg_pnl_per_trade": -154.6811111111111,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 10,
+            "SL": 8,
+            "TIME_LIMIT": 26,
+            "TP": 1
+          },
+          "lrc_thr": 45.0,
+          "n_trades": 45,
+          "net_pnl": -6960.65,
+          "profit_factor": 0.01,
+          "signal_exit_pct": 22.22222222222222,
+          "sl": 2.5,
+          "time_limit_pct": 57.77777777777778
+        },
+        "BTCUSDT": {
+          "avg_pnl_per_trade": -99.2584375,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 14,
+            "SL": 9,
+            "TIME_LIMIT": 8,
+            "TP": 1
+          },
+          "lrc_thr": 40.0,
+          "n_trades": 32,
+          "net_pnl": -3176.27,
+          "profit_factor": 0.09,
+          "signal_exit_pct": 43.75,
+          "sl": 2.5,
+          "time_limit_pct": 25.0
+        },
+        "DOGEUSDT": {
+          "avg_pnl_per_trade": -199.125,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 5,
+            "SL": 8,
+            "TIME_LIMIT": 25
+          },
+          "lrc_thr": 40.0,
+          "n_trades": 38,
+          "net_pnl": -7566.75,
+          "profit_factor": 0.0,
+          "signal_exit_pct": 13.157894736842104,
+          "sl": 2.5,
+          "time_limit_pct": 65.78947368421052
+        },
+        "ETHUSDT": {
+          "avg_pnl_per_trade": -92.82444444444444,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 4,
+            "SL": 11,
+            "TIME_LIMIT": 17,
+            "TP": 4
+          },
+          "lrc_thr": 55.0,
+          "n_trades": 36,
+          "net_pnl": -3341.68,
+          "profit_factor": 0.09,
+          "signal_exit_pct": 11.11111111111111,
+          "sl": 2.5,
+          "time_limit_pct": 47.22222222222222
+        },
+        "JUPUSDT": null,
+        "PENDLEUSDT": null,
+        "RUNEUSDT": {
+          "avg_pnl_per_trade": -234.9721875,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 1,
+            "SL": 3,
+            "TIME_LIMIT": 28
+          },
+          "lrc_thr": 55.0,
+          "n_trades": 32,
+          "net_pnl": -7519.11,
+          "profit_factor": 0.0,
+          "signal_exit_pct": 3.125,
+          "sl": 2.5,
+          "time_limit_pct": 87.5
+        },
+        "UNIUSDT": {
+          "avg_pnl_per_trade": -575.4985714285714,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 2,
+            "SL": 2,
+            "TIME_LIMIT": 10
+          },
+          "lrc_thr": 35.0,
+          "n_trades": 14,
+          "net_pnl": -8056.98,
+          "profit_factor": 0.0,
+          "signal_exit_pct": 14.285714285714286,
+          "sl": 1.5,
+          "time_limit_pct": 71.42857142857143
+        },
+        "XLMUSDT": {
+          "avg_pnl_per_trade": -553.6769230769231,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 4,
+            "SL": 1,
+            "TIME_LIMIT": 8
+          },
+          "lrc_thr": 40.0,
+          "n_trades": 13,
+          "net_pnl": -7197.8,
+          "profit_factor": 0.0,
+          "signal_exit_pct": 30.76923076923077,
+          "sl": 2.5,
+          "time_limit_pct": 61.53846153846154
+        }
+      },
+      "primary_criterion": {
+        "avg_pf_on_positive_subset": 0.0,
+        "n_syms_avg_ppt_positive": 0,
+        "n_syms_net_pnl_positive": 0,
+        "pass": false,
+        "required": {
+          "min_avg_pf_on_positive_subset": 1.2,
+          "min_n_syms_avg_ppt_positive": 1,
+          "min_n_syms_net_pnl_positive": 3
+        },
+        "syms_avg_ppt_positive": [],
+        "syms_net_pnl_positive": []
+      },
+      "secondary_criterion": {
+        "bankrupt_eligible": [
+          "ADAUSDT",
+          "AVAXUSDT",
+          "DOGEUSDT",
+          "RUNEUSDT",
+          "UNIUSDT",
+          "XLMUSDT"
+        ],
+        "bankrupt_pass_tl_under_20pct": [],
+        "n_bankrupt_pass": 0,
+        "pass": false,
+        "required_n_pass": 6,
+        "tl_pct_threshold": 20.0
+      },
+      "window": "A"
+    }
+  },
+  "cross_window_stability": {
+    "ADAUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.5,
+          45.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "AVAXUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          45.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "BTCUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.5,
+          40.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "DOGEUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          1.5,
+          40.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "ETHUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          55.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "JUPUSDT": {
+      "cells_per_window": {
+        "A": null,
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 0,
+      "same_cell_across_windows": null
+    },
+    "PENDLEUSDT": {
+      "cells_per_window": {
+        "A": null,
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 0,
+      "same_cell_across_windows": null
+    },
+    "RUNEUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          55.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "UNIUSDT": {
+      "cells_per_window": {
+        "A": [
+          1.5,
+          1.5,
+          35.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "XLMUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          1.5,
+          40.0
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    }
+  },
+  "verdict": {
+    "n_primary_pass": 0,
+    "n_secondary_pass": 0,
+    "n_windows": 1,
+    "primary_pass_per_window": {
+      "A": false
+    },
+    "secondary_pass_per_window": {
+      "A": false
+    },
+    "verdict": "R1_FAIL"
+  }
+}

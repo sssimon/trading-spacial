@@ -1,0 +1,81 @@
+{
+  "cli_args": {
+    "baselines_only": false,
+    "skip_baselines": true,
+    "smoke": false,
+    "window": "A",
+    "workers": 8
+  },
+  "code_commit": "6d81a61a0438de810c84aba0ea3088b4f5c7c727",
+  "currently_bankrupt_symbols": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "JUPUSDT",
+    "PENDLEUSDT",
+    "RUNEUSDT",
+    "UNIUSDT",
+    "XLMUSDT"
+  ],
+  "cutoff_iso": "2025-04-30T00:00:00+00:00",
+  "halt_after_a_fired": true,
+  "halt_after_a_symbols_threshold": 6,
+  "halt_after_a_threshold_pct": 35.0,
+  "harness": "tools.r1_signal_exit_sweep",
+  "leakage_check": {
+    "all_sub_windows_below_cutoff": true,
+    "method": "cutoff drops bars >= cutoff in run_backtest_with_params; sub-windows independently constrained below cutoff."
+  },
+  "n_trades_min": 10,
+  "ran_at_iso": "2026-05-12T14:59:13.473321+00:00",
+  "spec_ref": "docs/superpowers/plans/2026-05-12-r1-dynamic-exit-pre-reg.md",
+  "sub_windows": {
+    "A": {
+      "end_iso": "2022-07-01T00:00:00+00:00",
+      "start_iso": "2022-04-01T00:00:00+00:00"
+    },
+    "B": {
+      "end_iso": "2023-07-01T00:00:00+00:00",
+      "start_iso": "2023-04-01T00:00:00+00:00"
+    },
+    "C": {
+      "end_iso": "2025-04-30T00:00:00+00:00",
+      "start_iso": "2025-01-30T00:00:00+00:00"
+    }
+  },
+  "sweep_grid": {
+    "atr_be_mult": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "atr_sl_mult": [
+      0.5,
+      0.7,
+      1.0,
+      1.5,
+      2.5
+    ],
+    "cells_per_symbol_per_window": 75,
+    "lrc_exit_threshold": [
+      35.0,
+      40.0,
+      45.0,
+      50.0,
+      55.0
+    ]
+  },
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "UNIUSDT",
+    "XLMUSDT",
+    "PENDLEUSDT",
+    "JUPUSDT",
+    "RUNEUSDT"
+  ],
+  "usable_bars_min": 500
+}
