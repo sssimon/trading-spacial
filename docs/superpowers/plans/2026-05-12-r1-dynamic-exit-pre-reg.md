@@ -265,6 +265,18 @@ Per kickoff: "si primary falla pero secondary muestra TIME_LIMIT shift correcto,
 
 Operator picks one. Pre-registered: NO running both in parallel. NO running R3 with multiple signal candidates.
 
+### §4.6 — Halt-guard scope (2026-05-13 amendment, post-PR #330)
+
+§10 halt + `n_windows < 3` → `R1_INSUFFICIENT_DATA` **only** when the naive verdict is `R1_SUCCESS` / `R1_SUCCESS_CONDITIONAL`. Negative verdicts (`R1_FAIL` / `R1_INCONCLUSIVE`) on partial windows are **preserved** — §10 was pre-registered to act on dispositive partial negative evidence, not to suspend its inferential weight.
+
+**Asymmetry rationale:** spurious favorable verdicts have one-sided incentive bias (operator + project momentum favor declaring success early); honest negative evidence does not carry the same bias. Demanding symmetric sample-size discipline here would penalize the discipline-preserving move (acting on dispositive evidence) and reward the discipline-eroding move (burning compute to formalize an already-decided outcome).
+
+**Scope of this amendment:** clarifies §4.2 verdict-table behavior under §10 halt. Does **not** modify the verdict criteria themselves nor the §10 halt threshold. Implementation lives at `tools/r1_verdict.py:_classify_verdict` (PR #330, merged 2026-05-12).
+
+**Implication for R1:** recorded R1 verdict (halt=True, n_windows=1, primary 0/0, secondary 0/0) classifies as `R1_FAIL` per the asymmetric guard. §A.4 P(viable) <10% trigger fires; H5 escalation strongly considered (per audit §A.4 + §A.5).
+
+**Methodology framing:** this is an **explicit pre-reg amendment**, not a soft post-hoc clarification. The asymmetric scope was chosen by the dev agent during PR #330 implementation as the more methodologically defensible interpretation; operator + reviewer concurred (post-multi-agent review). Documenting the choice here, in the pre-reg, prevents future readers from interpreting the asymmetry as silent rationalization.
+
 ---
 
 ## §5 · Edge cases pre-registrados
@@ -491,5 +503,6 @@ Per audit §A.7 + §A.8 + §6 retrospective, R1 inherits these caveats:
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-12 | Pre-reg sub-spec inicial — drafted from kickoff prompt + R2 derivation_audit + structural audit context | Claude Opus 4.7 (sesión kickoff) + sssamuelll |
+| 2026-05-13 | §4.6 amendment — halt-guard scope clarified (asymmetric, favorable-direction only); references §4.2 + §10. Post-PR #330 multi-agent review surfaced the methodology question; operator + reviewer concurred on interpretation A. | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas para iteración post-operator-review en §9.
