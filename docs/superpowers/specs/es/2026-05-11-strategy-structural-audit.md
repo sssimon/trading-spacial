@@ -596,6 +596,62 @@ Las priorizaciones de §5 y §6 R2 quedan razonables porque la dimensión que R2
 
 **Nota metodológica:** Este amendment fue trigger-eado por pre-execution math sanity check durante R2 pre-reg. El claim original de H7 no estaba wrong sobre TL — estaba over-specified al claim también PoV over-restriction. Pre-execution math caught it antes de 2h de compute confirmar algo ya derivable del cost model calibration.
 
+### §A.8 — H7 fully retracted (2026-05-12, post-R2 derivation)
+
+[§A.7 dejó H7's TL component como "still valid". R2 execution (derivation step) lo invalidó también.]
+
+**R2 derivation result (2026-05-12):** ATR-based time-to-±1-ATR-move median converges a **~5h uniformly** sobre el basket completo (≥10K observations per symbol, censure rate <0.13%). Per-symbol detail:
+
+| symbol | current_TL | new_TL_ATR | Δ vs current |
+|---|---:|---:|---:|
+| BTCUSDT | 14 | 5 | -9 (dramatic tightening of major) |
+| ETHUSDT | 14 | 5 | -9 (dramatic tightening of major) |
+| ADAUSDT | 5 | 5 | 0 (matches current) |
+| AVAXUSDT | 8 | 5 | -3 (tightening) |
+| DOGEUSDT | 5 | 5 | 0 (matches current) |
+| UNIUSDT | 5 | 5 | 0 (matches current) |
+| XLMUSDT | 5 | 5 | 0 (matches current) |
+| PENDLEUSDT | 5 | 4 | -1 (slight tighten) |
+| JUPUSDT | 5 | 4 | -1 (slight tighten) |
+| RUNEUSDT | 5 | 4 | -1 (slight tighten) |
+
+**6 of 8 currently-bankrupt symbols have current_TL = new_TL_ATR exactly (or tighter).** The theoretical anchor confirms current TL is already at the right horizon for the mean-reversion frame (per audit §6 R3 / pre-reg §6).
+
+**Implication for H7:** the TL component was NOT pointing to "gates over-restrict" — current TL was already at the appropriate anchor for the current strategy frame. H7's TL claim was **wrong about direction**, not just over-specified.
+
+**H7 IS NOW FULLY RETRACTED.** Both components fail theoretical re-derivation:
+- PoV component: invalidated 2026-05-11 (current PoV is looser than v1 cost model anchor — see §A.7).
+- TL component: invalidated 2026-05-12 (current TL matches ATR-based anchor for 8/10 symbols).
+
+**Reformulated mechanism (third iteration, post-R2):**
+- ~~H7 (gates over-restrict)~~ — **RETRACTED FULLY**.
+- **H1** (signal expectancy ≈ -0.9R) — CONFIRMED, primary mechanism.
+- **H8** (cost model amplifies thin-liquidity slippage) — CONFIRMED, secondary mechanism.
+- **H4** (R-multiple sizing inflates path-to-bankruptcy) — CONFIRMED, structural mechanism.
+
+Gates are not the bottleneck. The bankruptcy in 8/10 symbols is fundamental signal+cost+sizing pathology that gate tuning cannot address.
+
+**Mean-reversion vs momentum frame caveat (per operator review 2026-05-12):**
+
+The ATR-based time-to-±1-ATR anchor is appropriate for the **mean-reversion frame** (current LRC strategy). For a random walk, time-to-N-ATR ≈ N² × time-to-1-ATR — so time-to-4-ATR ≈ 80h. Under a **momentum/sustained-move frame** (audit §6 R3 candidates), TL anchor would be much longer.
+
+R3 execution (if it proceeds) needs to **derive its own TL anchor** matched to the alternative signal's expected horizon. This R2 result does NOT constrain R3's TL choice. The R2 verdict applies to the *current* mean-reversion frame only.
+
+**Phase 2 status update (post-R2 + pre-R1 query):**
+- R2: FAIL (gates aren't the bottleneck).
+- R1: **viable** per pre-R1 exit reason query (TIME_LIMIT 44% dominant in current-config trades; dynamic exits could compete).
+- R3: still TBD (signal alternative is the deep fix).
+- Joint P(viable strategy) updated to ~12-15% (down from 15-25%; H5 escalation threshold not crossed).
+
+**Phase 2 re-order:** original `R2 → R1 → R3` becomes `[pre-R1 query: complete] → R1 → R3`. R2 closed FAIL; #317 closed; R1 pre-reg next session.
+
+**Closure references:**
+- `data/retune/2026-05-11-r2-gates/derivation_audit.md` — full math + verdict + pre-R1 query result
+- `data/retune/2026-05-11-r2-gates/tl_distributions.json` — per-symbol observation distributions
+- `data/retune/2026-05-11-r2-gates/pre_r1_exit_reasons.json` — exit reason aggregate verdict
+- Issue #317 — closed with conclusion comment.
+- Issue #325 — remains open (PoV deferred to cost model v2).
+
 ---
 
 ## §10 · Historial de actualización
@@ -605,5 +661,6 @@ Las priorizaciones de §5 y §6 R2 quedan razonables porque la dimensión que R2
 | 2026-05-11 | Draft inicial Phase 1 (§1–§10) | Claude Opus 4.7 (sesión audit) + sssamuelll |
 | 2026-05-11 | §A amendment — 5 modifications + 2 §8 sub-decisions from operator review | sssamuelll + Claude Opus 4.7 (esta sesión) |
 | 2026-05-11 | §A.7 — H7 PoV component reformulated post pre-execution math sanity check on R2 (PR #324) | sssamuelll + Claude Opus 4.7 |
+| 2026-05-12 | §A.8 — H7 fully retracted post-R2 derivation; R2 verdict FAIL; #317 closed; pre-R1 query → R1_PLAUSIBLE | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas adicionales para feedback iterativo en el PR y revisión externa adicional si aplica.
