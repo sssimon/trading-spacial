@@ -363,9 +363,34 @@ def _git_commit() -> str:
 
 
 def _save_json(path: Path, payload):
+    """Write `payload` as JSON. NaN / Inf raise rather than serialize.
+
+    The default `json.dump` emits `NaN` / `Infinity` tokens that are not valid
+    JSON — `json.loads` accepts them but the standard does not, and downstream
+    parsers (verdict calculator, audit doc consumers) may silently mishandle
+    them. Failing here surfaces the upstream metric pollution at write time.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        json.dump(payload, f, indent=2, sort_keys=True, default=str)
+        json.dump(payload, f, indent=2, sort_keys=True, default=str, allow_nan=False)
+
+
+def _summarize_worker_errors(results: list[dict]) -> str | None:
+    """Aggregate the `error` field across sweep results.
+
+    Returns a one-line summary if any worker reported an error, else None.
+    Surfaces multi-worker failure modes that would otherwise be buried in the
+    750-cell result list — without this, an operator scanning stderr at the
+    end of the sweep has no signal that anything went wrong.
+    """
+    errors = [r.get("error") for r in results if r.get("error")]
+    if not errors:
+        return None
+    distinct = sorted(set(errors))
+    return (
+        f"[r1_sweep] {len(errors)} workers errored "
+        f"({len(distinct)} distinct): {distinct}"
+    )
 
 
 def _run_jobs_parallel(jobs: list[dict], workers: int, label: str) -> list[dict]:
@@ -378,6 +403,9 @@ def _run_jobs_parallel(jobs: list[dict], workers: int, label: str) -> list[dict]
         results = pool.map(_process_cell, jobs)
     elapsed = time.monotonic() - t0
     sys.stderr.write(f"[r1_sweep] {label}: completed in {elapsed:.1f}s\n")
+    err_summary = _summarize_worker_errors(results)
+    if err_summary:
+        sys.stderr.write(err_summary + "\n")
     return results
 
 

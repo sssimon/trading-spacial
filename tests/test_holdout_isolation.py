@@ -64,6 +64,10 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # above — reads data/ohlcv.db only; artefact dir carries the literal
     # '-pre-holdout' suffix.
     "tools/regime_retune_pre_holdout.py",
+    # R2 gates re-derivation tool (Phase 2 R2). Prints "Pre-holdout end: <ts>"
+    # as a console label — `HOLDOUT_START` is the cutoff timestamp constant,
+    # the literal string is operator-facing output, not a data access path.
+    "tools/r2_gates_rederivation.py",
     # A.2 walk-forward harness modules and A.4 evaluation modules will be
     # added here when those tickets land.
 }

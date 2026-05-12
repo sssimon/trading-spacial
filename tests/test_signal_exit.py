@@ -160,6 +160,20 @@ def test_should_signal_exit_nan_lrc_returns_false():
     assert _should_signal_exit("SHORT", float("nan"), 50.0) is False
 
 
+def test_should_signal_exit_lowercase_direction_case_insensitive():
+    """Defensive: accept lowercase/mixed-case direction strings (operator config drift)."""
+    from backtest import _should_signal_exit
+    assert _should_signal_exit("long", 80.0, 50.0) is True
+    assert _should_signal_exit("Short", 20.0, 50.0) is True
+    assert _should_signal_exit("LoNg", 80.0, 50.0) is True
+
+
+def test_should_signal_exit_none_direction_returns_false():
+    """Defensive: None direction (e.g., position lacking a side) never triggers exit."""
+    from backtest import _should_signal_exit
+    assert _should_signal_exit(None, 80.0, 50.0) is False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # §2.2 — SIGNAL_EXIT fires via the simulator (integration)
 # ─────────────────────────────────────────────────────────────────────────────

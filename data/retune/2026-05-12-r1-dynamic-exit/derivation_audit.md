@@ -97,7 +97,7 @@ Implementation:
 | XLMUSDT | (2.5, 1.5, 40.0) | 13 | -7,197.80 | -553.68 | 0.00 | 61.5 ⚠️ | 30.8 |
 | RUNEUSDT | (2.5, 2.0, 55.0) | 32 | -7,519.11 | -234.97 | 0.00 | 87.5 ⚠️ | 3.1 |
 
-Hours. ⚠️ = `TL% > 35%` halt-condition contributor. **7 of 8** symbols breach the `TIME_LIMIT% > 35%` threshold on their argmax cell ⇒ pre-reg §10 halt-after-A fires (required: >6).
+⚠️ = `TL% > 35%` halt-condition contributor. **7 of 8** symbols breach the `TIME_LIMIT% > 35%` threshold on their argmax cell ⇒ pre-reg §10 halt-after-A fires (required: >6).
 
 **All 8 net_pnl values are negative.** Avg_pnl_per_trade likewise. Profit factors ≤ 0.09. Primary criterion (§4) is FAIL by every dimension.
 
@@ -166,7 +166,7 @@ The halt is firing on the operational definition pre-registered (`TIME_LIMIT% > 
 
 Per §10 explicit halt rule: running B+C after A's halt would not change interpretation. The mechanism's lift on profitability is fundamentally not present in A; without a mechanistic reason to expect B/C to differ, compute on B+C is not justified.
 
-**Compute saved:** 1,500 backtests × ~1.5s/cell × 8 workers parallel = ~5 min wall (modest, but the principle is what matters — pre-registration of the halt condition prevents post-hoc rationalization in either direction).
+**Compute saved:** modest in wall time; the principle is what matters — pre-registration of the halt condition prevents post-hoc rationalization in either direction.
 
 **Cross-sub-window stability (§4.4) is therefore unavailable.** Only window A's argmax cells exist. The "stable across all 3 windows" / "diverges" diagnostic is empty.
 

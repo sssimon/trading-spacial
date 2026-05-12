@@ -52,11 +52,20 @@ def _load_json(name: str):
 
 
 def _argmax_cell(cells: list[dict]) -> dict | None:
-    """Pre-reg §4.1: argmax(net_pnl) among cells with n_trades >= N_TRADES_MIN."""
+    """Pre-reg §4.1: argmax(net_pnl) among cells with n_trades >= N_TRADES_MIN.
+
+    Tie-break: when two cells tie on net_pnl, favor lower `sl`, then lower `be`,
+    then lower `lrc_thr` — i.e., the more conservative parameter combination.
+    Determinism matters because the previous insertion-order tie-break made
+    cell selection fragile to job-execution order across parallel workers.
+    """
     eligible = [c for c in cells if c.get("n_trades", 0) >= N_TRADES_MIN]
     if not eligible:
         return None
-    return max(eligible, key=lambda c: c["net_pnl"])
+    return max(
+        eligible,
+        key=lambda c: (c["net_pnl"], -c["sl"], -c["be"], -c["lrc_thr"]),
+    )
 
 
 def _avg_pnl_per_trade(cell: dict | None) -> float | None:
@@ -190,8 +199,16 @@ def _cross_window_stability(per_window_argmax: dict[str, dict]) -> dict:
     return out
 
 
-def _classify_verdict(per_window_analysis: dict[str, dict]) -> dict:
-    """Pre-reg §4.2 verdict classification."""
+def _classify_verdict(per_window_analysis: dict[str, dict], *, halt: bool = False) -> dict:
+    """Pre-reg §4.2 verdict classification.
+
+    Gap #4 (halt guard): if `halt=True` and fewer than 3 sub-windows ran, a naive
+    `R1_SUCCESS` / `R1_SUCCESS_CONDITIONAL` is overridden to `R1_INSUFFICIENT_DATA`.
+    Rationale: a favorable verdict on partial evidence is "spurious" — we can't
+    declare success without seeing B+C. `R1_FAIL` / `R1_INCONCLUSIVE` are kept
+    as-is: clear negative evidence on the windows that did run is not spurious,
+    and halt does not invalidate it.
+    """
     p_per_w = {w: a["primary_criterion"]["pass"] for w, a in per_window_analysis.items()}
     s_per_w = {w: a["secondary_criterion"]["pass"] for w, a in per_window_analysis.items()}
 
@@ -209,6 +226,9 @@ def _classify_verdict(per_window_analysis: dict[str, dict]) -> dict:
     else:
         verdict = "R1_FAIL"
 
+    if halt and n_windows < 3 and verdict in ("R1_SUCCESS", "R1_SUCCESS_CONDITIONAL"):
+        verdict = "R1_INSUFFICIENT_DATA"
+
     return {
         "verdict": verdict,
         "primary_pass_per_window": p_per_w,
@@ -216,6 +236,7 @@ def _classify_verdict(per_window_analysis: dict[str, dict]) -> dict:
         "n_primary_pass": n_primary_pass,
         "n_secondary_pass": n_secondary_pass,
         "n_windows": n_windows,
+        "halt": halt,
     }
 
 
@@ -257,6 +278,8 @@ def main() -> int:
     sweep_b = _load_json("sweep_results_B.json")
     sweep_c = _load_json("sweep_results_C.json")
     baseline = _load_json("baseline_pre_signal_exit.json")
+    halt_diag = _load_json("halt_after_a_diagnostic.json")
+    halt = bool(halt_diag and halt_diag.get("halt"))
 
     if baseline is None:
         print("WARNING: baseline_pre_signal_exit.json missing", file=sys.stderr)
@@ -291,10 +314,12 @@ def main() -> int:
             flag = "  [diverges]"
         print(f"  {sym:<12}  A:{cells.get('A')}  B:{cells.get('B')}  C:{cells.get('C')}{flag}")
 
-    verdict = _classify_verdict(analyses)
+    verdict = _classify_verdict(analyses, halt=halt)
     print(f"\n=== Verdict (§4.2) ===")
     print(f"  Primary pass per window:   {verdict['primary_pass_per_window']}")
     print(f"  Secondary pass per window: {verdict['secondary_pass_per_window']}")
+    if halt:
+        print(f"  Pre-reg §10 halt fired:    True (loaded from halt_after_a_diagnostic.json)")
     print(f"  ==> VERDICT: {verdict['verdict']}")
 
     out = {

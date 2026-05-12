@@ -560,9 +560,10 @@ def _should_signal_exit(direction, lrc_pct, threshold: float) -> bool:
     if math.isnan(v):
         return False
     thr = float(threshold)
-    if direction == "LONG":
+    d = (direction or "").upper()
+    if d == "LONG":
         return v >= thr
-    if direction == "SHORT":
+    if d == "SHORT":
         return v <= (100.0 - thr)
     return False
 

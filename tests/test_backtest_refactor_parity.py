@@ -84,6 +84,78 @@ def test_simulate_strategy_parity_without_kill_switch(tmp_path, monkeypatch):
 @pytest.mark.skipif(
     not os.path.exists(OHLCV_DB), reason="requires cached market data (data/ohlcv.db)",
 )
+def test_simulate_strategy_dynamic_exit_flag_off_real_data_parity(tmp_path, monkeypatch):
+    """`cfg.dynamic_exit_enabled=False` produces byte-identical trades vs no-field baseline.
+
+    Extends `test_signal_exit.test_flag_off_byte_identical_to_no_field_baseline`
+    (synthetic flat-bars) to real-data fixture (BTCUSDT 2024-01-01 → 2024-03-01).
+    Catches drift between the no-field and the explicit-False code paths under
+    realistic OHLCV that exercises full SL/TP/TIME_LIMIT logic.
+    """
+    from backtest import simulate_strategy, get_cached_data
+    import btc_api
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    btc_api.init_db()
+
+    symbol = "BTCUSDT"
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    data_start = datetime(2023, 1, 1, tzinfo=timezone.utc)
+
+    df1h = get_cached_data(symbol, "1h", start_date=data_start)
+    df4h = get_cached_data(symbol, "4h", start_date=data_start)
+    df5m = get_cached_data(symbol, "5m", start_date=data_start)
+    df1d = get_cached_data(symbol, "1d", start_date=data_start)
+
+    if df1h.empty or df4h.empty or df5m.empty:
+        pytest.skip("BTCUSDT market data not cached in data/ohlcv.db")
+
+    cfg_no_field = {}
+    cfg_flag_off = {"dynamic_exit_enabled": False, "lrc_exit_threshold": 50.0}
+
+    trades_baseline, equity_baseline = simulate_strategy(
+        df1h.copy(), df4h.copy(), df5m.copy(), symbol,
+        sim_start=start, sim_end=end, df1d=df1d.copy(),
+        cfg=cfg_no_field,
+        enable_slippage=False, enable_spread=False, enable_fees=False,
+    )
+    trades_flag_off, equity_flag_off = simulate_strategy(
+        df1h.copy(), df4h.copy(), df5m.copy(), symbol,
+        sim_start=start, sim_end=end, df1d=df1d.copy(),
+        cfg=cfg_flag_off,
+        enable_slippage=False, enable_spread=False, enable_fees=False,
+    )
+
+    assert len(trades_baseline) == len(trades_flag_off), (
+        f"trade count drift: baseline={len(trades_baseline)} flag_off={len(trades_flag_off)}"
+    )
+
+    def _signature(t: dict) -> tuple:
+        return (
+            t.get("direction"),
+            t.get("exit_reason"),
+            round(float(t.get("entry_price", 0.0)), 8),
+            round(float(t.get("exit_price", 0.0)), 8),
+            round(float(t.get("pnl_usd", 0.0)), 8),
+            t.get("entry_time"),
+            t.get("exit_time"),
+        )
+
+    for tb, tf in zip(trades_baseline, trades_flag_off):
+        assert _signature(tb) == _signature(tf), (
+            f"trade drift: baseline={tb}\n  flag_off={tf}"
+        )
+
+    assert equity_baseline[-1]["equity"] == pytest.approx(equity_flag_off[-1]["equity"], rel=1e-9)
+    assert not any(t.get("exit_reason") == "SIGNAL_EXIT" for t in trades_baseline)
+    assert not any(t.get("exit_reason") == "SIGNAL_EXIT" for t in trades_flag_off)
+
+
+@pytest.mark.skipif(
+    not os.path.exists(OHLCV_DB), reason="requires cached market data (data/ohlcv.db)",
+)
 def test_simulate_strategy_with_simulator_wires_correctly(tmp_path, monkeypatch):
     """With apply_kill_switch=True + shared_simulator, closed trades feed the
     simulator and the tier can evolve mid-backtest.
