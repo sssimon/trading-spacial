@@ -542,6 +542,31 @@ def _apply_costs_to_trade(
 #  SIMULATION
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _should_signal_exit(direction, lrc_pct, threshold: float) -> bool:
+    """Decide whether the LRC-based signal-reversal exit fires this bar.
+
+    Pre-reg §2.2 (Phase 2 R1):
+      - LONG  exits when lrc_pct >= threshold (price reverts up toward mid).
+      - SHORT exits when lrc_pct <= (100 - threshold) (price reverts down toward mid).
+    Pre-reg §5.3 warmup safety: None / NaN lrc_pct returns False.
+    """
+    if lrc_pct is None:
+        return False
+    try:
+        v = float(lrc_pct)
+    except (TypeError, ValueError):
+        return False
+    if math.isnan(v):
+        return False
+    thr = float(threshold)
+    if direction == "LONG":
+        return v >= thr
+    if direction == "SHORT":
+        return v <= (100.0 - thr)
+    return False
+
+
 def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame,
                       symbol: str, sl_mode: str = "atr",
                       atr_sl_mult: float = None, atr_tp_mult: float = None,
@@ -669,6 +694,12 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     _tp_m = atr_tp_mult if atr_tp_mult is not None else ATR_TP_MULT
     _be_m = atr_be_mult if atr_be_mult is not None else ATR_BE_MULT
 
+    # Phase 2 R1 — LRC-based signal-reversal exit. Flag-gated via cfg;
+    # defaults to False so the legacy `atr_*` kwargs path (cfg is None) and any
+    # call lacking these cfg keys behave byte-identically to pre-R1.
+    _dynamic_exit_enabled = bool((cfg or {}).get("dynamic_exit_enabled", False))
+    _lrc_exit_threshold = float((cfg or {}).get("lrc_exit_threshold", 50.0))
+
     # ─────────────────────────────────────────────────────────────────────
     # #186 A6 — KillSwitchSimulator wiring.
     #
@@ -741,18 +772,26 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 exit_price = position["tp"]
                 exit_reason = "TP"
             else:
-                _tl_h = position.get("time_limit_hours")
-                if _tl_h is not None:
-                    hours_open = (bar_time - position["entry_time"]).total_seconds() / 3600
-                    if hours_open >= _tl_h:
+                exit_price = None
+                exit_reason = None
+
+                # Phase 2 R1 — SIGNAL_EXIT check (pre-reg §2.2). Tie-break:
+                # SL > TP > SIGNAL_EXIT > TIME_LIMIT. SL/TP already handled above.
+                if _dynamic_exit_enabled and i >= LRC_PERIOD:
+                    _slice_close = df1h["close"].iloc[i - LRC_PERIOD + 1 : i + 1]
+                    _lrc_pct_now, _, _, _ = calc_lrc(_slice_close, LRC_PERIOD, LRC_STDEV)
+                    if _should_signal_exit(pos_dir, _lrc_pct_now, _lrc_exit_threshold):
                         exit_price = float(bar["close"])
-                        exit_reason = "TIME_LIMIT"
-                    else:
-                        exit_price = None
-                        exit_reason = None
-                else:
-                    exit_price = None
-                    exit_reason = None
+                        exit_reason = "SIGNAL_EXIT"
+
+                # TIME_LIMIT check (only if SIGNAL_EXIT did not fire).
+                if exit_reason is None:
+                    _tl_h = position.get("time_limit_hours")
+                    if _tl_h is not None:
+                        hours_open = (bar_time - position["entry_time"]).total_seconds() / 3600
+                        if hours_open >= _tl_h:
+                            exit_price = float(bar["close"])
+                            exit_reason = "TIME_LIMIT"
 
             if exit_price is not None:
                 trade = _close_position(
