@@ -1,0 +1,82 @@
+{
+  "ADAUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 0.5,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.003,
+    "time_limit_hours": 5
+  },
+  "AVAXUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 1.5,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.005,
+    "time_limit_hours": 5
+  },
+  "BTCUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 1.0,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.01,
+    "time_limit_hours": 5
+  },
+  "DOGEUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 0.7,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.005,
+    "time_limit_hours": 5
+  },
+  "ETHUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 1.2,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.01,
+    "time_limit_hours": 5
+  },
+  "JUPUSDT": {
+    "atr_be_mult": 2.5,
+    "atr_sl_mult": 0.5,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.005,
+    "time_limit_hours": 4
+  },
+  "PENDLEUSDT": {
+    "atr_be_mult": 2.0,
+    "atr_sl_mult": 0.5,
+    "atr_tp_mult": 3.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.0015,
+    "time_limit_hours": 4
+  },
+  "RUNEUSDT": {
+    "atr_be_mult": 2.5,
+    "atr_sl_mult": 0.7,
+    "atr_tp_mult": 6.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.003,
+    "time_limit_hours": 4
+  },
+  "UNIUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 1.0,
+    "atr_tp_mult": 3.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.002,
+    "time_limit_hours": 5
+  },
+  "XLMUSDT": {
+    "atr_be_mult": 1.5,
+    "atr_sl_mult": 0.5,
+    "atr_tp_mult": 4.0,
+    "cooldown_hours": 6,
+    "max_participation_rate": 0.0015,
+    "time_limit_hours": 5
+  }
+}

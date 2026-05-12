@@ -1,0 +1,191 @@
+{
+  "aggregate": {
+    "aggregate_counts": {
+      "BANKRUPT": 8,
+      "SL": 18,
+      "TIME_LIMIT": 22,
+      "TP": 2
+    },
+    "aggregate_pct": {
+      "BANKRUPT": 16.0,
+      "SL": 36.0,
+      "TIME_LIMIT": 44.0,
+      "TP": 4.0
+    },
+    "dominant_exit": "TIME_LIMIT",
+    "recommendation": "TIME_LIMIT exits dominate. Dynamic exits (trailing stop, signal-reversal) could mechanistically compete. Proceed to R1 pre-reg.",
+    "verdict": "R1_PLAUSIBLE"
+  },
+  "cutoff_iso": "2025-04-30T00:00:00+00:00",
+  "harness": "tools.r2_pre_r1_exit_reason_query",
+  "per_symbol": [
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "TIME_LIMIT": 1
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 50.0,
+        "TIME_LIMIT": 50.0
+      },
+      "net_pnl": -16280.94,
+      "params": {
+        "atr_be_mult": 1.5,
+        "atr_sl_mult": 0.5,
+        "atr_tp_mult": 4.0
+      },
+      "symbol": "ADAUSDT",
+      "total_trades": 1
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 5,
+        "TIME_LIMIT": 4
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 10.0,
+        "SL": 50.0,
+        "TIME_LIMIT": 40.0
+      },
+      "net_pnl": -9023.21,
+      "params": {
+        "atr_be_mult": 1.5,
+        "atr_sl_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "symbol": "AVAXUSDT",
+      "total_trades": 9
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 1
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 50.0,
+        "SL": 50.0
+      },
+      "net_pnl": -30488.65,
+      "params": {
+        "atr_be_mult": 1.5,
+        "atr_sl_mult": 0.7,
+        "atr_tp_mult": 4.0
+      },
+      "symbol": "DOGEUSDT",
+      "total_trades": 1
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 3,
+        "TIME_LIMIT": 9,
+        "TP": 2
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 6.67,
+        "SL": 20.0,
+        "TIME_LIMIT": 60.0,
+        "TP": 13.33
+      },
+      "net_pnl": -9041.04,
+      "params": {
+        "atr_be_mult": 1.5,
+        "atr_sl_mult": 1.0,
+        "atr_tp_mult": 3.0
+      },
+      "symbol": "UNIUSDT",
+      "total_trades": 14
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 7,
+        "TIME_LIMIT": 6
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 7.14,
+        "SL": 50.0,
+        "TIME_LIMIT": 42.86
+      },
+      "net_pnl": -9046.65,
+      "params": {
+        "atr_be_mult": 1.5,
+        "atr_sl_mult": 0.5,
+        "atr_tp_mult": 4.0
+      },
+      "symbol": "XLMUSDT",
+      "total_trades": 13
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "TIME_LIMIT": 1
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 50.0,
+        "TIME_LIMIT": 50.0
+      },
+      "net_pnl": -15170.71,
+      "params": {
+        "atr_be_mult": 2.0,
+        "atr_sl_mult": 0.5,
+        "atr_tp_mult": 3.0
+      },
+      "symbol": "PENDLEUSDT",
+      "total_trades": 1
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 1,
+        "TIME_LIMIT": 1
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 33.33,
+        "SL": 33.33,
+        "TIME_LIMIT": 33.33
+      },
+      "net_pnl": -11952.62,
+      "params": {
+        "atr_be_mult": 2.5,
+        "atr_sl_mult": 0.5,
+        "atr_tp_mult": 4.0
+      },
+      "symbol": "JUPUSDT",
+      "total_trades": 2
+    },
+    {
+      "bankruptcy_count": 1,
+      "exit_reason_counts": {
+        "BANKRUPT": 1,
+        "SL": 1
+      },
+      "exit_reason_pct": {
+        "BANKRUPT": 50.0,
+        "SL": 50.0
+      },
+      "net_pnl": -15245.17,
+      "params": {
+        "atr_be_mult": 2.5,
+        "atr_sl_mult": 0.7,
+        "atr_tp_mult": 6.0
+      },
+      "symbol": "RUNEUSDT",
+      "total_trades": 1
+    }
+  ],
+  "ran_at_iso": "2026-05-12T09:06:23.506804+00:00",
+  "spec_ref": "data/retune/2026-05-11-r2-gates/derivation_audit.md \u00a711.1",
+  "window_iso": [
+    "2024-01-30T00:00:00+00:00",
+    "2025-01-30T00:00:00+00:00"
+  ]
+}

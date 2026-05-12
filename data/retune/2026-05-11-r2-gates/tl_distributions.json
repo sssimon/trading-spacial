@@ -1,0 +1,212 @@
+{
+  "ADAUSDT": {
+    "censored_rate": 0.0003,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 6.599,
+      "p10": 1,
+      "p25": 3,
+      "p50": 5,
+      "p75": 9,
+      "p90": 14,
+      "p99": 31
+    },
+    "median_hours_raw": 5.0,
+    "n_bars": 37906,
+    "n_censored": 12,
+    "n_observations": 37880,
+    "n_valid_atr": 37892,
+    "symbol": "ADAUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "AVAXUSDT": {
+    "censored_rate": 0.0002,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 6.397,
+      "p10": 1,
+      "p25": 2,
+      "p50": 5,
+      "p75": 8,
+      "p90": 14,
+      "p99": 30
+    },
+    "median_hours_raw": 5.0,
+    "n_bars": 37906,
+    "n_censored": 6,
+    "n_observations": 37886,
+    "n_valid_atr": 37892,
+    "symbol": "AVAXUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "BTCUSDT": {
+    "censored_rate": 0.0011,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 7.82,
+      "p10": 1,
+      "p25": 3,
+      "p50": 5,
+      "p75": 10,
+      "p90": 17,
+      "p99": 44
+    },
+    "median_hours_raw": 5,
+    "n_bars": 37906,
+    "n_censored": 43,
+    "n_observations": 37849,
+    "n_valid_atr": 37892,
+    "symbol": "BTCUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "DOGEUSDT": {
+    "censored_rate": 0.0013,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 7.401,
+      "p10": 2,
+      "p25": 3,
+      "p50": 5,
+      "p75": 10,
+      "p90": 16,
+      "p99": 37
+    },
+    "median_hours_raw": 5.0,
+    "n_bars": 37906,
+    "n_censored": 48,
+    "n_observations": 37844,
+    "n_valid_atr": 37892,
+    "symbol": "DOGEUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "ETHUSDT": {
+    "censored_rate": 0.0004,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 7.09,
+      "p10": 1,
+      "p25": 3,
+      "p50": 5,
+      "p75": 9,
+      "p90": 15,
+      "p99": 36
+    },
+    "median_hours_raw": 5.0,
+    "n_bars": 37906,
+    "n_censored": 16,
+    "n_observations": 37876,
+    "n_valid_atr": 37892,
+    "symbol": "ETHUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "JUPUSDT": {
+    "censored_rate": 0.0002,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 6.133,
+      "p10": 1,
+      "p25": 2,
+      "p50": 4,
+      "p75": 8,
+      "p90": 13,
+      "p99": 27
+    },
+    "median_hours_raw": 4.0,
+    "n_bars": 10904,
+    "n_censored": 2,
+    "n_observations": 10888,
+    "n_valid_atr": 10890,
+    "symbol": "JUPUSDT",
+    "tl_anchor": 4,
+    "tl_anchor_rounded": 4
+  },
+  "PENDLEUSDT": {
+    "censored_rate": 0.0008,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 5.929,
+      "p10": 1,
+      "p25": 2,
+      "p50": 4,
+      "p75": 8,
+      "p90": 12,
+      "p99": 26
+    },
+    "median_hours_raw": 4.0,
+    "n_bars": 15998,
+    "n_censored": 12,
+    "n_observations": 15972,
+    "n_valid_atr": 15984,
+    "symbol": "PENDLEUSDT",
+    "tl_anchor": 4,
+    "tl_anchor_rounded": 4
+  },
+  "RUNEUSDT": {
+    "censored_rate": 0.0001,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 5.966,
+      "p10": 1,
+      "p25": 2,
+      "p50": 4,
+      "p75": 8,
+      "p90": 13,
+      "p99": 26
+    },
+    "median_hours_raw": 4.0,
+    "n_bars": 37906,
+    "n_censored": 2,
+    "n_observations": 37890,
+    "n_valid_atr": 37892,
+    "symbol": "RUNEUSDT",
+    "tl_anchor": 4,
+    "tl_anchor_rounded": 4
+  },
+  "UNIUSDT": {
+    "censored_rate": 0.0002,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 6.365,
+      "p10": 1,
+      "p25": 2,
+      "p50": 5,
+      "p75": 8,
+      "p90": 13,
+      "p99": 29
+    },
+    "median_hours_raw": 5,
+    "n_bars": 37906,
+    "n_censored": 9,
+    "n_observations": 37883,
+    "n_valid_atr": 37892,
+    "symbol": "UNIUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  },
+  "XLMUSDT": {
+    "censored_rate": 0.0003,
+    "clamped": false,
+    "distribution_percentiles": {
+      "mean": 6.581,
+      "p10": 1,
+      "p25": 3,
+      "p50": 5,
+      "p75": 9,
+      "p90": 14,
+      "p99": 30
+    },
+    "median_hours_raw": 5.0,
+    "n_bars": 37906,
+    "n_censored": 12,
+    "n_observations": 37880,
+    "n_valid_atr": 37892,
+    "symbol": "XLMUSDT",
+    "tl_anchor": 5,
+    "tl_anchor_rounded": 5
+  }
+}
