@@ -90,3 +90,85 @@ def test_summarize_worker_errors_includes_distinct_message_text():
     msg = _summarize_worker_errors(results)
     assert "ValueError: bad data" in msg
     assert "RuntimeError: cutoff drift" in msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _argmax_cell_per_symbol — deterministic tie-break (issue #332 item 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_argmax_cell_per_symbol_deterministic_tie_break_lower_sl_wins():
+    """On net_pnl tie, deterministic tie-break by (-sl, -be, -lrc_thr) tuple key.
+
+    Mirrors `tools/r1_verdict.py:_argmax_cell` behavior. Prevents drift between
+    sweep tool's argmax (used for halt diagnostic JSON) and verdict tool's
+    argmax (used for §4 classification) when cells tie on net_pnl. Without
+    this fix, raw `max(cells, key=lambda c: c["net_pnl"])` falls back to
+    insertion-order, which is contract-fragile across parallel worker orderings.
+    """
+    from tools.r1_signal_exit_sweep import _argmax_cell_per_symbol
+
+    # Two BTC cells with identical net_pnl but different sl values.
+    # Tie-break key (net_pnl, -sl, -be, -lrc_thr) on max picks lower sl
+    # because max sees larger -sl (-0.5 > -1.0).
+    results = [
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.0,
+         "lrc_thr": 50.0, "n_trades": 15, "exit_reasons": {}},
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 0.5, "be": 2.0,
+         "lrc_thr": 50.0, "n_trades": 15, "exit_reasons": {}},
+    ]
+    out = _argmax_cell_per_symbol(results)
+    assert out["BTCUSDT"]["sl"] == 0.5, (
+        f"Expected sl=0.5 (deterministic tie-break: lower sl preferred), "
+        f"got sl={out['BTCUSDT']['sl']}"
+    )
+
+
+def test_argmax_cell_per_symbol_tie_break_lower_be_wins_when_sl_tied():
+    """When net_pnl and sl tie, tie-break by lower be."""
+    from tools.r1_signal_exit_sweep import _argmax_cell_per_symbol
+
+    results = [
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.5,
+         "lrc_thr": 50.0, "n_trades": 15, "exit_reasons": {}},
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 1.5,
+         "lrc_thr": 50.0, "n_trades": 15, "exit_reasons": {}},
+    ]
+    out = _argmax_cell_per_symbol(results)
+    assert out["BTCUSDT"]["be"] == 1.5, (
+        f"Expected be=1.5 (tie-break: lower be preferred when sl tied), "
+        f"got be={out['BTCUSDT']['be']}"
+    )
+
+
+def test_argmax_cell_per_symbol_tie_break_lower_lrc_thr_wins_when_sl_be_tied():
+    """When net_pnl, sl, be all tie, tie-break by lower lrc_thr."""
+    from tools.r1_signal_exit_sweep import _argmax_cell_per_symbol
+
+    results = [
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.0,
+         "lrc_thr": 55.0, "n_trades": 15, "exit_reasons": {}},
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.0,
+         "lrc_thr": 35.0, "n_trades": 15, "exit_reasons": {}},
+    ]
+    out = _argmax_cell_per_symbol(results)
+    assert out["BTCUSDT"]["lrc_thr"] == 35.0, (
+        f"Expected lrc_thr=35.0 (tie-break: lower lrc_thr preferred when sl+be tied), "
+        f"got lrc_thr={out['BTCUSDT']['lrc_thr']}"
+    )
+
+
+def test_argmax_cell_per_symbol_higher_net_pnl_wins_over_tie_break():
+    """net_pnl dominates: higher net_pnl wins even if sl/be/lrc_thr would prefer the other cell."""
+    from tools.r1_signal_exit_sweep import _argmax_cell_per_symbol
+
+    results = [
+        {"symbol": "BTCUSDT", "net_pnl": 200.0, "sl": 2.5, "be": 2.5,
+         "lrc_thr": 55.0, "n_trades": 15, "exit_reasons": {}},  # higher net_pnl, worse tie-break
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 0.5, "be": 1.5,
+         "lrc_thr": 35.0, "n_trades": 15, "exit_reasons": {}},  # lower net_pnl, better tie-break
+    ]
+    out = _argmax_cell_per_symbol(results)
+    assert out["BTCUSDT"]["net_pnl"] == 200.0, (
+        "net_pnl must dominate tie-break fields"
+    )

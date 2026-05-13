@@ -288,6 +288,14 @@ def _coverage_for_window(window_id: str, app_config_path: str) -> dict[str, int]
 def _argmax_cell_per_symbol(results: list[dict]) -> dict[str, dict | None]:
     """Pre-reg §4.1: argmax(net_pnl) per symbol, subject to n_trades >= N_TRADES_MIN.
 
+    Tie-break: when two cells tie on net_pnl, favor lower `sl`, then lower `be`,
+    then lower `lrc_thr` — i.e., the more conservative parameter combination.
+    Mirrors `tools/r1_verdict.py:_argmax_cell` tie-break. Determinism matters
+    because the previous insertion-order tie-break made cell selection fragile
+    to job-execution order across parallel workers, and could cause drift
+    between the sweep tool's halt diagnostic JSON and the verdict tool's
+    §4 classification on the same data.
+
     Returns {symbol -> cell dict or None if no cell satisfies constraint}.
     """
     by_symbol: dict[str, list[dict]] = {}
@@ -302,7 +310,10 @@ def _argmax_cell_per_symbol(results: list[dict]) -> dict[str, dict | None]:
         if not eligible:
             out[sym] = None
         else:
-            out[sym] = max(eligible, key=lambda c: c["net_pnl"])
+            out[sym] = max(
+                eligible,
+                key=lambda c: (c["net_pnl"], -c["sl"], -c["be"], -c["lrc_thr"]),
+            )
     # Ensure all symbols have an entry
     for sym in CURATED_SYMBOLS:
         out.setdefault(sym, None)
