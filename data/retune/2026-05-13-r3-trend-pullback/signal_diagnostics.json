@@ -1,0 +1,72 @@
+{
+  "ADAUSDT": {
+    "max_n_trades": 69,
+    "median_n_trades": 13,
+    "min_n_trades": 1,
+    "n_cells": 75,
+    "n_cells_above_threshold": 45
+  },
+  "AVAXUSDT": {
+    "max_n_trades": 69,
+    "median_n_trades": 19,
+    "min_n_trades": 6,
+    "n_cells": 75,
+    "n_cells_above_threshold": 66
+  },
+  "BTCUSDT": {
+    "max_n_trades": 62,
+    "median_n_trades": 47,
+    "min_n_trades": 10,
+    "n_cells": 75,
+    "n_cells_above_threshold": 75
+  },
+  "DOGEUSDT": {
+    "max_n_trades": 67,
+    "median_n_trades": 19,
+    "min_n_trades": 1,
+    "n_cells": 75,
+    "n_cells_above_threshold": 45
+  },
+  "ETHUSDT": {
+    "max_n_trades": 65,
+    "median_n_trades": 52,
+    "min_n_trades": 13,
+    "n_cells": 75,
+    "n_cells_above_threshold": 75
+  },
+  "JUPUSDT": {
+    "max_n_trades": 0,
+    "median_n_trades": 0,
+    "min_n_trades": 0,
+    "n_cells": 75,
+    "n_cells_above_threshold": 0
+  },
+  "PENDLEUSDT": {
+    "max_n_trades": 0,
+    "median_n_trades": 0,
+    "min_n_trades": 0,
+    "n_cells": 75,
+    "n_cells_above_threshold": 0
+  },
+  "RUNEUSDT": {
+    "max_n_trades": 41,
+    "median_n_trades": 22,
+    "min_n_trades": 1,
+    "n_cells": 75,
+    "n_cells_above_threshold": 60
+  },
+  "UNIUSDT": {
+    "max_n_trades": 22,
+    "median_n_trades": 8,
+    "min_n_trades": 0,
+    "n_cells": 75,
+    "n_cells_above_threshold": 30
+  },
+  "XLMUSDT": {
+    "max_n_trades": 14,
+    "median_n_trades": 1,
+    "min_n_trades": 0,
+    "n_cells": 75,
+    "n_cells_above_threshold": 18
+  }
+}

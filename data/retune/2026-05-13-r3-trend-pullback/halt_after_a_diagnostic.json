@@ -1,0 +1,132 @@
+{
+  "argmax_cell_per_symbol": {
+    "ADAUSDT": {
+      "be": 2.5,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 36,
+        "SL": 7,
+        "TIME_LIMIT": 3,
+        "TP": 2
+      },
+      "n_trades": 48,
+      "net_pnl": -7974.67,
+      "pullback_distance": 0.3,
+      "sl": 2.5
+    },
+    "AVAXUSDT": {
+      "be": 2.0,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 29,
+        "SL": 13,
+        "TIME_LIMIT": 1,
+        "TP": 1
+      },
+      "n_trades": 44,
+      "net_pnl": -7174.1,
+      "pullback_distance": 0.3,
+      "sl": 2.5
+    },
+    "BTCUSDT": {
+      "be": 2.5,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 24,
+        "SL": 17,
+        "TIME_LIMIT": 1,
+        "TP": 2
+      },
+      "n_trades": 44,
+      "net_pnl": -4090.28,
+      "pullback_distance": 0.4,
+      "sl": 2.5
+    },
+    "DOGEUSDT": {
+      "be": 2.5,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 34,
+        "SL": 7,
+        "TIME_LIMIT": 4,
+        "TP": 2
+      },
+      "n_trades": 47,
+      "net_pnl": -8269.8,
+      "pullback_distance": 0.3,
+      "sl": 2.5
+    },
+    "ETHUSDT": {
+      "be": 2.0,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 32,
+        "SL": 11,
+        "TIME_LIMIT": 2,
+        "TP": 3
+      },
+      "n_trades": 48,
+      "net_pnl": -3283.83,
+      "pullback_distance": 0.4,
+      "sl": 2.5
+    },
+    "JUPUSDT": null,
+    "PENDLEUSDT": null,
+    "RUNEUSDT": {
+      "be": 2.0,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 18,
+        "SL": 8,
+        "TIME_LIMIT": 1
+      },
+      "n_trades": 27,
+      "net_pnl": -7490.16,
+      "pullback_distance": 0.3,
+      "sl": 2.5
+    },
+    "UNIUSDT": {
+      "be": 2.0,
+      "exit_reasons": {
+        "BANKRUPT": 1,
+        "SIGNAL_EXIT": 18,
+        "SL": 3,
+        "TIME_LIMIT": 1
+      },
+      "n_trades": 22,
+      "net_pnl": -9008.9,
+      "pullback_distance": 0.3,
+      "sl": 2.5
+    },
+    "XLMUSDT": {
+      "be": 1.5,
+      "exit_reasons": {
+        "SIGNAL_EXIT": 8,
+        "SL": 5,
+        "TIME_LIMIT": 1
+      },
+      "n_trades": 14,
+      "net_pnl": -8080.71,
+      "pullback_distance": 0.7,
+      "sl": 2.5
+    }
+  },
+  "h1_n_symbols_no_eligible_cell": 2,
+  "h1_symbols_no_eligible_cell": [
+    "JUPUSDT",
+    "PENDLEUSDT"
+  ],
+  "h2_n_symbols_over_tl_threshold": 0,
+  "h2_symbols_over_tl_threshold": [],
+  "halt": false,
+  "halt_h1_symbols_threshold": 6,
+  "halt_h2_symbols_threshold": 6,
+  "halt_h2_tl_pct_threshold": 50.0,
+  "halt_reason": [],
+  "per_symbol_tl_pct": {
+    "ADAUSDT": 6.25,
+    "AVAXUSDT": 2.27,
+    "BTCUSDT": 2.27,
+    "DOGEUSDT": 8.51,
+    "ETHUSDT": 4.17,
+    "JUPUSDT": null,
+    "PENDLEUSDT": null,
+    "RUNEUSDT": 3.7,
+    "UNIUSDT": 4.55,
+    "XLMUSDT": 7.14
+  }
+}

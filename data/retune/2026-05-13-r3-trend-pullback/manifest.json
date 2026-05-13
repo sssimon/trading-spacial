@@ -1,0 +1,88 @@
+{
+  "cli_args": {
+    "baselines_only": false,
+    "skip_baselines": true,
+    "smoke": false,
+    "window": "C",
+    "workers": 8
+  },
+  "code_commit": "ac2d28485055d13e0fa320df7ea696c5c235f6d0",
+  "currently_bankrupt_symbols": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "JUPUSDT",
+    "PENDLEUSDT",
+    "RUNEUSDT",
+    "UNIUSDT",
+    "XLMUSDT"
+  ],
+  "cutoff_iso": "2025-04-30T00:00:00+00:00",
+  "fixed_params": {
+    "dynamic_exit_enabled": true,
+    "lrc_exit_threshold": 50.0,
+    "uniform_time_limit_hours": 36.0
+  },
+  "halt_after_a_fired": false,
+  "halt_after_a_h1_symbols_threshold": 6,
+  "halt_after_a_h2_symbols_threshold": 6,
+  "halt_after_a_h2_tl_pct_threshold": 50.0,
+  "halt_after_a_reasons": [],
+  "harness": "tools.r3_trend_pullback_sweep",
+  "leakage_check": {
+    "all_sub_windows_below_cutoff": true,
+    "method": "cutoff drops bars >= cutoff in run_backtest_with_params; sub-windows independently constrained below cutoff."
+  },
+  "n_trades_min": 10,
+  "ran_at_iso": "2026-05-13T11:39:23.761822+00:00",
+  "spec_ref": "docs/superpowers/plans/2026-05-13-r3-trend-pullback-pre-reg.md",
+  "sub_windows": {
+    "A": {
+      "end_iso": "2022-07-01T00:00:00+00:00",
+      "start_iso": "2022-04-01T00:00:00+00:00"
+    },
+    "B": {
+      "end_iso": "2023-07-01T00:00:00+00:00",
+      "start_iso": "2023-04-01T00:00:00+00:00"
+    },
+    "C": {
+      "end_iso": "2025-04-30T00:00:00+00:00",
+      "start_iso": "2025-01-30T00:00:00+00:00"
+    }
+  },
+  "sweep_grid": {
+    "atr_be_mult": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "atr_sl_mult": [
+      0.5,
+      0.7,
+      1.0,
+      1.5,
+      2.5
+    ],
+    "cells_per_symbol_per_window": 75,
+    "pullback_distance": [
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7
+    ]
+  },
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "UNIUSDT",
+    "XLMUSDT",
+    "PENDLEUSDT",
+    "JUPUSDT",
+    "RUNEUSDT"
+  ],
+  "usable_bars_min": 500
+}

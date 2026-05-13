@@ -1,0 +1,626 @@
+{
+  "analyses": {
+    "A": {
+      "n_symbols_engaged": 8,
+      "per_symbol_argmax_cell": {
+        "ADAUSDT": {
+          "avg_pnl_per_trade": -166.13895833333333,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 36,
+            "SL": 7,
+            "TIME_LIMIT": 3,
+            "TP": 2
+          },
+          "n_trades": 48,
+          "net_pnl": -7974.67,
+          "profit_factor": 0.01,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 75.0,
+          "sl": 2.5,
+          "time_limit_pct": 6.25
+        },
+        "AVAXUSDT": {
+          "avg_pnl_per_trade": -163.0477272727273,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 29,
+            "SL": 13,
+            "TIME_LIMIT": 1,
+            "TP": 1
+          },
+          "n_trades": 44,
+          "net_pnl": -7174.1,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 65.9090909090909,
+          "sl": 2.5,
+          "time_limit_pct": 2.272727272727273
+        },
+        "BTCUSDT": {
+          "avg_pnl_per_trade": -92.9609090909091,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 24,
+            "SL": 17,
+            "TIME_LIMIT": 1,
+            "TP": 2
+          },
+          "n_trades": 44,
+          "net_pnl": -4090.28,
+          "profit_factor": 0.07,
+          "pullback_distance": 0.4,
+          "signal_exit_pct": 54.54545454545455,
+          "sl": 2.5,
+          "time_limit_pct": 2.272727272727273
+        },
+        "DOGEUSDT": {
+          "avg_pnl_per_trade": -175.9531914893617,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 34,
+            "SL": 7,
+            "TIME_LIMIT": 4,
+            "TP": 2
+          },
+          "n_trades": 47,
+          "net_pnl": -8269.8,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 72.34042553191489,
+          "sl": 2.5,
+          "time_limit_pct": 8.51063829787234
+        },
+        "ETHUSDT": {
+          "avg_pnl_per_trade": -68.413125,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 32,
+            "SL": 11,
+            "TIME_LIMIT": 2,
+            "TP": 3
+          },
+          "n_trades": 48,
+          "net_pnl": -3283.83,
+          "profit_factor": 0.12,
+          "pullback_distance": 0.4,
+          "signal_exit_pct": 66.66666666666667,
+          "sl": 2.5,
+          "time_limit_pct": 4.166666666666667
+        },
+        "JUPUSDT": null,
+        "PENDLEUSDT": null,
+        "RUNEUSDT": {
+          "avg_pnl_per_trade": -277.41333333333336,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 18,
+            "SL": 8,
+            "TIME_LIMIT": 1
+          },
+          "n_trades": 27,
+          "net_pnl": -7490.16,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 66.66666666666667,
+          "sl": 2.5,
+          "time_limit_pct": 3.7037037037037037
+        },
+        "UNIUSDT": {
+          "avg_pnl_per_trade": -409.49545454545455,
+          "be": 2.0,
+          "exit_reasons": {
+            "BANKRUPT": 1,
+            "SIGNAL_EXIT": 18,
+            "SL": 3,
+            "TIME_LIMIT": 1
+          },
+          "n_trades": 22,
+          "net_pnl": -9008.9,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 81.81818181818181,
+          "sl": 2.5,
+          "time_limit_pct": 4.545454545454546
+        },
+        "XLMUSDT": {
+          "avg_pnl_per_trade": -577.1935714285714,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 8,
+            "SL": 5,
+            "TIME_LIMIT": 1
+          },
+          "n_trades": 14,
+          "net_pnl": -8080.71,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.7,
+          "signal_exit_pct": 57.142857142857146,
+          "sl": 2.5,
+          "time_limit_pct": 7.142857142857143
+        }
+      },
+      "primary_criterion": {
+        "avg_pf_on_positive_subset": 0.0,
+        "n_syms_net_pnl_positive": 0,
+        "pass": false,
+        "required": {
+          "min_avg_pf_on_positive_subset": 1.2,
+          "min_n_syms_net_pnl_positive": 3
+        },
+        "syms_net_pnl_positive": []
+      },
+      "window": "A"
+    },
+    "B": {
+      "n_symbols_engaged": 5,
+      "per_symbol_argmax_cell": {
+        "ADAUSDT": {
+          "avg_pnl_per_trade": -863.884,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 3,
+            "SL": 7
+          },
+          "n_trades": 10,
+          "net_pnl": -8638.84,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 30.0,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "AVAXUSDT": {
+          "avg_pnl_per_trade": -900.757,
+          "be": 2.5,
+          "exit_reasons": {
+            "BANKRUPT": 1,
+            "SIGNAL_EXIT": 7,
+            "SL": 2,
+            "TP": 1
+          },
+          "n_trades": 10,
+          "net_pnl": -9007.57,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.7,
+          "signal_exit_pct": 70.0,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "BTCUSDT": {
+          "avg_pnl_per_trade": -186.7382608695652,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 10,
+            "SL": 10,
+            "TIME_LIMIT": 1,
+            "TP": 2
+          },
+          "n_trades": 23,
+          "net_pnl": -4294.98,
+          "profit_factor": 0.02,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 43.47826086956522,
+          "sl": 2.5,
+          "time_limit_pct": 4.3478260869565215
+        },
+        "DOGEUSDT": {
+          "avg_pnl_per_trade": -642.9885714285714,
+          "be": 1.5,
+          "exit_reasons": {
+            "BANKRUPT": 1,
+            "SIGNAL_EXIT": 7,
+            "SL": 7
+          },
+          "n_trades": 14,
+          "net_pnl": -9001.84,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.6,
+          "signal_exit_pct": 50.0,
+          "sl": 1.0,
+          "time_limit_pct": 0.0
+        },
+        "ETHUSDT": {
+          "avg_pnl_per_trade": -283.59333333333336,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 14,
+            "SL": 6,
+            "TP": 1
+          },
+          "n_trades": 21,
+          "net_pnl": -5955.46,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 66.66666666666667,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "JUPUSDT": null,
+        "PENDLEUSDT": null,
+        "RUNEUSDT": null,
+        "UNIUSDT": null,
+        "XLMUSDT": null
+      },
+      "primary_criterion": {
+        "avg_pf_on_positive_subset": 0.0,
+        "n_syms_net_pnl_positive": 0,
+        "pass": false,
+        "required": {
+          "min_avg_pf_on_positive_subset": 1.2,
+          "min_n_syms_net_pnl_positive": 3
+        },
+        "syms_net_pnl_positive": []
+      },
+      "window": "B"
+    },
+    "C": {
+      "n_symbols_engaged": 9,
+      "per_symbol_argmax_cell": {
+        "ADAUSDT": {
+          "avg_pnl_per_trade": -317.5205555555556,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 10,
+            "SL": 8
+          },
+          "n_trades": 18,
+          "net_pnl": -5715.37,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 55.55555555555556,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "AVAXUSDT": {
+          "avg_pnl_per_trade": -310.5792307692308,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 18,
+            "SL": 7,
+            "TP": 1
+          },
+          "n_trades": 26,
+          "net_pnl": -8075.06,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 69.23076923076923,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "BTCUSDT": {
+          "avg_pnl_per_trade": -156.27,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 5,
+            "SL": 6,
+            "TP": 2
+          },
+          "n_trades": 13,
+          "net_pnl": -2031.51,
+          "profit_factor": 0.01,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 38.46153846153846,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "DOGEUSDT": {
+          "avg_pnl_per_trade": -351.715,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 10,
+            "SL": 4,
+            "TIME_LIMIT": 1,
+            "TP": 1
+          },
+          "n_trades": 16,
+          "net_pnl": -5627.44,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 62.5,
+          "sl": 2.5,
+          "time_limit_pct": 6.25
+        },
+        "ETHUSDT": {
+          "avg_pnl_per_trade": -84.68076923076923,
+          "be": 2.0,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 17,
+            "SL": 6,
+            "TIME_LIMIT": 2,
+            "TP": 1
+          },
+          "n_trades": 26,
+          "net_pnl": -2201.7,
+          "profit_factor": 0.09,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 65.38461538461539,
+          "sl": 2.5,
+          "time_limit_pct": 7.6923076923076925
+        },
+        "JUPUSDT": {
+          "avg_pnl_per_trade": -473.82894736842104,
+          "be": 1.5,
+          "exit_reasons": {
+            "BANKRUPT": 1,
+            "SIGNAL_EXIT": 11,
+            "SL": 8
+          },
+          "n_trades": 19,
+          "net_pnl": -9002.75,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.5,
+          "signal_exit_pct": 57.89473684210526,
+          "sl": 1.5,
+          "time_limit_pct": 0.0
+        },
+        "PENDLEUSDT": {
+          "avg_pnl_per_trade": -634.7369230769231,
+          "be": 1.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 9,
+            "SL": 4
+          },
+          "n_trades": 13,
+          "net_pnl": -8251.58,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.7,
+          "signal_exit_pct": 69.23076923076923,
+          "sl": 2.5,
+          "time_limit_pct": 0.0
+        },
+        "RUNEUSDT": {
+          "avg_pnl_per_trade": -562.535625,
+          "be": 1.5,
+          "exit_reasons": {
+            "BANKRUPT": 1,
+            "SIGNAL_EXIT": 6,
+            "SL": 10
+          },
+          "n_trades": 16,
+          "net_pnl": -9000.57,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.3,
+          "signal_exit_pct": 37.5,
+          "sl": 1.0,
+          "time_limit_pct": 0.0
+        },
+        "UNIUSDT": {
+          "avg_pnl_per_trade": -655.5715384615385,
+          "be": 2.5,
+          "exit_reasons": {
+            "SIGNAL_EXIT": 8,
+            "SL": 3,
+            "TIME_LIMIT": 1,
+            "TP": 1
+          },
+          "n_trades": 13,
+          "net_pnl": -8522.43,
+          "profit_factor": 0.0,
+          "pullback_distance": 0.5,
+          "signal_exit_pct": 61.53846153846154,
+          "sl": 2.5,
+          "time_limit_pct": 7.6923076923076925
+        },
+        "XLMUSDT": null
+      },
+      "primary_criterion": {
+        "avg_pf_on_positive_subset": 0.0,
+        "n_syms_net_pnl_positive": 0,
+        "pass": false,
+        "required": {
+          "min_avg_pf_on_positive_subset": 1.2,
+          "min_n_syms_net_pnl_positive": 3
+        },
+        "syms_net_pnl_positive": []
+      },
+      "window": "C"
+    }
+  },
+  "cross_window_stability": {
+    "ADAUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.5,
+          0.3
+        ],
+        "B": [
+          2.5,
+          1.5,
+          0.3
+        ],
+        "C": [
+          2.5,
+          1.5,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 3,
+      "same_cell_across_windows": false
+    },
+    "AVAXUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          0.3
+        ],
+        "B": [
+          2.5,
+          2.5,
+          0.7
+        ],
+        "C": [
+          2.5,
+          2.5,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 3,
+      "same_cell_across_windows": false
+    },
+    "BTCUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.5,
+          0.4
+        ],
+        "B": [
+          2.5,
+          2.5,
+          0.3
+        ],
+        "C": [
+          2.5,
+          2.5,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 3,
+      "same_cell_across_windows": false
+    },
+    "DOGEUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.5,
+          0.3
+        ],
+        "B": [
+          1.0,
+          1.5,
+          0.6
+        ],
+        "C": [
+          2.5,
+          2.5,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 3,
+      "same_cell_across_windows": false
+    },
+    "ETHUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          0.4
+        ],
+        "B": [
+          2.5,
+          2.5,
+          0.3
+        ],
+        "C": [
+          2.5,
+          2.0,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 3,
+      "same_cell_across_windows": false
+    },
+    "JUPUSDT": {
+      "cells_per_window": {
+        "A": null,
+        "B": null,
+        "C": [
+          1.5,
+          1.5,
+          0.5
+        ]
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "PENDLEUSDT": {
+      "cells_per_window": {
+        "A": null,
+        "B": null,
+        "C": [
+          2.5,
+          1.5,
+          0.7
+        ]
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    },
+    "RUNEUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          0.3
+        ],
+        "B": null,
+        "C": [
+          1.0,
+          1.5,
+          0.3
+        ]
+      },
+      "n_windows_with_data": 2,
+      "same_cell_across_windows": false
+    },
+    "UNIUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          2.0,
+          0.3
+        ],
+        "B": null,
+        "C": [
+          2.5,
+          2.5,
+          0.5
+        ]
+      },
+      "n_windows_with_data": 2,
+      "same_cell_across_windows": false
+    },
+    "XLMUSDT": {
+      "cells_per_window": {
+        "A": [
+          2.5,
+          1.5,
+          0.7
+        ],
+        "B": null,
+        "C": null
+      },
+      "n_windows_with_data": 1,
+      "same_cell_across_windows": null
+    }
+  },
+  "verdict": {
+    "cells_stable_check": {
+      "stability_provided": true,
+      "stable": false
+    },
+    "halt": false,
+    "n_primary_pass": 0,
+    "n_symbols_engaged_per_window": {
+      "A": 8,
+      "B": 5,
+      "C": 9
+    },
+    "n_windows": 3,
+    "primary_pass_per_window": {
+      "A": false,
+      "B": false,
+      "C": false
+    },
+    "signal_degenerate_check": {
+      "engage_max_for_degenerate": 2,
+      "fires": false,
+      "min_windows_required": 2,
+      "n_windows_with_engage_le_threshold": 0
+    },
+    "verdict": "R3_FAIL"
+  }
+}

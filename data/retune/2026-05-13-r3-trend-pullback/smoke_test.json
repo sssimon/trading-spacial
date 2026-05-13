@@ -1,0 +1,22 @@
+{
+  "avg_duration_hours": 0.0,
+  "bankruptcy_count": 0,
+  "be": 1.5,
+  "clamped_trade_count": 0,
+  "error": "No trades",
+  "exit_reasons": {},
+  "lrc_thr": 50.0,
+  "max_drawdown_pct": 0.0,
+  "n_trades": 0,
+  "net_pnl": 0.0,
+  "profit_factor": 0.0,
+  "pullback_distance": 0.5,
+  "real_trades_signature": "no_data",
+  "sl": 1.0,
+  "sub_window": "C",
+  "symbol": "UNIUSDT",
+  "time_limit_hours": 36.0,
+  "tp": 3.0,
+  "trend_pullback_enabled": true,
+  "win_rate": 0.0
+}

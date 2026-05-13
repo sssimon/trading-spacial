@@ -662,5 +662,8 @@ R3 execution (if it proceeds) needs to **derive its own TL anchor** matched to t
 | 2026-05-11 | §A amendment — 5 modifications + 2 §8 sub-decisions from operator review | sssamuelll + Claude Opus 4.7 (esta sesión) |
 | 2026-05-11 | §A.7 — H7 PoV component reformulated post pre-execution math sanity check on R2 (PR #324) | sssamuelll + Claude Opus 4.7 |
 | 2026-05-12 | §A.8 — H7 fully retracted post-R2 derivation; R2 verdict FAIL; #317 closed; pre-R1 query → R1_PLAUSIBLE | sssamuelll + Claude Opus 4.7 |
+| 2026-05-12 | R1 verdict FAIL clean (#329); §10 halt fired in window A; B+C aborted; mechanism engaged (52% cell coverage) but profitability absent (0/8 in-data positive on 600 cells) | sssamuelll + Claude Opus 4.7 |
+| 2026-05-13 | R1 pre-reg §4.6 amendment — halt-guard scope clarified (asymmetric, favorable-direction only) (#331); R1 harness tooling-debt closure (#330 + #334 items 1-5) | sssamuelll + Claude Opus 4.7 |
+| 2026-05-13 | R3 pre-reg locked + merged (#333); R3 verdict FAIL clean — primary criterion 0/3 windows positive; mechanism engaged (8/5/9 of 10 in-data per window) but profitability absent across 2,250 cells; cells diverge wildly per §4.4 for all evaluated symbols; §10.4 halt did NOT fire; §1.1 hard-lock → path (a) of #321 escalation activated. Joint posterior P(viable strategy under current basket) updated ~12-18% → ~2-4% per §A.4; H5 hard-locked NO; #271 user-invitation guardrail enforced definitively. R1+R2+R3 stack converges on "no retail signal frame produces edge in this curated basket under post-fix simulator". | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas adicionales para feedback iterativo en el PR y revisión externa adicional si aplica.
