@@ -92,6 +92,47 @@ def test_summarize_worker_errors_includes_distinct_message_text():
     assert "RuntimeError: cutoff drift" in msg
 
 
+def test_emit_worker_error_summary_writes_to_stderr_when_errors_present(capsys):
+    """Closes #332 item 5: stderr-integration test for _summarize_worker_errors wiring.
+
+    Verifies the line at `_run_jobs_parallel` that writes the error summary
+    to `sys.stderr`. Without this test, the helper return string is covered
+    but the wiring (helper → stderr) is not — the exact gap noted in #332:
+    'we wrote the helper, did we wire it correctly'.
+
+    Helper `_emit_worker_error_summary` is the extracted wiring point.
+    """
+    from tools.r1_signal_exit_sweep import _emit_worker_error_summary
+
+    results = [
+        {"symbol": "BTCUSDT", "error": "ValueError: bad data"},
+        {"symbol": "ETHUSDT", "error": "RuntimeError: cutoff drift"},
+    ]
+    _emit_worker_error_summary(results)
+    captured = capsys.readouterr()
+    assert "2 workers errored" in captured.err
+    assert "ValueError: bad data" in captured.err
+    assert "RuntimeError: cutoff drift" in captured.err
+    assert captured.out == "", (
+        "Worker error summary must go to stderr, not stdout (operator scans "
+        "stderr at sweep completion; mixed streams obscure the signal)"
+    )
+
+
+def test_emit_worker_error_summary_silent_on_clean_results(capsys):
+    """No errors in results → no stderr emission (avoids noise)."""
+    from tools.r1_signal_exit_sweep import _emit_worker_error_summary
+
+    results = [
+        {"symbol": "BTCUSDT", "n_trades": 5},
+        {"symbol": "ETHUSDT", "n_trades": 3},
+    ]
+    _emit_worker_error_summary(results)
+    captured = capsys.readouterr()
+    assert captured.err == "", "No errors → no stderr emission"
+    assert captured.out == ""
+
+
 def test_summarize_worker_errors_uses_is_not_none_filter_not_truthy():
     """Closes #332 item 4: empty-string `error` field must count, not silently filter.
 

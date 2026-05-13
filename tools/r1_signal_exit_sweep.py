@@ -386,6 +386,21 @@ def _save_json(path: Path, payload):
         json.dump(payload, f, indent=2, sort_keys=True, default=str, allow_nan=False)
 
 
+def _emit_worker_error_summary(results: list[dict]) -> None:
+    """Write `_summarize_worker_errors` output to sys.stderr if non-None.
+
+    Extracted wiring point for #332 item 5 (stderr-integration test). The
+    operator scans stderr at sweep completion for any "[r1_sweep] N workers
+    errored" line; mixing into stdout would obscure the signal among the
+    sweep's normal progress output.
+
+    No-op when results are clean (no `error` fields present).
+    """
+    err_summary = _summarize_worker_errors(results)
+    if err_summary:
+        sys.stderr.write(err_summary + "\n")
+
+
 def _summarize_worker_errors(results: list[dict]) -> str | None:
     """Aggregate the `error` field across sweep results.
 
@@ -420,9 +435,7 @@ def _run_jobs_parallel(jobs: list[dict], workers: int, label: str) -> list[dict]
         results = pool.map(_process_cell, jobs)
     elapsed = time.monotonic() - t0
     sys.stderr.write(f"[r1_sweep] {label}: completed in {elapsed:.1f}s\n")
-    err_summary = _summarize_worker_errors(results)
-    if err_summary:
-        sys.stderr.write(err_summary + "\n")
+    _emit_worker_error_summary(results)
     return results
 
 
