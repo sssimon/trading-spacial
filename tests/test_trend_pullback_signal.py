@@ -27,6 +27,50 @@ import pytest
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _engineer_trend_pullback_long_fires_ohlcv(
+    n: int = 250, seed: int = 42, base: float = 100.0,
+) -> pd.DataFrame:
+    """Build OHLCV that DETERMINISTICALLY fires trend-pullback LONG signal.
+
+    Engineered constraints:
+      - SMA50 > SMA200 (uptrend confirmed at last bar) — guaranteed by positive
+        linear drift over the full 250 bars.
+      - |close[-1] - SMA20[-1]| ≤ 0.5 × ATR[-1] — guaranteed by setting
+        close[-1] explicitly to SMA20[-1] (zero distance, well within envelope).
+      - 4H/5m direction trend matches (positive slope) so macro_ok and 5m
+        trigger don't accidentally block.
+
+    Used by I-3 fix in `test_evaluate_signal_flag_on_score_uniform_standard_when_direction`
+    to assert the trend-pullback override fires unconditionally.
+    """
+    rng = np.random.default_rng(seed)
+    # Stronger trend slope + larger noise → realistic ATR.
+    slope_per_bar = 0.001  # 0.1% per bar → +25% over 250 bars
+    trend = base * (1.0 + slope_per_bar * np.arange(n))
+    # Noise std ~0.5% of price → ATR will be ~0.5-1.0 (realistic).
+    noise_close = rng.standard_normal(n) * 0.5
+    close = trend + noise_close
+
+    # Compute SMA20 over last 20 bars (using close[-21:-1] as the "rolling mean
+    # that defines SMA20 at index -1"). Then SET close[-1] = SMA20[-1] to
+    # guarantee pullback_ok=True (zero distance, within any positive envelope).
+    sma20_at_minus_1 = float(np.mean(close[-21:-1]))  # mean of prior 20 bars
+    close[-1] = sma20_at_minus_1
+
+    # OHLCV scaffolding with realistic hi-lo spread for ATR.
+    noise_hi_lo = np.abs(rng.standard_normal(n)) * 0.3
+    df = pd.DataFrame({
+        "open":   np.roll(close, 1),
+        "high":   close + noise_hi_lo,
+        "low":    close - noise_hi_lo,
+        "close":  close,
+        "volume": rng.random(n) * 1000 + 500,
+    })
+    df.loc[0, "open"] = close[0]
+    df.index = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
+    return df
+
+
 def _linear_trend_with_pullback_ohlcv(
     n: int = 250,
     seed: int = 42,
@@ -332,28 +376,45 @@ def test_evaluate_signal_flag_on_score_uniform_standard_when_direction():
 
     Per pre-reg §2.2: uniform score = 2 (1.0× sizing) eliminates score-related
     confounding within R3. Trend-pullback trades all get standard sizing.
+
+    PR #336 review I-3 fix: synthetic data engineered to PROVABLY fire the
+    trend-pullback signal (uptrend + pullback at last bar of pullback window),
+    asserted unconditionally rather than wrapping in `if direction != NONE`.
+    A vacuous-pass on direction=NONE never exercises the score override.
     """
     from strategy.core import evaluate_signal, SCORE_STANDARD
 
-    df1h = _linear_trend_with_pullback_ohlcv(n=250, seed=300, slope_pct=0.001)
-    df4h = _linear_trend_with_pullback_ohlcv(n=200, seed=301, slope_pct=0.001)
-    df5m = _linear_trend_with_pullback_ohlcv(n=250, seed=302, slope_pct=0.001)
-    df1d = _linear_trend_with_pullback_ohlcv(n=100, seed=303, slope_pct=0.001)
+    # Engineered to PROVABLY fire trend-pullback LONG: close[-1] = SMA20[-1]
+    # exactly (zero distance, within any positive envelope). See helper docstring.
+    df1h = _engineer_trend_pullback_long_fires_ohlcv(n=250, seed=300)
+    df4h = _engineer_trend_pullback_long_fires_ohlcv(n=200, seed=301)
+    df5m = _engineer_trend_pullback_long_fires_ohlcv(n=250, seed=302)
+    df1d = _engineer_trend_pullback_long_fires_ohlcv(n=100, seed=303)
 
     decision = evaluate_signal(
         df1h, df4h, df5m, df1d,
         symbol="BTCUSDT",
-        cfg={"trend_pullback_enabled": True, "trend_pullback_distance": 0.5},
+        cfg={"trend_pullback_enabled": True, "trend_pullback_distance": 0.7},
         regime={"regime": "BULL", "score": 75, "details": {}},
         health_state="NORMAL",
         now=datetime(2024, 4, 23, tzinfo=timezone.utc),
     )
 
-    if decision.direction != "NONE":
-        assert decision.score == SCORE_STANDARD, (
-            f"Trend-pullback trades must have uniform score=SCORE_STANDARD ({SCORE_STANDARD}); "
-            f"got score={decision.score}"
-        )
+    # Unconditional assertion — direction must fire LONG for this engineered case.
+    assert decision.direction == "LONG", (
+        f"Trend-pullback LONG must fire on engineered uptrend+pullback synthetic data; "
+        f"got direction={decision.direction!r}. Indicators: "
+        f"sma50_1h={decision.indicators.get('sma50_1h')}, "
+        f"sma200_1h={decision.indicators.get('sma200_1h')}, "
+        f"sma20_1h={decision.indicators.get('sma20_1h')}, "
+        f"atr_1h={decision.indicators.get('atr_1h')}, "
+        f"reasons={decision.reasons}"
+    )
+    # Now the score-override assertion is meaningful (direction definitely fired).
+    assert decision.score == SCORE_STANDARD, (
+        f"Trend-pullback trades must have uniform score=SCORE_STANDARD ({SCORE_STANDARD}); "
+        f"got score={decision.score}"
+    )
 
 
 def test_evaluate_signal_flag_on_sma200_warmup_skip():
@@ -406,6 +467,171 @@ def test_evaluate_signal_flag_on_indicators_include_sma50_sma200():
     )
     assert "sma50_1h" in decision.indicators
     assert "sma200_1h" in decision.indicators
+
+
+def _downtrend_ohlcv_for_lrc_long_zone(
+    n: int = 250, seed: int = 42, base: float = 100.0,
+) -> pd.DataFrame:
+    """Build OHLCV with flat-then-drop pattern: LRC% near 0 (deep LONG zone)
+    AND SMA50 < SMA200 (downtrend per SMA-based trend-pullback frame).
+
+    Used by I-4 LRC mutual exclusion test: LRC entry WOULD fire (low LRC%),
+    but trend-pullback under BULL regime BLOCKS the SHORT-direction signal
+    that the downtrend would produce → direction=NONE when flag on.
+    """
+    rng = np.random.default_rng(seed)
+    drop_bars = 25
+    flat_len = n - drop_bars
+    flat = base + rng.standard_normal(flat_len) * 0.2
+    drop = np.linspace(base, base * 0.92, drop_bars)
+    close = np.concatenate([flat, drop])[:n]
+    noise = np.abs(rng.standard_normal(n)) * 0.15
+    df = pd.DataFrame({
+        "open":   np.roll(close, 1),
+        "high":   close + noise,
+        "low":    close - noise,
+        "close":  close,
+        "volume": rng.random(n) * 1000 + 500,
+    })
+    df.loc[0, "open"] = close[0]
+    df.index = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
+    return df
+
+
+def _bearish_5m_ohlcv(n: int = 250, seed: int = 42, base: float = 100.0) -> pd.DataFrame:
+    """5m OHLCV with bearish last candle (close < open) + falling RSI.
+
+    Used by I-4 5m-trigger-lock test: 1H trend-pullback fires LONG, but 5m
+    `_check_trigger_5m_long` returns False (bearish candle + RSI not rising)
+    → is_signal=False, is_setup=True. Asserts §9.7 5m-trigger lock holds.
+    """
+    rng = np.random.default_rng(seed)
+    # Mild uptrend then a strong drop at the last few bars to ensure RSI falls.
+    flat = base + rng.standard_normal(n - 10) * 0.1
+    drop = np.linspace(base, base * 0.97, 10)  # 3% drop in last 10 bars
+    close = np.concatenate([flat, drop])[:n]
+    noise = np.abs(rng.standard_normal(n)) * 0.1
+    open_arr = np.roll(close, 1)
+    open_arr[0] = close[0]
+    # Force last bar to be unambiguously bearish: close < open by a clear margin.
+    open_arr[-1] = close[-2]   # open at prior close
+    close[-1] = open_arr[-1] - 0.5  # close clearly below open
+    df = pd.DataFrame({
+        "open":   open_arr,
+        "high":   np.maximum(close, open_arr) + noise,
+        "low":    np.minimum(close, open_arr) - noise,
+        "close":  close,
+        "volume": rng.random(n) * 1000 + 500,
+    })
+    df.index = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
+    return df
+
+
+def test_evaluate_signal_flag_on_lrc_path_bypassed():
+    """I-4 (§9.1 lock): LRC entry disabled when trend_pullback_enabled=True.
+
+    Engineered data: LRC% near 0 (deep LONG zone) AND SMA50 < SMA200
+    (downtrend per SMA-based trend-pullback frame). Under BULL regime:
+      - Flag off (LRC path): LRC LONG fires (zone+regime).
+      - Flag on (trend-pullback path): trend-pullback signal candidate is
+        SHORT (downtrend + pullback), but BULL regime blocks SHORT →
+        direction=NONE.
+
+    This verifies the §9.1 mutual-exclusion lock: when flag is on, LRC entry
+    is bypassed and only trend-pullback drives direction.
+    """
+    from strategy.core import evaluate_signal
+
+    df1h = _downtrend_ohlcv_for_lrc_long_zone(n=250, seed=700, base=100.0)
+    df4h = _downtrend_ohlcv_for_lrc_long_zone(n=200, seed=701, base=100.0)
+    df5m = _downtrend_ohlcv_for_lrc_long_zone(n=250, seed=702, base=100.0)
+    df1d = _downtrend_ohlcv_for_lrc_long_zone(n=100, seed=703, base=100.0)
+
+    common_kwargs = dict(
+        symbol="BTCUSDT",
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+
+    # Flag OFF: LRC LONG fires (zone+regime aligned).
+    decision_off = evaluate_signal(
+        df1h, df4h, df5m, df1d, cfg={}, **common_kwargs,
+    )
+    assert decision_off.indicators["lrc_pct"] is not None
+    assert decision_off.indicators["lrc_pct"] <= 25.0, (
+        f"Engineered data should keep LRC pct in LONG zone; "
+        f"got lrc_pct={decision_off.indicators['lrc_pct']}"
+    )
+    assert decision_off.direction == "LONG", (
+        "Flag OFF: LRC zone+BULL regime → LONG entry fires (baseline LRC path)"
+    )
+
+    # Flag ON: LRC bypassed; trend-pullback path takes over and yields NONE
+    # (downtrend SMA50<SMA200 → SHORT candidate, but BULL regime blocks SHORT).
+    decision_on = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        cfg={"trend_pullback_enabled": True, "trend_pullback_distance": 0.5},
+        **common_kwargs,
+    )
+    assert decision_on.direction == "NONE", (
+        f"Flag ON: LRC entry bypassed; trend-pullback SHORT (downtrend) blocked "
+        f"by BULL regime → direction=NONE. Got direction={decision_on.direction!r}, "
+        f"reasons={decision_on.reasons}"
+    )
+    assert decision_on.reasons.get("trend_pullback_enabled") is True
+
+
+def test_evaluate_signal_flag_on_5m_trigger_blocks_trend_pullback():
+    """I-4 (§9.7 lock): 5m trigger preservation enforced when flag on.
+
+    Engineered: 1H trend-pullback LONG fires (uptrend + pullback at SMA20),
+    4H macro_ok=True, but 5m bars have a bearish last candle so
+    `_check_trigger_5m_long` returns False.
+
+    Expected: direction="LONG" (1H signal candidate selected), is_setup=True
+    (setup is valid), is_signal=False (waiting for 5m trigger).
+
+    Verifies that the 5m trigger preservation locked in §9.7 actually gates
+    is_signal under the trend-pullback path — the trigger lock is not bypassed
+    just because the entry signal frame changed.
+    """
+    from strategy.core import evaluate_signal
+
+    # 1H/4H/1d: trend-pullback LONG fires.
+    df1h = _engineer_trend_pullback_long_fires_ohlcv(n=250, seed=800)
+    df4h = _engineer_trend_pullback_long_fires_ohlcv(n=200, seed=801)
+    df1d = _engineer_trend_pullback_long_fires_ohlcv(n=100, seed=803)
+    # 5m: bearish last candle so LONG trigger fails.
+    df5m = _bearish_5m_ohlcv(n=250, seed=802)
+
+    decision = evaluate_signal(
+        df1h, df4h, df5m, df1d,
+        symbol="BTCUSDT",
+        cfg={"trend_pullback_enabled": True, "trend_pullback_distance": 0.7},
+        regime={"regime": "BULL", "score": 75, "details": {}},
+        health_state="NORMAL",
+        now=datetime(2024, 4, 23, tzinfo=timezone.utc),
+    )
+
+    # 1H trend-pullback LONG candidate selected.
+    assert decision.direction == "LONG", (
+        f"1H trend-pullback LONG must fire on engineered data; "
+        f"got direction={decision.direction!r}, reasons={decision.reasons}"
+    )
+    # is_setup=True (LONG candidate valid pre-trigger).
+    assert decision.is_setup is True, (
+        "Setup must be valid (direction+macro_ok) for the 5m-trigger gating "
+        "to be the discriminator"
+    )
+    # is_signal=False because 5m trigger blocked it.
+    assert decision.is_signal is False, (
+        f"5m trigger must gate is_signal under trend-pullback path "
+        f"(§9.7 lock). Got is_signal={decision.is_signal}, "
+        f"trigger_active={decision.reasons.get('trigger_active')}"
+    )
+    # Confirm trigger_active is False (the actual mechanism).
+    assert decision.reasons.get("trigger_active") is False
 
 
 def test_evaluate_signal_flag_off_sma_indicators_also_present():

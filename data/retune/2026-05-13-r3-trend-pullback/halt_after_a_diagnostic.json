@@ -105,11 +105,8 @@
       "sl": 2.5
     }
   },
-  "h1_n_symbols_no_eligible_cell": 2,
-  "h1_symbols_no_eligible_cell": [
-    "JUPUSDT",
-    "PENDLEUSDT"
-  ],
+  "h1_n_symbols_no_eligible_cell": 0,
+  "h1_symbols_no_eligible_cell": [],
   "h2_n_symbols_over_tl_threshold": 0,
   "h2_symbols_over_tl_threshold": [],
   "halt": false,

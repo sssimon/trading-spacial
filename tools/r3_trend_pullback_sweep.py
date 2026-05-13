@@ -403,8 +403,24 @@ def _check_halt_after_a(a_results: list[dict]) -> dict:
     """
     argmax = _argmax_cell_per_symbol(a_results)
 
-    # H1: signal degenerate — count symbols with NO eligible argmax cell.
-    symbols_h1 = sorted(s for s, c in argmax.items() if c is None)
+    # I-1 fix (#336 review): build in-data set first — symbols with at least
+    # one cell that produced trades. Out-of-data symbols (no result dicts at
+    # all, e.g., JUP/PENDLE in window A per §3 exclusions) must NOT count
+    # toward H1 — that would conflate operational coverage gaps with signal
+    # pathology and produce false-positive halts.
+    by_symbol_for_in_data: dict[str, list[dict]] = {}
+    for r in a_results:
+        by_symbol_for_in_data.setdefault(r["symbol"], []).append(r)
+    in_data_symbols = {
+        sym for sym, cells in by_symbol_for_in_data.items()
+        if any(c.get("n_trades", 0) > 0 for c in cells)
+    }
+
+    # H1: signal degenerate — count ONLY in-data symbols with no eligible cell.
+    symbols_h1 = sorted(
+        s for s, c in argmax.items()
+        if c is None and s in in_data_symbols
+    )
     h1_fires = len(symbols_h1) >= HALT_H1_SYMBOLS_THRESHOLD
 
     # H2: TL horizon mismatch — TIME_LIMIT% above threshold on argmax cell.

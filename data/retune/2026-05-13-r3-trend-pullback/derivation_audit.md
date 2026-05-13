@@ -37,7 +37,10 @@ R3 tested whether replacing the LRC mean-reversion entry signal with a momentum/
 | P(R3 INCONCLUSIVE) | ~15-20% | **~0%** | Requires ≥2/3 primary ✓; 3/3 failed. |
 | P(R3 FAIL, signal-degenerate) | ~5-10% | **~0%** | Engagement is fine (8/5/9 of 10); signal not the bottleneck. |
 | P(R3 FAIL, clean) | ~50-60% | **~100%** | Mechanism engaged, profitability absent across 3 regimes. |
-| **Joint P(viable strategy under current basket)** | **~12-18%** | **~2-4%** | Cleanly resolved to FAIL. R1+R2+R3 stack converges on "no retail signal frame produces edge in this curated basket." |
+| **Within R3: P(R3 SUCCESS-or-CONDITIONAL) (pre-reg §12)** | **~12-18%** | **~0%** | Cleanly resolved to FAIL within R3. |
+| **Project-level: P(viable strategy under current basket)** | **~5-7%** (post-R1+R2, pre-R3 baseline) | **~2-4%** (post-R3) | Magnitude shift ~3pp from R3 alone; the pre-R3 baseline already reflected R1+R2 FAIL. R1+R2+R3 stack now converges on "no retail signal frame produces edge in this curated basket." |
+
+**S-1 disambiguation (PR #336 review):** Two distinct quantities documented separately — pre-R3 prior on R3 SUCCESS-or-CONDITIONAL (~12-18% per pre-reg §12) collapsed cleanly to ~0%; project-level P(viable strategy) was ALREADY ~5-7% post-R1+R2 (per pre-reg §1.1) and dropped to ~2-4% post-R3. Conflating these two would overstate R3's standalone magnitude shift.
 
 **Forward direction:** §1.1 hard-lock activates automatically — path (a) of issue #321 (stakeholder escalation to Simón). NO H5 follow-up, NO further phase, NO retry with different signal candidate. §A.2 H5 caveat carried forward but H5 hard-locked NO per operator. See §8 for Simón communication draft outline.
 
@@ -182,9 +185,9 @@ Per-symbol argmax cell across windows:
 
 **0 of 10 symbols** show same argmax cell across the 3 windows. Cells diverge wildly for every multi-window symbol. SUCCESS_CONDITIONAL (2/3 + stable per §4.4) is structurally unreachable in this dataset.
 
-`sl = 2.5` dominates argmax across windows (8 of 10 symbols pick `sl = 2.5` in window A; similar in B+C) — the widest stop is the "best" outcome by `argmax(net_pnl)`, meaning tighter stops produce systematically worse (more negative) results. This is consistent with the H4 / sizing inflation pathology audit-identified — wider SL means lower notional under R-multiple sizing, fewer dollar losses per trade, but doesn't change the underlying negative expectancy.
+`sl = 2.5` dominates argmax across windows (8 of 8 engaged in-data symbols pick `sl = 2.5` in window A — window A in-data is 8 of 10 per §3 exclusions for JUP/PENDLE; similar dominance in B+C) — the widest stop is the "best" outcome by `argmax(net_pnl)`, meaning tighter stops produce systematically worse (more negative) results. This is consistent with the H4 / sizing inflation pathology audit-identified — wider SL means lower notional under R-multiple sizing, fewer dollar losses per trade, but doesn't change the underlying negative expectancy.
 
-`pullback_distance = 0.3` dominates argmax in windows A (7/8) and B+C (most) — the tightest envelope. This rules out "loose envelope over-firing" as the failure mode (§5.2 pre-reg edge case): even with the narrowest, highest-conviction trend-pullback entries, the signal produces losses.
+`pullback_distance = 0.3` dominates argmax in window A (5 of 8 engaged in-data; BTC at 0.4, ETH at 0.4, XLM at 0.7 are the 3 non-0.3) and B+C (most) — the tightest envelope. This rules out "loose envelope over-firing" as the failure mode (§5.2 pre-reg edge case): even with the narrowest, highest-conviction trend-pullback entries, the signal produces losses. **I-5 correction (PR #336 review):** earlier draft cited "7/8" for window A's `pullback=0.3` dominance and "8 of 10" for `sl=2.5`; per the verdict.json argmax cells the correct counts are 5/8 (3 non-0.3 entries) and 8/8 engaged (window A in-data is 8, not 10).
 
 ---
 
@@ -214,7 +217,11 @@ Per §A.2 framing for the operator communication (§8 below): "R3 FAIL means 'NO
 | R3 FAIL (signal degenerate) | ~5-10% | ~0% | -10pp; engagement 8/5/9 of in-data, H1 false |
 | R3 FAIL (clean) | ~50-60% | **~100%** | +45pp; clean realization of pre-execution most-likely scenario |
 
-**Joint P(viable strategy under current basket): ~12-18% (pre-R3) → ~2-4% (post-R3).**
+**Within R3: P(R3 SUCCESS-or-CONDITIONAL) ~12-18% (pre-reg §12 prior) → ~0% (post-R3, clean resolution).**
+
+**Project-level: P(viable strategy under current basket) ~5-7% (post-R1+R2, the pre-R3 baseline per pre-reg §1.1) → ~2-4% (post-R3).** Magnitude shift attributable to R3 alone: ~3pp. R1+R2 had already moved the project-level estimate from ~15-25% (audit §A.4 initial) down to ~5-7% before R3 ran.
+
+**S-1 disambiguation (PR #336 review):** Two distinct quantities. Conflating them (as the original draft did) overstates R3's standalone shift by ~10pp.
 
 Auditor reasoning (3 sentences): R3 cleanly failed in the most-likely pre-execution scenario — mechanism engaged sufficiently across 8/5/9 of 10 in-data symbols per window with TIME_LIMIT% well below the §10.4 H2 threshold, ruling out signal-degenerate or wrong-horizon failure modes. Every cell across 2,250 backtests produces negative `net_pnl`; cells diverge wildly across the 3 sub-windows for every multi-window symbol, ruling out SUCCESS_CONDITIONAL. Combined with R1 FAIL (clean) and R2 FAIL (math-deterministic), the R1+R2+R3 stack converges on a single conclusion: the current basket does not support a profitable strategy under any retail signal frame tested within the structural-fix-driven post-#223 simulator.
 
@@ -237,12 +244,13 @@ Per kickoff Phase 4 spec, R3 FAIL deliverables include "initial draft communicat
 > **TL;DR:** después de ejecutar tres alternativas estructurales independientes (R1 dynamic exit, R2 gates re-derivation, R3 trend-pullback entry signal) bajo el simulador post-#223, ninguna produce edge sobre el basket curado actual. La estrategia, tal como está parametrizada hoy, no muestra ventaja demostrable. Recomendación: pausar invitaciones de usuarios per guardrail #271 mientras evaluás los siguientes pasos.
 >
 > **Qué probamos:**
-> 1. R2 (gates re-derivation, PR #327): re-derivamos `time_limit_hours` desde teoría ATR-based en lugar de la calibración contaminada de #281. Resultado matemáticamente determinado: 6 de 8 símbolos con problemas ya estaban en el anchor teórico (~5h). FAIL strong; H7 (gates over-restrict) retractada.
-> 2. R1 (dynamic exit, PR #329): reemplazamos el TP estático con un exit signal-reversal anclado al LRC midline. Mecanismo engagement 17.6% (52% cell coverage), pero 0 de 8 símbolos producen P&L positivo en ningún cell. FAIL clean; "mecanismo engaged, profitability absent."
-> 3. R3 (trend-pullback entry, PR #336): reemplazamos LRC mean-reversion entry con SMA50/200 trend confirmation + retrace a SMA20 ± 0.5 ATR. Sweep 2,250 backtests. Engagement 8/5/9 de 10 símbolos por ventana, TIME_LIMIT% bajo 9% (uniform 36h TL apropiada para el frame). Pero 0 de ~22 pares (símbolo, ventana) con P&L positivo. Celdas divergen entre ventanas. FAIL clean.
+> 1. R2 (gates re-derivation, PR #327): re-derivamos `time_limit_hours` desde teoría ATR-based para testear si los gates per-symbol over-restringían (H7 — audit §6 R2). La teoría confirmó que para 6 de 8 símbolos `current_TL` ya estaba en el anchor teórico (~5h) — H7 retractada (audit §A.7 + §A.8). FAIL strong (math-deterministic).
+> 2. R1 (dynamic exit, PR #329): R1 añadió un exit signal-reversal anclado al LRC midline para competir con TIME_LIMIT, que dominaba 44% de las salidas (per pre-R1 query). TP estático se mantuvo activo como anti-confounder per pre-reg §2.3. Mecanismo engagement 17.6% (52% cell coverage), pero 0 de 8 símbolos producen P&L positivo en ningún cell. FAIL clean; "mecanismo engaged, profitability absent."
+> 3. R3 (trend-pullback entry, PR #336): reemplazamos LRC mean-reversion entry con SMA50/200 trend confirmation + retrace a SMA20 ± `pullback_distance` × ATR (single-alternative discipline per audit §A.6). Sweep 2,250 backtests. Engagement 8/5/9 de 10 símbolos por ventana, TIME_LIMIT% bajo 9% (uniform 36h TL apropiada para el frame). Pero 0 de ~22 pares (símbolo, ventana) con P&L positivo. Celdas divergen entre ventanas. FAIL clean.
 >
 > **Interpretación:**
-> - Joint posterior P(viable strategy bajo este basket) cayó de ~12-18% pre-R3 a ~2-4% post-R3. Below any defendible re-investigation threshold.
+> - Within R3: P(R3 SUCCESS-or-CONDITIONAL) (pre-reg §12 prior) cayó de ~12-18% pre-execution a ~0% post-execution — resolución limpia a FAIL.
+> - Project-level: P(viable strategy bajo este basket) cayó de ~5-7% post-R1+R2 (el baseline pre-R3 per pre-reg §1.1) a ~2-4% post-R3. La magnitude shift atribuible a R3 sola es ~3pp; R1+R2 ya habían movido el estimate desde ~15-25% inicial (audit §A.4) hasta ~5-7%. Below any defendible re-investigation threshold per §A.4 trigger.
 > - El stack R1+R2+R3 converge sobre una sola lectura: **ningún signal frame retail produce edge en este basket curado bajo el simulador post-#223.**
 > - El "basket curado" mismo puede ser parte del problema — fue seleccionado bajo el simulador pre-#223 con el bug de phantom-profit (audit §A.2 H5 caveat). La pregunta "¿es el basket o la estrategia?" queda formalmente abierta pero operacionalmente cerrada per hard-lock NO H5.
 >
@@ -350,3 +358,4 @@ Reproducibility: `python tools/r3_trend_pullback_sweep.py` reproduces all output
 | 2026-05-13 | Sweep executed: baselines 30 cells + window A 750 cells (~14 min wall); halt did NOT fire; window B 750 cells; window C 750 cells | Claude Opus 4.7 |
 | 2026-05-13 | Verdict tool ran: R3_FAIL (clean) — 0/22 engaged-symbol-window pairs positive, cells diverge, mechanism engaged | Claude Opus 4.7 |
 | 2026-05-13 | derivation_audit + Bayesian update + Simón communication draft outline landed; §1.1 hard-lock → path (a) of #321 escalation activated | Claude Opus 4.7 |
+| 2026-05-13 | Incorporated PR #336 multi-agent review feedback: S-1 P(viable strategy) dual-label fix (§1, §7, §8.1 — separated pre-reg §12 R3-internal prior from §1.1 project-level baseline); S-2 R1 mischaracterization fix in Simón draft (R1 added SIGNAL_EXIT alongside SL/TP/TIME_LIMIT to compete with TIME_LIMIT 44% dominance, did NOT replace TP per pre-reg §2.3); S-3 R2 "contaminada" framing fix in Simón draft (#281 per-symbol TL was NOT leaked to holdout per CLAUDE.md; R2 tested H7 hypothesis); I-1 H1 halt counter in-data filter fix (`tools/r3_trend_pullback_sweep.py:_check_halt_after_a` — counts only in-data symbols toward H1 threshold to avoid false-positive from §3 out-of-data exclusions like JUP/PENDLE in window A); I-2 3 new R3 test files mirroring R1 hardened net (test_r3_sweep_halt.py, test_r3_sweep_defensive.py, test_r3_verdict.py); I-3 vacuous Score=2 assertion fix (new `_engineer_trend_pullback_long_fires_ohlcv` helper guarantees signal firing; assertion unconditional); I-4 LRC mutual exclusion (§9.1) + 5m trigger lock (§9.7) integration tests; I-5 number corrections in §5 (8 of 10 → 8 of 8 engaged for window A `sl=2.5`; 7/8 → 5/8 for `pullback=0.3`). Verdict and headline classification unchanged. | sssamuelll + Claude Opus 4.7 |

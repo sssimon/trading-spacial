@@ -261,10 +261,17 @@ def _classify_verdict(
     )
     signal_degenerate = n_degenerate_windows >= DEGENERATE_WINDOWS_MIN
 
-    # Apply verdict tree.
-    if n_primary_pass == n_windows == 3:
+    # Apply verdict tree. Mirrors R1's pattern for partial-window cases so the
+    # §4.6 asymmetric halt-guard has favorable verdicts to override when
+    # n_windows < 3 (per pre-reg §4.6 + R1 §4.6 amendment).
+    if n_primary_pass == n_windows and n_windows >= 1:
+        # All available windows pass primary. For n_windows=3, this is the
+        # genuine R3 SUCCESS case. For n_windows<3, this is naively favorable
+        # and will be overridden by §4.6 halt-guard below.
         verdict = "R3_SUCCESS"
-    elif n_primary_pass == 2 and n_windows == 3:
+    elif n_primary_pass == n_windows - 1 and n_windows >= 2:
+        # 1 window failed primary, 1+ passed. SUCCESS_CONDITIONAL if cells
+        # stable, INCONCLUSIVE if cells diverge.
         verdict = "R3_SUCCESS_CONDITIONAL" if cells_stable else "R3_INCONCLUSIVE"
     elif n_primary_pass <= n_windows - 2 and signal_degenerate:
         verdict = "R3_FAIL_SIGNAL_DEGENERATE"
