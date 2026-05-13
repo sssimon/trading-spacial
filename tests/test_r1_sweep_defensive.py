@@ -133,6 +133,63 @@ def test_emit_worker_error_summary_silent_on_clean_results(capsys):
     assert captured.out == ""
 
 
+def test_run_jobs_parallel_writes_error_summary_to_stderr_end_to_end(
+    capsys, monkeypatch
+):
+    """Polish-2: end-to-end test that _run_jobs_parallel actually invokes the wiring.
+
+    Item 5 tests verified `_emit_worker_error_summary` writes to stderr in
+    isolation, and verified silence on clean results. But the call site
+    inside `_run_jobs_parallel` had no test — a future refactor that
+    accidentally removes that call would still pass all helper-level tests.
+
+    This test monkeypatches `Pool` to a fake that returns synthetic results
+    (one errored, one clean), invokes `_run_jobs_parallel`, and asserts the
+    error summary lands in stderr via the wiring at `_run_jobs_parallel`.
+
+    Hypothetical regression caught: removing or commenting out the line
+    `_emit_worker_error_summary(results)` inside `_run_jobs_parallel`.
+    """
+    from tools import r1_signal_exit_sweep
+
+    synthetic_results = [
+        {"symbol": "BTCUSDT", "error": "ValueError: synthetic worker failure",
+         "n_trades": 0, "sl": 1.0, "be": 1.5, "lrc_thr": 50.0, "exit_reasons": {}},
+        {"symbol": "ETHUSDT", "n_trades": 5,
+         "sl": 1.0, "be": 1.5, "lrc_thr": 50.0, "exit_reasons": {}, "net_pnl": 10.0},
+    ]
+
+    class _FakePool:
+        """Minimal Pool replacement: context manager + map returning synthetic results."""
+
+        def __init__(self, n_workers):
+            self.n_workers = n_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def map(self, fn, jobs):
+            return synthetic_results
+
+    monkeypatch.setattr(r1_signal_exit_sweep, "Pool", _FakePool)
+
+    jobs = [{"symbol": "BTCUSDT"}, {"symbol": "ETHUSDT"}]
+    results = r1_signal_exit_sweep._run_jobs_parallel(jobs, workers=2, label="polish2_test")
+
+    captured = capsys.readouterr()
+    # Wiring assertion: error summary must reach stderr via _emit_worker_error_summary.
+    assert "1 workers errored" in captured.err, (
+        "Expected error summary in stderr — wiring "
+        "_run_jobs_parallel → _emit_worker_error_summary may be broken"
+    )
+    assert "ValueError: synthetic worker failure" in captured.err
+    # Pool.map result still returned correctly.
+    assert results == synthetic_results
+
+
 def test_summarize_worker_errors_uses_is_not_none_filter_not_truthy():
     """Closes #332 item 4: empty-string `error` field must count, not silently filter.
 
@@ -238,3 +295,45 @@ def test_argmax_cell_per_symbol_higher_net_pnl_wins_over_tie_break():
     assert out["BTCUSDT"]["net_pnl"] == 200.0, (
         "net_pnl must dominate tie-break fields"
     )
+
+
+def test_argmax_cell_per_symbol_tiebreak_deterministic_across_input_orders():
+    """Polish-1: all 24 permutations of 4 tied cells yield same deterministic winner.
+
+    Mirrors `test_r1_verdict.py:test_argmax_cell_tiebreak_deterministic_across_input_orders`
+    pattern for the sweep tool's `_argmax_cell_per_symbol`. Exhausts
+    `itertools.permutations` to catch sign bugs that affect only specific
+    input orderings — sequential tests would pass even if the tie-break key
+    were inverted for one level.
+
+    Hypothetical regression caught: if `_argmax_cell_per_symbol` reverted to
+    raw `max(eligible, key=lambda c: c["net_pnl"])`, some permutations would
+    return different cells (insertion-order fallback differs by permutation).
+    """
+    from itertools import permutations
+
+    from tools.r1_signal_exit_sweep import _argmax_cell_per_symbol
+
+    # 4 cells engineered to tie at every successive tie-break level.
+    # All have net_pnl=100.0 — forces tie-break to walk through (-sl, -be, -lrc_thr).
+    # Cell D is the expected winner (most conservative on every level).
+    cells = [
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.0,
+         "lrc_thr": 50.0, "n_trades": 15, "exit_reasons": {}},  # A: worst on every level
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 2.0,
+         "lrc_thr": 35.0, "n_trades": 15, "exit_reasons": {}},  # B: beats A on lrc_thr
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 1.0, "be": 1.5,
+         "lrc_thr": 35.0, "n_trades": 15, "exit_reasons": {}},  # C: beats B on be
+        {"symbol": "BTCUSDT", "net_pnl": 100.0, "sl": 0.5, "be": 1.5,
+         "lrc_thr": 35.0, "n_trades": 15, "exit_reasons": {}},  # D: beats C on sl (winner)
+    ]
+
+    expected = {"sl": 0.5, "be": 1.5, "lrc_thr": 35.0}
+    for perm in permutations(cells):
+        out = _argmax_cell_per_symbol(list(perm))
+        winner = out["BTCUSDT"]
+        for k, v in expected.items():
+            assert winner[k] == v, (
+                f"Permutation order {[c['sl'] for c in perm]}: "
+                f"expected {k}={v}, got {k}={winner[k]}"
+            )

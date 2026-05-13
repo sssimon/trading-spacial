@@ -290,9 +290,10 @@ def _argmax_cell_per_symbol(results: list[dict]) -> dict[str, dict | None]:
 
     Tie-break: when two cells tie on net_pnl, favor lower `sl`, then lower `be`,
     then lower `lrc_thr` — i.e., the more conservative parameter combination.
-    Mirrors `tools/r1_verdict.py:_argmax_cell` tie-break. Determinism matters
-    because the previous insertion-order tie-break made cell selection fragile
-    to job-execution order across parallel workers, and could cause drift
+    Mirrors `tools/r1_verdict.py:_argmax_cell` tie-break (modulo 5th key — see
+    inline comment near the `max` call). Determinism matters because the
+    previous insertion-order tie-break made cell selection fragile to
+    job-execution order across parallel workers, and could cause drift
     between the sweep tool's halt diagnostic JSON and the verdict tool's
     §4 classification on the same data.
 
@@ -310,6 +311,11 @@ def _argmax_cell_per_symbol(results: list[dict]) -> dict[str, dict | None]:
         if not eligible:
             out[sym] = None
         else:
+            # 5th tie-break field (symbol lex order, per r1_verdict._argmax_cell)
+            # omitted intentionally: per-symbol grouping above (by_symbol bucket)
+            # guarantees all eligible cells share the same symbol, so the 5th
+            # key would be a literal no-op. See r1_verdict._argmax_cell
+            # docstring for full 5-level contract.
             out[sym] = max(
                 eligible,
                 key=lambda c: (c["net_pnl"], -c["sl"], -c["be"], -c["lrc_thr"]),

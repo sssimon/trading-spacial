@@ -174,6 +174,30 @@ def test_argmax_cell_5th_tiebreak_noop_for_per_symbol_caller():
     assert out["sl"] == 0.5
 
 
+def test_argmax_cell_5th_tiebreak_reverse_input_order_same_winner():
+    """Polish-3: reverse-input deterministic — [ETH, BTC] → ETH (same as [BTC, ETH] → ETH).
+
+    The forward-direction test alone would pass even if the 5th tie-break key
+    accidentally inverted (e.g., a hypothetical change to `-c.get("symbol", "")`
+    couldn't apply since strings aren't negatable, but a buggy `key=...` lambda
+    that swapped the 5th element direction would slip through the
+    forward-only test). Reverse-direction test ensures determinism is
+    independent of input order — the symmetric counterpart to Polish-1's
+    permutation exhaust for the sweep tool.
+
+    Hypothetical regression caught: any 5th key change that makes the winner
+    depend on input order (sign inversion, removal, etc.).
+    """
+    cells_reversed = [
+        _cell(symbol="ETHUSDT", net_pnl=100.0, sl=1.0, be=2.0, lrc_thr=50.0, n_trades=15),
+        _cell(symbol="BTCUSDT", net_pnl=100.0, sl=1.0, be=2.0, lrc_thr=50.0, n_trades=15),
+    ]
+    out = _argmax_cell(cells_reversed)
+    assert out["symbol"] == "ETHUSDT", (
+        "Lex-greater symbol must win regardless of input order"
+    )
+
+
 def test_argmax_cell_tiebreak_deterministic_across_input_orders():
     """Gap #2: tie-break is independent of insertion order — all 6 permutations agree."""
     a = _cell(sl=1.0, be=1.5, lrc_thr=35.0, net_pnl=100.0)
