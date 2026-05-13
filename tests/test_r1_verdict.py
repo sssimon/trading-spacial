@@ -134,6 +134,46 @@ def test_argmax_cell_tiebreak_prefers_lower_lrc_thr_when_sl_and_be_tie():
     assert winner["lrc_thr"] == 35.0
 
 
+def test_argmax_cell_5th_tiebreak_symbol_lex_order_on_full_4tuple_tie():
+    """Closes #332 item 3: 5th tie-break on symbol lex order for fully-tied 4-tuple cells.
+
+    In normal per-symbol use (cells all share same symbol), 5th key is a no-op.
+    Defensive contract: if `_argmax_cell` is ever called with multi-symbol cells
+    (current caller passes per-symbol, but signature doesn't enforce), the 5th
+    tie-break makes ordering deterministic via lex order on symbol.
+
+    Without this 5th key, `max` falls back to Python's insertion-order tie-break,
+    which is contract-fragile against any caller change (e.g., a future
+    multi-symbol caller that batches cells from concurrent workers in
+    non-deterministic order).
+    """
+    cells = [
+        _cell(symbol="BTCUSDT", net_pnl=100.0, sl=1.0, be=2.0, lrc_thr=50.0, n_trades=15),
+        _cell(symbol="ETHUSDT", net_pnl=100.0, sl=1.0, be=2.0, lrc_thr=50.0, n_trades=15),
+    ]
+    # max picks the lex-greater symbol on full 4-tuple tie.
+    # max(("BTCUSDT",), ("ETHUSDT",)) = ("ETHUSDT",) because "ETHUSDT" > "BTCUSDT".
+    out = _argmax_cell(cells)
+    assert out["symbol"] == "ETHUSDT", (
+        "5th tie-break (symbol lex order) must select lex-greater symbol on full 4-tuple tie"
+    )
+
+
+def test_argmax_cell_5th_tiebreak_noop_for_per_symbol_caller():
+    """When all cells share the same symbol (normal caller), 5th key is a no-op.
+
+    Existing 4-tuple tie-break (lower sl wins) still applies; symbol equality
+    means the 5th key collapses and doesn't change selection.
+    """
+    cells = [
+        _cell(symbol="BTCUSDT", net_pnl=100.0, sl=1.0, be=2.0, lrc_thr=50.0, n_trades=15),
+        _cell(symbol="BTCUSDT", net_pnl=100.0, sl=0.5, be=2.0, lrc_thr=50.0, n_trades=15),
+    ]
+    out = _argmax_cell(cells)
+    # 4-tuple tie-break: lower sl (0.5) wins; 5th key (symbol) is identical so no override.
+    assert out["sl"] == 0.5
+
+
 def test_argmax_cell_tiebreak_deterministic_across_input_orders():
     """Gap #2: tie-break is independent of insertion order — all 6 permutations agree."""
     a = _cell(sl=1.0, be=1.5, lrc_thr=35.0, net_pnl=100.0)

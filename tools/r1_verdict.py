@@ -87,17 +87,42 @@ def _extract_halt_from_diagnostic(halt_diag) -> bool:
 def _argmax_cell(cells: list[dict]) -> dict | None:
     """Pre-reg §4.1: argmax(net_pnl) among cells with n_trades >= N_TRADES_MIN.
 
-    Tie-break: when two cells tie on net_pnl, favor lower `sl`, then lower `be`,
-    then lower `lrc_thr` — i.e., the more conservative parameter combination.
+    Tie-break order (5 levels, all deterministic):
+      1. higher net_pnl wins
+      2. lower `sl` wins (more conservative stop)
+      3. lower `be` wins (more conservative break-even)
+      4. lower `lrc_thr` wins (more aggressive exit threshold)
+      5. lex-greater `symbol` wins (#332 item 3 defensive 5th key)
+
+    Tie-break levels 1-4 are the methodologically-justified contract: among
+    cells with same P&L, prefer more-conservative parameters. Level 5 is
+    purely defensive: in normal per-symbol use (cells all share same symbol)
+    it's a no-op, but it makes the function safe against any future
+    multi-symbol caller — falling back to Python's insertion-order tie-break
+    would be contract-fragile against concurrent-worker batching.
+
     Determinism matters because the previous insertion-order tie-break made
     cell selection fragile to job-execution order across parallel workers.
+
+    Contract: the 4-tuple `(net_pnl, sl, be, lrc_thr)` is expected to uniquely
+    identify a cell in the canonical sweep grid for a single symbol. True
+    duplicates (same 4-tuple within same symbol) indicate upstream bug — the
+    5th key resolves the order silently rather than raising, but the grid
+    constructor in `tools/r1_signal_exit_sweep.py` should be audited if
+    diagnostic output shows duplicate cell counts.
     """
     eligible = [c for c in cells if c.get("n_trades", 0) >= N_TRADES_MIN]
     if not eligible:
         return None
     return max(
         eligible,
-        key=lambda c: (c["net_pnl"], -c["sl"], -c["be"], -c["lrc_thr"]),
+        key=lambda c: (
+            c["net_pnl"],
+            -c["sl"],
+            -c["be"],
+            -c["lrc_thr"],
+            c.get("symbol", ""),  # 5th defensive tie-break: lex order on symbol
+        ),
     )
 
 
