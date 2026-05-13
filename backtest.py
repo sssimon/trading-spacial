@@ -634,9 +634,21 @@ def _simulate_strategy_regime_allocation(
     )
 
     cfg = cfg or {}
-    portfolio_vol_target = float(cfg.get("portfolio_vol_target", DEFAULT_PORTFOLIO_VOL_TARGET))
-    max_position_pct = float(cfg.get("max_position_pct", DEFAULT_MAX_POSITION_PCT))
-    min_position_usd = float(cfg.get("min_position_usd", DEFAULT_MIN_POSITION_USD))
+    # Phase 1D: prefer nested `cfg.regime_allocation` block (production
+    # config.defaults.json shape), fall back to top-level keys (test convenience).
+    _ra_cfg = cfg.get("regime_allocation") if isinstance(cfg.get("regime_allocation"), dict) else {}
+
+    def _ra_param(key: str, default):
+        # nested wins if present; else top-level; else default
+        if key in _ra_cfg:
+            return _ra_cfg[key]
+        if key in cfg:
+            return cfg[key]
+        return default
+
+    portfolio_vol_target = float(_ra_param("portfolio_vol_target", DEFAULT_PORTFOLIO_VOL_TARGET))
+    max_position_pct = float(_ra_param("max_position_pct", DEFAULT_MAX_POSITION_PCT))
+    min_position_usd = float(_ra_param("min_position_usd", DEFAULT_MIN_POSITION_USD))
 
     # Cost setup — always-on by default per v2; flags allow opt-out for parity
     # testing or pure gross-PnL probes.
@@ -935,22 +947,32 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         Mutually exclusive with regime_thresholds.
     """
     # ── Early dispatch: regime-allocation path (epic #338 Phase 1C) ────────
-    # When `cfg.regime_allocation_enabled` is True, delegate entirely to the
+    # When regime-allocation is enabled, delegate entirely to the
     # regime-allocation simulator. LRC simulation below is bypassed.
-    if isinstance(cfg, dict) and cfg.get("regime_allocation_enabled", False):
-        return _simulate_strategy_regime_allocation(
-            df1h=df1h,
-            df1d=df1d,
-            symbol=symbol,
-            sim_start=sim_start,
-            sim_end=sim_end,
-            cfg=cfg,
-            enable_slippage=enable_slippage,
-            enable_spread=enable_spread,
-            enable_fees=enable_fees,
-            enable_funding=enable_funding,
-            cost_calibration=cost_calibration,
+    #
+    # Phase 1D: supports BOTH `cfg.regime_allocation.enabled` (nested,
+    # production config.defaults.json shape) and `cfg.regime_allocation_enabled`
+    # (flat, testing convenience).
+    if isinstance(cfg, dict):
+        _ra_nested = cfg.get("regime_allocation")
+        _ra_enabled = (
+            (isinstance(_ra_nested, dict) and _ra_nested.get("enabled", False))
+            or cfg.get("regime_allocation_enabled", False)
         )
+        if _ra_enabled:
+            return _simulate_strategy_regime_allocation(
+                df1h=df1h,
+                df1d=df1d,
+                symbol=symbol,
+                sim_start=sim_start,
+                sim_end=sim_end,
+                cfg=cfg,
+                enable_slippage=enable_slippage,
+                enable_spread=enable_spread,
+                enable_fees=enable_fees,
+                enable_funding=enable_funding,
+                cost_calibration=cost_calibration,
+            )
 
     if regime_disabled and regime_thresholds is not None:
         raise RegimeKwargError(

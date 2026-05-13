@@ -99,6 +99,38 @@ Binance API (Bybit fallback)
 ### Operational Model
 Signal generation is automatic; entry/close decisions require manual approval via CLI or frontend (Telegram is outbound only — no inbound bot for trade approval). Exclusions E2–E5 in `btc_scanner.py:305-335` are manual-check by design — see `docs/superpowers/specs/es/2026-05-01-operational-model-manual-gating.md` for the full classification and the backtest-vs-live distinction.
 
+### Cost model v2 (post-Phase 0 of epic #338)
+- **Slippage formula:** sqrt-participation (Almgren-Chriss family). `slippage_bps = base_bps + size_factor × sqrt(notional/liquidity_per_min)`, capped at `EXTREME_PARTICIPATION_CAP_BPS = 500` (5%) per fill. Migration from v1 linear in `backtest_costs.py` (PR #341). v1 linear path still available via `model='v1'` for parity testing.
+- **Anchor parity preserved:** at 0.1% participation, v2 and v1 produce identical total slippage per tier (calibration design invariant tested in `test_backtest_costs_v2.py::TestAnchorParity`).
+- **Funding-rate accounting:** per-tier conservative bps per 8h (`major=1.0`, `mid=2.0`, `small=5.0` in `costs_calibration.json`). Charged on every 8h funding interval the position is held (floor semantics: 7h pays 0, 8h pays 1, 24h pays 3). Conservative mode = always positive cost regardless of position direction.
+- **Forensic mitigation:** the DOGE -$30K single-trade case from audit H8 (#323) is mitigated >1000× under v2. v1 produced unbounded ~$19.8M per-fill cost on the catastrophically thin bar; v2 caps at $1,050. Vol-targeting in the new strategy class (below) prevents the $21K notional from being placed in the first place.
+- **Calibration sources cited in `costs_calibration.json`:** Almgren-Chriss (2001), Donier-Bonart (2015), Tóth et al (2011).
+
+### Regime-allocation strategy class (epic #338, post-Phase 1)
+Structurally distinct alternative strategy class to the LRC architecture. Mutually exclusive via `cfg.regime_allocation.enabled` (nested) or `cfg.regime_allocation_enabled` (flat, test convenience). Default **OFF** in `config.defaults.json` — opt-in only; not yet validated (Phase 2-6 pending).
+
+**Locked parameters** (§8 of epic spec):
+| Param | Value | Where |
+|---|---|---|
+| Signal | Equal-weight vote ensemble | `strategy/donchian_ensemble.py::ZARATTINI_LOOKBACKS = (5, 10, 20, 30, 60, 90, 150, 250, 360)` days |
+| Update frequency | Daily (23:00 UTC close) | `_simulate_strategy_regime_allocation` in `backtest.py` |
+| Portfolio vol target | 30% annualized | `cfg.regime_allocation.portfolio_vol_target` |
+| Sizing | Vol-targeting (replaces R-multiple) | `strategy/vol_targeting.py::compute_position_size` |
+| SHORT | Bidirectional rotational (requires perps + cross-margin) | dispatch direction sign from ensemble vote |
+| Max position per symbol | 20% of capital | `cfg.regime_allocation.max_position_pct` |
+| Leverage cap | 2x | `cfg.regime_allocation.max_leverage` (applied by portfolio orchestrator) |
+| Min position | $50 USD (Binance min) | `cfg.regime_allocation.min_position_usd` |
+| Exits | Signal-based (no SL/TP/TL) | `SIGNAL_FLIP` / `SIGNAL_EXIT` / `BANKRUPT` / `SIM_END` |
+
+**Architectural notes:**
+- When flag is on: `evaluate_signal` delegates to `_populate_regime_allocation_decision` (uses df1d only); `simulate_strategy` delegates to `_simulate_strategy_regime_allocation` (daily-update loop). LRC + trend-pullback paths are bypassed entirely.
+- When flag is off: LRC path is byte-identical (confirmed by `test_strategy_core` + `test_backtest_*` regression).
+- Single-symbol scope in `_simulate_strategy_regime_allocation`. Portfolio-level orchestration (n_active_symbols, leverage cap across symbols) is the caller's responsibility — not built in Phase 1.
+- Warmup: 390 daily bars required (longest lookback 360 + vol window 30). Symbols with shorter history return NONE with `regime_allocation_warmup` reason.
+- Cost model v2 + funding rate is the default for the regime-allocation path. Funding accrues per 8h interval the position is held (epic §8.5 SHORT bidirectional → perp dependency).
+
+**Authoritative spec doc:** `docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md` — read this before touching anything under the `regime_allocation` flag.
+
 ## Configuration
 
 **`config.json`** (root) — primary config read by both scanner and API:

@@ -503,16 +503,27 @@ def evaluate_signal(
     decision = SignalDecision()
 
     # ── Regime-allocation dispatch (epic #338 Phase 1B) ────────────────────
-    # When `cfg.regime_allocation_enabled` is True, take the structurally
-    # distinct regime-allocation path (Donchian ensemble + vol-targeting prep
-    # via daily bars). LRC and trend-pullback paths are skipped entirely —
-    # per §0 of epic spec, regime-allocation is mutually exclusive with the
-    # legacy LRC architecture, not an overlay. Pure df1d-driven; df1h / df4h
-    # may be empty without affecting the regime-allocation outcome.
-    if isinstance(cfg, dict) and cfg.get("regime_allocation_enabled", False):
-        return _populate_regime_allocation_decision(
-            decision=decision, df1d=df1d, symbol=symbol,
+    # When regime-allocation is enabled, take the structurally distinct path
+    # (Donchian ensemble + vol-targeting prep via daily bars). LRC and
+    # trend-pullback paths are skipped entirely — per §0 of epic spec,
+    # regime-allocation is mutually exclusive with the legacy LRC architecture,
+    # not an overlay. Pure df1d-driven; df1h / df4h may be empty without
+    # affecting the regime-allocation outcome.
+    #
+    # Phase 1D: supports BOTH `cfg.regime_allocation.enabled` (nested,
+    # production config.defaults.json shape) and `cfg.regime_allocation_enabled`
+    # (flat, testing convenience for ad-hoc cfg dicts). Either path enables
+    # regime-allocation.
+    if isinstance(cfg, dict):
+        _ra_nested = cfg.get("regime_allocation")
+        _ra_enabled = (
+            (isinstance(_ra_nested, dict) and _ra_nested.get("enabled", False))
+            or cfg.get("regime_allocation_enabled", False)
         )
+        if _ra_enabled:
+            return _populate_regime_allocation_decision(
+                decision=decision, df1d=df1d, symbol=symbol,
+            )
 
     # Guard: not enough bars to compute anything useful (LRC path only).
     if len(df1h) == 0 or len(df4h) == 0:

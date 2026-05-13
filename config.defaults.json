@@ -42,6 +42,13 @@
   "auto_tune": {
     "seed": 42
   },
+  "regime_allocation": {
+    "enabled": false,
+    "portfolio_vol_target": 0.30,
+    "max_position_pct": 0.20,
+    "min_position_usd": 50.0,
+    "max_leverage": 2.0
+  },
   "symbol_overrides": {
     "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010,  "cooldown_hours": 14 },
     "ETHUSDT":    { "atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010,  "cooldown_hours": 14 },
