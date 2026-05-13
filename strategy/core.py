@@ -225,6 +225,64 @@ def _check_trigger_5m_short(df5: pd.DataFrame) -> bool:
     return bearish_candle and rsi_falling
 
 
+def _evaluate_trend_pullback_direction(
+    price: float,
+    sma50: float | None,
+    sma200: float | None,
+    sma20: float | None,
+    atr: float | None,
+    pullback_distance: float,
+    regime_token: str,
+) -> tuple[str, dict]:
+    """Trend-pullback direction selection (Phase 2 R3, pre-reg §2.2).
+
+    LONG when SMA50 > SMA200 AND price ∈ SMA20 ± (pullback_distance × ATR)
+              AND regime_token in ("LONG", "ANY")
+    SHORT when SMA50 < SMA200 AND price ∈ SMA20 ± (pullback_distance × ATR)
+              AND regime_token in ("SHORT", "ANY") — BEAR-gated, mirrors LRC discipline
+    NONE  otherwise (no trend, no pullback, warmup incomplete, regime blocks,
+                     degenerate ATR).
+
+    Pure function: no side effects, no DataFrames. Caller passes pre-computed
+    indicator values; this function only does the comparison logic.
+
+    Args:
+        price: current 1H close.
+        sma50, sma200, sma20: 1H simple moving averages. `None` = warmup not
+            complete (SMA200 needs 200 bars; SMA50 needs 50).
+        atr: 1H Wilder ATR(14). `None` or ≤ 0 = degenerate (e.g., no
+            high/low spread); return NONE.
+        pullback_distance: envelope multiplier (R3 sweep grid: {0.3, 0.4, 0.5,
+            0.6, 0.7}). Larger = looser entry envelope.
+        regime_token: "LONG" | "SHORT" | "ANY" from _regime_to_direction_token.
+
+    Returns:
+        (direction, reasons): direction string ("LONG"|"SHORT"|"NONE") and
+        diagnostic dict with `is_uptrend`, `is_downtrend`, `pullback_ok` plus
+        edge-case flags (`warmup_incomplete`, `degenerate_atr`).
+    """
+    if sma50 is None or sma200 is None or sma20 is None:
+        return "NONE", {"warmup_incomplete": True}
+    if atr is None or atr <= 0:
+        return "NONE", {"degenerate_atr": True}
+
+    is_uptrend = sma50 > sma200
+    is_downtrend = sma50 < sma200
+    pullback_ok = abs(price - sma20) <= pullback_distance * atr
+
+    reasons = {
+        "is_uptrend": is_uptrend,
+        "is_downtrend": is_downtrend,
+        "pullback_ok": pullback_ok,
+    }
+
+    if is_uptrend and pullback_ok and regime_token in ("LONG", "ANY"):
+        return "LONG", reasons
+    if is_downtrend and pullback_ok and regime_token in ("SHORT", "ANY"):
+        return "SHORT", reasons
+    return "NONE", reasons
+
+
 @dataclass
 class SignalDecision:
     """Return shape of `evaluate_signal()`.
@@ -308,6 +366,21 @@ def evaluate_signal(
     sma10_1h = float(calc_sma(df1h["close"], 10).iloc[-1])
     sma20_1h = float(calc_sma(df1h["close"], 20).iloc[-1])
 
+    # SMA50 + SMA200 for trend-pullback (Phase 2 R3, pre-reg §2.2). Computed
+    # unconditionally — cheap, and exposing them in `decision.indicators` lets
+    # diagnostic consumers rely on their presence regardless of the
+    # `trend_pullback_enabled` flag.
+    sma50_1h: float | None = None
+    sma200_1h: float | None = None
+    if len(df1h) >= 50:
+        _sma50_val = calc_sma(df1h["close"], 50).iloc[-1]
+        if not pd.isna(_sma50_val):
+            sma50_1h = float(_sma50_val)
+    if len(df1h) >= 200:
+        _sma200_val = calc_sma(df1h["close"], 200).iloc[-1]
+        if not pd.isna(_sma200_val):
+            sma200_1h = float(_sma200_val)
+
     vol_avg1h = float(df1h["volume"].rolling(VOL_PERIOD).mean().iloc[-1])
     vol_1h = float(df1h["volume"].iloc[-1])
 
@@ -343,6 +416,8 @@ def evaluate_signal(
         "bb_lower_1h": bb_dn1h,
         "sma10_1h": sma10_1h,
         "sma20_1h": sma20_1h,
+        "sma50_1h": sma50_1h,
+        "sma200_1h": sma200_1h,
         "vol_1h": vol_1h,
         "vol_avg_1h": vol_avg1h,
         "cvd_1h": cvd_1h,
@@ -372,6 +447,34 @@ def evaluate_signal(
         direction = "NONE"
 
     decision.direction = direction
+
+    # ── Trend-pullback override (Phase 2 R3, pre-reg §2.2) ─────────────────
+    # When `cfg.trend_pullback_enabled` is True, REPLACE the LRC-zone direction
+    # with the SMA-based trend-pullback decision. Per pre-reg §A.6 single-
+    # alternative discipline: the two signal frames do NOT operate in parallel.
+    trend_pullback_enabled = bool((cfg or {}).get("trend_pullback_enabled", False)) \
+        if isinstance(cfg, dict) else False
+    if trend_pullback_enabled:
+        pullback_distance = (
+            float((cfg or {}).get("trend_pullback_distance", 0.5))
+            if isinstance(cfg, dict) else 0.5
+        )
+        tp_direction, tp_reasons = _evaluate_trend_pullback_direction(
+            price=price,
+            sma50=sma50_1h,
+            sma200=sma200_1h,
+            sma20=sma20_1h,
+            atr=atr_val,
+            pullback_distance=pullback_distance,
+            regime_token=regime_token,
+        )
+        direction = tp_direction
+        decision.direction = direction
+        decision.reasons.update({
+            "trend_pullback_enabled": True,
+            "trend_pullback_distance": pullback_distance,
+            **tp_reasons,
+        })
 
     # ── Exclusion / block detection (engulfings + divergences) ─────────────
     bull_eng = _detect_bull_engulfing(df1h)
@@ -436,6 +539,13 @@ def evaluate_signal(
         if sma10_1h > sma20_1h:
             score += 1
     # direction == "NONE" → score stays 0 (matches scan: no confirmations added)
+
+    # ── Trend-pullback score override (Phase 2 R3, pre-reg §2.2) ──────────
+    # When trend-pullback path is in use, force uniform `SCORE_STANDARD` (=2)
+    # on signal-firing trades to eliminate score-related confounding within R3
+    # (per pre-reg §2.2 + §9.5). Direction=NONE keeps score=0.
+    if trend_pullback_enabled and direction != "NONE":
+        score = SCORE_STANDARD
 
     decision.score = int(score)
     decision.score_label = _score_label(score)
@@ -540,13 +650,17 @@ def evaluate_signal(
     decision.is_signal = is_signal
     decision.is_setup = is_setup
     decision.estado = estado
-    decision.reasons = {
+    # Use .update() rather than reassignment to preserve any earlier additions
+    # (e.g., trend-pullback fields added by the §2.2 override branch above).
+    # LRC path's decision.reasons starts as {} from the dataclass default, so
+    # .update() produces identical content for the LRC path.
+    decision.reasons.update({
         "blocks": blocks,
         "macro_ok": macro_ok,
         "trigger_active": trigger_active,
         "atr_sl_mult": sl_mult,
         "atr_tp_mult": tp_mult,
         "atr_be_mult": be_mult,
-    }
+    })
 
     return decision
