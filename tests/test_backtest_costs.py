@@ -42,7 +42,11 @@ class TestTierForSymbol:
 
 
 class TestSlippageBps:
-    """v1 linear slippage: bps = base + size_factor * (order_usd / liquidity_per_min)."""
+    """v1 linear slippage: bps = base + size_factor * (order_usd / liquidity_per_min).
+
+    These tests pin v1 (legacy linear) behavior explicitly via `model='v1'`.
+    v2 sqrt-participation tests live in test_backtest_costs_v2.py (#340).
+    """
 
     def test_zero_size_returns_only_base_bps(self):
         """A zero-notional order incurs only the always-on minimum slippage."""
@@ -53,6 +57,7 @@ class TestSlippageBps:
             liquidity_usd_per_min=1_000_000.0,
             base_bps=5.0,
             size_factor=25_000.0,
+            model="v1",
         )
         assert bps == pytest.approx(5.0)
 
@@ -60,7 +65,7 @@ class TestSlippageBps:
         """Linear contract: variable component scales linearly with order size."""
         from backtest_costs import compute_slippage_bps
 
-        kwargs = dict(liquidity_usd_per_min=1_000_000.0, base_bps=5.0, size_factor=25_000.0)
+        kwargs = dict(liquidity_usd_per_min=1_000_000.0, base_bps=5.0, size_factor=25_000.0, model="v1")
         small = compute_slippage_bps(order_usd=1_000.0, **kwargs)
         large = compute_slippage_bps(order_usd=2_000.0, **kwargs)
 
@@ -81,6 +86,7 @@ class TestSlippageBps:
             liquidity_usd_per_min=liquidity_per_min,
             base_bps=5.0,
             size_factor=25_000.0,
+            model="v1",
         )
         # Formula: 5 + 25_000 * (1000/1_000_000) = 5 + 25 = 30
         assert bps == pytest.approx(30.0)
@@ -89,7 +95,7 @@ class TestSlippageBps:
         """Zero-volume bar: refuse to divide by zero. Fall back to a conservative
         slippage (default = 100 bps = 1%, deliberately punitive so the strategy
         is penalized for entering when volume is unobservable). Caller may
-        override via fallback_bps kwarg."""
+        override via fallback_bps kwarg. Model-independent (fallback path)."""
         from backtest_costs import compute_slippage_bps
 
         bps = compute_slippage_bps(
@@ -97,6 +103,7 @@ class TestSlippageBps:
             liquidity_usd_per_min=0.0,
             base_bps=5.0,
             size_factor=25_000.0,
+            model="v1",
         )
         assert bps == pytest.approx(100.0)
 
@@ -109,6 +116,7 @@ class TestSlippageBps:
             base_bps=5.0,
             size_factor=25_000.0,
             fallback_bps=200.0,
+            model="v1",
         )
         assert bps == pytest.approx(200.0)
 
@@ -122,6 +130,7 @@ class TestSlippageBps:
             liquidity_usd_per_min=-1.0,
             base_bps=5.0,
             size_factor=25_000.0,
+            model="v1",
         )
         assert bps == pytest.approx(100.0)
 
@@ -133,6 +142,7 @@ class TestSlippageBps:
             liquidity_usd_per_min=float("nan"),
             base_bps=5.0,
             size_factor=25_000.0,
+            model="v1",
         )
         assert bps == pytest.approx(100.0)
 
@@ -183,12 +193,31 @@ class TestLoadCalibration:
         cal = load_calibration()
         assert cal.sensitivity_note and len(cal.sensitivity_note) > 0
 
-    def test_calibration_records_v1_model_marker(self):
-        """v1 must be tagged 'linear'; v2 plan documented in module docstring."""
+    def test_calibration_records_v2_model_marker(self):
+        """Post-#340: calibration JSON is v2. Active model must be sqrt-participation.
+
+        The v1 'linear' marker was correct under #277; v2 migrated per epic #338
+        Phase 0. test_v2_calibration_anchor_parity_matches_v1 covers numerical
+        continuity at the anchor."""
         from backtest_costs import load_calibration
 
         cal = load_calibration()
-        assert cal.model == "linear"
+        assert cal.version == 2
+        assert "sqrt-participation" in cal.model.lower()
+
+    def test_calibration_includes_funding_rate_field_v2(self):
+        """Post-#340: each tier exposes funding_rate_bps_per_8h (NEW in v2).
+        Required because epic #338 §8.5 locked SHORT bidirectional → perps."""
+        from backtest_costs import load_calibration
+
+        cal = load_calibration()
+        for tier_name, params in cal.tiers.items():
+            assert params.funding_rate_bps_per_8h >= 0.0, (
+                f"{tier_name} funding_rate_bps_per_8h must be non-negative"
+            )
+            # Conservative monotonicity: major ≤ mid ≤ small (less-liquid pays more)
+        assert cal.tiers["major"].funding_rate_bps_per_8h <= cal.tiers["mid"].funding_rate_bps_per_8h
+        assert cal.tiers["mid"].funding_rate_bps_per_8h <= cal.tiers["small"].funding_rate_bps_per_8h
 
 
 class TestComputeTradeCosts:
@@ -259,6 +288,7 @@ class TestComputeTradeCosts:
         assert c["total_cost_bps"] == pytest.approx(3.0)
 
     def test_only_slippage_enabled_uses_per_side_liquidity(self):
+        """Explicit v1 model pin — hardcoded size_factor expects linear formula."""
         from backtest_costs import compute_trade_costs
 
         # 0.1% participation on entry, 0.2% on exit
@@ -271,6 +301,8 @@ class TestComputeTradeCosts:
             enable_slippage=True,
             enable_spread=False,
             enable_fees=False,
+            enable_funding=False,
+            model="v1",
         )
         # Entry: 5 + 25_000 * 0.001 = 30
         # Exit:  5 + 25_000 * 0.002 = 55
@@ -279,6 +311,7 @@ class TestComputeTradeCosts:
         assert c["total_cost_bps"] == pytest.approx(85.0)
 
     def test_all_flags_on_sums_components(self):
+        """Explicit v1 model pin — hardcoded size_factor expects linear formula."""
         from backtest_costs import compute_trade_costs
 
         c = compute_trade_costs(
@@ -290,6 +323,8 @@ class TestComputeTradeCosts:
             enable_slippage=True,
             enable_spread=True,
             enable_fees=True,
+            enable_funding=False,
+            model="v1",
         )
         # Entry: slip 30 + spread 1.5; Exit: same; fee round-trip 20
         # Total: 30 + 30 + 1.5 + 1.5 + 20 = 83

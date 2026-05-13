@@ -1,38 +1,65 @@
-"""Realistic transaction cost model for backtests (A.0.2, #277).
+"""Realistic transaction cost model for backtests (A.0.2 #277; v2 epic #338 Phase 0 #340).
 
-Provides tier-based slippage + bid-ask spread + fee components. Designed so
-backtest.py can compute per-trade cost_bps deterministically without depending
-on per-symbol orderbook history.
+Provides tier-based slippage + bid-ask spread + fee + funding-rate components.
+Designed so backtest.py can compute per-trade cost_bps deterministically without
+depending on per-symbol orderbook history.
 
-v1 model is **linear in participation rate**:
+## Model versions
 
-    slippage_bps = base_bps + size_factor * (order_usd / liquidity_usd_per_min)
+**v1 — linear in participation rate** (epic #277, legacy):
 
-Compared to the empirically-better Almgren-Chriss `sqrt(participation)` baseline,
-v1 linear **underpenalizes small orders and overpenalizes large ones** when
-both models are calibrated to the same anchor (e.g., 30 bps at 0.1%
-participation). At P below the anchor, linear gives less slippage than sqrt
-(linear is more permissive of small orders). At P above the anchor, linear
-explodes super-proportionally while sqrt grows more slowly. Practical
-implication: a backtest using v1 with small per-trade participation
-under-states slippage (good news bias for tightly-sized trades), while a
-backtest where R-multiple sizing inflates notional past comfortable
-participation rates produces catastrophic slippage that is not what real
-execution would show. v2 migration to sqrt fixes both ends.
+    slippage_bps = base_bps + size_factor * (notional / liquidity_per_min)
 
-Note: the spec text in #277 phrases the direction inverted ("overpenalizes
-small, underpenalizes large"). The math above is the correct read; the
-discrepancy is surfaced for the reviewer in the A.0.2 PR description.
+v1 explodes super-proportionally for high-participation trades. Documented
+failure mode: DOGE -$30,489 single-trade case (R3 forensic, audit H8 #323).
+
+**v2 — sqrt-participation Almgren-Chriss** (epic #338 Phase 0 #340, default):
+
+    slippage_bps = base_bps + size_factor * sqrt(notional / liquidity_per_min)
+    slippage_bps = min(slippage_bps, EXTREME_PARTICIPATION_CAP_BPS)
+
+v2 is the empirically-validated baseline for crypto market impact (Donier-Bonart
+2015; Tóth et al 2011). The square-root law holds across asset classes and is
+the standard quantitative finance anchor. At the calibration anchor (0.1%
+participation), v2 produces the same total slippage as v1 — they differ only at
+non-anchor participation rates:
+- At < anchor: v2 charges more (correctly — small orders aren't free)
+- At > anchor: v2 charges less than v1's super-linear explosion (correctly —
+  even market makers refuse to widen spreads beyond a hard practical cap)
+
+Additionally, v2 adds:
+- **Funding-rate accounting** for perp positions (epic #338 §8.5 — SHORT
+  bidirectional enables perp dependency). Conservative per-tier estimate
+  charged per 8h interval the position is held.
+- **Extreme participation cap** (`EXTREME_PARTICIPATION_CAP_BPS = 500.0`):
+  hard cap on per-fill slippage. Real execution would refuse a fill at >5%
+  adverse price; cap protects backtests from residual single-trade
+  catastrophes even under sqrt.
+
+## Migration notes (v1 → v2)
+
+- `compute_slippage_bps` extended with `model: Literal['v1', 'v2']` arg, default
+  `'v2'`. Callers wanting linear behavior must pass `model='v1'` explicitly.
+- `compute_trade_costs` extended with same `model` arg + new `holding_hours`
+  and `enable_funding` args. Funding accounted when `enable_funding=True`
+  (default) and `holding_hours > 0`.
+- `TierParams` gains `funding_rate_bps_per_8h` field with default 0.0 for
+  backward compat with v1 callers.
+- `costs_calibration.json` v2: size_factors re-calibrated so anchor parity
+  holds (size_factor_v2 = size_factor_v1 × sqrt(anchor_participation) /
+  anchor_participation = size_factor_v1 / sqrt(anchor_participation)). At
+  anchor=0.001, conversion factor = 1/sqrt(0.001) ≈ 31.623.
 
 Calibration lives in `costs_calibration.json` (committed alongside this module).
-Each parameter cites its source — invented numbers are not allowed (#277).
+Each parameter cites its source — invented numbers are not allowed (#277, #340).
 """
 from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 # Curated symbols are organized into three liquidity tiers. The split is the
 # same as the spec's recommended grouping (#277 §2): majors trade tightest,
@@ -78,6 +105,11 @@ def tier_for_symbol(symbol: str) -> str:
 # better fallback (e.g. tier-default participation × tier-default base_bps).
 _DEFAULT_LIQUIDITY_FALLBACK_BPS = 100.0
 
+# v2 extreme-participation cap. Slippage above this is non-physical: real
+# execution would refuse a fill at >5% adverse price. Protects backtests from
+# residual single-trade catastrophes even under the sqrt model.
+EXTREME_PARTICIPATION_CAP_BPS = 500.0
+
 
 def compute_slippage_bps(
     *,
@@ -86,26 +118,38 @@ def compute_slippage_bps(
     base_bps: float,
     size_factor: float,
     fallback_bps: float = _DEFAULT_LIQUIDITY_FALLBACK_BPS,
+    model: Literal["v1", "v2"] = "v2",
 ) -> float:
-    """v1 linear slippage model.
+    """Compute per-fill slippage in bps.
 
-    Returns total slippage in bps for a single fill of `order_usd` against a
-    liquidity proxy of `liquidity_usd_per_min`. The proxy is meant to be a
-    rolling average of (volume × price) per minute over the last ~30 days
-    on the same timeframe the strategy trades on.
+    Returns total slippage for a single fill of `order_usd` against a liquidity
+    proxy of `liquidity_usd_per_min`. The proxy is meant to be a rolling
+    average of (volume × price) per minute over the last ~30 days on the same
+    timeframe the strategy trades on.
 
-    Edge cases:
+    Args:
+        order_usd: USD notional of the fill.
+        liquidity_usd_per_min: USD volume per minute (rolling 30d proxy).
+        base_bps: Per-tier base slippage (always-on minimum).
+        size_factor: Per-tier slope. Units depend on model — see formula.
+        fallback_bps: Returned when liquidity is non-positive/non-finite.
+        model: 'v1' (linear in participation) or 'v2' (sqrt Almgren-Chriss).
+            Default 'v2'.
+
+    Formula:
+        - v1: bps = base + size_factor * (order/liquidity). size_factor is
+          unitless slope per unit participation.
+        - v2: bps = base + size_factor * sqrt(order/liquidity). size_factor
+          here is approximately √31.6× larger than v1's to hit the same
+          anchor at 0.1% participation. v2 result is capped at
+          EXTREME_PARTICIPATION_CAP_BPS.
+
+    Edge cases (both models):
       - liquidity_usd_per_min ≤ 0, NaN, or non-finite → fallback_bps.
         Rationale: a zero-volume bar is exceptional; entering then is closer
         to "we have no idea what fill we'd get" than "we'd get a tight fill".
         Default fallback is punitive (100 bps) so the strategy is penalized
         for picking such a bar.
-
-    NOT modeled in v1 (deferred to v2):
-      - sqrt-participation impact (Almgren-Chriss) — overpenalizes small,
-        underpenalizes large relative to linear.
-      - Permanent vs temporary impact decomposition.
-      - Order book depth heterogeneity within a single bar.
     """
     if (
         liquidity_usd_per_min is None
@@ -113,16 +157,76 @@ def compute_slippage_bps(
         or liquidity_usd_per_min <= 0.0
     ):
         return fallback_bps
-    return base_bps + size_factor * (order_usd / liquidity_usd_per_min)
+
+    participation = order_usd / liquidity_usd_per_min
+
+    if model == "v1":
+        return base_bps + size_factor * participation
+    elif model == "v2":
+        # sqrt-participation impact. Negative participation (degenerate input)
+        # treated as zero — square root of negative is meaningless here.
+        if participation < 0.0:
+            participation = 0.0
+        slippage = base_bps + size_factor * math.sqrt(participation)
+        return min(slippage, EXTREME_PARTICIPATION_CAP_BPS)
+    else:
+        raise ValueError(f"Unknown cost model {model!r}; expected 'v1' or 'v2'")
+
+
+def compute_funding_cost_bps(
+    *,
+    holding_hours: float,
+    funding_rate_bps_per_8h: float,
+    conservative: bool = True,
+) -> float:
+    """Compute cumulative funding cost (in bps) for a perp position held
+    `holding_hours`.
+
+    Args:
+        holding_hours: How long the position is held. Funding intervals are
+            8h on Binance USDT-M perps.
+        funding_rate_bps_per_8h: Per-tier conservative absolute estimate of
+            the funding rate per 8h interval.
+        conservative: If True (default), always charge the absolute funding
+            rate regardless of position direction (worst-case assumption for
+            backtest validation). If False, caller must provide signed rate
+            and direction — currently NOT implemented (raise NotImplementedError).
+
+    Returns:
+        Total funding cost in bps for the holding period. Zero if
+        holding_hours <= 0.
+
+    Notes:
+        - Uses floor: a position held 7h pays 0 funding intervals; 8h pays 1;
+          24h pays 3. Mirrors Binance's discrete funding settlement.
+        - Conservative mode is appropriate for v2 baseline validation.
+          Direction-aware mode is deferred to Phase 1+ when per-bar funding
+          rate data is integrated.
+    """
+    if not conservative:
+        raise NotImplementedError(
+            "Direction-aware funding (non-conservative) is deferred to Phase "
+            "1+; v2 baseline uses conservative absolute-rate accounting only."
+        )
+    if holding_hours <= 0.0:
+        return 0.0
+    if not math.isfinite(holding_hours):
+        return 0.0
+    n_intervals = math.floor(holding_hours / 8.0)
+    return n_intervals * abs(funding_rate_bps_per_8h)
 
 
 @dataclass(frozen=True)
 class TierParams:
-    """Per-tier cost parameters loaded from costs_calibration.json."""
+    """Per-tier cost parameters loaded from costs_calibration.json.
+
+    The funding_rate_bps_per_8h field is new in v2 (#340); defaults to 0.0 for
+    backward compat with v1 callers that constructed TierParams manually."""
     base_bps: float
     size_factor: float
     half_spread_bps: float
     fee_bps_per_side: float
+    funding_rate_bps_per_8h: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -152,13 +256,14 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
             size_factor=float(t["size_factor"]),
             half_spread_bps=float(t["half_spread_bps"]),
             fee_bps_per_side=float(t["fee_bps_per_side"]),
+            funding_rate_bps_per_8h=float(t.get("funding_rate_bps_per_8h", 0.0)),
         )
         for name, t in raw["tiers"].items()
     }
     return Calibration(
         version=int(raw["version"]),
         model=raw["model"],
-        v2_planned=raw["v2_planned"],
+        v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),
         tiers=tiers,
         sources=dict(raw["sources"]),
         sensitivity_note=raw["sensitivity_note"],
@@ -175,14 +280,31 @@ def compute_trade_costs(
     enable_slippage: bool = True,
     enable_spread: bool = True,
     enable_fees: bool = True,
+    enable_funding: bool = True,
+    holding_hours: float = 0.0,
+    model: Literal["v1", "v2"] = "v2",
 ) -> dict:
     """Compute per-component cost dict for a single round-trip trade.
 
     Returns keys: entry_slippage_bps, exit_slippage_bps, entry_spread_bps,
-    exit_spread_bps, fee_bps (round-trip), total_cost_bps, total_cost_usd.
+    exit_spread_bps, fee_bps (round-trip), funding_cost_bps (NEW in v2),
+    total_cost_bps, total_cost_usd.
 
     Notional is the position USD value at fill time. Liquidity is a 30-day
     rolling proxy of (volume × price) per minute on the bar's timeframe.
+
+    Args (v2-specific):
+        enable_funding: Include funding-rate cost for perp positions held
+            across funding intervals. Default True (matches epic #338 §8.5
+            which locked SHORT bidirectional → perp dependency).
+        holding_hours: How long the position was held end-to-end. Funding
+            costs accrue per 8h interval (floor). Zero by default for
+            backward-compat with v1 callers.
+        model: 'v1' (legacy linear slippage) or 'v2' (sqrt + cap, default).
+
+    Backward compat: if `holding_hours=0` (default), funding_cost_bps=0
+    regardless of enable_funding — preserves v1 test expectations for callers
+    that don't yet supply holding_hours.
     """
     if enable_slippage:
         entry_slip = compute_slippage_bps(
@@ -190,12 +312,14 @@ def compute_trade_costs(
             liquidity_usd_per_min=entry_liquidity_usd_per_min,
             base_bps=tier_params.base_bps,
             size_factor=tier_params.size_factor,
+            model=model,
         )
         exit_slip = compute_slippage_bps(
             order_usd=exit_notional_usd,
             liquidity_usd_per_min=exit_liquidity_usd_per_min,
             base_bps=tier_params.base_bps,
             size_factor=tier_params.size_factor,
+            model=model,
         )
     else:
         entry_slip = 0.0
@@ -213,7 +337,18 @@ def compute_trade_costs(
     else:
         fee_bps = 0.0
 
-    total_cost_bps = entry_slip + exit_slip + entry_spread + exit_spread + fee_bps
+    if enable_funding and holding_hours > 0.0:
+        funding_bps = compute_funding_cost_bps(
+            holding_hours=holding_hours,
+            funding_rate_bps_per_8h=tier_params.funding_rate_bps_per_8h,
+            conservative=True,
+        )
+    else:
+        funding_bps = 0.0
+
+    total_cost_bps = (
+        entry_slip + exit_slip + entry_spread + exit_spread + fee_bps + funding_bps
+    )
     avg_notional = 0.5 * (entry_notional_usd + exit_notional_usd)
     total_cost_usd = total_cost_bps * avg_notional / 10_000.0
 
@@ -223,6 +358,7 @@ def compute_trade_costs(
         "entry_spread_bps": entry_spread,
         "exit_spread_bps": exit_spread,
         "fee_bps": fee_bps,
+        "funding_cost_bps": funding_bps,
         "total_cost_bps": total_cost_bps,
         "total_cost_usd": total_cost_usd,
     }
