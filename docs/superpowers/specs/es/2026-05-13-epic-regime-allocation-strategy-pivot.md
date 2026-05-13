@@ -1,7 +1,7 @@
 # Epic — Regime-allocation strategy pivot (post-R3 FAIL)
 
 **Fecha:** 2026-05-13
-**Status:** DRAFT — conditional on closure del A.4 (`2026-05-13-r3-fail-closure-path-a-honoring.md`) y approval de Simón
+**Status:** ACTIVE — A.4 closure ratificado por Simón 2026-05-13; §8 questions locked 2026-05-13; Phase 0 (cost model v2) en arranque
 **Autor:** sssamuelll en colaboración con Claude Opus 4.7
 **Tipo:** epic spec — propuesta de arquitectura estructuralmente distinta
 **Trigger:** R3 FAIL (PR #336) + investigación externa 2026-05-13
@@ -382,38 +382,85 @@ Solo si holdout passes. Requiere comunicación a Simón + revisor externo + deci
 
 ---
 
-## 8 · Open questions for operator review (pre-Phase 1)
+## 8 · Operator decisions locked (2026-05-13)
 
-Las siguientes decisiones deben locked antes de empezar Phase 1 implementation:
+Las 7 decisiones fueron locked via 2 rounds de `AskUserQuestion` el 2026-05-13. Se preserva la deliberación original (alternativas consideradas) con la opción elegida marcada **[LOCKED]** para traceability.
 
-1. **§9.1 — Aggregation method del ensemble**
-   - (a) Equal-weight vote (Recommended — minimum degrees of freedom)
-   - (b) Signal-strength weighted
-   - (c) Regime-conditional weights
+### §8.1 — Aggregation method del ensemble — **LOCKED: equal-weight vote**
 
-2. **§9.2 — Position update frequency**
-   - (a) Daily (Recommended — match Zarattini, lower turnover, lower costs)
-   - (b) Per 1H bar with threshold
+- **(a) Equal-weight vote [LOCKED]** — minimum degrees of freedom; matchea Zarattini
+- (b) Signal-strength weighted — rejected: más DOF, requiere normalización cross-symbol
+- (c) Regime-conditional weights — rejected: sale del scope de replicación cercana
 
-3. **§9.3 — Portfolio vol target**
-   - (a) 30% (Recommended — conservative anchor)
-   - (b) 35%
-   - (c) 40% (aggressive)
+**Definición operacional**: cada uno de los 9 Donchian channels emite signal ∈ {-1, 0, +1}. Position direction = `sign(sum of signals)`. Confidence = `|sum| / 9` ∈ [0, 1]. Flat si sum = 0.
 
-4. **§9.4 — Lookback list**
-   - (a) Zarattini exact 5/10/20/30/60/90/150/250/360 (Recommended)
-   - (b) Subset (e.g., 10/30/90/180 — 4 lookbacks, lower degrees of freedom)
+### §8.2 — Position update frequency — **LOCKED: daily**
 
-5. **§9.5 — Short enabled**
-   - (a) Yes — bidirectional rotational como Zarattini (Recommended)
-   - (b) Long-only (more conservative, easier to operate)
+- **(a) Daily [LOCKED]** — match Zarattini, lower turnover, lower costos
+- (b) Per 1H bar with threshold — rejected: más costos, threshold introduce nuevo parámetro
 
-6. **§9.6 — Hard cap leverage**
-   - (a) 1× (no leverage, sum |positions| ≤ capital)
-   - (b) 2× (sum |positions| ≤ 2 × capital)
+**Definición operacional**: el ensemble se computa una vez al día sobre close de la última barra 1H del día UTC (23:00 UTC). Position se sostiene 24h.
 
-7. **§9.7 — Compute budget Phase 3**
-   - Default: same hardware/wallclock que R3 sweep (~30-60 min)
+### §8.3 — Portfolio vol target — **LOCKED: 30% anualizado**
+
+- **(a) 30% [LOCKED]** — conservador, lower end del rango Zarattini
+- (b) 35% — rejected: trade-off de upside/downside no justificado para validación inicial
+- (c) 40% — rejected: drawdowns muy grandes podrían triggear halt conditions §6.3 con demasiada frecuencia
+
+**Definición operacional**: `target_vol_per_symbol = 0.30 / n_active_symbols`. Position size USD = `capital × target_vol_per_symbol / realized_vol_30d_annualized`.
+
+### §8.4 — Lista de lookbacks — **LOCKED: Zarattini exact 9**
+
+- **(a) Zarattini exact 9: 5/10/20/30/60/90/150/250/360 días [LOCKED]** — máxima fidelidad al benchmark
+- (b) Subset 4: 10/30/90/180 — rejected: pierde fidelidad al ensemble denso del paper
+- (c) Subset 5: 7/14/30/90/180 — rejected: sale del scope de replicación cercana
+
+**Definición operacional**: para cada símbolo y cada lookback N ∈ {5, 10, 20, 30, 60, 90, 150, 250, 360}, el Donchian channel se computa sobre **N días de barras 1H agregadas a daily** (close de cada día UTC).
+
+### §8.5 — SHORT habilitado — **LOCKED: bidirectional rotational**
+
+- **(a) Sí — bidirectional rotational [LOCKED]** — match Zarattini, captura full edge
+- (b) Long-only — rejected: pierde ~50% del edge teórico
+
+**Definición operacional**: position direction puede ser LONG (sum > 0), SHORT (sum < 0), o flat (sum = 0). Implementación requiere acceso a perps (Binance Futures USDT-M). Venue: misma cuenta de producción que el operator usa hoy. Funding rate cost incluido en cost model v2.
+
+### §8.6 — Leverage cap — **LOCKED: 2x**
+
+- **(a) 2x [LOCKED]** — sum |positions| ≤ 2 × capital. Permite long+short simultáneo entre símbolos
+- (b) 1x — rejected: subutiliza capital cuando ensemble vota fuerte en múltiples símbolos
+- (c) 3x — rejected: riesgo de liquidación en eventos de gap, no apropiado para validación inicial
+
+**Definición operacional**: hard cap aplicado tras vol-targeting. Si `sum(|position_size_usd|) > 2 × capital`, escalar proporcionalmente todas las positions para que sum exacto = 2 × capital.
+
+### §8.7 — Compute budget Phase 3 — **LOCKED: expandido (sensitivity sweep incluido)**
+
+- (a) Default ~30-60 min — rejected: confidence intermedia
+- **(b) Expandido [LOCKED]** — incluir sensitivity sweep sobre vol_target ∈ {25, 30, 35, 40}. 4 × 30 = 120 backtests, ~2-3h wallclock. Mayor confidence en verdict.
+- (c) Mínimo (1 sub-window) — rejected: pierde 3-window walk-forward
+
+**Definición operacional**: Phase 3 sweep ejecuta dos passes:
+- **Primary pass**: params locked exactos (vol_target=30%), 1 cell × 10 símbolos × 3 sub-windows = 30 backtests.
+- **Sensitivity pass**: vol_target ∈ {25, 30, 35, 40}, 4 × 30 = 120 backtests. Reporta sensitivity curve del primary metric vs vol_target. Locked threshold: si primary criterion §6.1 PASS solo en uno de los 4 vol_target values, eso es weak evidence (potential sweet-spot artifact). Si PASS en ≥ 3 de 4, strong evidence.
+
+---
+
+## 8.B · Implicaciones de las decisiones locked
+
+Algunas de las decisiones locked tienen implicaciones operacionales no obvias:
+
+### Implicación de §8.5 (SHORT bidirectional) + §8.6 (leverage 2x)
+
+Bidirectional rotational + leverage 2x requiere **perps con margen cruzado**. En Binance Futures USDT-M, esto está disponible bajo la cuenta del operator. Sin embargo:
+
+- **Funding rate** se cobra cada 8h sobre la posición neta. En periodos de funding extremo (>0.1% per 8h), el cost model v2 debe capturarlo. Phase 0 incluye funding rate accounting.
+- **Margin calls** son posibles si vol-targeting falla durante un gap event. El leverage 2x es un cap permisivo — la mayoría del tiempo el portfolio operará a 0.5-1.5x leverage efectivo según la dispersión de signals del ensemble.
+- **Cross-margin vs isolated**: cross-margin es necesario para que el leverage cap sea operacional. Documentar en Phase 1 que el production scanner asume cross-margin enabled.
+
+### Implicación de §8.7 (sensitivity sweep)
+
+El sensitivity sweep agrega ~3h al wallclock. NO modifica las decisiones primary (criterio §6.1 sigue siendo "beat BTC B&H bajo vol_target=30%"). El sweep adicional sirve solo para detectar **sweet-spot overfit**:
+- Si el strategy solo funciona en vol_target=30% y no en {25, 35, 40} → sospechoso, sugiere sobre-ajuste de la calibración inicial
+- Si funciona en al menos 3 de 4 vol_target values → evidencia robusta de que el edge es real, no artifact de un punto específico
 
 ---
 
@@ -533,7 +580,8 @@ Las siguientes decisiones deben locked antes de empezar Phase 1 implementation:
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-13 | Initial draft post-R3 FAIL, post-research externa | sssamuelll + Claude Opus 4.7 |
-| TBD | Operator review feedback incorporado | sssamuelll |
-| TBD | Simón review feedback incorporado | sssamuelll |
-| TBD | §8 questions resolved → spec finalized | sssamuelll |
-| TBD | Phase 0 issue created | sssamuelll |
+| 2026-05-13 | Spec mergeada a `main` via PR #337 (closure + epic draft package) | sssamuelll |
+| 2026-05-13 | A.4 closure ratificado por Simón → epic habilitado | sssamuelll |
+| 2026-05-13 | §8 questions resolved via 2 AskUserQuestion rounds → spec finalized, status ACTIVE | sssamuelll |
+| 2026-05-13 | Epic tracking issue creado: #338 | sssamuelll |
+| TBD | Phase 0 issue creado (cost model v2 sqrt-participation) | sssamuelll |

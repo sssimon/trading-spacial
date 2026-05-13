@@ -194,6 +194,7 @@ Todo el material que soporta este cierre está commiteado y reproducible:
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-13 | Initial draft post-R3 FAIL (PR #336 merged) | sssamuelll + Claude Opus 4.7 |
-| TBD | Comunicación enviada a Simón | sssamuelll |
-| TBD | Respuesta de Simón incorporada (acceptance / pushback / amendment) | sssamuelll |
-| TBD | Closure final ratificado | sssamuelll |
+| 2026-05-13 | Spec mergeada a `main` via PR #337 | sssamuelll |
+| 2026-05-13 | Comunicación enviada a Simón | sssamuelll |
+| 2026-05-13 | **Simón ratifica el cierre A.4** — path (a) confirmado, holdout permanece locked, #271 enforced indefinidamente bajo arquitectura LRC | sssamuelll |
+| 2026-05-13 | Closure final ratificado — handoff al epic regime-allocation (#338) habilitado | sssamuelll |
