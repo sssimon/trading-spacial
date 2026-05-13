@@ -568,6 +568,326 @@ def _should_signal_exit(direction, lrc_pct, threshold: float) -> bool:
     return False
 
 
+def _simulate_strategy_regime_allocation(
+    *,
+    df1h: pd.DataFrame,
+    df1d: pd.DataFrame,
+    symbol: str,
+    sim_start: datetime | None,
+    sim_end: datetime | None,
+    cfg: dict | None,
+    enable_slippage: bool,
+    enable_spread: bool,
+    enable_fees: bool,
+    enable_funding: bool,
+    cost_calibration,
+) -> tuple[list[dict], list[dict]]:
+    """Regime-allocation simulation path (epic #338 Phase 1C).
+
+    Daily-update loop using the Donchian ensemble from `strategy.donchian_ensemble`
+    and vol-targeted sizing from `strategy.vol_targeting`. Structurally distinct
+    from the LRC bar-by-bar path:
+    - Decision frequency: daily (locked §8.2)
+    - Direction: ensemble vote across 9 lookbacks (locked §8.4)
+    - Sizing: vol-targeted (locked §8.3 + §4.3), NOT R-multiple
+    - Exits: signal-based — position closes when ensemble direction flips or
+      goes flat. NO ATR-based SL/TP, NO time-limit barrier.
+    - Cost model: v2 sqrt-participation (default per Phase 0) with funding-rate
+      accounting for perp holds (epic §8.5).
+
+    Single-symbol scope. Portfolio-level orchestration (n_active_symbols,
+    leverage cap across multiple symbols) is the caller's responsibility — this
+    function treats the input symbol as a single-asset book with
+    target_vol_per_symbol = portfolio_vol_target / 1.
+
+    Returns:
+        (trades, equity_curve) — same shape contract as `simulate_strategy`.
+        Trade dicts have regime-allocation-shaped fields (no atr_*_mult_used,
+        exit_reason ∈ {SIGNAL_FLIP, SIGNAL_EXIT, BANKRUPT, SIM_END}).
+
+    Args:
+        df1h: 1H bars — used for liquidity-proxy proxy (rolling 30-day USD
+            volume per minute). May be empty; falls back to default liquidity
+            in cost computation.
+        df1d: daily bars (close/high/low/volume) — primary data source.
+        symbol: tier resolution + diagnostics.
+        sim_start / sim_end: simulation window in df1d.index. None → use full
+            df1d range from MIN_DAYS onward.
+        cfg: config dict. Reads `regime_allocation_enabled` (which got us
+            here), `portfolio_vol_target` (defaults 0.30), `max_position_pct`
+            (0.20), `min_position_usd` (50.0).
+        enable_*: cost flags (mirrors `simulate_strategy`).
+        enable_funding: NEW for v2. When True (default), holding-period
+            funding cost accrues per 8h interval.
+        cost_calibration: explicit calibration object; None → load default.
+    """
+    from strategy.donchian_ensemble import (
+        ZARATTINI_LOOKBACKS, compute_ensemble_history,
+    )
+    from strategy.vol_targeting import (
+        DEFAULT_PORTFOLIO_VOL_TARGET, DEFAULT_MAX_POSITION_PCT,
+        DEFAULT_MIN_POSITION_USD, DEFAULT_VOL_WINDOW_DAYS,
+        compute_position_size, compute_realized_vol_annualized,
+    )
+    from backtest_costs import (
+        tier_for_symbol, load_calibration, compute_trade_costs,
+    )
+
+    cfg = cfg or {}
+    portfolio_vol_target = float(cfg.get("portfolio_vol_target", DEFAULT_PORTFOLIO_VOL_TARGET))
+    max_position_pct = float(cfg.get("max_position_pct", DEFAULT_MAX_POSITION_PCT))
+    min_position_usd = float(cfg.get("min_position_usd", DEFAULT_MIN_POSITION_USD))
+
+    # Cost setup — always-on by default per v2; flags allow opt-out for parity
+    # testing or pure gross-PnL probes.
+    _costs_active = bool(enable_slippage or enable_spread or enable_fees or enable_funding)
+    _calibration = (
+        cost_calibration if cost_calibration is not None else load_calibration()
+    )
+    _tier_params = _calibration.tiers[tier_for_symbol(symbol)]
+
+    # Liquidity proxy: 30-day rolling USD volume per minute from 1H bars.
+    # If df1h is empty/short, cost path falls back to fallback_bps (100 bps).
+    _liquidity_per_min = None
+    if df1h is not None and len(df1h) > 0:
+        _usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
+        _liquidity_per_min = _usd_per_min.rolling(720, min_periods=120).mean()
+
+    MIN_DAYS = max(ZARATTINI_LOOKBACKS) + DEFAULT_VOL_WINDOW_DAYS  # 390
+
+    # Filter df1d to simulation window
+    if df1d is None or len(df1d) == 0:
+        return [], []
+    df1d_indexed = df1d.copy()
+    if sim_start is not None:
+        df1d_indexed = df1d_indexed[df1d_indexed.index >= sim_start]
+    if sim_end is not None:
+        df1d_indexed = df1d_indexed[df1d_indexed.index <= sim_end]
+    if len(df1d_indexed) == 0:
+        return [], []
+
+    trades: list[dict] = []
+    equity_curve: list[dict] = []
+    capital = INITIAL_CAPITAL
+    position: dict | None = None
+    bankrupt = False
+
+    def _liquidity_at(ts) -> float:
+        if _liquidity_per_min is None or len(_liquidity_per_min) == 0:
+            return float("nan")
+        # Find the closest 1H bar at or before ts
+        try:
+            mask = _liquidity_per_min.index <= ts
+            if not mask.any():
+                return float("nan")
+            return float(_liquidity_per_min[mask].iloc[-1])
+        except (KeyError, IndexError):
+            return float("nan")
+
+    def _close_position_ra(
+        pos: dict, exit_price: float, exit_time, exit_reason: str
+    ) -> dict:
+        """Close regime-allocation position. Returns trade dict.
+
+        pnl_pct sign convention matches LRC `_close_position`:
+        - LONG: (exit - entry) / entry × 100
+        - SHORT: (entry - exit) / entry × 100
+        """
+        entry_price = pos["entry_price"]
+        entry_time = pos["entry_time"]
+        notional = pos["notional_usd"]
+        direction = pos["direction"]
+
+        if direction == "LONG":
+            pnl_pct = (exit_price - entry_price) / entry_price * 100.0
+        else:
+            pnl_pct = (entry_price - exit_price) / entry_price * 100.0
+
+        gross_pnl_usd = pnl_pct / 100.0 * notional
+        holding_hours = (exit_time - entry_time).total_seconds() / 3600.0
+
+        # Costs (v2 default with funding for hold period)
+        entry_liq = pos.get("entry_liquidity_per_min", float("nan"))
+        exit_liq = _liquidity_at(exit_time)
+        if _costs_active:
+            cost = compute_trade_costs(
+                entry_notional_usd=notional,
+                exit_notional_usd=notional,
+                entry_liquidity_usd_per_min=entry_liq,
+                exit_liquidity_usd_per_min=exit_liq,
+                tier_params=_tier_params,
+                enable_slippage=enable_slippage,
+                enable_spread=enable_spread,
+                enable_fees=enable_fees,
+                enable_funding=enable_funding,
+                holding_hours=holding_hours,
+                model="v2",
+            )
+            net_pnl_usd = gross_pnl_usd - cost["total_cost_usd"]
+        else:
+            cost = {
+                "entry_slippage_bps": 0.0, "exit_slippage_bps": 0.0,
+                "entry_spread_bps": 0.0, "exit_spread_bps": 0.0,
+                "fee_bps": 0.0, "funding_cost_bps": 0.0,
+                "total_cost_bps": 0.0, "total_cost_usd": 0.0,
+            }
+            net_pnl_usd = gross_pnl_usd
+
+        return {
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "exit_reason": exit_reason,
+            "direction": direction,
+            "pnl_pct": round(pnl_pct, 4),
+            "pnl_usd": round(net_pnl_usd, 2),
+            "gross_pnl_usd": round(gross_pnl_usd, 2),
+            "notional_usd": round(notional, 2),
+            "duration_hours": holding_hours,
+            "size_mult": None,
+            "atr_sl_mult_used": None,
+            "atr_tp_mult_used": None,
+            "atr_be_mult_used": None,
+            "overshoot_clamped": False,
+            "score": pos.get("entry_score"),
+            # Cost components (v2)
+            "entry_slippage_bps": cost["entry_slippage_bps"],
+            "exit_slippage_bps": cost["exit_slippage_bps"],
+            "entry_spread_bps": cost["entry_spread_bps"],
+            "exit_spread_bps": cost["exit_spread_bps"],
+            "fee_bps": cost["fee_bps"],
+            "funding_cost_bps": cost["funding_cost_bps"],
+            "total_cost_bps": cost["total_cost_bps"],
+            "total_cost_usd": round(cost["total_cost_usd"], 2),
+        }
+
+    # Pre-compute ensemble over full df1d history (once). Indexed by ts.
+    # Slicing per-bar would be O(N²); pre-computing makes it O(N).
+    ensemble_full = compute_ensemble_history(
+        closes=df1d["close"], highs=df1d["high"], lows=df1d["low"],
+        lookbacks=ZARATTINI_LOOKBACKS,
+    )
+
+    # Pre-compute returns + rolling vol for sizing
+    daily_returns = df1d["close"].pct_change()
+
+    for ts in df1d_indexed.index:
+        if bankrupt:
+            break
+
+        # Need enough history for ensemble + vol
+        try:
+            df_pos = df1d.index.get_loc(ts)
+        except KeyError:
+            continue
+        if df_pos < MIN_DAYS:
+            equity_curve.append({"time": ts, "equity": capital})
+            continue
+
+        # Direction from ensemble
+        ensemble_row = ensemble_full.iloc[df_pos]
+        direction_signed = int(ensemble_row["direction"])
+        confidence = float(ensemble_row["confidence"])
+
+        # Realized vol from last 30 returns ending at ts (inclusive)
+        returns_window = daily_returns.iloc[df_pos - DEFAULT_VOL_WINDOW_DAYS + 1: df_pos + 1]
+        realized_vol = compute_realized_vol_annualized(
+            returns_window, window=DEFAULT_VOL_WINDOW_DAYS,
+        )
+
+        # Target position size (USD, signed)
+        target_size = compute_position_size(
+            capital_usd=capital,
+            direction=direction_signed,
+            target_vol_per_symbol=portfolio_vol_target,  # n_active=1 for single-symbol
+            realized_vol_annualized=realized_vol,
+            max_position_pct=max_position_pct,
+            min_position_usd=min_position_usd,
+        )
+
+        daily_close = float(df1d["close"].iloc[df_pos])
+
+        # Action: hold, flip, open, close
+        current_dir = (
+            1 if (position is not None and position["direction"] == "LONG")
+            else (-1 if (position is not None and position["direction"] == "SHORT") else 0)
+        )
+        target_dir = 1 if direction_signed > 0 else (-1 if direction_signed < 0 else 0)
+
+        if position is not None and current_dir == target_dir and target_dir != 0:
+            # Hold (no re-sizing intra-direction)
+            pass
+        elif position is not None and current_dir != target_dir:
+            # Close current; possibly open new
+            exit_reason = "SIGNAL_FLIP" if target_dir != 0 else "SIGNAL_EXIT"
+            trade = _close_position_ra(position, daily_close, ts, exit_reason)
+            capital += trade["pnl_usd"]
+            trades.append(trade)
+            position = None
+
+            # Open new if target direction != 0 and size above min
+            if target_dir != 0 and abs(target_size) > 0:
+                position = {
+                    "direction": "LONG" if target_dir > 0 else "SHORT",
+                    "notional_usd": abs(target_size),
+                    "entry_price": daily_close,
+                    "entry_time": ts,
+                    "entry_liquidity_per_min": _liquidity_at(ts),
+                    "entry_score": (
+                        5 if confidence >= 0.78
+                        else 3 if confidence >= 0.45
+                        else 1
+                    ),
+                }
+        elif position is None and target_dir != 0 and abs(target_size) > 0:
+            # Open from flat
+            position = {
+                "direction": "LONG" if target_dir > 0 else "SHORT",
+                "notional_usd": abs(target_size),
+                "entry_price": daily_close,
+                "entry_time": ts,
+                "entry_liquidity_per_min": _liquidity_at(ts),
+                "entry_score": (
+                    5 if confidence >= 0.78
+                    else 3 if confidence >= 0.45
+                    else 1
+                ),
+            }
+
+        # Mark-to-market unrealized PnL for equity curve
+        unrealized = 0.0
+        if position is not None:
+            entry_p = position["entry_price"]
+            if position["direction"] == "LONG":
+                unrealized = (daily_close - entry_p) / entry_p * position["notional_usd"]
+            else:
+                unrealized = (entry_p - daily_close) / entry_p * position["notional_usd"]
+
+        current_equity = capital + unrealized
+        equity_curve.append({"time": ts, "equity": current_equity})
+
+        # Bankruptcy halt (#280): force-close + halt if mark-to-market equity
+        # falls below threshold
+        if current_equity < BANKRUPTCY_THRESHOLD:
+            if position is not None:
+                trade = _close_position_ra(position, daily_close, ts, "BANKRUPT")
+                capital += trade["pnl_usd"]
+                trades.append(trade)
+                position = None
+            bankrupt = True
+
+    # End-of-simulation: force-close any open position at last bar
+    if position is not None and not bankrupt:
+        last_ts = df1d_indexed.index[-1]
+        last_close = float(df1d.loc[last_ts]["close"])
+        trade = _close_position_ra(position, last_close, last_ts, "SIM_END")
+        capital += trade["pnl_usd"]
+        trades.append(trade)
+
+    return trades, equity_curve
+
+
 def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame,
                       symbol: str, sl_mode: str = "atr",
                       atr_sl_mult: float = None, atr_tp_mult: float = None,
@@ -586,6 +906,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                       enable_slippage: bool = True,      # NEW (A.0.2, #277)
                       enable_spread: bool = True,        # NEW (A.0.2, #277)
                       enable_fees: bool = True,          # NEW (A.0.2, #277)
+                      enable_funding: bool = True,       # NEW (#338 Phase 1C)
                       cost_calibration=None,             # NEW (A.0.2, #277)
                       regime_thresholds: tuple[int, int] | None = None,
                       regime_disabled: bool = False,
@@ -613,6 +934,24 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
         regime dict with regime="BYPASS" so direction is gated by zone alone.
         Mutually exclusive with regime_thresholds.
     """
+    # ── Early dispatch: regime-allocation path (epic #338 Phase 1C) ────────
+    # When `cfg.regime_allocation_enabled` is True, delegate entirely to the
+    # regime-allocation simulator. LRC simulation below is bypassed.
+    if isinstance(cfg, dict) and cfg.get("regime_allocation_enabled", False):
+        return _simulate_strategy_regime_allocation(
+            df1h=df1h,
+            df1d=df1d,
+            symbol=symbol,
+            sim_start=sim_start,
+            sim_end=sim_end,
+            cfg=cfg,
+            enable_slippage=enable_slippage,
+            enable_spread=enable_spread,
+            enable_fees=enable_fees,
+            enable_funding=enable_funding,
+            cost_calibration=cost_calibration,
+        )
+
     if regime_disabled and regime_thresholds is not None:
         raise RegimeKwargError(
             "regime_disabled=True is mutually exclusive with regime_thresholds — "
