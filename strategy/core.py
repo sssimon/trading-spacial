@@ -32,6 +32,14 @@ from strategy.constants import (
     ATR_PERIOD, ATR_SL_MULT_DEFAULT, ATR_TP_MULT_DEFAULT, ATR_BE_MULT_DEFAULT,
     LRC_LONG_MAX, LRC_SHORT_MIN, SCORE_MIN_HALF, SCORE_STANDARD, SCORE_PREMIUM,
 )
+from strategy.donchian_ensemble import (
+    ZARATTINI_LOOKBACKS,
+    compute_ensemble_history,
+)
+from strategy.vol_targeting import (
+    DEFAULT_VOL_WINDOW_DAYS,
+    compute_realized_vol_annualized,
+)
 
 # Imported lazily inside evaluate_signal to avoid circular imports:
 #   btc_scanner imports strategy.indicators; we re-import its helpers here.
@@ -283,6 +291,22 @@ def _evaluate_trend_pullback_direction(
     return "NONE", reasons
 
 
+# Minimum daily-bar history required for regime-allocation path:
+# longest Donchian lookback (360) + vol estimation window (30) = 390 bars.
+# Below this, evaluate_signal returns NONE with a `regime_allocation_warmup`
+# reason flag — the caller (scanner / backtest) can choose to suppress or log.
+_REGIME_ALLOCATION_MIN_DAYS = max(ZARATTINI_LOOKBACKS) + DEFAULT_VOL_WINDOW_DAYS
+
+
+# Score tier thresholds for regime-allocation. Maps ensemble confidence
+# (vote magnitude / n_lookbacks, range [0, 1]) to integer score + label.
+# Confidence 1.0 = all 9 lookbacks agree (rare; full conviction).
+# Confidence 0.56-0.78 = 5-7 out of 9 lookbacks aligned.
+# Confidence <0.56 = bare majority (4 of 9) or weaker.
+_REGIME_ALLOC_PREMIUM_THRESHOLD = 0.78   # ≥ 7/9 lookbacks aligned
+_REGIME_ALLOC_STANDARD_THRESHOLD = 0.45  # ≥ 5/9 lookbacks aligned
+
+
 @dataclass
 class SignalDecision:
     """Return shape of `evaluate_signal()`.
@@ -307,6 +331,136 @@ class SignalDecision:
     reasons: dict[str, Any] = field(default_factory=dict)
     indicators: dict[str, Any] = field(default_factory=dict)
     estado: str = ""                  # human-readable Spanish status
+
+
+def _populate_regime_allocation_decision(
+    *,
+    decision: SignalDecision,
+    df1d: pd.DataFrame,
+    symbol: str,
+) -> SignalDecision:
+    """Populate `decision` via Donchian ensemble + realized-vol diagnostics
+    (epic #338 Phase 1B integration of `strategy.donchian_ensemble` +
+    `strategy.vol_targeting`).
+
+    This is the regime-allocation path: when `cfg.regime_allocation_enabled`
+    is True, `evaluate_signal` delegates to this helper instead of the LRC /
+    trend-pullback paths. The two architectures are mutually exclusive — per
+    §0 of epic spec, regime-allocation is a structurally distinct strategy
+    class, not an overlay on LRC.
+
+    Decision shape:
+    - `direction`: 'LONG' / 'SHORT' / 'NONE' from ensemble vote sign
+    - `score`: 1 / 3 / 5 mapped from ensemble confidence (MINIMA / STANDARD /
+      PREMIUM tier). Higher = more lookbacks aligned.
+    - `entry_price`: latest daily close (regime-allocation updates daily, not
+      per-1H-bar)
+    - `sl_price` / `tp_price`: None — exits are signal-based, not price-based.
+      Caller (backtest / scanner) reads `realized_vol_annualized_30d` from
+      `decision.indicators` to vol-target the position size; exits fire when
+      ensemble vote flips.
+    - `decision.indicators` gains `regime_allocation_*` diagnostic fields plus
+      `realized_vol_annualized_30d` for downstream sizing.
+
+    Returns:
+        The same `decision` instance, mutated.
+
+    Edge cases:
+    - df1d empty / None / fewer than 390 bars → direction = NONE, reasons
+      flagged with `regime_allocation_warmup`.
+    - All 9 lookbacks flat (no breakouts) → vote = 0 → direction = NONE.
+    - Realized vol unavailable (insufficient returns) → indicators record
+      NaN; downstream sizing returns 0 (handled in `strategy.vol_targeting`).
+    """
+    decision.reasons["regime_allocation_enabled"] = True
+
+    if df1d is None or len(df1d) == 0:
+        decision.reasons["regime_allocation_no_daily_data"] = True
+        decision.estado = "regime-allocation: no daily data"
+        return decision
+
+    n_days = len(df1d)
+    if n_days < _REGIME_ALLOCATION_MIN_DAYS:
+        decision.reasons["regime_allocation_warmup"] = {
+            "have_days": n_days,
+            "need_days": _REGIME_ALLOCATION_MIN_DAYS,
+        }
+        decision.estado = (
+            f"regime-allocation: warmup ({n_days}/{_REGIME_ALLOCATION_MIN_DAYS} days)"
+        )
+        return decision
+
+    # Compute ensemble across all 9 lookbacks
+    ensemble_df = compute_ensemble_history(
+        closes=df1d["close"],
+        highs=df1d["high"],
+        lows=df1d["low"],
+        lookbacks=ZARATTINI_LOOKBACKS,
+    )
+    latest = ensemble_df.iloc[-1]
+    direction_signed = int(latest["direction"])
+    vote = int(latest["vote"])
+    confidence = float(latest["confidence"])
+    n_long = int(latest["n_long"])
+    n_short = int(latest["n_short"])
+    n_flat = int(latest["n_flat"])
+
+    # Map signed direction to string. NONE when vote == 0 (tied or all flat).
+    if direction_signed > 0:
+        direction = "LONG"
+    elif direction_signed < 0:
+        direction = "SHORT"
+    else:
+        direction = "NONE"
+
+    # Map confidence to score tier
+    if confidence >= _REGIME_ALLOC_PREMIUM_THRESHOLD:
+        score = 5
+        score_label = "PREMIUM"
+    elif confidence >= _REGIME_ALLOC_STANDARD_THRESHOLD:
+        score = 3
+        score_label = "STANDARD"
+    elif direction != "NONE":
+        score = 1
+        score_label = "MINIMA"
+    else:
+        score = 0
+        score_label = ""
+
+    daily_price = float(df1d["close"].iloc[-1])
+
+    decision.direction = direction
+    decision.score = score
+    decision.score_label = score_label
+    decision.is_signal = direction != "NONE"
+    decision.is_setup = direction != "NONE"
+    decision.entry_price = daily_price if direction != "NONE" else None
+    decision.sl_price = None  # signal-based exits, not price-based
+    decision.tp_price = None
+
+    # Realized vol for downstream vol-targeted sizing
+    daily_returns = df1d["close"].pct_change().dropna()
+    realized_vol = compute_realized_vol_annualized(
+        daily_returns, window=DEFAULT_VOL_WINDOW_DAYS
+    )
+
+    decision.indicators.update({
+        "regime_allocation_direction_signed": direction_signed,
+        "regime_allocation_vote": vote,
+        "regime_allocation_confidence": confidence,
+        "regime_allocation_n_long": n_long,
+        "regime_allocation_n_short": n_short,
+        "regime_allocation_n_flat": n_flat,
+        "regime_allocation_n_lookbacks": len(ZARATTINI_LOOKBACKS),
+        "realized_vol_annualized_30d": realized_vol,
+        "daily_close": daily_price,
+    })
+
+    decision.estado = (
+        f"regime-allocation: {direction} "
+        f"(vote={vote}, conf={confidence:.2f}, L/S/F={n_long}/{n_short}/{n_flat})"
+    )
+    return decision
 
 
 def evaluate_signal(
@@ -348,7 +502,19 @@ def evaluate_signal(
     """
     decision = SignalDecision()
 
-    # Guard: not enough bars to compute anything useful.
+    # ── Regime-allocation dispatch (epic #338 Phase 1B) ────────────────────
+    # When `cfg.regime_allocation_enabled` is True, take the structurally
+    # distinct regime-allocation path (Donchian ensemble + vol-targeting prep
+    # via daily bars). LRC and trend-pullback paths are skipped entirely —
+    # per §0 of epic spec, regime-allocation is mutually exclusive with the
+    # legacy LRC architecture, not an overlay. Pure df1d-driven; df1h / df4h
+    # may be empty without affecting the regime-allocation outcome.
+    if isinstance(cfg, dict) and cfg.get("regime_allocation_enabled", False):
+        return _populate_regime_allocation_decision(
+            decision=decision, df1d=df1d, symbol=symbol,
+        )
+
+    # Guard: not enough bars to compute anything useful (LRC path only).
     if len(df1h) == 0 or len(df4h) == 0:
         return decision
 
