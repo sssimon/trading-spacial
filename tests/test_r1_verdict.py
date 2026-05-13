@@ -470,3 +470,67 @@ def test_load_json_parses_existing_file(tmp_path, monkeypatch):
     payload = {"foo": "bar", "n": 42}
     (tmp_path / "test.json").write_text(json.dumps(payload))
     assert r1_verdict._load_json("test.json") == payload
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _extract_halt_from_diagnostic — isinstance validation (issue #332 item 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_extract_halt_from_diagnostic_none_returns_false():
+    """No halt diagnostic file → halt=False (sweep completed normally)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    assert _extract_halt_from_diagnostic(None) is False
+
+
+def test_extract_halt_from_diagnostic_empty_dict_returns_false():
+    """Empty dict (no 'halt' key) → halt=False, key-missing default."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    assert _extract_halt_from_diagnostic({}) is False
+
+
+def test_extract_halt_from_diagnostic_true_value_returns_true():
+    """{'halt': True} → True (normal halt-after-A fired case)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    assert _extract_halt_from_diagnostic({"halt": True}) is True
+
+
+def test_extract_halt_from_diagnostic_false_value_returns_false():
+    """{'halt': False} → False (halt diagnostic present but did not fire)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    assert _extract_halt_from_diagnostic({"halt": False}) is False
+
+
+def test_extract_halt_from_diagnostic_string_value_raises():
+    """{'halt': 'false'} → ValueError (was silently coerced to True under bool())."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    with pytest.raises(ValueError, match=r"halt_diag\['halt'\] must be bool"):
+        _extract_halt_from_diagnostic({"halt": "false"})
+
+
+def test_extract_halt_from_diagnostic_int_zero_raises():
+    """{'halt': 0} → ValueError (was silently coerced to False under bool())."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    with pytest.raises(ValueError, match=r"halt_diag\['halt'\] must be bool"):
+        _extract_halt_from_diagnostic({"halt": 0})
+
+
+def test_extract_halt_from_diagnostic_int_one_raises():
+    """{'halt': 1} → ValueError (no implicit int→bool coercion accepted)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    with pytest.raises(ValueError, match=r"halt_diag\['halt'\] must be bool"):
+        _extract_halt_from_diagnostic({"halt": 1})
+
+
+def test_extract_halt_from_diagnostic_non_dict_raises():
+    """Non-dict halt_diag → ValueError (defends against JSON parser returning unexpected type)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    with pytest.raises(ValueError, match=r"halt_diag must be dict or None"):
+        _extract_halt_from_diagnostic("not a dict")
+
+
+def test_extract_halt_from_diagnostic_list_raises():
+    """List halt_diag → ValueError (same: defensive against malformed JSON)."""
+    from tools.r1_verdict import _extract_halt_from_diagnostic
+    with pytest.raises(ValueError, match=r"halt_diag must be dict or None"):
+        _extract_halt_from_diagnostic([{"halt": True}])

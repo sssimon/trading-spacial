@@ -51,6 +51,39 @@ def _load_json(name: str):
         return json.load(f)
 
 
+def _extract_halt_from_diagnostic(halt_diag) -> bool:
+    """Extract halt boolean from diagnostic dict, raising on malformed input.
+
+    Closes #332 item 2. Replaces the previous
+    `bool(halt_diag and halt_diag.get("halt"))` coercion which silently
+    accepted truthy non-bool values (e.g., `{"halt": "false"}` → True via
+    truthy-string coercion, `{"halt": 0}` → False) — both methodologically
+    wrong because a malformed halt diagnostic should be loud, not silent.
+
+    Accepts:
+      - `None` → False (no halt diagnostic file written by sweep)
+      - `{}` (no "halt" key) → False (key-missing default)
+      - `{"halt": True}` → True
+      - `{"halt": False}` → False
+
+    Raises ValueError on:
+      - non-dict (e.g., list, str, int) — JSON parser returned unexpected type
+      - non-bool "halt" value (e.g., string, int) — producer contract violation
+    """
+    if halt_diag is None:
+        return False
+    if not isinstance(halt_diag, dict):
+        raise ValueError(
+            f"halt_diag must be dict or None, got {type(halt_diag).__name__}: {halt_diag!r}"
+        )
+    halt_value = halt_diag.get("halt", False)
+    if not isinstance(halt_value, bool):
+        raise ValueError(
+            f"halt_diag['halt'] must be bool, got {type(halt_value).__name__}: {halt_value!r}"
+        )
+    return halt_value
+
+
 def _argmax_cell(cells: list[dict]) -> dict | None:
     """Pre-reg §4.1: argmax(net_pnl) among cells with n_trades >= N_TRADES_MIN.
 
@@ -279,7 +312,7 @@ def main() -> int:
     sweep_c = _load_json("sweep_results_C.json")
     baseline = _load_json("baseline_pre_signal_exit.json")
     halt_diag = _load_json("halt_after_a_diagnostic.json")
-    halt = bool(halt_diag and halt_diag.get("halt"))
+    halt = _extract_halt_from_diagnostic(halt_diag)
 
     if baseline is None:
         print("WARNING: baseline_pre_signal_exit.json missing", file=sys.stderr)
