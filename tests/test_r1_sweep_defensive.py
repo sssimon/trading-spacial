@@ -92,6 +92,31 @@ def test_summarize_worker_errors_includes_distinct_message_text():
     assert "RuntimeError: cutoff drift" in msg
 
 
+def test_summarize_worker_errors_uses_is_not_none_filter_not_truthy():
+    """Closes #332 item 4: empty-string `error` field must count, not silently filter.
+
+    Producer `_process_cell` currently only writes `out["error"] = err` when err
+    is non-empty (safe in practice), but the truthy filter
+    `r.get("error") for r in results if r.get("error")` was contract-fragile —
+    if producer ever set `out["error"] = ""` deliberately (e.g., empty error
+    flag), the truthy filter would silently swallow it.
+
+    Fix: `is not None` check distinguishes "explicit empty error" from "no key".
+    """
+    from tools.r1_signal_exit_sweep import _summarize_worker_errors
+
+    results = [
+        {"symbol": "BTCUSDT", "error": ""},   # Explicit empty string (key set)
+        {"symbol": "ETHUSDT"},                 # No error key at all
+    ]
+    msg = _summarize_worker_errors(results)
+    assert msg is not None, (
+        "Empty-string error must be counted (is not None semantics), "
+        "not silently filtered by truthy check"
+    )
+    assert "1 workers errored" in msg
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _argmax_cell_per_symbol — deterministic tie-break (issue #332 item 1)
 # ─────────────────────────────────────────────────────────────────────────────

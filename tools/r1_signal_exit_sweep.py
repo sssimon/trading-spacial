@@ -393,8 +393,14 @@ def _summarize_worker_errors(results: list[dict]) -> str | None:
     Surfaces multi-worker failure modes that would otherwise be buried in the
     750-cell result list — without this, an operator scanning stderr at the
     end of the sweep has no signal that anything went wrong.
+
+    Filter uses `is not None` rather than truthy semantics so that an explicit
+    empty-string `error` field (intentional flag from producer) is not silently
+    swallowed. Producer `_process_cell` currently only writes the field when
+    non-empty, so the practical behavior is unchanged; this hardens the
+    contract against future producer changes.
     """
-    errors = [r.get("error") for r in results if r.get("error")]
+    errors = [r.get("error") for r in results if r.get("error") is not None]
     if not errors:
         return None
     distinct = sorted(set(errors))
