@@ -119,12 +119,12 @@ Where:
 - `pullback_distance` is a sweep parameter (default 0.5; sweep range per §2.5).
 - `regime_state` comes from existing `strategy/regime.py:detect_regime` (60/40 thresholds; cached daily per CLAUDE.md).
 
-**5m entry trigger (kept active from current strategy):** the 1H signal candidate must be confirmed by a 5m bullish/bearish candle + RSI 5m direction match (per `strategy/core.py:200-225`). Trend-pullback inherits this — no new 5m trigger logic needed. The kickoff did not explicitly lock the 5m trigger preservation; flag in §9 if operator wants to drop it for R3.
+**5m entry trigger: LOCKED active (operator §9.7 confirmation, 2026-05-13 PR #333 review):** the 1H signal candidate must be confirmed by a 5m bullish/bearish candle + RSI 5m direction match (per `strategy/core.py:200-225`). Trend-pullback inherits this lock — no new 5m trigger logic, no opt-out within R3 scope. The 5m trigger preservation was implicit in the kickoff brief and explicitly confirmed in operator review (§9.7); recorded here as a pre-registered lock alongside the SMA-based entry logic.
 
 **Replaces LRC entry (per audit §A.6 wording + §9.1 confirmation):** the LRC signal evaluation (`LRC_LONG_MAX = 25`, `LRC_SHORT_MIN = 75`) is **disabled** when `cfg.trend_pullback_enabled = True`. The two signal frames do NOT operate in parallel. This is locked per audit §A.6 single-alternative discipline — confirm in §9.1.
 
 **Score derivation (locked at uniform `SCORE_STANDARD = 2` for R3):** trend-pullback signal has different inputs than LRC, so the existing 0-9 score (`strategy/core.py:254-450` `evaluate_signal`) does NOT apply unchanged. **Pre-registered design:** assign uniform `score = 2` (`SCORE_STANDARD`) to all trend-pullback entries during R3 sweep. Rationale:
-- Tier-multiplier sizing (`backtest.py:895-900`: 0.5 / 1.0 / 1.5 for 0-1 / 2-3 / ≥4 score tiers) collapses to `1.0×` uniform on trend-pullback trades — neutral test, no aggressive/defensive sizing override.
+- Tier-multiplier sizing (`backtest.py:935-940`: 0.5 / 1.0 / 1.5 for 0-1 / 2-3 / ≥4 score tiers; CLAUDE.md cite at line 895-900 is stale) collapses to `1.0×` uniform on trend-pullback trades — neutral test, no aggressive/defensive sizing override.
 - Eliminates score-related confounding within R3 — every trade gets standard sizing.
 - If R3 SUCCESS, integrated re-run (audit §A.5 step 4) can revisit score derivation for trend-pullback context.
 - Alternative considered + rejected: porting LRC's RSI/BB/divergence score components to trend-pullback. Rejected as scope creep that confounds the signal-frame question with the score-derivation question. Flag in §9.5 if operator wants a different uniform score value.
@@ -227,7 +227,7 @@ pullback_distance ∈ {0.3, 0.4, 0.5, 0.6, 0.7}              # 5 values (NEW —
 
 **Properties identical to R1+R2:**
 - Non-overlapping ✓
-- All BEFORE holdout_start = 2025-04-30 ✓ (Window C ends exactly at holdout_start − 1 day; safe)
+- All BEFORE holdout_start = 2025-04-30 ✓ (Window C ends at holdout_start exclusive, i.e., last pre-holdout bar at 2025-04-29T23:59 UTC per R2 derivation_audit §2; safe)
 - Genuinely OUTSIDE A.4-1 train window [2024-01-30, 2025-01-30] ✓
 - 3 distinct regime characterizations
 
@@ -272,13 +272,17 @@ The cell selected for symbol S in sub-window A need NOT match the cell selected 
 
 ### §4.2 — Failure modes pre-registrados
 
-| Outcome (across 3 sub-windows) | Verdict | Phase 2 action |
+**Precondition:** the rows below assume §10.4 halt did NOT fire. If a halt did fire: H1 → R3 FAIL (signal degenerate) automatically; H2 → R3 FAIL (clean — TL horizon mismatch) automatically. Both per §10.4 + §1.1 hard-lock. The classification is reflected in `tools/r3_verdict.py:_classify_verdict` (the halt-guard scope per §4.6 applies to favorable verdicts only; negative verdicts are preserved under partial-window evidence).
+
+**Engagement threshold conventions (resolves PR #333 review I-3 denominator question):** in-data symbols per window: A=8, B=9, C=10 (per §3 exclusions). The rows below use absolute thresholds (`≤2 engage` or `≥3 engage`) rather than percentages, so the denominator difference across windows does NOT change the row criteria. "Engage in a window" means: at least one cell in the 75-cell grid produces `n_trades ≥ 10` for that (symbol, window) — i.e., the symbol is not INSUFFICIENT_DATA per §4.1.
+
+| Outcome (post-execution, no halt fired) | Verdict | Phase 2 action |
 |---|---|---|
 | Primary ✓ in 3/3 sub-windows | **R3 SUCCESS** | Automatic advance to integrated re-run (audit §A.5 step 4): re-run A.4-1.5 + A.4-1 with trend-pullback + SIGNAL_EXIT active over full pre-holdout. |
-| Primary ✓ in 2/3 sub-windows | **R3 SUCCESS-CONDITIONAL** (regime-dependent) | Document which sub-window failed + regime characterization. **Operator decides** (per §4.5) whether to advance with regime-conditional notation or treat as INCONCLUSIVE. |
-| Primary ✗ in ≥2/3 sub-windows AND signal mechanism engages (≥10 trades on argmax cell for ≥6 of 8 in-data symbols) | **R3 FAIL (clean)** | Per §1.1 hard-lock: path (a) of #321 directly. Mirror R1 FAIL framing — "mechanism engaged, profitability absent". |
-| Primary ✗ AND signal mechanism does NOT engage (no per-symbol cells exceed `n_trades ≥ 10` for ≥6 of 8 symbols) | **R3 FAIL (signal degenerate)** | Per §1.1 hard-lock: path (a) of #321 directly. Signal-firing too rare to evaluate. |
-| Mechanism engages, primary ✗ in 1/3, primary ✓ in 2/3 but cross-window cells diverge wildly | **R3 INCONCLUSIVE** | **Operator decides** (per §4.5): default = hard-lock per §1.1 (treat as FAIL); override = investigate sub-window-specific failure as separate ticket. |
+| Primary ✓ in 2/3 sub-windows AND cross-window cells stable per §4.4 | **R3 SUCCESS-CONDITIONAL** (regime-dependent) | Document failed sub-window + regime characterization. **Operator decides** (per §4.5): (a) advance with regime-conditional notation; (b) treat as INCONCLUSIVE → hard-lock per §1.1. **Asymmetry rationale (resolves PR #333 review I-2):** §4's strict 3/3 conjuntive criterion is tightened from audit §A.6's ≥2/3 to suppress single-window noise as a SUCCESS pathway. The 2/3 SUCCESS-CONDITIONAL row is informationally distinct from FAIL — regime-conditional partial success identifies a strategy that works in SOME regimes (e.g., bull+recovery) but not others (e.g., bear-2022 stress), which an operator may find actionable under explicit regime-gating notation. Treating 2/3 as bare FAIL would discard this signal. Default §4.5 path: hard-lock per §1.1 unless explicit override with documented Bayesian update + new ticket scope. |
+| Primary ✓ in 2/3 sub-windows AND cross-window cells diverge wildly per §4.4 | **R3 INCONCLUSIVE** | Cell instability suggests success not robust. **Operator decides** (per §4.5): default = hard-lock per §1.1 (treat as FAIL); override = investigate sub-window-specific failure as separate ticket. **Priority note (resolves PR #333 review Minor 1):** this row takes precedence over the SUCCESS-CONDITIONAL row above when cells diverge wildly per §4.4 reading rules. SUCCESS-CONDITIONAL requires both 2/3 primary ✓ AND cross-window cell stability. |
+| Primary ✗ in ≥2/3 sub-windows AND mechanism is degenerate (≤2 of in-data symbols engage per the threshold convention above, in ≥2 of 3 sub-windows) | **R3 FAIL (signal degenerate)** | Per §1.1 hard-lock: path (a) of #321 directly. Signal fires too rarely to evaluate across the basket. |
+| Primary ✗ in ≥2/3 sub-windows AND mechanism is NOT degenerate (≥3 of in-data symbols engage in ≥2 of 3 sub-windows) | **R3 FAIL (clean)** | Per §1.1 hard-lock: path (a) of #321 directly. **Default fall-through (resolves PR #333 review Minor 2):** any primary-✗ outcome that does NOT trigger the signal-degenerate row above lands here. The intermediate engagement range (3-5 of in-data symbols engaging) is mapped to FAIL clean — substantial enough engagement to evaluate, but profitability absent. Mirror R1 FAIL framing — "mechanism engaged, profitability absent". |
 
 **Operator hard-lock from §1.1 (re-stated):** R3 FAIL of any flavor → path (a) of #321 automatically. R3 INCONCLUSIVE defaults to hard-lock unless operator overrides per §4.5. Posterior post-R3-FAIL ~2-4%, below any threshold for further investigation. Escalate to Simón with R1+R2+R3 stack as overwhelming evidence.
 
@@ -441,6 +445,7 @@ Resumen de branch points donde la metodología tiene rule explícita:
 |---|---|---|
 | Variant choice | Trend-pullback (single, no iteration) — operator-locked + audit §A.6 | §2.1 |
 | Trend-pullback REPLACES LRC entry | YES (per audit §A.6 wording + §9.1 confirmation) | §2.2 |
+| 5m entry trigger preservation | LOCKED active (operator §9.7 confirmation 2026-05-13 review) — no opt-out within R3 scope | §2.2 |
 | Score for trend-pullback trades | Uniform `SCORE_STANDARD = 2` during R3 (1.0× sizing) | §2.2 |
 | SIGNAL_EXIT (R1 mechanism) | Kept active, fixed threshold = 50 (midline) | §2.3 |
 | TP estático | Kept active at per-symbol current values | §2.4 |
@@ -536,18 +541,24 @@ If operator picks (d), this pre-reg needs §2.2 re-draft before execution.
 
 Mean-reversion frame anchor (R2 §3 derivation): median time-to-1-ATR ≈ 5h on 1H bars.
 
-Random-walk approximation (R2 §6 derivation): `time-to-N-ATR ≈ N² × time-to-1-ATR`.
+Random-walk approximation (R2 §6 invocation of the standard property; not derived from first principles in that section): `time-to-N-ATR ≈ N² × time-to-1-ATR`.
 
 | N (target ATR multiples) | RW-approximated time | Use case |
 |---|---:|---|
 | 1 | 5h | Mean-reversion (R1 frame) |
-| 2 | 20h | Modest trend continuation |
+| 2 | 20h | Modest trend continuation (low-end TP target per `atr_tp_mult` ∈ {2, 3, 4, 5, 6}) |
 | 2.7 | ≈ 36h | **Conservative trend-pullback target** (auditor recommendation, §9.2 option a) |
-| 3 | 45h | Decent trend continuation |
+| 3 | 45h | Decent trend continuation (mid-low TP target) |
 | 3.1 | ≈ 48h | Upper bound (§9.2 option b; operational frequency limit per R2 §2.1 clamp) |
-| 4 | 80h | Ambitious trend continuation (above operational cap) |
+| 4 | 80h | R2 §6 default momentum anchor — but **above operational cap** (see "Why 36h, not 80h" below) |
 
-**Verdict:** TL = 36h is a defendible mid-range under RW approximation, covering up to ~2.7 ATR target. Option (b) 48h is also defendible (~3.1 ATR). Option (c) per-symbol empirical can refine — per-symbol values likely cluster around 24-48h depending on volatility profile.
+**Why 36h, not 80h** (justification for downgrading from R2 §6's stated 4-ATR / 80h anchor):
+
+1. **Strategy TP target spectrum.** `atr_tp_mult` per-symbol currently in `config.defaults.json:symbol_overrides` clusters in {2, 3, 4} for most symbols. Trend-pullback's natural target is the *first leg* of trend continuation post-pullback — typically 2-3 ATR, not the full 4-ATR RW horizon. 2.7 ATR (≈36h) is the geometric midpoint of the 2-3 ATR low-end target band, where the strategy is most likely to capture the move profitably. 4 ATR represents a full complete trend leg, closer to the holding ceiling than the typical trade target.
+
+2. **§10.4 H2 halt would almost certainly fire under TL=80h.** Under 91-day sub-windows (2,184 bars), a TL=80h cap is loose enough that TIME_LIMIT exits would dominate other exit reasons for most symbols — the `TIME_LIMIT% > 50%` halt condition (§10.4 H2) would trigger on ≥6 of 8 in-data symbols in window A, halting B+C before R3 can produce a discriminating verdict. Choosing TL=36h preserves test viability: H2 fires only if the *strategy* (not the TL choice itself) is the binding constraint.
+
+Both arguments are defensible independently; together they form the rationale for the 36h preference. Option (c) per-symbol empirical derivation (§9.2) refines per symbol around this same horizon — typically clustering 24-48h depending on volatility profile.
 
 **Caveat:** RW approximation assumes Brownian motion with no drift. Trend-following dynamics have non-zero drift (trends compound). Empirical per-symbol derivation (§9.2 (c)) corrects for this; uniform values don't.
 
@@ -675,5 +686,6 @@ Per audit §A.2 + §A.7 + §A.8 + R1 §13 + R2 §6, R3 inherits these caveats:
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-13 | Pre-reg sub-spec inicial — drafted from kickoff prompt + R1+R2 derivation_audits + structural audit context + §A.4-§A.8 amendments | Claude Opus 4.7 (sesión kickoff post-R1+R2 FAIL) + sssamuelll |
+| 2026-05-13 | Incorporated PR #333 review feedback (multi-agent code-reviewer + comment-analyzer): §10.1 RW math justification for 36h preference over R2 §6's 80h anchor (I-1); §4.2 verdict tree restructured for explicit asymmetry rationale (I-2), per-window denominator clarification (I-3), priority between SUCCESS-CONDITIONAL vs INCONCLUSIVE on 2/3 (Minor 1), and fall-through mapping for intermediate engagement 3-5 of in-data (Minor 2); §2.2 5m entry trigger LOCKED active per §9.7 confirmation; citation fixes (CCM-1 `backtest.py:935-940`, CCM-2 "invocation" not "derivation", CCE-1 "exclusive" not "−1 day") | sssamuelll + Claude Opus 4.7 |
 
 Reservar líneas para iteración post-operator-review en §9.
