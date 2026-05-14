@@ -834,4 +834,110 @@ class TestVerdictJsonOperatorOverrideSchema:
 
 
 # Holdout isolation is enforced structurally by tests/test_holdout_isolation.py
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker tz-normalization — regression for bug surfaced by smoke test 2026-05-14:
+# `_process_regime_allocation_cell` + `_process_lrc_archived_baseline_cell`
+# normalize df.index to tz-naive but passed tz-aware sim_start/sim_end into
+# simulate_strategy. backtest.py:675 does `df.index >= sim_start` which raises
+# TypeError on tz-aware vs tz-naive mismatch. Fix: workers normalize
+# sim_start/sim_end alongside df.index.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestWorkerTzNormalization:
+    """Workers must pass tz-naive sim_start/sim_end to simulate_strategy when
+    they normalize df.index to tz-naive. Otherwise backtest.py:675 crashes
+    with `Invalid comparison between dtype=datetime64[ms] and datetime`."""
+
+    @staticmethod
+    def _build_tz_aware_df(n_days: int = 500):
+        import pandas as pd
+        idx = pd.date_range(
+            "2024-01-01", periods=n_days, freq="D", tz="UTC",
+        )
+        return pd.DataFrame(
+            {
+                "open": [100.0] * n_days,
+                "high": [110.0] * n_days,
+                "low": [90.0] * n_days,
+                "close": [105.0] * n_days,
+                "volume": [1000.0] * n_days,
+            },
+            index=idx,
+        )
+
+    def _install_fakes(self, monkeypatch, captured: dict):
+        import backtest
+        df_aware = self._build_tz_aware_df(n_days=500)
+
+        def fake_get_cached_data(symbol, tf, start_date=None):
+            return df_aware.copy()
+
+        def fake_simulate(**kwargs):
+            captured.update(kwargs)
+            return [], None
+
+        def fake_calc_metrics(trades, equity_curve):
+            return {}
+
+        monkeypatch.setattr(backtest, "simulate_strategy", fake_simulate)
+        monkeypatch.setattr(backtest, "get_cached_data", fake_get_cached_data)
+        monkeypatch.setattr(backtest, "calculate_metrics", fake_calc_metrics)
+
+    def test_regime_allocation_worker_passes_tz_naive_sim_start(
+        self, monkeypatch, tmp_path,
+    ):
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured)
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text('{"regime_allocation": {"enabled": false}}')
+
+        args = {
+            "symbol": "BTCUSDT",
+            "sub_window": "C",
+            "vol_target": 0.30,
+            "sim_start_iso": "2025-01-30T00:00:00+00:00",
+            "sim_end_iso": "2025-04-30T00:00:00+00:00",
+            "cutoff_iso": "2025-04-30T00:00:00+00:00",
+            "app_config_path": str(cfg_path),
+        }
+        ras._process_regime_allocation_cell(args)
+
+        assert captured, "simulate_strategy was not called"
+        # The bug: passing tz-aware sim_start with tz-naive df.index crashes
+        # in backtest.py:_simulate_strategy_regime_allocation:675.
+        assert captured["sim_start"].tzinfo is None, (
+            "sim_start must be tz-naive when worker normalizes df.index "
+            "to tz-naive (else backtest.py:675 raises TypeError)."
+        )
+        assert captured["sim_end"].tzinfo is None, "sim_end must be tz-naive"
+
+    def test_lrc_archived_worker_passes_tz_naive_sim_start(
+        self, monkeypatch, tmp_path,
+    ):
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured)
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text('{"regime_allocation": {"enabled": false}}')
+
+        args = {
+            "symbol": "BTCUSDT",
+            "sub_window": "C",
+            "sim_start_iso": "2025-01-30T00:00:00+00:00",
+            "sim_end_iso": "2025-04-30T00:00:00+00:00",
+            "cutoff_iso": "2025-04-30T00:00:00+00:00",
+            "app_config_path": str(cfg_path),
+        }
+        ras._process_lrc_archived_baseline_cell(args)
+
+        assert captured, "simulate_strategy was not called"
+        assert captured["sim_start"].tzinfo is None, (
+            "LRC archived worker must pass tz-naive sim_start to match "
+            "the tz-naive df.index normalization."
+        )
+        assert captured["sim_end"].tzinfo is None, "sim_end must be tz-naive"
 # (AST scanner over all non-whitelisted modules). No need to duplicate here.

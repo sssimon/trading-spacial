@@ -239,6 +239,13 @@ def _process_regime_allocation_cell(args: dict) -> dict:
     cutoff = _iso_to_utc_dt(args["cutoff_iso"])
     app_config_path = args["app_config_path"]
 
+    # Normalize sim_start/sim_end to tz-naive — df.index is normalized to
+    # naive below (lines 264-269), and backtest.py:_simulate_strategy_
+    # regime_allocation does `df1d.index >= sim_start` (line 675) which
+    # raises TypeError on tz-aware vs tz-naive mismatch.
+    sim_start = sim_start.replace(tzinfo=None) if sim_start.tzinfo else sim_start
+    sim_end = sim_end.replace(tzinfo=None) if sim_end.tzinfo else sim_end
+
     with open(app_config_path) as f:
         app_config = json.load(f)
 
@@ -533,6 +540,13 @@ def _process_lrc_archived_baseline_cell(args: dict) -> dict:
     sim_end = _iso_to_utc_dt(args["sim_end_iso"])
     cutoff = _iso_to_utc_dt(args["cutoff_iso"])
     app_config_path = args["app_config_path"]
+
+    # Normalize sim_start/sim_end to tz-naive for consistency with the
+    # tz-naive df.index mutation below (lines 559-560). Mirrors the fix in
+    # _process_regime_allocation_cell — keeps the worker's tz invariant
+    # uniform across all internal comparisons and the simulate_strategy call.
+    sim_start = sim_start.replace(tzinfo=None) if sim_start.tzinfo else sim_start
+    sim_end = sim_end.replace(tzinfo=None) if sim_end.tzinfo else sim_end
 
     with open(app_config_path) as f:
         app_config = json.load(f)
