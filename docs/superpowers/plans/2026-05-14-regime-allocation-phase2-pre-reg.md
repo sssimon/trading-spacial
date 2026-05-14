@@ -86,25 +86,37 @@ Esta es la **primera iteración** del Phase 2 methodology. Está abierta a opera
 
 **No-touched de Phase 2:** los 9 lookbacks, el método de aggregation, y la sticky direction logic están locked. Phase 3 sweep NO los varía. La única dimensión swept es `portfolio_vol_target` (sensitivity sweep §2.5).
 
-### §2.2 — Sizing: volatility-targeting (locked per epic §8.3 + §8.6)
+### §2.2 — Sizing: volatility-targeting (locked per epic §8.3 + §8.6; single-symbol scope per Phase 1 implementation)
 
-**Definición carry-forward del epic spec:**
+**Definición operacional (matches `backtest.py:_simulate_strategy_regime_allocation` line 601 + 815):**
 
 ```
-target_vol_per_symbol = portfolio_vol_target / n_active_symbols
+target_vol_per_symbol = portfolio_vol_target          # single-symbol scope, n_active=1
 position_size_usd = capital × target_vol_per_symbol / realized_vol_30d_annualized
 ```
 
 Donde:
 - `portfolio_vol_target = 0.30` para primary pass; ∈ {0.25, 0.30, 0.35, 0.40} para sensitivity sweep.
 - `realized_vol_30d_annualized = std(daily_log_returns[-30:]) × sqrt(365)`.
-- `n_active_symbols` = count de símbolos con ensemble signal ≠ flat ese día.
+- `capital` = per-symbol stream capital (each símbolo runs as independent $10K stream per backtest.py architecture).
+
+**Divergencia from Zarattini paper formula (documented per BLOCK 5 review 2026-05-14):**
+
+The Zarattini paper uses `target_vol_per_symbol = portfolio_vol_target / n_active_symbols` over **pooled portfolio capital**. Our architecture differs structurally: `backtest.py:_simulate_strategy_regime_allocation` runs each símbolo as **independent $10K stream** (CLAUDE.md confirms: "Single-symbol scope... Portfolio-level orchestration not built in Phase 1"). Cross-symbol n_active coordination is NOT implemented in Phase 1; building it in Phase 3 would expand the §6 lock ("NO patches on backtest.py / strategy/core.py") significantly.
+
+**Path B locked (kickoff 2026-05-14 operator decision):** Phase 2 + Phase 3 use the single-symbol formula (`n_active=1` effective). Position sizes are larger than literal Zarattini interpretation would suggest, but:
+- `max_position_pct = 0.20` cap is **more frequently binding** under single-symbol scope (acts as the effective constraint).
+- `min_position_usd = 50.0` floor unchanged.
+- "Portfolio aggregate" §4 primary criterion sums independent stream returns (no cross-symbol capital pooling).
+- The leverage cap 2x epic §8.6 becomes effectively per-symbol (each stream is independent; cross-stream leverage NOT enforced in Phase 1).
+
+This divergence is acknowledged as a **methodological choice**, not an oversight: it preserves §6 implementation lock and aligns pre-reg with shipped code. Future epics may add portfolio-level orchestration (separate scope; not Phase 2/3 here).
 
 **Hard caps (post-sizing):**
 
 - `position_size_usd ≤ 0.20 × capital` per símbolo (`cfg.regime_allocation.max_position_pct`).
 - `position_size_usd ≥ 50.0` (Binance min, `cfg.regime_allocation.min_position_usd`).
-- `sum(|position_size_usd|) ≤ 2.0 × capital` (leverage cap, aplicado proporcionalmente vía scale factor si excede).
+- `sum(|position_size_usd|) ≤ 2.0 × capital` per símbolo (leverage cap effective per-stream under independent-stream architecture).
 
 **R-multiple sizing está estructuralmente eliminado**. NO se usa `risk_amount × 100 / sl_pct_actual`. NO se usa SL distance.
 
@@ -140,21 +152,23 @@ Exit triggers (única vía `_simulate_strategy_regime_allocation`):
 **Primary pass (locked vol_target=30%):**
 
 ```
-cells = 10 símbolos × 3 sub-windows × 1 vol_target = 30 backtests
+cells_submitted = 10 símbolos × 3 sub-windows × 1 vol_target = 30 cells
+cells_running   = 8 + 8 + 9 = 25 cells (5 NO_DATA per §3 coverage: PENDLE in A+B, JUP in A+B+C)
 ```
 
-Cada celda evalúa el strategy con params locked exactos. Output: `data/retune/2026-05-14-regime-allocation/sweep_primary_{A,B,C}.json`.
+Cada celda evalúa el strategy con params locked exactos. NO_DATA cells return warmup-fail marker without running ensemble. Output: `data/retune/2026-05-14-regime-allocation/sweep_primary_{A,B,C}.json`.
 
 **Sensitivity pass (vol_target sweep):**
 
 ```
-cells = 10 símbolos × 3 sub-windows × 4 vol_target = 120 backtests
+cells_submitted = 10 símbolos × 3 sub-windows × 4 vol_target = 120 cells
+cells_running   = 25 × 4 = 100 cells (same NO_DATA exclusion per sub-window)
 vol_target ∈ {0.25, 0.30, 0.35, 0.40}
 ```
 
 Output: `data/retune/2026-05-14-regime-allocation/sweep_sensitivity_{A,B,C}.json`.
 
-**Total compute Phase 3:** 30 + 120 = **150 backtests** (excluyendo BTC B&H baseline benchmark de §5.1).
+**Total compute Phase 3:** 30 + 120 = **150 cells submitted**, **125 backtests actually running** (post-coverage exclusion). Excluyendo BTC B&H baseline benchmark de §5.1.
 
 **Baseline benchmark (separate, not in sweep):**
 
@@ -168,11 +182,11 @@ Output: `data/retune/2026-05-14-regime-allocation/sweep_sensitivity_{A,B,C}.json
 
 **Locked per §1.1 operator decision (R3 pre-reg exact dates):**
 
-| ID | Window | Regime characterization | Notable coverage |
+| ID | Window | Regime characterization | In-coverage (regime-allocation 390-daily warmup) |
 |---|---|---|---|
-| A | 2022-04-01 → 2022-07-01 | Bear market 2022 (Terra/Luna May) | 8/10 (excl. PENDLE start 2023-07, JUP start 2024-01) |
-| B | 2023-04-01 → 2023-07-01 | Recovery 2023 (post-FTX) | 9/10 (excl. JUP) |
-| C | 2025-01-30 → 2025-04-30 | Recent pre-holdout 3 months | 10/10 |
+| A | 2022-04-01 → 2022-07-01 | Bear market 2022 (Terra/Luna May) | **8/10** (excl. PENDLE first bar 2023-07-03, JUP first bar 2024-01-31) |
+| B | 2023-04-01 → 2023-07-01 | Recovery 2023 (post-FTX) | **8/10** (excl. PENDLE — first bar 2023-07-03 is AFTER B end; JUP — no bars yet) |
+| C | 2025-01-30 → 2025-04-30 | Recent pre-holdout 3 months | **9/10** (excl. JUP — only ~364 daily bars by C start, < 390 warmup requirement) |
 
 **Properties (identical to R1+R2+R3):**
 - Non-overlapping ✓
@@ -180,17 +194,22 @@ Output: `data/retune/2026-05-14-regime-allocation/sweep_sensitivity_{A,B,C}.json
 - Genuinely OUTSIDE A.4-1 train window `[2024-01-30, 2025-01-30]` ✓
 - 3 distinct regime characterizations
 
-**Per-symbol coverage rule:**
+**Per-symbol coverage rule (revised post-review 2026-05-14):**
 
-Símbolos con menos de **390 daily bars** disponibles antes del START de cada sub-window son excluidos de esa sub-window (warmup requirement per §2.1). Esto implica:
-- **PENDLE** (start 2023-07): excluido de Window A (necesita ~13 meses warmup pre-2022-04-01, no disponible).
-- **JUP** (start 2024-01): excluido de Window A + Window B (no tiene 390d pre-2023-04-01).
-- Todos los 10 símbolos: incluidos en Window C.
+Símbolos con menos de **390 daily bars** disponibles antes del START de cada sub-window son excluidos de esa sub-window (warmup requirement per §2.1). First-bar dates verified empirically via `data.market_data` provider query 2026-05-14:
+
+| Símbolo | First 1H bar (UTC) | Days pre-A_start | Days pre-B_start | Days pre-C_start |
+|---|---|---:|---:|---:|
+| BTCUSDT | (long history) | ≥ 1000 | ≥ 1000 | ≥ 1000 |
+| ETHUSDT | (long history) | ≥ 1000 | ≥ 1000 | ≥ 1000 |
+| ADAUSDT, AVAXUSDT, DOGEUSDT, UNIUSDT, XLMUSDT, RUNEUSDT | (all pre-2022) | ≥ 390 | ≥ 390 | ≥ 390 |
+| PENDLEUSDT | 2023-07-03 10:00 | -457 (excl) | -94 (excl) | 576 (incl) |
+| JUPUSDT | 2024-01-31 16:00 | -730 (excl) | -670 (excl) | 364 (**excl** — 364 < 390) |
 
 **Coverage por sub-window:**
 - Window A: 8 símbolos (BTC, ETH, ADA, AVAX, DOGE, UNI, XLM, RUNE) — PENDLE + JUP excluded.
-- Window B: 9 símbolos (anteriores + PENDLE) — JUP excluded.
-- Window C: 10 símbolos (todos).
+- Window B: 8 símbolos (mismos que A) — PENDLE still not trading (first bar 2023-07-03 > B end 2023-07-01); JUP still not trading.
+- Window C: 9 símbolos (anteriores + PENDLE) — JUP excluded because only ~364 daily bars < 390 warmup at C_start 2025-01-30.
 
 **Warmup consideration:** el sub-window evaluation period comienza al primer daily bar **después** de los 390 bars de warmup. Para cada (símbolo, sub-window) pair en el sweep, harness extrae OHLCV cubriendo `[sub_window_start - 391 days, sub_window_end]` y descarta los primeros 390 daily bars para warmup. Evaluation effective bars: ~91 daily bars per sub-window (3-month windows; daily granularity).
 
@@ -207,9 +226,11 @@ Phase 3 PASS = en CADA de las 3 sub-windows, **simultáneamente**:
 
 **Required conjunctive holding:** PASS en 3/3 sub-windows. Per operator §1.1 + epic §6.1 wording ("beat BTC B&H net of v2 costs sobre portfolio aggregate").
 
+**Amendment to epic §5.1 (acknowledged post-review 2026-05-14):** epic spec §5.1 originally anchored the comparison to a **single 15-month pre-holdout window** `[2024-01-30, 2025-04-29]` (BTC buy-and-hold over the entire pre-holdout period). Operator decision §1.1 (kickoff 2026-05-14) replaced this with a **3-sub-window conjunctive** comparison using R3-exact dates, to preserve comparability with the R1/R2/R3 evidence stack. Implication: 2 of the 3 sub-windows (A, B) fall **outside** the original epic §5.1 anchor window. This amendment is operator-approved and documented here so future readers don't assume the window was always 3×3-month.
+
 **Notes:**
-- "Portfolio aggregate" se computa como `sum(per_symbol_final_equity) - sum(per_symbol_initial_capital)` sobre los símbolos in-coverage del sub-window. Cada símbolo arranca con `INITIAL_CAPITAL = 10000.0` independiente (carry-forward del backtest architecture actual). Para Window A: 8 × $10K = $80K initial; para Window C: 10 × $10K = $100K initial.
-- BTC B&H equivalente: hold BTC long-only desde sub-window start (con allocation prorata: $80K en A, $90K en B, $100K en C; o equivalentemente, multiplicar BTC % return × n_symbols × $10K para apples-to-apples).
+- "Portfolio aggregate" se computa como `sum(per_symbol_final_equity) - sum(per_symbol_initial_capital)` sobre los símbolos in-coverage del sub-window. Cada símbolo arranca con `INITIAL_CAPITAL = 10000.0` independiente (carry-forward del backtest architecture actual + Path B locked per §2.2). Initial capital aggregates: **Window A: 8 × $10K = $80K; Window B: 8 × $10K = $80K; Window C: 9 × $10K = $90K** (per §3 coverage).
+- BTC B&H equivalente: hold BTC long-only desde sub-window start (con allocation prorata: $80K en A, $80K en B, $90K en C; o equivalentemente, multiplicar BTC % return × n_in_coverage × $10K para apples-to-apples).
 - "Net of v2 costs" para BTC B&H: solo cuenta una buy fee + una sell fee, no funding (long spot, no perp). Para regime-allocation strategy: full v2 costs incluyendo funding rate sobre todas las posiciones held.
 
 ### §4.1 — Cell selection rule (primary pass)
@@ -218,7 +239,7 @@ Phase 3 PASS = en CADA de las 3 sub-windows, **simultáneamente**:
 
 Primary pass tiene **1 cell per (símbolo, sub-window)** (vol_target=30%, params locked). NO hay grid sobre el cual maximize — la celda primary está fija.
 
-**Cell exclusion rule:** si una (símbolo, sub-window) cell produce `n_trades < 5` AND `simulation_completed = True` (no NO_DATA / warmup fail), marcar como `INSUFFICIENT_DATA` y excluir del aggregation. Si más de 1/3 de cells in-coverage caen en INSUFFICIENT_DATA en una sub-window dada, → halt H2 (signal degenerate, §10.4).
+**Cell exclusion rule:** si una (símbolo, sub-window) cell produce `n_trades < 5` AND `simulation_completed = True` (no NO_DATA / warmup fail), marcar como `INSUFFICIENT_DATA` y excluir del aggregation. **Halt threshold for INSUFFICIENT_DATA prevalence is operationalized in §10.4 (H2)** — single source of truth para evitar internal inconsistency.
 
 **Deterministic tie-break** (en el improbable evento que un comparison genere ties): por `(strategy_total_return, -btc_bh_total_return, alphabetical_symbol)`.
 
@@ -255,10 +276,11 @@ Sensitivity sweep evalúa `vol_target ∈ {0.25, 0.30, 0.35, 0.40}` × 10 símbo
 | Primary ✓ at vol=30 in 3/3 AND sensitivity 2/4 | **SUCCESS-CONDITIONAL** | Operator decides (§4.5): advance with caveat OR treat INCONCLUSIVE. |
 | Primary ✓ at vol=30 in 3/3 AND sensitivity ≤1/4 | **SWEET-SPOT ARTIFACT (FAIL)** | Strategy archived. No Phase 4. Document hipótesis: calibration overfit. |
 | Primary ✓ at vol=30 in 2/3 sub-windows | **PARTIAL SUCCESS** | Operator decides (§4.5). Regime-specific edge may justify regime-gating notation. |
-| Primary ✗ at vol=30 in ≥2/3 sub-windows AND mechanism engaged (≥6 of in-coverage trade > 5x) | **PHASE 3 FAIL (clean)** | Mechanism engaged but no edge. Default per §4.5: open question — basket adequacy vs strategy class viability. |
-| Primary ✗ at vol=30 in ≥2/3 sub-windows AND mechanism degenerate (≥6 of in-coverage trade < 5x) | **PHASE 3 FAIL (signal degenerate)** | Ensemble doesn't fire enough. Signal calibration issue OR basket non-trending. Document signal-firing diagnostic. |
+| Primary ✗ at vol=30 in ≥2/3 sub-windows AND sensitivity ≥1/4 PASS at other vol_target | **INCONCLUSIVE** | Operator decides (§4.5). **Default:** treat as PHASE 3 FAIL clean (no Phase 4). Override path: investigate why vol=30 specifically fails (sweet-spot inversa hypothesis); requires sub-spec separate doc + auditor counter-signoff per §4.5 self-policing rule. |
+| Primary ✗ at vol=30 in ≥2/3 sub-windows AND sensitivity 0/4 AND mechanism engaged (≥75% of in-coverage símbolos n_trades ≥ 5) | **PHASE 3 FAIL (clean)** | Mechanism engaged but no edge. Default per §4.5: open question — basket adequacy vs strategy class viability. |
+| Primary ✗ at vol=30 in ≥2/3 sub-windows AND mechanism degenerate (≥75% of in-coverage símbolos n_trades < 5) | **PHASE 3 FAIL (signal degenerate)** | Ensemble doesn't fire enough. Signal calibration issue OR basket non-trending. Document signal-firing diagnostic. |
 
-**Default fall-through:** any primary-✗ outcome that does NOT trigger the degenerate row above lands in FAIL clean. Mirror R1 FAIL framing — "mechanism engaged, profitability absent".
+**Default fall-through:** any primary-✗ outcome that does NOT trigger the INCONCLUSIVE row (sensitivity ≥1/4) AND does NOT trigger the degenerate row (≥75% n_trades < 5) lands in FAIL clean. Mirror R1 FAIL framing — "mechanism engaged, profitability absent". Per BLOCK 4 review fix 2026-05-14: the INCONCLUSIVE row is now explicit in this verdict table (previously only enumerated in §4.2 + §4.5; this row was missing from §4.3, creating three-place inconsistency).
 
 ### §4.4 — Cross-sub-window stability (informative, not gating)
 
@@ -295,6 +317,16 @@ For each in-coverage símbolo, report:
 - (b) FAIL signal degenerate → ensemble doesn't fire enough. Either basket no-trending in test windows OR ensemble miscalibrated. Document diagnostic.
 - (c) FAIL sweet-spot → vol=30 isolated success; calibration not robust. Strategy class archive.
 
+**Asymmetric guard scope caveat (CR3 review fix 2026-05-14):** the §4.6 asymmetric halt-guard applies **only to §10-halt-fired scenarios** (favorable verdicts overridden when partial-window data). It does **NOT** cover operator override paths in this §4.5 (SUCCESS-CONDITIONAL / PARTIAL / INCONCLUSIVE → "advance to Phase 4 with caveat"). The bias risk identified in §4.6 (operator + project momentum favor declaring success early) applies equally to these override paths, but they are not symmetrically guarded.
+
+**Self-policing requirement for §4.5 override paths:** any override that promotes a non-PASS-strong/robust verdict to Phase 4 advancement MUST:
+1. Document explicit Bayesian update with magnitude shift in `derivation_audit.md` (mirror §A.4 checkpoint pattern from R1/R2/R3).
+2. Open a separate sub-spec document (mirror "issue separado A.4-1.5" mechanism from CLAUDE.md §Caveats) capturing the override rationale + new Phase 4 scope BEFORE Phase 4 advances.
+3. Require auditor counter-signoff (operator may invoke `code-review-excellence` agent or equivalent) confirming the override is methodologically defendible — NOT just operator-discretionary.
+4. The override decision is logged in `verdict.json` under `operator_override` block with timestamp, rationale, and link to sub-spec doc.
+
+This is **not a soft guideline** — it is a pre-reg lock with the same standing as the halt-guard. Any Phase 4 advancement from a non-PASS-strong/robust verdict that lacks these 4 elements is methodologically invalid under this pre-reg.
+
 ### §4.6 — Halt-guard scope (mirror R3 §4.6)
 
 §10 halt + `n_windows < 3` → `PHASE_3_INSUFFICIENT_DATA` **only** when the naive verdict is favorable (PASS / SUCCESS-CONDITIONAL / PARTIAL). Negative verdicts (FAIL clean / FAIL degenerate / FAIL sweet-spot) on partial windows are **preserved** — §10 acts on dispositive partial negative evidence, no on inferential weight suspension.
@@ -313,11 +345,11 @@ For each in-coverage símbolo, report:
 
 **Risk:** símbolos con history corta (PENDLE, JUP) no cubren los 390 daily bars de warmup pre-sub-window. Ensemble retorna `NONE` con reason `regime_allocation_warmup`.
 
-**Pre-registered handling:**
-- PENDLE: excluida de Window A únicamente (insufficient pre-warmup data).
-- JUP: excluida de Window A + Window B.
-- Coverage exact per §3.
-- Excluded símbolos NO cuentan en aggregation portfolio para esa sub-window — el initial capital de la portfolio aggregate ajusta (Window A: $80K, Window B: $90K, Window C: $100K).
+**Pre-registered handling (revised per BLOCK 1+2 review fix 2026-05-14):**
+- PENDLE first bar 2023-07-03 (verified empirically): excluida de Window A (no existía) Y Window B (first bar es AFTER B end 2023-07-01). Incluida en Window C (576 daily bars ≥ 390).
+- JUP first bar 2024-01-31 (verified empirically): excluida de Window A + B (no existía) Y Window C (solo ~364 daily bars < 390 warmup threshold at C_start 2025-01-30).
+- Coverage exact per §3 corrected table: **A=8, B=8, C=9**.
+- Excluded símbolos NO cuentan en aggregation portfolio para esa sub-window — el initial capital de la portfolio aggregate ajusta: **Window A: $80K, Window B: $80K, Window C: $90K**.
 - Diagnostic: `coverage_by_window` reportado en `manifest.json` per Phase 3 deliverable.
 
 ### §5.2 — Signal degenerate: ensemble never votes (`sum == 0` siempre)
@@ -461,20 +493,23 @@ Resumen de branch points donde la metodología tiene rule explícita. Cada branc
 | Cost model | v2 sqrt-participation + funding (Phase 0 PR #341 locked) | §2.4 |
 | Sub-windows | A 2022-04-01→07-01, B 2023-04-01→07-01, C 2025-01-30→04-30 (operator locked §1.1) | §3 |
 | Sub-window evaluation period | 91 daily bars post-warmup (390 daily bars warmup pre-window) | §3, §5.1 |
-| Coverage exclusion rule | <390 daily bars pre-window → exclude (PENDLE from A, JUP from A+B) | §3, §5.1 |
+| Coverage exclusion rule | <390 daily bars pre-window → exclude (PENDLE from A+B; JUP from A+B+C) | §3, §5.1 |
+| n_active formula (Path B) | `target_vol_per_symbol = portfolio_vol_target` (single-symbol scope per `backtest.py:601`; n_active=1 effective). Divergence from Zarattini portfolio-pooled approach documented in §2.2 | §2.2 |
 | Primary criterion | Strategy total_return > BTC B&H total_return per sub-window, net of v2 costs, portfolio aggregate | §4 |
+| Epic §5.1 amendment | Original anchor: 15-month single-window. Pre-reg: 3 sub-window conjunctive (operator decision §1.1). 2 of 3 sub-windows fall outside original epic §5.1 range. | §4 |
 | Conjunctive holding | 3/3 sub-windows for PASS (operator locked §1.1) | §4 |
-| Cell exclusion | `n_trades < 5` → INSUFFICIENT_DATA per (símbolo, sub-window, vol_target) | §4.1 |
+| Cell exclusion | `n_trades < 5` → INSUFFICIENT_DATA per (símbolo, sub-window, vol_target). Halt threshold operationalized in §10.4 H2 (single source of truth). | §4.1 |
 | Tie-break | `(strategy_total_return, -btc_bh_total_return, alphabetical_symbol)` | §4.1 |
 | Sensitivity verdict map | 4/4=STRONG, 3/4=ROBUST, 2/4=CONDITIONAL, 1/4=SWEET-SPOT FAIL, 0/4=FAIL clean (operator locked §1.1) | §4.2 |
 | Cross-window stability | Informative only, not gating | §4.4 |
 | PASS strong/robust | Auto-advance to Phase 4 paper trade | §4.5 |
 | SUCCESS-CONDITIONAL (sensitivity 2/4) | Operator decides advance vs INCONCLUSIVE | §4.5 |
 | PARTIAL (primary 2/3 windows) | Operator decides (default INCONCLUSIVE) | §4.5 |
-| INCONCLUSIVE (primary FAIL vol=30 + sensitivity ≥1/4) | Default hard-lock as FAIL; operator override path | §4.5 |
+| INCONCLUSIVE (primary FAIL vol=30 + sensitivity ≥1/4) | Default hard-lock as FAIL; operator override path with 4-element self-policing requirement (§4.5) | §4.5 |
+| Operator override self-policing | Any non-PASS-strong/robust → Phase 4 advance requires (1) Bayesian update in derivation_audit.md, (2) separate sub-spec doc, (3) auditor counter-signoff, (4) verdict.json operator_override block | §4.5 |
 | FAIL (clean / degenerate / sweet-spot) | Automatic. Strategy archived. Future Epic B (basket revision) considered if degenerate. | §4.5 |
-| Halt H1 (universal bankruptcy) | ≥6 of in-coverage símbolos bankrupt en sub-window A AT vol_target=30 → halt B+C | §10.4 |
-| Halt H2 (signal degenerate) | ≥6 of in-coverage símbolos con n_trades < 5 en sub-window A AT vol_target=30 → halt B+C | §10.4 |
+| Halt H1 (universal bankruptcy) | ≥75% of in-coverage símbolos bankrupt en sub-window A AT vol_target=30 → halt B+C (≥6 in A/B; ≥7 in C) | §10.4 |
+| Halt H2 (signal degenerate) | ≥75% of in-coverage símbolos con n_trades < 5 en sub-window A AT vol_target=30 → halt B+C (≥6 in A/B; ≥7 in C). Loosens epic §6.3 H2 anchor from 10→5 (rationale §10.4). | §10.4 |
 | §4.6 asymmetric halt-guard | Favorable verdicts overridden under partial windows; negative preserved | §4.6 |
 | Live path safety | Flag-gated; defaults to False; NO live promotion in Phase 2/3 scope | §6, §7 |
 | Pre-reg iteration | Single-iteration discipline; NO Phase 2.5 / Phase 2 v2 | §1.3, §7 |
@@ -491,18 +526,18 @@ Per §10.4 + §8 table:
 - **H1 (universal bankruptcy):** ≥6 of in-coverage símbolos bankrupt en sub-window A AT vol_target=30 → halt B+C.
 - **H2 (signal degenerate):** ≥6 of in-coverage símbolos con `n_trades < 5` en sub-window A AT vol_target=30 → halt B+C.
 
-Operator may adjust:
-- (a) **Keep as proposed [recommended]** — 6/8 (Window A coverage) = 75%. Stricter than epic §6.3 ">80% bankrupt" anchor (which would be 7/8 = 87.5%); rationale: regime-allocation has fewer trades than R3 sweep, so noise in bankruptcy attribution is higher; tighter halt prevents long expensive B+C compute on a degenerate signal.
-- (b) Looser: ≥7 of 8 (matches >80% anchor literally).
-- (c) Stricter: ≥5 of 8 (≥62.5%).
+Operator may adjust (thresholds revised to use uniform 75% per BLOCK 3 review fix 2026-05-14, consistent across windows given coverage A=8, B=8, C=9):
+- (a) **Keep as proposed [recommended]** — ≥75% of in-coverage (≥6 in A/B, ≥7 in C). Stricter than epic §6.3 ">80% bankrupt" anchor (which would be ≥7 in A/B, ≥8 in C); rationale: regime-allocation has fewer trades than R3 sweep, so noise in bankruptcy attribution is higher; tighter halt prevents long expensive B+C compute on a degenerate signal.
+- (b) Looser: ≥80% literal (≥7 in A/B, ≥8 in C — matches epic §6.3 anchor literally).
+- (c) Stricter: ≥62.5% (≥5 in A/B, ≥6 in C).
 
 ### §9.2 — [OPTIONAL] Insufficient-data threshold `n_trades < 5`
 
-Per §4.1 cell exclusion rule. Anchored to "regime-allocation holds days-to-months per epic §3.1, so 5 trades over 91 daily bars (5.5% trade frequency) is the minimum to extract meaningful signal".
+Per §4.1 cell exclusion rule. **This loosens epic §6.3 H2 threshold from 10→5** (CR1 review fix 2026-05-14). Honest framing: epic §6.3 was drafted pre-Phase-1 (before §10.2 algebraic estimate). Phase 1 implementation reveals daily-frequency ensemble produces 5-25 trades/cell expected (vs LRC frame's 30-60 trades/cell at 1H granularity that R3 used). 10 trades is too high a bar for regime-allocation; 5 trades is the minimum meaningful sample for per-symbol attribution. This pre-reg operationalizes the threshold based on the post-implementation empirical evidence, not the pre-implementation estimate. Direction of change is **loosening** (less strict), unlike H1 which is stricter than epic literal — both deviations require explicit framing for diagnostic honesty.
 
-- (a) **n_trades < 5 [recommended]** — auditor default.
-- (b) n_trades < 3 — looser; trusts even low-frequency cells.
-- (c) n_trades < 10 — stricter (R3 used this); would exclude more cells in regime-allocation given lower trade frequency.
+- (a) **n_trades < 5 [recommended]** — operationalization per §10.2 algebra; loosens epic §6.3 explicitly.
+- (b) n_trades < 3 — even looser; trusts very low-frequency cells.
+- (c) n_trades < 10 — preserves epic §6.3 literal; would exclude more cells in regime-allocation given lower trade frequency than R3 (>50% of cells likely INSUFFICIENT_DATA under daily granularity).
 
 ### §9.3 — [OPTIONAL] Compute budget hard cap
 
@@ -512,15 +547,9 @@ Per §11 estimate: ~2-3h paralelizado for 150 backtests + 9 baselines.
 - (b) Hard cap 4h — abort if exceeded; diagnose perf issue before retry.
 - (c) Hard cap 6h — more generous; matches R3 estimate ceiling.
 
-### §9.4 — [OPTIONAL] Branch + PR title convention
+### §9.4 — [RESOLVED — consumed pre-review] Branch + PR title convention
 
-Phase 2 PR is doc-only. Phase 3 PR is code + execution.
-
-- **Phase 2 branch:** `docs/regime-allocation-phase2-pre-reg` [default, ya creada]
-- **Phase 2 PR title:** `docs(epic #338 Phase 2): pre-registration sub-spec for regime-allocation sweep (closes #347)`
-- **Phase 3 branch (post-merge):** `feat/regime-allocation-phase3-sweep` (TBD when Phase 3 starts)
-
-Operator may adjust naming convention.
+Removed from open-questions per OBSERVATION review fix 2026-05-14: Phase 2 branch (`docs/regime-allocation-phase2-pre-reg`) and PR title (`docs(epic #338 Phase 2): pre-registration sub-spec for regime-allocation sweep (closes #347)`) were already locked when this pre-reg was first published (PR #348 created 2026-05-14 with those exact strings). Asking permission post-facto for an already-consumed decision is procedurally inconsistent. Phase 3 branch convention (`feat/regime-allocation-phase3-sweep`) decided when Phase 3 starts — not a Phase 2 pre-reg concern.
 
 ### §9.5 — [REQUIRED before Phase 3] Confirm baseline benchmark execution scope
 
@@ -545,10 +574,12 @@ Per §2.1: warmup = longest_lookback + vol_window = 360 + 30 = 390 daily bars. F
 - Daily bars resampled from 1H OHLCV (Pandas `freq="D"`, close-of-day UTC 23:00).
 - Pre-warmup period (~13 months) is consumed silently; ensemble starts emitting non-NULL signals at warmup_end + 1.
 
-**Verification:** PENDLE start 2023-07 → 13 months pre-warmup needed → not available before 2024-08 → excluded from Window A (2022-04-01) + Window B (2023-04-01); included in Window C (2025-01-30, has 13+ months pre-warmup).
-JUP start 2024-01 → 13 months pre-warmup needed → not available before 2025-02 → excluded from Window A + B; included in Window C.
+**Verification (revised post-review 2026-05-14 with empirical first-bar dates from `data.market_data` provider query):**
 
-**Algebra check passes.** Coverage per §3 confirmed: A=8, B=9, C=10.
+- **PENDLE** first 1H bar `2023-07-03 10:00 UTC` → first complete daily bar `2023-07-04`. Days to A_start (2022-04-01): -457 (PENDLE didn't exist) → excluded from A. Days to B_start (2023-04-01): -94 (PENDLE didn't exist) → excluded from B (PENDLE first bar 2023-07-03 is also AFTER B end 2023-07-01, so no in-window data either). Days to C_start (2025-01-30): 576 ≥ 390 → included in C.
+- **JUP** first 1H bar `2024-01-31 16:00 UTC` → first complete daily bar `2024-02-01` (per §5.8 partial-day skip rule). Days to A_start: -730 → excluded from A. Days to B_start: -670 → excluded from B. Days to C_start (2025-01-30): **364** (from 2024-02-01 to 2025-01-29 inclusive). **364 < 390** → **excluded from C** (JUP does not satisfy 390 daily bars warmup at C_start; previous claim "JUP included in C" was a non-sequitur identified in BLOCK 2 review).
+
+**Algebra check passes (corrected).** Coverage per §3 corrected table: **A=8, B=8, C=9**.
 
 ### §10.2 — Signal frequency plausibility (algebraic lower bound)
 
@@ -566,35 +597,35 @@ For ensemble to fire ≥5 trades per (símbolo, sub-window):
 
 ### §10.3 — Cost impact lower bound
 
-Per Phase 0 calibration: per-trade cost ≈ `0.05% notional` (slippage) + funding rate (~0.01% per 8h hold). For a típical trade (size $5K, hold 5 days):
-- Slippage: 2 × $5000 × 0.0005 = $5 (entry + exit, no funding cost for first 8h period).
-- Funding: 5 days × 24h / 8h = 15 funding periods × $5000 × 0.0001 = $7.5 (conservative tier major).
-- Total per-trade cost: ~$12.5 (0.25% of notional).
+Per Phase 0 calibration: per-trade cost ≈ `0.05% notional` (slippage) + funding rate (~0.01% per 8h hold).
 
-Si strategy genera ~15 trades por (símbolo, sub-window), total cost per cell ≈ $200-300. Sobre INITIAL_CAPITAL = $10K, eso es ~2-3% drag. Tolerable si gross return > 5%. Cost-dominated outcome flag fires if cost > 30% del gross_pnl (§5.4).
+**Under Path B (§2.2 single-symbol scope; cap-binding):** typical position size ≈ `0.20 × capital = $2K` (max_position_pct cap binding most of the time under single-symbol vol-targeting with portfolio_vol_target=30% and realized_vol ≈ 50%). For a típical trade (size $2K, hold 5 days):
+- Slippage: 2 × $2000 × 0.0005 = $2 (entry + exit).
+- Funding: 5 days × 24h / 8h = 15 funding periods × $2000 × 0.0001 = $3 (conservative tier major).
+- Total per-trade cost: ~$5 (0.25% of notional).
+
+Si strategy genera ~15 trades por (símbolo, sub-window), total cost per cell ≈ $75. Sobre INITIAL_CAPITAL = $10K, eso es ~0.75% drag. Cost-dominated outcome flag fires if cost > 30% del gross_pnl (§5.4). Under Path B with cap-binding sizing, the cost is **lower in absolute terms** than original Zarattini-formula path (smaller positions) **but proportional to notional** so the relative drag is unchanged.
 
 **Plausibility passes:** cost model v2 calibration leaves room for strategy edge even at 15-20% trade frequency.
 
 ### §10.4 — Halt conditions pre-registered (concrete thresholds)
 
-**Halt H1 (universal bankruptcy):** during sub-window A execution at vol_target=30%, if ≥6 of in-coverage símbolos (≥6 of 8 = 75%) bankrupt within the sub-window, halt B+C. Mechanism failed structurally — vol-targeting + leverage cap NOT preventing capital destruction.
+**Halt H1 (universal bankruptcy):** during sub-window A execution at vol_target=30%, if **≥75% of in-coverage símbolos** bankrupt within the sub-window, halt B+C. Concrete counts (per §3 coverage A=8, B=8, C=9): **≥6 in Windows A/B; ≥7 in Window C** (though Window C only matters if A halt doesn't fire). Mechanism failed structurally — vol-targeting + leverage cap NOT preventing capital destruction.
 
-**Halt H2 (signal degenerate):** during sub-window A execution at vol_target=30%, if ≥6 of in-coverage símbolos (≥6 of 8 = 75%) have `n_trades < 5`, halt B+C. Ensemble fails to fire — signal calibration issue OR basket non-trending in Window A specifically.
+**Halt H2 (signal degenerate):** during sub-window A execution at vol_target=30%, if **≥75% of in-coverage símbolos** have `n_trades < 5`, halt B+C. Concrete counts: **≥6 in Windows A/B; ≥7 in Window C**. Ensemble fails to fire — signal calibration issue OR basket non-trending in Window A specifically. **This loosens epic §6.3 H2 anchor (originally `n_trades < 10`) → `n_trades < 5` per CR1 review fix 2026-05-14** (rationale: §10.2 algebraic estimate shows daily-frequency ensemble produces 5-25 trades/cell; 10 trades/cell would exclude >50% of cells even under healthy strategy; the epic threshold was drafted pre-Phase-1 before empirical algebra was available). Direction of change: loosening (less strict); operator may revert to epic literal per §9.2 option (c).
 
 **Either halt → write halt diagnostic.** `data/retune/2026-05-14-regime-allocation/halt_diagnostic.json` con full per-symbol breach explanation + sensitivity sweep also halted (no need to run vol_target ∈ {25, 35, 40} si primary already fails decisively).
 
-**Why 6 of 8 (75%), not 7 of 8 (87.5%) per epic §6.3 ">80%":**
+**Why ≥75% (uniform across windows), not literal epic §6.3 ">80%":**
 
 Epic §6.3 says ">80% de símbolos bancarrotan en >50% de cells". For regime-allocation:
 - "Cells" interpretation: in primary pass there's 1 cell per (símbolo, sub-window). So "in >50% of cells" reduces to "in the primary cell".
-- ">80%" of 8 in-coverage = 6.4, rounded up to 7. So literal interpretation: ≥7 of 8 bankrupt.
-- This pre-reg adjusts to ≥6 of 8 (75%) as **stricter than literal**. Rationale: regime-allocation has lower trade frequency than LRC; noise in per-symbol bankruptcy attribution is higher; tighter halt threshold prevents long expensive B+C compute on a degenerate signal. Operator can adjust per §9.1.
+- ">80%" of 8 in-coverage = 6.4, rounded up to 7. Literal interpretation: ≥7 of 8 (Window A/B) bankrupt OR ≥8 of 9 (Window C) bankrupt.
+- This pre-reg adjusts to **≥75% uniform** = ≥6 in A/B, ≥7 in C as **stricter than literal**. Rationale: regime-allocation has lower trade frequency than LRC; noise in per-symbol bankruptcy attribution is higher; tighter halt threshold prevents long expensive B+C compute on a degenerate signal. Direction of change: stricter (more sensitive). Operator can adjust per §9.1.
 
-**Why `n_trades < 5`, not `n_trades < 10` (R3 pattern):**
+**Direction-of-change framing transparency (per CR1 review fix 2026-05-14):** H1 deviates from epic §6.3 in the **strict** direction (75% < 80% literal anchor); H2 deviates in the **loose** direction (5 < 10 epic anchor). Both directions are honest deviations driven by post-Phase-1 empirical evidence; the framing is explicit to enable diagnostic review.
 
-R3 used `n_trades < 10` because LRC frame produces ~30-60 trades per (símbolo, sub-window) on its 1H entry frame. Regime-allocation produces ~5-25 trades per cell on its daily evaluation frame (per §10.2 algebraic estimate). 10 trades is too high a bar — most cells would fail it even under healthy strategy. 5 trades is the minimum meaningful sample for per-symbol attribution. Operator can adjust per §9.2.
-
-**§4.6 asymmetric halt-guard:** under halt, favorable verdicts (PASS, SUCCESS-CONDITIONAL, PARTIAL) are overridden to `PHASE_3_INSUFFICIENT_DATA`. Negative verdicts (FAIL clean, FAIL degenerate, FAIL sweet-spot) on partial windows are preserved. Per §4.6 + R3 §4.6 mirror.
+**§4.6 asymmetric halt-guard:** under halt, favorable verdicts (PASS, SUCCESS-CONDITIONAL, PARTIAL) are overridden to `PHASE_3_INSUFFICIENT_DATA`. Negative verdicts (FAIL clean, FAIL degenerate, FAIL sweet-spot) on partial windows are preserved. Per §4.6 + R3 §4.6 mirror. **Override paths in §4.5 are NOT covered by this guard** (see §4.5 self-policing requirement added per CR3).
 
 ---
 
@@ -606,8 +637,8 @@ R3 used `n_trades < 10` because LRC frame produces ~30-60 trades per (símbolo, 
 | Code patch (`tools/regime_allocation_verdict.py`) | 1-2 h | Adapted from `tools/r3_verdict.py` + §4.6 halt-guard scope mirror + sensitivity verdict mapping §4.2 |
 | Unit tests (`tests/test_regime_allocation_sweep.py`) | 2-3 h | ~15-20 tests: sweep harness correctness, deterministic cell selection, halt-condition activation, sensitivity verdict mapping, baseline benchmark execution |
 | Baseline backtests (9 = 3 baselines × 3 sub-windows) | 15-20 min | Sequential, single config each |
-| Sweep execution primary (30 backtests, parallelized 8 workers) | **30-45 min wall-clock** | Per-backtest avg ~60s (daily granularity is faster than 1H R3 sweep); 4 workers parallel |
-| Sweep execution sensitivity (120 backtests, parallelized 8 workers) | **1.5-2 h wall-clock** | Per-backtest avg ~60s; 4× primary compute |
+| Sweep execution primary (25 running of 30 submitted, parallelized 8 workers) | **25-40 min wall-clock** | Per-backtest avg ~60s (daily granularity is faster than 1H R3 sweep); 5 NO_DATA cells return early per §3 coverage |
+| Sweep execution sensitivity (100 running of 120 submitted, parallelized 8 workers) | **1.3-1.7 h wall-clock** | Per-backtest avg ~60s; 4× primary compute minus same coverage exclusions |
 | Verdict tool execution + JSON outputs + README | 30-45 min | Includes Bayesian update prose + decision hooks |
 | Derivation audit (md prose, math, interpretation tree) | 1-2 h | Math/data interpretation + sensitivity verdict + per-symbol attribution + cross-window stability |
 | PR comment + Phase 4 scope draft (if PASS) | 30 min | Operator-facing summary |
@@ -678,18 +709,23 @@ Per epic §9 (risk register) + R3 §13 + audit §A.2 + §A.7 + §A.8, Phase 2 + 
 
 10. **Sub-window choice may not generalize.** A/B/C cover bear-2022/recovery-2023/recent-2025. Other regimes not tested (bull-2021, bear-2024, etc.). Phase 5 holdout (12 months 2025-04-30 → 2026-04-30) covers a different time slice; if Phase 3 PASS but Phase 5 FAIL, that's the regime-generalization gap evidence.
 
+11. **Independent-stream architecture vs Zarattini portfolio approach (BLOCK 5 review fix 2026-05-14).** The pre-reg formula in §2.2 uses single-symbol scope (`target_vol_per_symbol = portfolio_vol_target`; n_active=1 effective) to match `backtest.py:_simulate_strategy_regime_allocation` shipped in Phase 1C (PR #345). The Zarattini paper uses portfolio-pooled capital with `n_active_symbols` dynamic across active positions. Our architecture's 10 independent $10K streams cannot natively implement portfolio-pooled vol-targeting without re-architecting the simulator. Operator decision §1.1 (Path B) accepts this divergence: position sizes are larger than literal Zarattini formula would produce, but bounded by `max_position_pct = 0.20` cap which is **more frequently binding** under single-symbol scope. Cross-symbol leverage cap 2x effectively becomes per-symbol (each stream is independent). If future epic adds portfolio-level orchestration, the n_active formula can be revisited; under this pre-reg, the divergence is locked.
+
+12. **Epic §5.1 anchor amendment (CR2 review fix 2026-05-14).** The primary criterion in §4 compares regime-allocation strategy vs BTC B&H **per sub-window**, conjunctive 3/3. Epic §5.1 originally anchored the comparison to a **single 15-month pre-holdout window** `[2024-01-30, 2025-04-29]`. The kickoff operator decision §1.1 changed this to 3-sub-window conjunctive (R3-exact dates). 2 of the 3 sub-windows (A: 2022-04-01→07-01; B: 2023-04-01→07-01) fall **outside** the original epic §5.1 anchor window. This amendment is operator-approved and explicitly framed for downstream readers to avoid confusion about historical anchoring.
+
 ---
 
 ## §14 · Historial
 
 | Fecha | Cambio | Autor |
 |---|---|---|
-| 2026-05-14 | Pre-reg sub-spec inicial — drafted from kickoff prompt + epic #338 spec + R3 pre-reg pattern + 3 operator decisions locked via AskUserQuestion | Claude Opus 4.7 (sesión kickoff post-Phase-1D) + sssamuelll |
-| TBD | Operator review + any §9 adjustments | sssamuelll |
+| 2026-05-14 | Pre-reg sub-spec inicial — drafted from kickoff prompt + epic #338 spec + R3 pre-reg pattern + 3 operator decisions locked via AskUserQuestion (PR #348 opened) | Claude Opus 4.7 (sesión kickoff post-Phase-1D) + sssamuelll |
+| 2026-05-14 | **PR #348 review fixes applied** — 5 BLOCKs + 3 CHANGES_REQUESTED + 1 OBSERVATION addressed (single revision pass): BLOCK 1+2 coverage table corrected to A=8/B=8/C=9 (PENDLE first-bar 2023-07-03 verified empirically, JUP first-bar 2024-01-31 verified empirically); BLOCK 3 H2 threshold de-duplicated (single source of truth in §10.4); BLOCK 4 INCONCLUSIVE row added explicitly to §4.3 verdict table; BLOCK 5 Path B locked (n_active=1 single-symbol scope matching `backtest.py:601/815`; Zarattini divergence documented in §2.2 + §13 #11); CR1 H2 loosening framing added (§9.2 + §10.4); CR2 epic §5.1 amendment acknowledged (§4 + §13 #12); CR3 asymmetric-guard scope caveat + 4-element self-policing requirement added to §4.5; OBSERVATION §9.4 procedural-question converted to resolved-decision note | Claude Opus 4.7 + sssamuelll (Path B operator-locked via AskUserQuestion 2026-05-14) |
+| TBD | Operator re-review + final approval | sssamuelll |
 | TBD | Phase 2 PR merged via gh pr merge --squash | sssamuelll |
 | TBD | Phase 3 execution (separate PR after Phase 2 merge) | sssamuelll + Claude Opus 4.7 |
 
-Reservar líneas para iteración post-operator-review en §9 y verdict registration en Phase 3 closure.
+Reservar líneas para iteración post-operator-re-review y verdict registration en Phase 3 closure.
 
 
 
