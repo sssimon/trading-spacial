@@ -361,14 +361,21 @@ def _compute_btc_bh_baseline(args: dict) -> dict:
     n_in_coverage = int(args["n_in_coverage"])
 
     df = get_cached_data("BTCUSDT", "1d", start_date=sim_start - relativedelta(months=14))
-    cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
-    if not df.empty:
-        idx = df.index.tz_localize(None) if df.index.tz is not None else df.index
-        df = df[idx < cutoff_naive]
 
-    # Find the first daily close >= sim_start and the last daily close <= sim_end.
+    # CHANGES_REQUESTED #6 review fix 2026-05-14 — normalize df.index to
+    # tz-naive in-place once, then all downstream comparisons use naive
+    # timestamps. Avoids tz-aware vs tz-naive comparison TypeError that
+    # would surface only against real tz-aware OHLCV cache (synthetic
+    # tests don't exercise the path).
+    cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
     sim_start_naive = sim_start.replace(tzinfo=None) if sim_start.tzinfo else sim_start
     sim_end_naive = sim_end.replace(tzinfo=None) if sim_end.tzinfo else sim_end
+    if not df.empty and df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+    if not df.empty:
+        df = df[df.index < cutoff_naive]
+
+    # Find the first daily close >= sim_start and the last daily close <= sim_end.
     in_window = df[(df.index >= sim_start_naive) & (df.index < sim_end_naive)]
 
     if in_window.empty or len(in_window) < 2:
@@ -429,18 +436,22 @@ def _compute_hubrich_baseline(args: dict) -> dict:
     df = get_cached_data(
         "BTCUSDT", "1d", start_date=sim_start - relativedelta(months=14),
     )
+
+    # CHANGES_REQUESTED #6 review fix 2026-05-14 — normalize tz once, then
+    # operate naive throughout (mirror _compute_btc_bh_baseline fix).
     cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+    sim_start_naive = sim_start.replace(tzinfo=None) if sim_start.tzinfo else sim_start
+    sim_end_naive = sim_end.replace(tzinfo=None) if sim_end.tzinfo else sim_end
+    if not df.empty and df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
     if not df.empty:
-        idx = df.index.tz_localize(None) if df.index.tz is not None else df.index
-        df = df[idx < cutoff_naive]
+        df = df[df.index < cutoff_naive]
 
     # 200-day SMA on closes; use prior-day SMA to avoid same-day look-ahead.
     closes = df["close"].copy()
     sma200 = closes.rolling(HUBRICH_SMA_DAYS, min_periods=HUBRICH_SMA_DAYS).mean().shift(1)
     above = (closes > sma200).fillna(False)
 
-    sim_start_naive = sim_start.replace(tzinfo=None) if sim_start.tzinfo else sim_start
-    sim_end_naive = sim_end.replace(tzinfo=None) if sim_end.tzinfo else sim_end
     mask = (closes.index >= sim_start_naive) & (closes.index < sim_end_naive)
     window_closes = closes[mask]
     window_above = above[mask]
@@ -538,15 +549,17 @@ def _process_lrc_archived_baseline_cell(args: dict) -> dict:
     df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=2))
     df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=14))
 
+    # CHANGES_REQUESTED #6 review fix 2026-05-14 — normalize tz once,
+    # mutate df.index in-place; downstream comparisons (simulate_strategy
+    # internals + sim_start/sim_end slicing) handle tz uniformly.
     cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
     for df in (df1h, df4h, df5m, df1d):
-        if not df.empty:
-            idx = df.index.tz_localize(None) if df.index.tz is not None else df.index
-            mask = idx < cutoff_naive
-            # Pandas slicing requires assignment in caller's scope — re-bind
-            # by index would not propagate; we use the assign-via-loc pattern
-            # below.
-            df.drop(df.index[~mask], inplace=True)  # type: ignore[arg-type]
+        if df.empty:
+            continue
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        keep_mask = df.index < cutoff_naive
+        df.drop(df.index[~keep_mask], inplace=True)  # type: ignore[arg-type]
 
     err = None
     trades: list[dict] = []
@@ -728,6 +741,17 @@ def _check_halt_after_a(primary_results: list[dict]) -> dict:
     ≥75% of in-coverage (8 → ≥6).
 
     Returns dict with halt bool, halt_reasons list, per-symbol breach details.
+
+    NIT note (per review 2026-05-14): worker exceptions in
+    `_process_regime_allocation_cell` return cells with n_trades=0. These
+    cells count toward H2 (signal degenerate) by virtue of n_trades < 5,
+    even when the actual root cause is infra (disk, pool exception, transient
+    network). Operator should inspect halt_diagnostic.json post-firing to
+    distinguish "signal didn't fire" from "compute didn't run" — the
+    per_symbol_a_cell map carries n_trades + bankruptcy_count + net_pnl
+    for each cell to surface this. A future iteration could split errored
+    cells into a separate `h2_n_errored_cells` bucket; deferred since
+    operator review is the safety net.
     """
     in_coverage_a = COVERAGE_BY_WINDOW["A"]
     n_in_cov_a = len(in_coverage_a)
@@ -980,6 +1004,60 @@ def _run_jobs_parallel(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Partial window sequencing — pre-reg §10.4 BLOCK #2 review fix 2026-05-14.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _validate_partial_window_sequencing(
+    args, output_dir: Path,
+) -> tuple[bool, str | None]:
+    """Refuse --window B/C standalone if Window A halt check hasn't run.
+
+    Pre-reg §10.4 — halt evaluation runs on Window A primary at
+    vol_target=30%. Running B or C standalone skips this evaluation;
+    combined with verdict tool's §4.6 halt-guard (which defaults halt to
+    False when halt_diagnostic.json is missing), this would mask a
+    partial-run as a favorable verdict.
+
+    BLOCK #2 review fix 2026-05-14 — sweep tool refuses --window B|C
+    when sweep_primary_A.json or halt_diagnostic.json missing, OR when
+    halt_diagnostic reports halt=True (B+C are halted per pre-reg §10.4).
+
+    Returns:
+        (ok, error_message) — ok=True means execution may proceed.
+    """
+    if args.window not in ("B", "C"):
+        return True, None
+    a_results = output_dir / "sweep_primary_A.json"
+    halt_diag = output_dir / "halt_diagnostic.json"
+    if not a_results.exists():
+        return False, (
+            f"--window {args.window} requires sweep_primary_A.json to "
+            f"exist (Window A primary must run first per pre-reg §10.4 "
+            f"halt evaluation). Run --window A or --window all first."
+        )
+    if not halt_diag.exists():
+        return False, (
+            f"--window {args.window} requires halt_diagnostic.json to "
+            f"exist. Run --window A first to evaluate §10.4 halt."
+        )
+    try:
+        with open(halt_diag) as f:
+            halt_data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"Cannot read halt_diagnostic.json: {exc}"
+    if halt_data.get("halt") is True:
+        return False, (
+            f"--window {args.window} blocked: halt_diagnostic.json reports "
+            f"halt=True (reasons={halt_data.get('halt_reasons', [])}). "
+            f"B+C sweep is halted per pre-reg §10.4 — sensitivity sweep "
+            f"is also halted. Verdict tool will classify per §4.6 "
+            f"asymmetric halt-guard."
+        )
+    return True, None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Manifest
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1092,6 +1170,14 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     app_config_path = args.app_config
 
+    # Pre-reg §10.4 + BLOCK #2 review fix 2026-05-14: refuse --window B/C
+    # standalone without prior Window A halt evaluation. Halt is part of
+    # the methodology, not optional — see _validate_partial_window_sequencing.
+    ok, err = _validate_partial_window_sequencing(args, OUTPUT_DIR)
+    if not ok:
+        sys.stderr.write(f"[regime_allocation_sweep] ABORT: {err}\n")
+        return 1
+
     # Smoke mode — quick validation of harness wiring.
     if args.smoke:
         sys.stderr.write("[regime_allocation_sweep] SMOKE MODE: 1 cell only\n")
@@ -1118,6 +1204,23 @@ def main() -> int:
     )
     coverage_report = _coverage_verification(app_config_path)
     _save_json(OUTPUT_DIR / "coverage.json", coverage_report)
+
+    # NIT review fix 2026-05-14 — surface coverage drift (empirical vs
+    # pre-reg-locked table). Hardcoded COVERAGE_BY_WINDOW remains
+    # authoritative (pre-reg-locked) but operator should know if data
+    # refresh shifted any (symbol, window) classification.
+    for sym, info in coverage_report.get("per_symbol", {}).items():
+        for win, w_info in info.get("per_window", {}).items():
+            if w_info.get("in_coverage_empirical") != w_info.get(
+                "in_coverage_pre_reg"
+            ):
+                sys.stderr.write(
+                    f"[regime_allocation_sweep] WARNING: coverage mismatch "
+                    f"for {sym} Window {win}: empirical="
+                    f"{w_info.get('in_coverage_empirical')} vs pre-reg="
+                    f"{w_info.get('in_coverage_pre_reg')}. Using pre-reg "
+                    f"table (locked); operator review recommended.\n"
+                )
 
     # Baselines (BTC B&H, Hubrich, LRC archived).
     if not args.skip_baselines:

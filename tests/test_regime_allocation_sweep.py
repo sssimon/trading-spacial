@@ -18,7 +18,11 @@ Coverage areas (pre-reg §11 estimate: ~15-20 tests):
 """
 from __future__ import annotations
 
+import inspect
+import json
 import math
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -291,6 +295,58 @@ class TestAsymmetricHaltGuard:
         assert c["halt_guard_applied"] is False
         assert c["verdict"] == "STRONG_PASS"
 
+    def test_partial_windows_without_halt_returns_insufficient_data(self):
+        """BLOCK #1 review fix 2026-05-14 — defensive gate.
+
+        Pre-reg §4 + §4.6 cover only halt=True under partial windows. The
+        opposite case (n_windows<3 + halt=False) is an invalid sweep state
+        (e.g., operator did --window A standalone, or pipeline crashed
+        without writing halt_diagnostic.json). Must default to
+        PHASE_3_INSUFFICIENT_DATA, NOT to STRONG_PASS via the partial-window
+        favorable branch.
+
+        Previously this case slipped through to naive=STRONG_PASS (per
+        line 427-431 of the partial-window branch) and the §4.6 guard
+        didn't apply because halt=False.
+        """
+        ppw = self._build_primary_per_window({"A": True})  # n_windows=1
+        c = rav._classify_verdict(
+            primary_per_window=ppw,
+            sensitivity_label="FAIL_CLEAN",
+            n_sensitivity_pass=0,
+            halt=False,  # no halt fired
+        )
+        assert c["verdict"] == "PHASE_3_INSUFFICIENT_DATA"
+        assert (
+            c["naive_verdict_before_halt_guard"]
+            == "INVALID_STATE_partial_without_halt"
+        )
+        assert c.get("defensive_gate_fired") == "partial_windows_without_halt"
+
+    def test_partial_windows_without_halt_n_windows_2(self):
+        """Defensive gate fires for any n_windows<3 without halt."""
+        ppw = self._build_primary_per_window({"A": True, "B": True})  # n=2
+        c = rav._classify_verdict(
+            primary_per_window=ppw,
+            sensitivity_label="FAIL_CLEAN",
+            n_sensitivity_pass=0,
+            halt=False,
+        )
+        assert c["verdict"] == "PHASE_3_INSUFFICIENT_DATA"
+        assert c.get("defensive_gate_fired") == "partial_windows_without_halt"
+
+    def test_full_3_windows_no_halt_no_defensive_gate(self):
+        """Defensive gate does NOT fire when all 3 windows ran (no halt)."""
+        ppw = self._build_primary_per_window({"A": True, "B": True, "C": True})
+        c = rav._classify_verdict(
+            primary_per_window=ppw,
+            sensitivity_label="STRONG",
+            n_sensitivity_pass=4,
+            halt=False,
+        )
+        assert c["verdict"] == "STRONG_PASS"
+        assert "defensive_gate_fired" not in c
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sensitivity verdict map — pre-reg §4.2.
@@ -438,18 +494,32 @@ class TestVerdictOutcomes:
         assert c["verdict"] == "FAIL_CLEAN"
 
     def test_fail_degenerate(self):
-        """≥75% in-coverage cells with n_trades<5 in predominant windows."""
-        # In Windows A (8 in-cov), need ≥6 insufficient. Same for B.
+        """FAIL_DEGENERATE requires predominance of per-window degenerate flag.
+
+        With insufficient_count=6 across all 3 windows:
+          Window A (8 in-cov): 6/8 = 0.75 ≥ 0.75 → degenerate ✓
+          Window B (8 in-cov): 6/8 = 0.75 ≥ 0.75 → degenerate ✓
+          Window C (9 in-cov): 6/9 = 0.667 < 0.75 → NOT degenerate
+        n_degenerate_windows = 2; predominance threshold = max(1, 3//2+1) = 2.
+        2 ≥ 2 → predominant → FAIL_DEGENERATE.
+
+        Comment corrected per NIT review fix 2026-05-14: previous comment
+        claimed "n_degenerate_windows = 3 (all windows have 6/8 ≥ 0.75)"
+        but Window C has 9 in-coverage symbols, so 6/9=0.667<0.75 → not
+        degenerate. Test still passed (2 ≥ predominance threshold) but
+        for different math than the comment claimed.
+        """
         ppw = self._build_ppw(
             {"A": False, "B": False, "C": False}, insufficient_count=6,
         )
-        # n_degenerate_windows = 3 (all windows have 6/8 ≥ 0.75 cells degenerate)
-        # n_windows = 3; majority threshold = n//2+1 = 2 → 3>=2 → predominant
         c = rav._classify_verdict(
             primary_per_window=ppw, sensitivity_label="FAIL_CLEAN",
             n_sensitivity_pass=0, halt=False,
         )
         assert c["verdict"] == "FAIL_DEGENERATE"
+        # Confirm the actual math (2 of 3 windows degenerate, not 3).
+        assert c["n_degenerate_windows"] == 2
+        assert c["degenerate_predominant"] is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -620,6 +690,147 @@ class TestPhase4AdvanceDecision:
         d = rav._phase_4_advance_decision(v)
         assert d["auto_advance_to_phase_4"] is False
         assert d["operator_decision_required"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BLOCK #2 review fix 2026-05-14 — sweep tool refuses --window B/C standalone
+# without prior Window A halt evaluation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestPartialWindowSequencing:
+    """Pre-reg §10.4 + BLOCK #2 — _validate_partial_window_sequencing helper."""
+
+    def test_window_a_always_allowed(self, tmp_path):
+        args = SimpleNamespace(window="A")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is True
+        assert err is None
+
+    def test_window_all_always_allowed(self, tmp_path):
+        args = SimpleNamespace(window="all")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is True
+
+    def test_window_b_refused_without_primary_a(self, tmp_path):
+        args = SimpleNamespace(window="B")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is False
+        assert "sweep_primary_A.json" in err
+
+    def test_window_c_refused_without_primary_a(self, tmp_path):
+        args = SimpleNamespace(window="C")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is False
+        assert "sweep_primary_A.json" in err
+
+    def test_window_b_refused_without_halt_diagnostic(self, tmp_path):
+        """sweep_primary_A.json exists but halt_diagnostic.json missing."""
+        (tmp_path / "sweep_primary_A.json").write_text("[]")
+        args = SimpleNamespace(window="B")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is False
+        assert "halt_diagnostic.json" in err
+
+    def test_window_b_refused_when_halt_fired(self, tmp_path):
+        """halt_diagnostic.halt=True → B/C halted per pre-reg §10.4."""
+        (tmp_path / "sweep_primary_A.json").write_text("[]")
+        (tmp_path / "halt_diagnostic.json").write_text(json.dumps({
+            "halt": True,
+            "halt_reasons": ["H1_universal_bankruptcy"],
+        }))
+        args = SimpleNamespace(window="B")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is False
+        assert "halt_diagnostic.json reports halt=True" in err
+
+    def test_window_b_allowed_when_a_complete_no_halt(self, tmp_path):
+        """A primary ran, no halt fired → B/C sequencing permitted."""
+        (tmp_path / "sweep_primary_A.json").write_text("[]")
+        (tmp_path / "halt_diagnostic.json").write_text(json.dumps({
+            "halt": False,
+            "halt_reasons": [],
+        }))
+        args = SimpleNamespace(window="B")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is True
+        assert err is None
+
+    def test_window_b_refused_with_malformed_halt_diagnostic(self, tmp_path):
+        """Defensive: malformed halt_diagnostic.json → refuse rather than guess."""
+        (tmp_path / "sweep_primary_A.json").write_text("[]")
+        (tmp_path / "halt_diagnostic.json").write_text("not valid json {{{")
+        args = SimpleNamespace(window="B")
+        ok, err = ras._validate_partial_window_sequencing(args, tmp_path)
+        assert ok is False
+        assert "Cannot read halt_diagnostic.json" in err
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHANGES_REQUESTED #4 review fix 2026-05-14 — _load_btc_bh_baseline raises
+# FileNotFoundError if missing (silent default to FAIL was hiding misconfig).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBaselineLoadingErrors:
+    """CHANGES_REQUESTED #4 — missing baseline files."""
+
+    def test_btc_bh_baseline_raises_when_missing(self, tmp_path, monkeypatch):
+        """Missing baseline_btc_bh_X.json must raise FileNotFoundError loud."""
+        monkeypatch.setattr(rav, "OUTPUT_DIR", tmp_path)
+        with pytest.raises(FileNotFoundError, match="baseline_btc_bh_A.json"):
+            rav._load_btc_bh_baseline("A")
+
+    def test_btc_bh_baseline_loads_when_present(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(rav, "OUTPUT_DIR", tmp_path)
+        payload = {"sub_window": "A", "total_return_usd": 1000.0}
+        (tmp_path / "baseline_btc_bh_A.json").write_text(json.dumps(payload))
+        result = rav._load_btc_bh_baseline("A")
+        assert result == payload
+
+    def test_hubrich_baseline_returns_none_when_missing_with_warning(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Informational baselines (Hubrich, LRC archived) warn but return None
+        — they don't affect primary criterion comparison."""
+        monkeypatch.setattr(rav, "OUTPUT_DIR", tmp_path)
+        result = rav._load_hubrich_baseline("A")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "baseline_hubrich_A.json missing" in captured.err
+
+    def test_lrc_archived_baseline_returns_none_when_missing_with_warning(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        monkeypatch.setattr(rav, "OUTPUT_DIR", tmp_path)
+        result = rav._load_lrc_archived_baseline("A")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "baseline_lrc_archived_A.json" in captured.err
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHANGES_REQUESTED #5 review fix 2026-05-14 — verdict.json schema includes
+# operator_override block + schema documentation (pre-reg §4.5 element 4).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestVerdictJsonOperatorOverrideSchema:
+
+    def test_verdict_main_emits_operator_override_field(self):
+        """Verify verdict tool's main() builds operator_override into out dict."""
+        src = inspect.getsource(rav.main)
+        assert '"operator_override": None' in src
+        assert '"operator_override_schema"' in src
+        # Schema documents the 4 fields per pre-reg §4.5 element 4
+        assert "auditor_counter_signoff" in src
+        assert "sub_spec_doc" in src
+        assert "rationale" in src
+
+    def test_verdict_schema_version_is_2(self):
+        """Schema version bumped to 2 after CHANGES_REQUESTED #5."""
+        src = inspect.getsource(rav.main)
+        assert '"schema_version": 2' in src
 
 
 # Holdout isolation is enforced structurally by tests/test_holdout_isolation.py

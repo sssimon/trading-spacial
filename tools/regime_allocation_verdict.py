@@ -101,8 +101,22 @@ ALL_SUB_WINDOWS: Final[tuple[str, ...]] = ("A", "B", "C")
 # Pre-reg §4.1 — cell exclusion threshold (mirror sweep).
 N_TRADES_MIN_FOR_ELIGIBILITY: Final[int] = 5
 
-# Pre-reg §4.3 row 7 — FAIL_DEGENERATE if ≥75% of in-coverage in a single
-# window have n_trades<5 (signal degenerate, separate from halt-fire).
+# Pre-reg §4.3 row 7 — per-window degenerate threshold.
+#
+# This constant is the PER-WINDOW threshold: a single sub-window's primary
+# cell at vol_target=30% is considered "degenerate" when ≥75% of its
+# in-coverage cells have n_trades < N_TRADES_MIN_FOR_ELIGIBILITY.
+#
+# The verdict-level FAIL_DEGENERATE classification (in _classify_verdict)
+# additionally requires that this per-window flag hold for a PREDOMINANT
+# share of available windows (≥majority of n_windows, computed as
+# `max(1, n_windows // 2 + 1)`). Option A locked per BLOCK #3 review fix
+# 2026-05-14: predominance prevents a single anomalous window from
+# spuriously triggering FAIL_DEGENERATE.
+#
+# Operator note: pre-reg §4.3 row 7 wording ("≥75% of in-coverage símbolos
+# n_trades<5") is per-window in spirit but verdict-level requires the
+# additional predominance gate, locked here.
 DEGENERATE_FRACTION_THRESHOLD: Final[float] = 0.75
 
 # Pre-reg §4.2 — sensitivity verdict map.
@@ -217,16 +231,61 @@ def _aggregate_window_at_vol_target(
     }
 
 
-def _load_btc_bh_baseline(window_id: str) -> dict | None:
-    return _load_json(f"baseline_btc_bh_{window_id}.json")
+def _load_btc_bh_baseline(window_id: str) -> dict:
+    """Load BTC B&H baseline for window; raise FileNotFoundError if missing.
+
+    Pre-reg §4 lockea BTC B&H as primary criterion comparator. Missing
+    file means the methodology cannot be evaluated honestly — silent
+    default to FAIL clean would hide misconfiguration. CHANGES_REQUESTED
+    #4 review fix 2026-05-14: raise loud instead of returning None.
+    """
+    path = OUTPUT_DIR / f"baseline_btc_bh_{window_id}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Baseline file missing: {path}. Cannot evaluate primary "
+            f"criterion for Window {window_id}. Re-run "
+            f"tools/regime_allocation_sweep.py to generate baselines, "
+            f"or run with --baselines-only."
+        )
+    with open(path) as f:
+        return json.load(f)
 
 
 def _load_hubrich_baseline(window_id: str) -> dict | None:
-    return _load_json(f"baseline_hubrich_{window_id}.json")
+    """Load Hubrich baseline for window; warn if missing (informational).
+
+    Hubrich is informational only (§5.2 epic baseline) — not part of the
+    primary criterion comparison. Returns None if missing, with a stderr
+    warning to surface the misconfiguration.
+    """
+    path = OUTPUT_DIR / f"baseline_hubrich_{window_id}.json"
+    if not path.exists():
+        sys.stderr.write(
+            f"[verdict] WARNING: baseline_hubrich_{window_id}.json missing — "
+            f"Hubrich comparison will be omitted from Window {window_id} "
+            f"output (informational only; does not affect verdict).\n"
+        )
+        return None
+    with open(path) as f:
+        return json.load(f)
 
 
 def _load_lrc_archived_baseline(window_id: str) -> list[dict] | None:
-    return _load_json(f"baseline_lrc_archived_{window_id}.json")
+    """Load LRC archived baseline for window; warn if missing (informational).
+
+    LRC archived is internal control benchmark (§5.4 epic) — not part of
+    the primary criterion comparison. Returns None if missing.
+    """
+    path = OUTPUT_DIR / f"baseline_lrc_archived_{window_id}.json"
+    if not path.exists():
+        sys.stderr.write(
+            f"[verdict] WARNING: baseline_lrc_archived_{window_id}.json "
+            f"missing — LRC archived comparison will be omitted from "
+            f"Window {window_id} output (informational only).\n"
+        )
+        return None
+    with open(path) as f:
+        return json.load(f)
 
 
 def _lrc_archived_total_return(window_id: str) -> float | None:
@@ -271,19 +330,20 @@ def _compute_primary_per_window(
         )
         if agg is None:
             continue
+        # _load_btc_bh_baseline raises FileNotFoundError if missing
+        # (CHANGES_REQUESTED #4) — primary criterion cannot be evaluated
+        # without it.
         btc_bh = _load_btc_bh_baseline(window_id)
         hubrich = _load_hubrich_baseline(window_id)
         lrc_archived_total = _lrc_archived_total_return(window_id)
 
-        btc_bh_total = float(btc_bh.get("total_return_usd", 0.0)) if btc_bh else None
+        btc_bh_total = float(btc_bh.get("total_return_usd", 0.0))
         hubrich_total = (
             float(hubrich.get("total_return_usd", 0.0)) if hubrich else None
         )
 
-        pass_btc_bh = (
-            _primary_criterion_pass(
-                agg["strategy_total_return_usd"], btc_bh_total
-            ) if btc_bh_total is not None else False
+        pass_btc_bh = _primary_criterion_pass(
+            agg["strategy_total_return_usd"], btc_bh_total
         )
 
         out[window_id] = {
@@ -314,14 +374,12 @@ def _compute_sensitivity_per_vol_target(
             if agg is None:
                 per_window[window_id] = {"available": False}
                 continue
+            # _load_btc_bh_baseline raises FileNotFoundError if missing
+            # (CHANGES_REQUESTED #4); see _compute_primary_per_window.
             btc_bh = _load_btc_bh_baseline(window_id)
-            btc_bh_total = (
-                float(btc_bh.get("total_return_usd", 0.0)) if btc_bh else None
-            )
-            primary_pass = (
-                _primary_criterion_pass(
-                    agg["strategy_total_return_usd"], btc_bh_total
-                ) if btc_bh_total is not None else False
+            btc_bh_total = float(btc_bh.get("total_return_usd", 0.0))
+            primary_pass = _primary_criterion_pass(
+                agg["strategy_total_return_usd"], btc_bh_total
             )
             per_window[window_id] = {
                 "available": True,
@@ -373,10 +431,16 @@ def _sensitivity_verdict(
 
 
 def _is_degenerate_window(window_agg: dict) -> bool:
-    """Pre-reg §4.3 row 7 — single-window degenerate check.
+    """Per-window degenerate predicate (pre-reg §4.3 row 7, per-window).
 
-    ≥75% of in-coverage cells with n_trades<N_TRADES_MIN_FOR_ELIGIBILITY in
-    this window's primary cell at vol_target=30%.
+    Returns True when ≥DEGENERATE_FRACTION_THRESHOLD (75%) of the window's
+    in-coverage cells have n_trades < N_TRADES_MIN_FOR_ELIGIBILITY.
+
+    NOTE: this is a per-window predicate. The verdict-level FAIL_DEGENERATE
+    classification (in `_classify_verdict`) requires a PREDOMINANT share
+    of available windows to satisfy this predicate (Option A locked per
+    BLOCK #3 review fix 2026-05-14). See DEGENERATE_FRACTION_THRESHOLD
+    docstring above for the full predominance + per-window framing.
     """
     n_in_cov = window_agg.get("n_in_coverage", 0)
     if n_in_cov == 0:
@@ -403,9 +467,42 @@ def _classify_verdict(
         if w.get("primary_criterion_pass")
     )
 
+    # Pre-reg §4 + §4.6 defensive gate (BLOCK #1 review fix 2026-05-14):
+    # n_windows<3 + halt=False is an invalid sweep state — pre-reg §4 locks
+    # 3/3 conjunctive holding for PASS, and §4.6 only covers halt=True
+    # under partial windows. The opposite case (partial without halt)
+    # means the sweep didn't complete properly (e.g., operator did
+    # --window A standalone, or the pipeline crashed without writing
+    # halt_diagnostic.json). Refuse to produce a favorable verdict from
+    # such partial data; without halt evidence the inferential weight of
+    # partial windows is undefined.
+    if n_windows < 3 and not halt:
+        return {
+            "verdict": "PHASE_3_INSUFFICIENT_DATA",
+            "naive_verdict_before_halt_guard": (
+                "INVALID_STATE_partial_without_halt"
+            ),
+            "halt_guard_applied": False,
+            "halt": halt,
+            "n_windows_available": n_windows,
+            "n_primary_pass_windows": n_primary_pass,
+            "primary_pass_per_window": {
+                w: v.get("primary_criterion_pass", False)
+                for w, v in primary_per_window.items()
+            },
+            "n_degenerate_windows": 0,
+            "degenerate_predominant": False,
+            "n_sensitivity_pass_out_of_4": n_sensitivity_pass,
+            "sensitivity_label": sensitivity_label,
+            "defensive_gate_fired": "partial_windows_without_halt",
+        }
+
     # Pre-reg §4.3 row 7 — FAIL_DEGENERATE check.
-    # Computed across all available primary windows; if ≥75% of any single
-    # window's in-coverage cells are insufficient → degenerate flag fires.
+    # Per-window degenerate: a single sub-window is "degenerate" when ≥75%
+    # of its in-coverage cells have n_trades<5 (see _is_degenerate_window).
+    # Verdict-level FAIL_DEGENERATE additionally requires the per-window
+    # flag to hold for a PREDOMINANT share of available windows (Option A
+    # locked per BLOCK #3 review fix 2026-05-14).
     n_degenerate_windows = sum(
         1 for w in primary_per_window.values() if _is_degenerate_window(w)
     )
@@ -425,8 +522,10 @@ def _classify_verdict(
         else:  # FAIL_CLEAN sensitivity
             naive = "SWEET_SPOT_FAIL"  # primary pass with 0/4 sensitivity = isolated → SWEET_SPOT
     elif n_windows >= 1 and n_primary_pass >= max(1, n_windows - 1) and n_windows < 3:
-        # Partial windows (halt fired): naive verdict is favorable if all
-        # available windows pass primary. Will be overridden by §4.6 guard.
+        # Partial windows + halt fired (only reached when halt=True per
+        # BLOCK #1 defensive gate above). Naive verdict is favorable if
+        # all available windows pass primary; will be overridden by §4.6
+        # guard below.
         if n_primary_pass == n_windows:
             naive = "STRONG_PASS"  # placeholder; overridden by halt-guard
         else:
@@ -712,7 +811,9 @@ def main() -> int:
 
     # ── Machine-readable verdict.json ─────────────────────────────────────
     out = {
-        "schema_version": 1,
+        # schema_version bumped to 2 — added operator_override block per
+        # CHANGES_REQUESTED #5 review fix 2026-05-14.
+        "schema_version": 2,
         "spec_ref": (
             "docs/superpowers/plans/2026-05-14-regime-allocation-phase2-pre-reg.md"
         ),
@@ -727,6 +828,51 @@ def main() -> int:
         "halt_fired": halt,
         "phase_4_advance_decision": advance,
         "bayesian_update_template": bayesian_template,
+        # Pre-reg §4.5 self-policing requirement element (4): operator
+        # override block. Populated by operator (not by this tool) when
+        # invoking Phase 4 advance from a non-PASS-strong/robust verdict.
+        # The schema field below documents the expected shape so operator
+        # has guidance for the manual edit. Element 4 atomic with
+        # element 1 (Bayesian update in derivation_audit.md) + element 2
+        # (separate sub-spec doc, mirror A.4-1.5 mechanism) + element 3
+        # (auditor counter-signoff).
+        "operator_override": None,
+        "operator_override_schema": {
+            "description": (
+                "Operator override block per pre-reg §4.5 self-policing "
+                "requirement (4-element check). Populate when invoking "
+                "Phase 4 advance from a non-PASS-strong/robust verdict. "
+                "Element 4: this block; plus element 1 (Bayesian update "
+                "in derivation_audit.md), element 2 (separate sub-spec "
+                "doc mirror A.4-1.5 mechanism), element 3 (auditor "
+                "counter-signoff). All 4 elements required atomically; "
+                "any Phase 4 advance lacking these is methodologically "
+                "invalid under this pre-reg."
+            ),
+            "fields": {
+                "timestamp": (
+                    "ISO 8601 UTC datetime when operator invoked override"
+                ),
+                "rationale": (
+                    "Operator's written reason for overriding default "
+                    "verdict; must reference the Bayesian update prose"
+                ),
+                "sub_spec_doc": (
+                    "Relative path to sub-spec doc capturing override "
+                    "scope (e.g., docs/superpowers/plans/2026-MM-DD-"
+                    "phase-3-override-XXX.md)"
+                ),
+                "auditor_counter_signoff": {
+                    "agent_id": (
+                        "Agent name/model that performed counter-signoff "
+                        "(e.g., code-review-excellence)"
+                    ),
+                    "signoff_timestamp": (
+                        "ISO 8601 UTC datetime of counter-signoff"
+                    ),
+                },
+            },
+        },
     }
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_DIR / "verdict.json", "w") as f:
