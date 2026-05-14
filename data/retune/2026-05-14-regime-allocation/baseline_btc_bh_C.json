@@ -1,0 +1,14 @@
+{
+  "baseline": "btc_bh",
+  "capital_basis_usd": 90000.0,
+  "entry_date": "2025-01-30 00:00:00",
+  "entry_price": 104722.94,
+  "exit_date": "2025-04-29 00:00:00",
+  "exit_price": 94256.82,
+  "fees_pct": 0.1,
+  "gross_return_pct": -9.9941,
+  "n_in_coverage": 9,
+  "sub_window": "C",
+  "total_return_pct": -10.0941,
+  "total_return_usd": -9084.694
+}

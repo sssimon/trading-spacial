@@ -1,0 +1,13 @@
+{
+  "baseline": "hubrich",
+  "capital_basis_usd": 80000.0,
+  "entry_date": "2023-04-01 00:00:00",
+  "exit_date": "2023-06-30 00:00:00",
+  "fees_pct": 0.1,
+  "gross_return_pct": 7.0969,
+  "n_in_coverage": 8,
+  "n_transitions": 2,
+  "sub_window": "B",
+  "total_return_pct": 6.9969,
+  "total_return_usd": 5597.5431
+}

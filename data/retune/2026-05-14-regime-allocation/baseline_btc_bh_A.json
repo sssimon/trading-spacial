@@ -1,0 +1,14 @@
+{
+  "baseline": "btc_bh",
+  "capital_basis_usd": 80000.0,
+  "entry_date": "2022-04-01 00:00:00",
+  "entry_price": 46283.49,
+  "exit_date": "2022-06-30 00:00:00",
+  "exit_price": 19942.21,
+  "fees_pct": 0.1,
+  "gross_return_pct": -56.9129,
+  "n_in_coverage": 8,
+  "sub_window": "A",
+  "total_return_pct": -57.0129,
+  "total_return_usd": -45610.3263
+}

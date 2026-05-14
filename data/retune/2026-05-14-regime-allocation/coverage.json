@@ -1,0 +1,243 @@
+{
+  "coverage_by_window_pre_reg": {
+    "A": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "RUNEUSDT"
+    ],
+    "B": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "RUNEUSDT"
+    ],
+    "C": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "PENDLEUSDT",
+      "RUNEUSDT"
+    ]
+  },
+  "n_in_coverage_pre_reg": {
+    "A": 8,
+    "B": 8,
+    "C": 9
+  },
+  "per_symbol": {
+    "ADAUSDT": {
+      "first_bar": "2020-04-01 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 730,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 1095,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1765,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "AVAXUSDT": {
+      "first_bar": "2020-09-22 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 556,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 921,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1591,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "BTCUSDT": {
+      "first_bar": "2020-04-01 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 730,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 1095,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1765,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "DOGEUSDT": {
+      "first_bar": "2020-04-01 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 730,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 1095,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1765,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "ETHUSDT": {
+      "first_bar": "2020-04-01 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 730,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 1095,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1765,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "JUPUSDT": {
+      "first_bar": "2024-01-31 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 0,
+          "in_coverage_empirical": false,
+          "in_coverage_pre_reg": false
+        },
+        "B": {
+          "daily_bars_pre_window_start": 0,
+          "in_coverage_empirical": false,
+          "in_coverage_pre_reg": false
+        },
+        "C": {
+          "daily_bars_pre_window_start": 365,
+          "in_coverage_empirical": false,
+          "in_coverage_pre_reg": false
+        }
+      }
+    },
+    "PENDLEUSDT": {
+      "first_bar": "2023-07-03 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 0,
+          "in_coverage_empirical": false,
+          "in_coverage_pre_reg": false
+        },
+        "B": {
+          "daily_bars_pre_window_start": 0,
+          "in_coverage_empirical": false,
+          "in_coverage_pre_reg": false
+        },
+        "C": {
+          "daily_bars_pre_window_start": 577,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "RUNEUSDT": {
+      "first_bar": "2020-09-04 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 574,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 939,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1609,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "UNIUSDT": {
+      "first_bar": "2020-09-17 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 561,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 926,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1596,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    },
+    "XLMUSDT": {
+      "first_bar": "2020-04-01 00:00:00",
+      "per_window": {
+        "A": {
+          "daily_bars_pre_window_start": 730,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "B": {
+          "daily_bars_pre_window_start": 1095,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        },
+        "C": {
+          "daily_bars_pre_window_start": 1765,
+          "in_coverage_empirical": true,
+          "in_coverage_pre_reg": true
+        }
+      }
+    }
+  },
+  "warmup_daily_bars_required": 390
+}

@@ -1,0 +1,98 @@
+[
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": -66.95,
+    "n_trades": 24,
+    "net_pnl_usd": -6695.17,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "BTCUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": -65.02,
+    "n_trades": 21,
+    "net_pnl_usd": -6502.49,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "ETHUSDT",
+    "win_rate": 4.8
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": -10.25,
+    "n_trades": 1,
+    "net_pnl_usd": -1025.42,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "ADAUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": -41.81,
+    "n_trades": 9,
+    "net_pnl_usd": -4180.69,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "AVAXUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 1,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": -91.15,
+    "n_trades": 27,
+    "net_pnl_usd": -9114.65,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "DOGEUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": 0.0,
+    "n_trades": 0,
+    "net_pnl_usd": 0.0,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "UNIUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": 0.0,
+    "n_trades": 0,
+    "net_pnl_usd": 0.0,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "XLMUSDT",
+    "win_rate": 0.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "baseline": "lrc_archived",
+    "clamped_trade_count": 0,
+    "max_drawdown_pct": 0.0,
+    "n_trades": 0,
+    "net_pnl_usd": 0.0,
+    "profit_factor": 0.0,
+    "sub_window": "B",
+    "symbol": "RUNEUSDT",
+    "win_rate": 0.0
+  }
+]
