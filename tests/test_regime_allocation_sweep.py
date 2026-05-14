@@ -1033,4 +1033,47 @@ class TestWorkerRetryWrapper:
         × few-retry cells)."""
         assert ras._FETCH_RETRY_MAX_ATTEMPTS == 6
         assert ras._FETCH_RETRY_BASE_BACKOFF_SEC == 3.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inf/NaN sentinel coercion — regression for sweep crash surfaced during
+# Phase 3 sesión 2 (2026-05-14): calculate_metrics emits profit_factor=inf
+# when gross_loss==0 (all trades won, e.g., single-trade winning cell).
+# _save_json has allow_nan=False per CHANGES_REQUESTED #5; worker must
+# coerce inf before output dict construction.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestProfitFactorInfCoercion:
+    """Pre-reg §6 deliverable + CHANGES_REQUESTED #5 — workers never emit
+    math.inf / NaN through to _save_json, which has allow_nan=False."""
+
+    def test_finite_or_passes_through_finite(self):
+        assert ras._finite_or(3.14, 99999.0) == 3.14
+        assert ras._finite_or(0.0, 99999.0) == 0.0
+        assert ras._finite_or(-1.5, 99999.0) == -1.5
+
+    def test_finite_or_coerces_inf(self):
+        import math
+        assert ras._finite_or(math.inf, 99999.0) == 99999.0
+        assert ras._finite_or(-math.inf, 99999.0) == 99999.0
+
+    def test_finite_or_coerces_nan(self):
+        import math
+        assert ras._finite_or(math.nan, 99999.0) == 99999.0
+
+    def test_profit_factor_inf_sentinel_value(self):
+        """Pre-reg downstream readability — 99999 is a recognizable sentinel
+        for 'no losses' (all trades won) without colliding with realistic
+        profit_factor values which are typically <10."""
+        assert ras._PROFIT_FACTOR_INF_SENTINEL == 99999.0
+
+    def test_save_json_disallows_nan(self, tmp_path):
+        """Pre-reg discipline — _save_json keeps allow_nan=False so any
+        worker emitting inf/NaN crashes loudly (forcing the coerce fix)
+        rather than silently emitting non-standard JSON tokens."""
+        import math
+        target = tmp_path / "test.json"
+        with pytest.raises(ValueError, match="Out of range"):
+            ras._save_json(target, {"x": math.inf})
 # (AST scanner over all non-whitelisted modules). No need to duplicate here.

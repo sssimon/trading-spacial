@@ -219,6 +219,22 @@ def _save_json(path: Path, payload):
 _FETCH_RETRY_MAX_ATTEMPTS: Final[int] = 6
 _FETCH_RETRY_BASE_BACKOFF_SEC: Final[float] = 3.0
 
+# Sentinel used in place of math.inf for profit_factor when all trades won
+# (zero gross_loss). _save_json has allow_nan=False (CHANGES_REQUESTED #5
+# review fix 2026-05-14) — inf/NaN must not reach the JSON writer.
+# Downstream readers (verdict tool, derivation_audit) treat 99999 as
+# "very profitable, no losses recorded".
+_PROFIT_FACTOR_INF_SENTINEL: Final[float] = 99999.0
+
+
+def _finite_or(value, fallback: float) -> float:
+    """Coerce float to JSON-compliant finite. Use on metric fields where
+    upstream calculate_metrics may emit math.inf (zero denominator).
+    Mirrors _save_json's allow_nan=False discipline at the worker layer."""
+    import math
+    v = float(value)
+    return v if math.isfinite(v) else fallback
+
 
 def _get_cached_data_with_retry(symbol, timeframe, start_date):
     """get_cached_data with exponential backoff on AllProvidersFailedError.
@@ -373,9 +389,17 @@ def _process_regime_allocation_cell(args: dict) -> dict:
         "n_trades": int(metrics.get("total_trades", 0)),
         "net_pnl_usd": round(float(metrics.get("net_pnl", 0.0)), 4),
         "gross_pnl_usd": round(gross_pnl_usd_sum, 4),
-        "profit_factor": round(float(metrics.get("profit_factor", 0.0)), 4),
-        "win_rate": round(float(metrics.get("win_rate", 0.0)), 4),
-        "max_drawdown_pct": round(float(metrics.get("max_drawdown_pct", 0.0)), 4),
+        # profit_factor coerced to _PROFIT_FACTOR_INF_SENTINEL when
+        # calculate_metrics returns math.inf (zero gross_loss = all trades
+        # won). _save_json has allow_nan=False per CHANGES_REQUESTED #5.
+        "profit_factor": round(
+            _finite_or(metrics.get("profit_factor", 0.0),
+                       _PROFIT_FACTOR_INF_SENTINEL), 4,
+        ),
+        "win_rate": round(_finite_or(metrics.get("win_rate", 0.0), 0.0), 4),
+        "max_drawdown_pct": round(
+            _finite_or(metrics.get("max_drawdown_pct", 0.0), 0.0), 4,
+        ),
         "bankruptcy_count": int(metrics.get("bankruptcy_count", 0)),
         "clamped_trade_count": int(metrics.get("clamped_trade_count", 0)),
         "total_funding_usd": round(funding_usd_sum, 4),
@@ -666,9 +690,16 @@ def _process_lrc_archived_baseline_cell(args: dict) -> dict:
         "baseline": "lrc_archived",
         "n_trades": int(metrics.get("total_trades", 0)),
         "net_pnl_usd": round(float(metrics.get("net_pnl", 0.0)), 4),
-        "profit_factor": round(float(metrics.get("profit_factor", 0.0)), 4),
-        "win_rate": round(float(metrics.get("win_rate", 0.0)), 4),
-        "max_drawdown_pct": round(float(metrics.get("max_drawdown_pct", 0.0)), 4),
+        # profit_factor coerced to _PROFIT_FACTOR_INF_SENTINEL when
+        # calculate_metrics returns math.inf (zero gross_loss).
+        "profit_factor": round(
+            _finite_or(metrics.get("profit_factor", 0.0),
+                       _PROFIT_FACTOR_INF_SENTINEL), 4,
+        ),
+        "win_rate": round(_finite_or(metrics.get("win_rate", 0.0), 0.0), 4),
+        "max_drawdown_pct": round(
+            _finite_or(metrics.get("max_drawdown_pct", 0.0), 0.0), 4,
+        ),
         "bankruptcy_count": int(metrics.get("bankruptcy_count", 0)),
         "clamped_trade_count": int(metrics.get("clamped_trade_count", 0)),
     }
