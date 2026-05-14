@@ -358,7 +358,7 @@ This is **not a soft guideline** — it is a pre-reg lock with the same standing
 
 **Pre-registered handling:**
 - Per-cell `n_trades < 5` → INSUFFICIENT_DATA marker (§4.1).
-- Halt H2 fires if ≥6 of 10 in-coverage cells in window A are INSUFFICIENT_DATA across vol_target=30% primary + 4 sensitivity values (operationalization in §10.4).
+- Halt H2 threshold operacionalizada en §10.4 (single source of truth: ≥75% of in-coverage símbolos con `n_trades < 5` en sub-window A AT vol_target=30 → halt B+C; concrete counts ≥6 in A/B; ≥7 in C). Sensitivity sweep también halted bajo H2 firing (§10.4).
 - Diagnostic: `signal_diagnostics.json` reports per-symbol per-window vote distribution (count of bars with `sum > 0`, `sum < 0`, `sum == 0`) for forensic understanding regardless of halt firing.
 
 ### §5.3 — Signal over-active (ensemble flips daily)
@@ -384,7 +384,7 @@ Per `_simulate_strategy_regime_allocation` (PR #345): BANKRUPT halts new entries
 
 **Pre-registered handling:**
 - Bankruptcy events count by (símbolo, sub-window, vol_target) reported en `bankruptcy_diagnostics.json`.
-- Si > 50% de símbolos bankrupt en una sub-window dada at vol_target=30%, → halt H1 (§10.4).
+- Halt H1 threshold operacionalizada en §10.4 (single source of truth: ≥75% of in-coverage símbolos bankrupt en sub-window A AT vol_target=30 → halt B+C; concrete counts ≥6 in A/B; ≥7 in C).
 - Bankruptcy ≠ FAIL automatically. Si remaining símbolos no-bankrupt aggregate beat BTC B&H, primary criterion can still PASS — pero S4 secondary criterion (target = 0 bankruptcies) flagged.
 
 ### §5.6 — Funding cost amplification (epic §8.5 SHORT bidirectional implication)
@@ -425,9 +425,9 @@ data/retune/2026-05-14-regime-allocation/
 ├── derivation_audit.md             # methodology recap + per-cell verdict + cross-window stability + sensitivity verdict + Bayesian update
 ├── manifest.json                   # cutoff, code_commit, leakage_check, sub_windows, sweep grid, coverage_by_window, baseline refs
 ├── sweep_primary_A.json            # 10 símbolos × 1 vol_target, sub-window A (8 in-coverage)
-├── sweep_primary_B.json            # sub-window B (9 in-coverage) — ONLY IF §10 halt NOT fired
-├── sweep_primary_C.json            # sub-window C (10 in-coverage) — ONLY IF §10 halt NOT fired
-├── sweep_sensitivity_A.json        # 10 símbolos × 4 vol_target (32 cells in-coverage para A; 36 para B; 40 para C)
+├── sweep_primary_B.json            # sub-window B (8 in-coverage) — ONLY IF §10 halt NOT fired
+├── sweep_primary_C.json            # sub-window C (9 in-coverage) — ONLY IF §10 halt NOT fired
+├── sweep_sensitivity_A.json        # 10 símbolos × 4 vol_target (32 cells in-coverage para A; 32 para B; 36 para C)
 ├── sweep_sensitivity_B.json        # ONLY IF §10 halt NOT fired
 ├── sweep_sensitivity_C.json        # ONLY IF §10 halt NOT fired
 ├── baseline_btc_bh_{A,B,C}.json    # BTC B&H per sub-window (3 files)
