@@ -584,4 +584,6 @@ El sensitivity sweep agrega ~3h al wallclock. NO modifica las decisiones primary
 | 2026-05-13 | A.4 closure ratificado por Simón → epic habilitado | sssamuelll |
 | 2026-05-13 | §8 questions resolved via 2 AskUserQuestion rounds → spec finalized, status ACTIVE | sssamuelll |
 | 2026-05-13 | Epic tracking issue creado: #338 | sssamuelll |
-| TBD | Phase 0 issue creado (cost model v2 sqrt-participation) | sssamuelll |
+| 2026-05-13 | Phase 0 mergeada (cost model v2 sqrt-participation + funding) via PR #341 | sssamuelll + Claude Opus 4.7 |
+| 2026-05-13 | Phase 1A-1D mergeadas (Donchian ensemble + vol-targeting + dispatch + simulation + config defaults) via PRs #343, #344, #345, #346 | sssamuelll + Claude Opus 4.7 |
+| 2026-05-14 | Phase 2 pre-reg sub-spec drafted (`docs/superpowers/plans/2026-05-14-regime-allocation-phase2-pre-reg.md`) — 3 operator decisions locked (sub-windows conjunctive R3-exact, sensitivity verdict map); issue #347 + PR pending | sssamuelll + Claude Opus 4.7 |
