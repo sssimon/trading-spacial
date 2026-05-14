@@ -209,6 +209,40 @@ def _save_json(path: Path, payload):
         json.dump(payload, f, indent=2, sort_keys=True, default=str, allow_nan=False)
 
 
+# Pre-reg §11 (compute estimate) R3 risk realized 2026-05-14: Binance
+# occasionally returns TCP RST (Windows 10054) or ConnectTimeout on
+# historical chunks; data layer's fetch_with_failover switches to Bybit
+# which often lacks the same historical range; both exhausted → workers
+# crash. Mirrors warmer pattern (tools/warmup_ohlcv_cache.py). Each retry
+# re-calls get_klines_range, which re-scans the cache for gaps and
+# resumes from the (smaller) gap set after partial chunks persisted.
+_FETCH_RETRY_MAX_ATTEMPTS: Final[int] = 6
+_FETCH_RETRY_BASE_BACKOFF_SEC: Final[float] = 3.0
+
+
+def _get_cached_data_with_retry(symbol, timeframe, start_date):
+    """get_cached_data with exponential backoff on AllProvidersFailedError.
+
+    Multiprocessing-safe — imports inside the function body. Subprocess
+    workers inherit module state per fork/spawn; this helper sits at
+    module scope so they get a fresh re-import per process.
+    """
+    import time
+    from backtest import get_cached_data
+    from data.providers.base import AllProvidersFailedError
+
+    last_err = None
+    for attempt in range(1, _FETCH_RETRY_MAX_ATTEMPTS + 1):
+        try:
+            return get_cached_data(symbol, timeframe, start_date=start_date)
+        except AllProvidersFailedError as exc:
+            last_err = exc
+            if attempt < _FETCH_RETRY_MAX_ATTEMPTS:
+                wait = _FETCH_RETRY_BASE_BACKOFF_SEC * (2 ** (attempt - 1))
+                time.sleep(wait)
+    raise last_err  # exhausted — propagate so worker can build error result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Cell workers (multiprocessing-safe; imports inside the function body)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -256,30 +290,39 @@ def _process_regime_allocation_cell(args: dict) -> dict:
     ra_block["portfolio_vol_target"] = vol_target
     cfg["regime_allocation"] = ra_block
 
-    # Load data with ample pre-window for 390-day warmup. df1d needs
-    # ~13 months of history before sub-window start; df1h drives the
-    # liquidity proxy and can be tighter.
-    df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=14))
-    df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=14))
-
     # df4h/df5m are unused by the regime-allocation path but required by
     # simulate_strategy's signature. Pass empty placeholders.
     empty_ohlcv = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-    # Anti-leakage: slice all dfs to < cutoff. Pre-reg §3 + holdout policy.
-    cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
-    if not df1h.empty:
-        idx = df1h.index.tz_localize(None) if df1h.index.tz is not None else df1h.index
-        df1h = df1h[idx < cutoff_naive]
-    if not df1d.empty:
-        idx = df1d.index.tz_localize(None) if df1d.index.tz is not None else df1d.index
-        df1d = df1d[idx < cutoff_naive]
-
     err = None
     trades: list[dict] = []
     metrics: dict = {}
+    df1h = pd.DataFrame()
+    df1d = pd.DataFrame()
 
     try:
+        # Load data with ample pre-window for 390-day warmup. df1d needs
+        # ~13 months of history before sub-window start; df1h drives the
+        # liquidity proxy and can be tighter. Retry wrapper absorbs
+        # transient AllProvidersFailedError (Binance TCP RST / ConnectTimeout
+        # patterns on Windows + Bybit missing historical 5m) — exhaustion
+        # bubbles up to the `except` below as a soft error.
+        df1h = _get_cached_data_with_retry(
+            symbol, "1h", sim_start - relativedelta(months=14),
+        )
+        df1d = _get_cached_data_with_retry(
+            symbol, "1d", sim_start - relativedelta(months=14),
+        )
+
+        # Anti-leakage: slice all dfs to < cutoff. Pre-reg §3 + holdout policy.
+        cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+        if not df1h.empty:
+            idx = df1h.index.tz_localize(None) if df1h.index.tz is not None else df1h.index
+            df1h = df1h[idx < cutoff_naive]
+        if not df1d.empty:
+            idx = df1d.index.tz_localize(None) if df1d.index.tz is not None else df1d.index
+            df1d = df1d[idx < cutoff_naive]
+
         if df1d.empty or len(df1d) < WARMUP_DAILY_BARS:
             err = f"insufficient daily bars: {len(df1d)} < {WARMUP_DAILY_BARS}"
         else:
@@ -558,28 +601,44 @@ def _process_lrc_archived_baseline_cell(args: dict) -> dict:
     ra_block["enabled"] = False
     cfg["regime_allocation"] = ra_block
 
-    df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=14))
-    df4h = get_cached_data(symbol, "4h", start_date=sim_start - relativedelta(months=14))
-    df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=2))
-    df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=14))
-
-    # CHANGES_REQUESTED #6 review fix 2026-05-14 — normalize tz once,
-    # mutate df.index in-place; downstream comparisons (simulate_strategy
-    # internals + sim_start/sim_end slicing) handle tz uniformly.
-    cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
-    for df in (df1h, df4h, df5m, df1d):
-        if df.empty:
-            continue
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
-        keep_mask = df.index < cutoff_naive
-        df.drop(df.index[~keep_mask], inplace=True)  # type: ignore[arg-type]
-
     err = None
     trades: list[dict] = []
     metrics: dict = {}
+    df1h = pd.DataFrame()
+    df4h = pd.DataFrame()
+    df5m = pd.DataFrame()
+    df1d = pd.DataFrame()
 
     try:
+        # Load data with retry wrapper. Retry absorbs transient
+        # AllProvidersFailedError (Binance TCP RST / ConnectTimeout +
+        # Bybit missing historical 5m); exhaustion bubbles up to the
+        # `except` below as a soft error in the result dict.
+        df1h = _get_cached_data_with_retry(
+            symbol, "1h", sim_start - relativedelta(months=14),
+        )
+        df4h = _get_cached_data_with_retry(
+            symbol, "4h", sim_start - relativedelta(months=14),
+        )
+        df5m = _get_cached_data_with_retry(
+            symbol, "5m", sim_start - relativedelta(months=2),
+        )
+        df1d = _get_cached_data_with_retry(
+            symbol, "1d", sim_start - relativedelta(months=14),
+        )
+
+        # CHANGES_REQUESTED #6 review fix 2026-05-14 — normalize tz once,
+        # mutate df.index in-place; downstream comparisons (simulate_strategy
+        # internals + sim_start/sim_end slicing) handle tz uniformly.
+        cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+        for df in (df1h, df4h, df5m, df1d):
+            if df.empty:
+                continue
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            keep_mask = df.index < cutoff_naive
+            df.drop(df.index[~keep_mask], inplace=True)  # type: ignore[arg-type]
+
         if df1h.empty or df4h.empty or df5m.empty:
             err = "missing intraday OHLCV — LRC path requires df1h+df4h+df5m"
         else:

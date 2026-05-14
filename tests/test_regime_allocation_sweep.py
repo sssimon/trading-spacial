@@ -940,4 +940,97 @@ class TestWorkerTzNormalization:
             "the tz-naive df.index normalization."
         )
         assert captured["sim_end"].tzinfo is None, "sim_end must be tz-naive"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker retry wrapper — regression for cache-fetch transients surfaced
+# during Phase 3 sesión 2 (2026-05-14): Binance TCP RST (Windows 10054) +
+# Bybit missing historical 5m → AllProvidersFailedError crashed the worker
+# pool. _get_cached_data_with_retry absorbs the transient pattern with
+# exponential backoff; exhaustion bubbles up as a soft error in the result.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestWorkerRetryWrapper:
+    """Pre-reg §11 R3 risk — _get_cached_data_with_retry verified end-to-end."""
+
+    def _install_apfe(self, monkeypatch):
+        """Install a fake AllProvidersFailedError-like exception type into
+        the providers module (so the helper's import-inside-function picks
+        it up correctly when caching is bypassed)."""
+        import data.providers.base as pbase
+        return pbase.AllProvidersFailedError
+
+    def test_retry_helper_succeeds_after_transient_failures(
+        self, monkeypatch,
+    ):
+        import backtest
+        import pandas as pd
+
+        AllProvidersFailedError = self._install_apfe(monkeypatch)
+        call_counter = {"n": 0}
+
+        def flaky_get_cached_data(symbol, timeframe, start_date=None):
+            call_counter["n"] += 1
+            if call_counter["n"] < 3:
+                raise AllProvidersFailedError(
+                    f"All providers failed for {symbol} {timeframe} "
+                    f"(simulated attempt {call_counter['n']})"
+                )
+            return pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [110.0],
+                    "low": [90.0],
+                    "close": [105.0],
+                    "volume": [1000.0],
+                },
+                index=pd.date_range("2025-01-30", periods=1, freq="D"),
+            )
+
+        # No-op sleep so the test runs in <1s instead of paying real backoff.
+        monkeypatch.setattr(backtest, "get_cached_data", flaky_get_cached_data)
+        import time as time_mod
+        monkeypatch.setattr(time_mod, "sleep", lambda _: None)
+
+        df = ras._get_cached_data_with_retry(
+            "BTCUSDT", "1h",
+            __import__("datetime").datetime(2024, 1, 1),
+        )
+        assert call_counter["n"] == 3, (
+            f"Expected 3 attempts (2 transient + 1 success), got {call_counter['n']}"
+        )
+        assert not df.empty
+
+    def test_retry_helper_raises_after_exhausting_attempts(
+        self, monkeypatch,
+    ):
+        import backtest
+
+        AllProvidersFailedError = self._install_apfe(monkeypatch)
+
+        def always_fails(symbol, timeframe, start_date=None):
+            raise AllProvidersFailedError(
+                f"All providers failed for {symbol} {timeframe} (permanent)"
+            )
+
+        monkeypatch.setattr(backtest, "get_cached_data", always_fails)
+        import time as time_mod
+        monkeypatch.setattr(time_mod, "sleep", lambda _: None)
+
+        with pytest.raises(AllProvidersFailedError) as exc_info:
+            ras._get_cached_data_with_retry(
+                "BTCUSDT", "1h",
+                __import__("datetime").datetime(2024, 1, 1),
+            )
+        assert "permanent" in str(exc_info.value)
+
+    def test_retry_max_attempts_matches_pre_reg_envelope(self):
+        """Pre-reg §11 — retry envelope should be small enough to amortize
+        transient failures without blowing the compute budget. 6 attempts
+        with exponential backoff (3, 6, 12, 24, 48, 96) = ~189s worst case
+        per fetch, which is within the §11 LRC baseline estimate (~60s/cell
+        × few-retry cells)."""
+        assert ras._FETCH_RETRY_MAX_ATTEMPTS == 6
+        assert ras._FETCH_RETRY_BASE_BACKOFF_SEC == 3.0
 # (AST scanner over all non-whitelisted modules). No need to duplicate here.
