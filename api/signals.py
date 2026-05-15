@@ -15,10 +15,11 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import load_config
 from api.deps import verify_api_key
+from auth.dependencies import get_current_tenant_id
 from api.telegram import build_telegram_message
 from db.connection import get_db
 from db.signals import (
@@ -229,14 +230,23 @@ def list_signals(
 
 
 @router.get("/performance", summary="Métricas de éxito de las señales históricas")
-def get_signals_performance():
+def get_signals_performance(
+    tenant_id: int = Depends(get_current_tenant_id),
+):
     """
     Calcula estadísticas de acierto de las señales procesadas (status='completed').
     Win Rate se define como: precio 24h > precio señal (para LONG).
+
+    B.5 #258: scoped to tenant_id from JWT. Pre-backfill signal_outcomes
+    (tenant_id=NULL) are invisible. Each user sees their own performance
+    tracking.
     """
     con = get_db()
-    # Solo señales completadas (24h de historia)
-    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'completed'").fetchall()
+    # Solo señales completadas (24h de historia) — filtradas por tenant
+    rows = con.execute(
+        "SELECT * FROM signal_outcomes WHERE status = 'completed' AND tenant_id = ?",
+        (tenant_id,),
+    ).fetchall()
     con.close()
 
     if not rows:

@@ -14,8 +14,13 @@ def client(tmp_path, monkeypatch):
     return TestClient(btc_api.app)
 
 
-def _seed(n_unread=3, n_read=2):
-    """Insert notifications directly via the storage helper."""
+def _seed(n_unread=3, n_read=2, tenant_id: int = 0):
+    """Insert notifications directly via the storage helper.
+
+    B.5 follow-up #258: tenant_id=0 matches synthetic test user
+    (auth.middleware._synthetic_test_user). Without explicit tenant_id,
+    strict filter excludes rows post-B.5-follow-up.
+    """
     from notifier._storage import record_delivery, mark_read
     ids = []
     for i in range(n_unread):
@@ -23,14 +28,16 @@ def _seed(n_unread=3, n_read=2):
             event_type="signal", event_key=f"signal:SYM{i}", priority="info",
             payload={"symbol": f"SYM{i}"}, channels_sent=["telegram"],
             delivery_status="ok",
+            tenant_id=tenant_id,
         ))
     for i in range(n_read):
         nid = record_delivery(
             event_type="health", event_key=f"health:R{i}", priority="warning",
             payload={"symbol": f"R{i}"}, channels_sent=["telegram"],
             delivery_status="ok",
+            tenant_id=tenant_id,
         )
-        mark_read(nid)
+        mark_read(nid, tenant_id=tenant_id)
     return ids
 
 
