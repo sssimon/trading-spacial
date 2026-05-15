@@ -331,3 +331,92 @@ class TestThresholdConstants:
         assert WIN_RATE_FLOOR == 0.30  # Q-PR3
         assert WIN_RATE_DEGRADATION == 0.50  # Q-PR4
         assert AGGREGATE_MATCH_FRACTION == 0.75  # heredar #338 ≥75%
+
+
+# ---------------------------------------------------------------------------
+# Module 3: signal_calibration_diagnostic.py — Phase 2 runner unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnosticRunner:
+    def test_phase2_jobs_window_a_only_8_cells(self):
+        """build_phase2_jobs produces exactly 8 cells, all Window A, vol_target=30%."""
+        from tools.signal_calibration_diagnostic import build_phase2_jobs
+
+        jobs = build_phase2_jobs(app_config_path="fake/path.json")
+        assert len(jobs) == 8
+        assert all(j["sub_window"] == "A" for j in jobs)
+        assert all(j["vol_target"] == 0.30 for j in jobs)
+
+    def test_phase2_jobs_exclude_pendle_jup(self):
+        """Pre-reg §5.1 — PENDLE + JUP NOT in Window A coverage (warmup-fail)."""
+        from tools.signal_calibration_diagnostic import build_phase2_jobs
+
+        jobs = build_phase2_jobs(app_config_path="fake/path.json")
+        symbols = {j["symbol"] for j in jobs}
+        assert "PENDLEUSDT" not in symbols
+        assert "JUPUSDT" not in symbols
+        # Sanity: BTC + ETH ARE in coverage
+        assert "BTCUSDT" in symbols
+        assert "ETHUSDT" in symbols
+
+    def test_phase2_halt_fires_at_6_of_8_bankrupt(self):
+        """Pre-reg §10.4 — ≥6/8 bankrupt → halt=True."""
+        from tools.signal_calibration_diagnostic import check_phase2_halt
+
+        results = [
+            {"symbol": s, "sub_window": "A", "bankruptcy_count": 1, "n_trades": 0, "net_pnl_usd": -10000}
+            for s in ("BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "UNIUSDT")
+        ] + [
+            {"symbol": s, "sub_window": "A", "bankruptcy_count": 0, "n_trades": 5, "net_pnl_usd": 100}
+            for s in ("XLMUSDT", "RUNEUSDT")
+        ]
+        halt_diag = check_phase2_halt(results)
+        assert halt_diag["halt"] is True
+        assert halt_diag["n_symbols_bankrupt"] == 6
+
+    def test_phase2_halt_does_not_fire_at_5_of_8(self):
+        """5 < 6 threshold → halt=False."""
+        from tools.signal_calibration_diagnostic import check_phase2_halt
+
+        results = [
+            {"symbol": s, "sub_window": "A", "bankruptcy_count": 1, "n_trades": 0, "net_pnl_usd": -10000}
+            for s in ("BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT")
+        ] + [
+            {"symbol": s, "sub_window": "A", "bankruptcy_count": 0, "n_trades": 5, "net_pnl_usd": 100}
+            for s in ("UNIUSDT", "XLMUSDT", "RUNEUSDT")
+        ]
+        halt_diag = check_phase2_halt(results)
+        assert halt_diag["halt"] is False
+        assert halt_diag["n_symbols_bankrupt"] == 5
+
+    def test_aggregate_observability_cells_passes_through(self):
+        """aggregate_observability_cells extracts per_lookback + sum_distribution.
+
+        Used to feed classify_phase2_verdict downstream.
+        """
+        from tools.signal_calibration_diagnostic import aggregate_observability_cells
+
+        results = [
+            {
+                "symbol": "BTCUSDT",
+                "observability": {
+                    "per_lookback": {5: {"firing_count": 10}, 10: {"firing_count": 8}},
+                    "sum_distribution": {"p50": 1.5},
+                },
+            },
+            {
+                "symbol": "ETHUSDT",
+                "observability": {
+                    "per_lookback": {5: {"firing_count": 12}, 10: {"firing_count": 9}},
+                    "sum_distribution": {"p50": 1.8},
+                },
+            },
+            # Cell with no observability (e.g., error path) — should be skipped
+            {"symbol": "ADAUSDT", "observability": {}, "error": "fetch failed"},
+        ]
+        cells = aggregate_observability_cells(results)
+        assert len(cells) == 2  # ADA skipped
+        assert cells[0]["symbol"] == "BTCUSDT"
+        assert cells[0]["sum_distribution"]["p50"] == 1.5
+        assert cells[1]["sum_distribution"]["p50"] == 1.8
