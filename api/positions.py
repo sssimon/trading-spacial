@@ -15,7 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from api.config import load_config
 from api.deps import verify_api_key
-from auth.dependencies import require_role
+from auth.dependencies import get_current_tenant_id, require_role
 from db.connection import get_db
 from db.positions import (
     _calc_pnl,
@@ -234,9 +234,11 @@ def check_position_stops(symbol: str, price: float, now: datetime | None = None)
 
 @router.get("", summary="Listar posiciones")
 def list_positions(
-    status: Optional[str] = Query("all", description="open | closed | all")
+    status: Optional[str] = Query("all", description="open | closed | all"),
+    tenant_id: int = Depends(get_current_tenant_id),
 ):
-    positions = db_get_positions(status)
+    # B.5 #258: tenant_id from JWT, never from request param/header/body
+    positions = db_get_positions(status, tenant_id=tenant_id)
     return {"total": len(positions), "positions": positions}
 
 
@@ -246,13 +248,17 @@ def list_positions(
     # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
     dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
-def open_position(body: dict = Body(...)):
+def open_position(
+    body: dict = Body(...),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
     required = {"symbol", "entry_price"}
     missing  = required - body.keys()
     if missing:
         raise HTTPException(status_code=422, detail=f"Faltan campos: {missing}")
     try:
-        pos = db_create_position(body)
+        # B.5 #258: tenant_id from JWT — body's tenant_id (if any) silently dropped
+        pos = db_create_position(body, tenant_id=tenant_id)
         update_positions_json()
         return {"ok": True, "position": pos}
     except Exception as e:
@@ -265,8 +271,13 @@ def open_position(body: dict = Body(...)):
     # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
     dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
-def edit_position(pos_id: int, body: dict = Body(...)):
-    pos = db_update_position(pos_id, body)
+def edit_position(
+    pos_id: int,
+    body: dict = Body(...),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
+    # B.5 #258: ownership-enforced. Returns None if pos doesn't belong to tenant.
+    pos = db_update_position(pos_id, body, tenant_id=tenant_id)
     if not pos:
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     update_positions_json()
@@ -279,12 +290,17 @@ def edit_position(pos_id: int, body: dict = Body(...)):
     # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
     dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
-def close_position(pos_id: int, body: dict = Body(...)):
+def close_position(
+    pos_id: int,
+    body: dict = Body(...),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
     exit_price  = body.get("exit_price")
     exit_reason = body.get("exit_reason", "MANUAL")
     if exit_price is None:
         raise HTTPException(status_code=422, detail="Falta exit_price")
-    pos = db_close_position(pos_id, float(exit_price), exit_reason)
+    # B.5 #258: ownership-enforced
+    pos = db_close_position(pos_id, float(exit_price), exit_reason, tenant_id=tenant_id)
     if not pos:
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     _write_position_event_log(pos, exit_reason, float(exit_price))
@@ -298,9 +314,17 @@ def close_position(pos_id: int, body: dict = Body(...)):
     # TODO(auth-cleanup): remove verify_api_key after JWT migration stable
     dependencies=[Depends(verify_api_key), Depends(require_role("admin"))],
 )
-def delete_position(pos_id: int):
+def delete_position(
+    pos_id: int,
+    tenant_id: int = Depends(get_current_tenant_id),
+):
+    # B.5 #258: ownership-enforced via inline SELECT (db helper doesn't have
+    # delete primitive yet; refactor deferred to follow-up)
     con = get_db()
-    row = con.execute("SELECT id FROM positions WHERE id=?", (pos_id,)).fetchone()
+    row = con.execute(
+        "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+        (pos_id, tenant_id),
+    ).fetchone()
     if not row:
         con.close()
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")

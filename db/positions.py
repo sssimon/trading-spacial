@@ -1,7 +1,21 @@
 """Positions DB layer — CRUD queries.
 
-Extracted from btc_api.py:379-465 in PR4 of the api+db refactor (2026-04-27).
+Extracted from btc_api.py:379-465 in PR0 of the api+db refactor (2026-04-27).
 _calc_pnl lives here (pure math, no I/O) and is re-exported by api/positions.py.
+
+## Multi-tenancy (B.5 #258 — 2026-05-15)
+
+All public functions accept an optional `tenant_id: int | None = None` param:
+- `None` (default) — legacy behavior; no tenant filter. Used by internal
+  callers like btc_scanner.py that operate system-wide.
+- `int` — enforce tenant ownership. Reads filter `WHERE tenant_id = ?`;
+  writes inject tenant_id; ownership checks gate mutations.
+
+The API layer (api/positions.py) ALWAYS passes tenant_id from JWT via
+`Depends(get_current_tenant_id)`. Never read tenant_id from request params,
+headers, or body — that's the threat surface closed by B.5.
+
+Pre-reg: docs/superpowers/plans/2026-05-15-multi-tenant-b5-api-enforcement-pre-reg.md
 """
 from __future__ import annotations
 
@@ -24,7 +38,12 @@ def _calc_pnl(direction: str, entry: float, exit_p: float, qty: float):
     return round(pnl_usd, 4), round(pnl_pct, 4)
 
 
-def db_create_position(data: dict) -> dict:
+def db_create_position(data: dict, tenant_id: Optional[int] = None) -> dict:
+    """Create position. If tenant_id provided, persisted on the row.
+
+    Per B.5: API callers always pass tenant_id from JWT; internal/legacy
+    callers may pass None (row inserted with tenant_id NULL).
+    """
     con = get_db()
     entry = float(data["entry_price"])
     qty   = float(data.get("qty") or (float(data.get("size_usd", 0) or 0) / entry if entry else 0))
@@ -32,8 +51,9 @@ def db_create_position(data: dict) -> dict:
     cur = con.execute("""
         INSERT INTO positions
             (scan_id, symbol, direction, status, entry_price, entry_ts,
-             sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes,
+             tenant_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         data.get("scan_id"),
         data["symbol"].upper(),
@@ -48,6 +68,7 @@ def db_create_position(data: dict) -> dict:
         data.get("atr_entry"),
         data.get("be_mult"),
         data.get("notes", ""),
+        tenant_id,  # NULL if not provided — legacy behavior
     ))
     pos_id = cur.lastrowid
     con.commit()
@@ -56,17 +77,29 @@ def db_create_position(data: dict) -> dict:
     return dict(row)
 
 
-def db_last_exit_ts(symbol: str) -> Optional[datetime]:
-    """Return last exit_ts (UTC, tz-aware) for symbol's closed positions, or None."""
-    # Naive ISO strings get tz=UTC attached so arithmetic vs
-    # datetime.now(timezone.utc) is well-defined; malformed ISO swallowed → None.
+def db_last_exit_ts(symbol: str, tenant_id: Optional[int] = None) -> Optional[datetime]:
+    """Return last exit_ts (UTC, tz-aware) for symbol's closed positions, or None.
+
+    Per B.5: when tenant_id is None (default), returns the most recent exit
+    across ALL users — correct semantic for scanner cooldown (system-wide).
+    When tenant_id is int, filters to that user's exits only.
+    """
     con = get_db()
-    row = con.execute(
-        "SELECT exit_ts FROM positions "
-        "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
-        "ORDER BY exit_ts DESC LIMIT 1",
-        (symbol.upper(),),
-    ).fetchone()
+    if tenant_id is None:
+        row = con.execute(
+            "SELECT exit_ts FROM positions "
+            "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+            "ORDER BY exit_ts DESC LIMIT 1",
+            (symbol.upper(),),
+        ).fetchone()
+    else:
+        row = con.execute(
+            "SELECT exit_ts FROM positions "
+            "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+            "AND tenant_id=? "
+            "ORDER BY exit_ts DESC LIMIT 1",
+            (symbol.upper(), tenant_id),
+        ).fetchone()
     con.close()
     if not row or not row[0]:
         return None
@@ -79,23 +112,53 @@ def db_last_exit_ts(symbol: str) -> Optional[datetime]:
     return dt
 
 
-def db_get_positions(status: Optional[str] = None) -> list:
+def db_get_positions(
+    status: Optional[str] = None,
+    tenant_id: Optional[int] = None,
+) -> list:
+    """List positions, optionally filtered by status and tenant_id.
+
+    Per B.5: when tenant_id is None (default), returns all rows (legacy).
+    When tenant_id is int, filters strict to that tenant.
+    """
     con = get_db()
+    clauses: list[str] = []
+    params: list = []
     if status and status != "all":
-        rows = con.execute(
-            "SELECT * FROM positions WHERE status=? ORDER BY id DESC", (status,)
-        ).fetchall()
-    else:
-        rows = con.execute(
-            "SELECT * FROM positions ORDER BY id DESC"
-        ).fetchall()
+        clauses.append("status=?")
+        params.append(status)
+    if tenant_id is not None:
+        clauses.append("tenant_id=?")
+        params.append(tenant_id)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = con.execute(
+        f"SELECT * FROM positions{where} ORDER BY id DESC", params,
+    ).fetchall()
     con.close()
     return [dict(r) for r in rows]
 
 
-def db_close_position(pos_id: int, exit_price: float, exit_reason: str) -> Optional[dict]:
+def db_close_position(
+    pos_id: int,
+    exit_price: float,
+    exit_reason: str,
+    tenant_id: Optional[int] = None,
+) -> Optional[dict]:
+    """Close position by id. Per B.5: ownership-enforced when tenant_id given.
+
+    If tenant_id is provided and the position does NOT belong to that tenant,
+    returns None (IDOR protection — caller sees same behavior as 'not found').
+    """
     con = get_db()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
+    if tenant_id is None:
+        row = con.execute(
+            "SELECT * FROM positions WHERE id=?", (pos_id,),
+        ).fetchone()
+    else:
+        row = con.execute(
+            "SELECT * FROM positions WHERE id=? AND tenant_id=?",
+            (pos_id, tenant_id),
+        ).fetchone()
     if not row:
         con.close()
         return None
@@ -122,12 +185,30 @@ def db_close_position(pos_id: int, exit_price: float, exit_reason: str) -> Optio
     return closed
 
 
-def db_update_position(pos_id: int, data: dict) -> Optional[dict]:
+def db_update_position(
+    pos_id: int,
+    data: dict,
+    tenant_id: Optional[int] = None,
+) -> Optional[dict]:
+    """Update position fields. Per B.5: ownership-enforced when tenant_id given.
+
+    Returns None if position not found OR (when tenant_id provided) the
+    position does not belong to that tenant.
+    """
     allowed = {"sl_price", "tp_price", "size_usd", "qty", "notes", "entry_price", "atr_entry", "be_mult"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return None
     con = get_db()
+    # Ownership pre-check when tenant_id provided
+    if tenant_id is not None:
+        owner_row = con.execute(
+            "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+            (pos_id, tenant_id),
+        ).fetchone()
+        if not owner_row:
+            con.close()
+            return None
     sets = ", ".join(f"{k}=?" for k in updates)
     vals = list(updates.values()) + [pos_id]
     con.execute(f"UPDATE positions SET {sets} WHERE id=?", vals)

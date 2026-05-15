@@ -22,20 +22,10 @@ import pytest
 # Test pattern: monkeypatch btc_api.DB_FILE so init_db() uses tmp path
 @pytest.fixture
 def tmp_db(tmp_path, monkeypatch):
-    """Fresh empty DB at tmp_path/test.db, with btc_api.DB_FILE patched."""
+    """Fresh empty DB at tmp_path/test.db — uses real btc_api like existing test pattern."""
+    import btc_api
     db_path = tmp_path / "test.db"
-
-    # Patch BEFORE importing init_db (which uses _resolve_db_file via btc_api lookup)
-    # Use a stub btc_api module if real one isn't importable cleanly
-    import sys
-    if "btc_api" not in sys.modules:
-        import types
-        stub = types.ModuleType("btc_api")
-        stub.DB_FILE = str(db_path)
-        sys.modules["btc_api"] = stub
-    else:
-        monkeypatch.setattr("btc_api.DB_FILE", str(db_path))
-
+    monkeypatch.setattr(btc_api, "DB_FILE", str(db_path))
     yield db_path
 
 

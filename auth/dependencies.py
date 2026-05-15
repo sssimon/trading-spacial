@@ -52,6 +52,25 @@ def require_role(required: str) -> Callable[[User], User]:
     return _dep
 
 
+def get_current_tenant_id(user: User = Depends(get_current_user)) -> int:
+    """Return tenant_id derived from JWT.
+
+    Epic B B.5 (#258) enforcement primitive. The tenant_id is ALWAYS the
+    authenticated user's id. Never read from request params/headers/body —
+    that's the threat surface explicitly closed per #253 threat model
+    (URL guessing, IDOR, header forging, query param manipulation).
+
+    Use in route handlers as:
+        @router.get("/foo")
+        def list_foo(tenant_id: int = Depends(get_current_tenant_id)):
+            return db_get_foo(tenant_id=tenant_id)
+
+    The dependency chains through get_current_user which raises 401 if
+    request.state.user is None — preserves existing auth behavior.
+    """
+    return user.id
+
+
 def require_csrf(request: Request) -> None:
     """Double-submit-cookie CSRF check.
 
