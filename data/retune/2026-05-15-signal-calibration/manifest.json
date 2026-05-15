@@ -1,0 +1,24 @@
+{
+  "code_commit": "3ac2aa4d17721298305b3541df02bce58522aea1",
+  "cutoff_iso": "2025-04-30T00:00:00+00:00",
+  "elapsed_seconds": 8.3,
+  "in_coverage": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "DOGEUSDT",
+    "UNIUSDT",
+    "XLMUSDT",
+    "RUNEUSDT"
+  ],
+  "n_in_coverage": 8,
+  "phase": 2,
+  "schema_version": 1,
+  "spec_ref": "docs/superpowers/plans/2026-05-15-signal-calibration-pre-reg.md",
+  "sub_window": "A",
+  "sub_window_end_iso": "2022-07-01T00:00:00+00:00",
+  "sub_window_start_iso": "2022-04-01T00:00:00+00:00",
+  "vol_target": 0.3,
+  "warmup_daily_bars": 390
+}

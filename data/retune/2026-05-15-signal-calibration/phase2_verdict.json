@@ -1,0 +1,10 @@
+{
+  "halt": false,
+  "halt_guard_applied": false,
+  "n_symbols_a_evidence": 0,
+  "n_symbols_no_a_evidence": 0,
+  "n_symbols_total": 8,
+  "naive_verdict": "AMBIGUOUS",
+  "threshold": 6,
+  "verdict": "AMBIGUOUS"
+}

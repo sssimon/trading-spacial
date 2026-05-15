@@ -1,0 +1,1002 @@
+[
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.67,
+    "n_trades": 2,
+    "net_pnl_usd": 782.84,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 16,
+          "count_short": 75,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 16,
+          "count_short": 75,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 25,
+          "count_short": 66,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 34,
+          "count_short": 57,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 38,
+          "count_short": 53,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        },
+        "360": {
+          "count_flat": 72,
+          "count_long": 0,
+          "count_short": 19,
+          "firing_count": 19,
+          "lookback_days": 360,
+          "magnitude_mean": 5.593406593406593,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.9050090199705703
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 5.593406593406593,
+        "p25": 4.0,
+        "p50": 6.0,
+        "p75": 8.0,
+        "p95": 9.0,
+        "std": 2.9050090199705703
+      }
+    },
+    "profit_factor": 6.01,
+    "sub_window": "A",
+    "symbol": "BTCUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.5
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -4.92,
+    "n_trades": 2,
+    "net_pnl_usd": 826.53,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 29,
+          "count_short": 62,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 29,
+          "count_short": 62,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 38,
+          "count_short": 53,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 40,
+          "count_short": 51,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        },
+        "360": {
+          "count_flat": 70,
+          "count_long": 0,
+          "count_short": 21,
+          "firing_count": 21,
+          "lookback_days": 360,
+          "magnitude_mean": 5.461538461538462,
+          "magnitude_p50": 8.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 3.4171760473570276
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 5.461538461538462,
+        "p25": 2.0,
+        "p50": 8.0,
+        "p75": 8.0,
+        "p95": 9.0,
+        "std": 3.4171760473570276
+      }
+    },
+    "profit_factor": 3.73,
+    "sub_window": "A",
+    "symbol": "ETHUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.5
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.82,
+    "n_trades": 1,
+    "net_pnl_usd": 1032.45,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 20,
+          "count_short": 71,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 18,
+          "count_short": 73,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 16,
+          "count_short": 75,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 25,
+          "count_short": 66,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        },
+        "360": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 360,
+          "magnitude_mean": 7.263736263736264,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.2621353562516155
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 7.263736263736264,
+        "p25": 5.0,
+        "p50": 9.0,
+        "p75": 9.0,
+        "p95": 9.0,
+        "std": 2.2621353562516155
+      }
+    },
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "ADAUSDT",
+    "vol_target": 0.3,
+    "win_rate": 1.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -4.99,
+    "n_trades": 2,
+    "net_pnl_usd": 1055.93,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 12,
+          "count_short": 79,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 28,
+          "count_short": 63,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 37,
+          "count_short": 54,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 40,
+          "count_short": 51,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        },
+        "360": {
+          "count_flat": 91,
+          "count_long": 0,
+          "count_short": 0,
+          "firing_count": 0,
+          "lookback_days": 360,
+          "magnitude_mean": 5.428571428571429,
+          "magnitude_p50": 6.0,
+          "magnitude_p95": 8.0,
+          "magnitude_std": 2.673199741935229
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 5.428571428571429,
+        "p25": 2.0,
+        "p50": 6.0,
+        "p75": 8.0,
+        "p95": 8.0,
+        "std": 2.673199741935229
+      }
+    },
+    "profit_factor": 3.9,
+    "sub_window": "A",
+    "symbol": "AVAXUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.5
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -11.72,
+    "n_trades": 3,
+    "net_pnl_usd": -180.46,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 34,
+          "count_short": 57,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 42,
+          "count_short": 49,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 23,
+          "count_short": 68,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 38,
+          "count_short": 53,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "150": {
+          "count_flat": 38,
+          "count_long": 0,
+          "count_short": 53,
+          "firing_count": 53,
+          "lookback_days": 150,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "250": {
+          "count_flat": 38,
+          "count_long": 0,
+          "count_short": 53,
+          "firing_count": 53,
+          "lookback_days": 250,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        },
+        "360": {
+          "count_flat": 38,
+          "count_long": 0,
+          "count_short": 53,
+          "firing_count": 53,
+          "lookback_days": 360,
+          "magnitude_mean": 5.175824175824176,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 4.0208068912841295
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 5.175824175824176,
+        "p25": 0.0,
+        "p50": 7.0,
+        "p75": 9.0,
+        "p95": 9.0,
+        "std": 4.0208068912841295
+      }
+    },
+    "profit_factor": 0.73,
+    "sub_window": "A",
+    "symbol": "DOGEUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.333
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -3.01,
+    "n_trades": 1,
+    "net_pnl_usd": 844.42,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 15,
+          "count_short": 76,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 17,
+          "count_short": 74,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 18,
+          "count_short": 73,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 25,
+          "count_short": 66,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        },
+        "360": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 360,
+          "magnitude_mean": 7.351648351648351,
+          "magnitude_p50": 9.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.3457870881980365
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 7.351648351648351,
+        "p25": 7.0,
+        "p50": 9.0,
+        "p75": 9.0,
+        "p95": 9.0,
+        "std": 2.3457870881980365
+      }
+    },
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "UNIUSDT",
+    "vol_target": 0.3,
+    "win_rate": 1.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.76,
+    "n_trades": 1,
+    "net_pnl_usd": 605.61,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 21,
+          "count_short": 70,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 24,
+          "count_short": 67,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 29,
+          "count_short": 62,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "250": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 250,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        },
+        "360": {
+          "count_flat": 37,
+          "count_long": 0,
+          "count_short": 54,
+          "firing_count": 54,
+          "lookback_days": 360,
+          "magnitude_mean": 6.747252747252747,
+          "magnitude_p50": 7.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.379368309342512
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 6.747252747252747,
+        "p25": 5.0,
+        "p50": 7.0,
+        "p75": 9.0,
+        "p95": 9.0,
+        "std": 2.379368309342512
+      }
+    },
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "XLMUSDT",
+    "vol_target": 0.3,
+    "win_rate": 1.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "max_drawdown_pct": -11.48,
+    "n_trades": 2,
+    "net_pnl_usd": 292.26,
+    "observability": {
+      "per_lookback": {
+        "5": {
+          "count_flat": 0,
+          "count_long": 22,
+          "count_short": 69,
+          "firing_count": 91,
+          "lookback_days": 5,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "10": {
+          "count_flat": 0,
+          "count_long": 12,
+          "count_short": 79,
+          "firing_count": 91,
+          "lookback_days": 10,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "20": {
+          "count_flat": 0,
+          "count_long": 10,
+          "count_short": 81,
+          "firing_count": 91,
+          "lookback_days": 20,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "30": {
+          "count_flat": 0,
+          "count_long": 28,
+          "count_short": 63,
+          "firing_count": 91,
+          "lookback_days": 30,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "60": {
+          "count_flat": 0,
+          "count_long": 38,
+          "count_short": 53,
+          "firing_count": 91,
+          "lookback_days": 60,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "90": {
+          "count_flat": 0,
+          "count_long": 56,
+          "count_short": 35,
+          "firing_count": 91,
+          "lookback_days": 90,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "150": {
+          "count_flat": 0,
+          "count_long": 0,
+          "count_short": 91,
+          "firing_count": 91,
+          "lookback_days": 150,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "250": {
+          "count_flat": 56,
+          "count_long": 0,
+          "count_short": 35,
+          "firing_count": 35,
+          "lookback_days": 250,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        },
+        "360": {
+          "count_flat": 56,
+          "count_long": 0,
+          "count_short": 35,
+          "firing_count": 35,
+          "lookback_days": 360,
+          "magnitude_mean": 4.78021978021978,
+          "magnitude_p50": 5.0,
+          "magnitude_p95": 9.0,
+          "magnitude_std": 2.8042440277339047
+        }
+      },
+      "sum_distribution": {
+        "bars_total": 91,
+        "mean": 4.78021978021978,
+        "p25": 2.0,
+        "p50": 5.0,
+        "p75": 7.0,
+        "p95": 9.0,
+        "std": 2.8042440277339047
+      }
+    },
+    "profit_factor": 1.37,
+    "sub_window": "A",
+    "symbol": "RUNEUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.5
+  }
+]

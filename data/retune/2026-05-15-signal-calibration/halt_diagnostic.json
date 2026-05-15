@@ -1,0 +1,53 @@
+{
+  "halt": false,
+  "halt_count_threshold": 6,
+  "halt_fraction_threshold": 0.75,
+  "halt_reasons": [],
+  "n_in_coverage": 8,
+  "n_symbols_bankrupt": 0,
+  "per_symbol_a_cell": {
+    "ADAUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 1,
+      "net_pnl_usd": 1032.45
+    },
+    "AVAXUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 2,
+      "net_pnl_usd": 1055.93
+    },
+    "BTCUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 2,
+      "net_pnl_usd": 782.84
+    },
+    "DOGEUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 3,
+      "net_pnl_usd": -180.46
+    },
+    "ETHUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 2,
+      "net_pnl_usd": 826.53
+    },
+    "RUNEUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 2,
+      "net_pnl_usd": 292.26
+    },
+    "UNIUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 1,
+      "net_pnl_usd": 844.42
+    },
+    "XLMUSDT": {
+      "bankruptcy_count": 0,
+      "n_trades": 1,
+      "net_pnl_usd": 605.61
+    }
+  },
+  "symbols_bankrupt": [],
+  "vol_target_evaluated": 0.3,
+  "window_evaluated": "A"
+}
