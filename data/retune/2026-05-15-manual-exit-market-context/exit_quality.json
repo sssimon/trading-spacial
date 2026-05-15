@@ -1,0 +1,172 @@
+{
+  "by_quality": {
+    "GOOD": [
+      35,
+      37,
+      38,
+      39
+    ],
+    "PREMATURE": [
+      17,
+      18,
+      25,
+      27,
+      29,
+      33,
+      34,
+      42
+    ],
+    "REVERSAL_CAUGHT": [
+      1,
+      28,
+      31,
+      47
+    ]
+  },
+  "per_position": [
+    {
+      "direction": "SHORT",
+      "exit_quality": "REVERSAL_CAUGHT",
+      "id": 1,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 1.983202725340952,
+      "post_exit_4h_favorable_pct": 0.41932473606692106,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 17,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.2378843208302242,
+      "post_exit_4h_favorable_pct": 2.7413161139903544,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 18,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.5846970664336679,
+      "post_exit_4h_favorable_pct": 3.536325145334187,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 25,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 1.2686567164179197,
+      "post_exit_4h_favorable_pct": 2.835820895522374,
+      "symbol": "PENDLEUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "exit_quality": "PREMATURE",
+      "id": 27,
+      "is_winner": false,
+      "post_exit_4h_adverse_pct": 0.20833333333333354,
+      "post_exit_4h_favorable_pct": 1.4583333333333348,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "REVERSAL_CAUGHT",
+      "id": 28,
+      "is_winner": false,
+      "post_exit_4h_adverse_pct": 1.1249999999999976,
+      "post_exit_4h_favorable_pct": -0.4375000000000039,
+      "symbol": "XLMUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 29,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": -0.34269700857586144,
+      "post_exit_4h_favorable_pct": 1.4741879937875548,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "REVERSAL_CAUGHT",
+      "id": 31,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 2.44090638964825,
+      "post_exit_4h_favorable_pct": -0.4511275482172114,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 33,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 1.3207547169811331,
+      "post_exit_4h_favorable_pct": 2.264150943396228,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 34,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": -0.5577043678881515,
+      "post_exit_4h_favorable_pct": 1.8720184529635573,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "exit_quality": "GOOD",
+      "id": 35,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.5536606508888643,
+      "post_exit_4h_favorable_pct": 0.008712205364116729,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "exit_quality": "GOOD",
+      "id": 37,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.6250000000000006,
+      "post_exit_4h_favorable_pct": 0.031250000000010436,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "exit_quality": "GOOD",
+      "id": 38,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.5536606508888643,
+      "post_exit_4h_favorable_pct": 0.008712205364116729,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "exit_quality": "GOOD",
+      "id": 39,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 0.09316770186334376,
+      "post_exit_4h_favorable_pct": 0.37267080745341646,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "PREMATURE",
+      "id": 42,
+      "is_winner": false,
+      "post_exit_4h_adverse_pct": 0.19865450013918,
+      "post_exit_4h_favorable_pct": 2.6307466204361205,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "exit_quality": "REVERSAL_CAUGHT",
+      "id": 47,
+      "is_winner": true,
+      "post_exit_4h_adverse_pct": 1.8644067796610189,
+      "post_exit_4h_favorable_pct": -0.16949152542372897,
+      "symbol": "RUNEUSDT"
+    }
+  ]
+}

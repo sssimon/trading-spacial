@@ -1,0 +1,17 @@
+{
+  "code_commit": "2969fc31a2974448073a955c817f1cdc62a5bb8b",
+  "locks": {
+    "atr_period": 14,
+    "exit_quality_threshold_pct": 1.0,
+    "momentum_lookback": 3,
+    "ohlcv_timeframe": "1h",
+    "post_exit_hours": 4,
+    "rolling_bars": 5,
+    "subset": "curated_10_manual_quality_filtered"
+  },
+  "n_positions": 16,
+  "ohlcv_db_path": "C:\\Users\\simon\\Desktop\\Papa\\trading-spacial\\data\\ohlcv.db",
+  "schema_version": 1,
+  "signals_db_path": "C:\\Users\\simon\\Desktop\\Papa\\trading_backup_extracted\\signals.db",
+  "spec_ref": "docs/superpowers/plans/2026-05-15-exit-market-context-pre-reg.md"
+}
