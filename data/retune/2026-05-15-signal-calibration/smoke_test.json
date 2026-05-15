@@ -1,0 +1,39 @@
+{
+  "cell_args": {
+    "cutoff_iso": "2025-04-30T00:00:00+00:00",
+    "lookbacks_subset": [
+      5,
+      10,
+      20
+    ],
+    "sim_end_iso": "2022-07-01T00:00:00+00:00",
+    "sim_start_iso": "2022-04-01T00:00:00+00:00",
+    "sub_window": "A",
+    "symbol": "BTCUSDT",
+    "vol_target": 0.3
+  },
+  "cell_result": {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "insufficient_data": true,
+    "lookbacks_subset": [
+      5,
+      10,
+      20
+    ],
+    "max_drawdown_pct": -2.67,
+    "n_trades": 2,
+    "net_pnl_usd": 782.84,
+    "profit_factor": 6.01,
+    "sub_window": "A",
+    "symbol": "BTCUSDT",
+    "vol_target": 0.3,
+    "win_rate": 0.5
+  },
+  "code_commit": "b30f6af0b8fba6d57513fa257b5943da777f4312",
+  "elapsed_seconds": 3.53,
+  "harness_wiring_ok": true,
+  "phase": "smoke",
+  "schema_version": 1,
+  "spec_ref": "docs/superpowers/plans/2026-05-15-signal-calibration-pre-reg.md"
+}

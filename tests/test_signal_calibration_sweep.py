@@ -420,3 +420,93 @@ class TestDiagnosticRunner:
         assert cells[0]["symbol"] == "BTCUSDT"
         assert cells[0]["sum_distribution"]["p50"] == 1.5
         assert cells[1]["sum_distribution"]["p50"] == 1.8
+
+
+# ---------------------------------------------------------------------------
+# Module 4: signal_calibration_sweep.py — Phase 3 + Phase 4 runner unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestSweepRunner:
+    def test_phase3_primary_jobs_8_cells_window_a_a1_vol30(self):
+        """Pre-reg §2.5 Phase 3 primary: 8 × Window A × A1 × vol=30%."""
+        from tools.signal_calibration_sweep import (
+            A1_SUBSET, build_phase3_primary_jobs,
+        )
+
+        jobs = build_phase3_primary_jobs(app_config_path="fake/path.json")
+        assert len(jobs) == 8
+        assert all(j["sub_window"] == "A" for j in jobs)
+        assert all(j["vol_target"] == 0.30 for j in jobs)
+        assert all(tuple(j["lookbacks_subset"]) == A1_SUBSET for j in jobs)
+        # A1 subset is exactly (5, 10, 20) per Q-PR6 lock
+        assert A1_SUBSET == (5, 10, 20)
+
+    def test_phase3_sensitivity_jobs_32_cells_4_vol_targets(self):
+        """Pre-reg §2.5 Phase 3 sensitivity: 8 × 4 vol_target = 32 cells."""
+        from tools.signal_calibration_sweep import (
+            SENSITIVITY_VOL_TARGETS, build_phase3_sensitivity_jobs,
+        )
+
+        jobs = build_phase3_sensitivity_jobs(app_config_path="fake/path.json")
+        assert len(jobs) == 32
+        # 4 distinct vol_targets
+        assert {j["vol_target"] for j in jobs} == set(SENSITIVITY_VOL_TARGETS)
+
+    def test_phase4_primary_jobs_17_cells_b_plus_c(self):
+        """Pre-reg §2.5 Phase 4 primary: 8 in B + 9 in C × A1 × vol=30% = 17 cells."""
+        from tools.signal_calibration_sweep import build_phase4_primary_jobs
+
+        jobs = build_phase4_primary_jobs(app_config_path="fake/path.json")
+        assert len(jobs) == 17
+        b_jobs = [j for j in jobs if j["sub_window"] == "B"]
+        c_jobs = [j for j in jobs if j["sub_window"] == "C"]
+        assert len(b_jobs) == 8
+        assert len(c_jobs) == 9
+        # Pre-reg §3 — PENDLE NOT in B (first bar AFTER B end), IS in C
+        b_symbols = {j["symbol"] for j in b_jobs}
+        c_symbols = {j["symbol"] for j in c_jobs}
+        assert "PENDLEUSDT" not in b_symbols
+        assert "PENDLEUSDT" in c_symbols
+
+    def test_aggregate_window_summary_counts_primary_passing_cells(self):
+        """aggregate_window_summary counts cells satisfying §4.2 PRIMARY conditions."""
+        from tools.signal_calibration_sweep import aggregate_window_summary
+
+        cells = [
+            # 6 cells PASS in Window B (n_trades=10, no bankruptcy, win_rate=0.40)
+            {"symbol": s, "sub_window": "B", "vol_target": 0.30,
+             "n_trades": 10, "bankruptcy_count": 0, "win_rate": 0.40}
+            for s in ("BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "UNIUSDT")
+        ] + [
+            # 2 cells FAIL (n_trades < 5)
+            {"symbol": s, "sub_window": "B", "vol_target": 0.30,
+             "n_trades": 2, "bankruptcy_count": 0, "win_rate": 0.40}
+            for s in ("XLMUSDT", "RUNEUSDT")
+        ]
+        summary = aggregate_window_summary(cells, "B")
+        assert summary["n_pass"] == 6
+        assert summary["n_in_coverage"] == 8
+        # 6/8 = 0.75 → just at threshold
+
+    def test_smoke_job_btc_window_a_a1(self):
+        """--smoke produces a single BTC × Window A × A1 × vol=30% job."""
+        from tools.signal_calibration_sweep import A1_SUBSET, build_smoke_job
+
+        job = build_smoke_job(app_config_path="fake/path.json")
+        assert job["symbol"] == "BTCUSDT"
+        assert job["sub_window"] == "A"
+        assert job["vol_target"] == 0.30
+        assert tuple(job["lookbacks_subset"]) == A1_SUBSET
+
+    def test_normalize_win_rate_percent_to_fraction(self):
+        """backtest returns 50.0 for 50%; normalize to 0.50 fraction for verdict layer."""
+        from tools.signal_calibration_sweep import _normalize_win_rate_to_fraction
+
+        assert _normalize_win_rate_to_fraction(50.0) == 0.50
+        assert _normalize_win_rate_to_fraction(100.0) == 1.0
+        assert _normalize_win_rate_to_fraction(0.0) == 0.0
+        # Already-fraction values are passed through (defensive, won't surface
+        # with current backtest but protects against future contract change)
+        assert _normalize_win_rate_to_fraction(0.40) == 0.40
+        assert _normalize_win_rate_to_fraction(0.30) == 0.30

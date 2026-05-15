@@ -119,6 +119,17 @@ def _finite_or(value, fallback: float) -> float:
     return v if math.isfinite(v) else fallback
 
 
+def _normalize_win_rate_to_fraction(value: float) -> float:
+    """backtest.calculate_metrics returns win_rate as percent (0-100); the verdict
+    layer (`WIN_RATE_FLOOR = 0.30`) expects fraction. Normalize at worker boundary.
+
+    Duplicated from tools/signal_calibration_sweep.py per Q-PR2 copy-modify lock
+    (modules independent at boundary). See sweep.py docstring for boundary-case
+    rationale.
+    """
+    return value / 100.0 if value > 1.0 else value
+
+
 def _get_cached_data_with_retry(symbol, timeframe, start_date):
     """get_cached_data with exponential backoff. Multiprocessing-safe (re-imports)."""
     from backtest import get_cached_data
@@ -232,6 +243,10 @@ def _process_phase2_cell(args: dict) -> dict:
     except Exception as exc:  # noqa: BLE001
         err = f"{type(exc).__name__}: {exc}"
 
+    win_rate_fraction = _normalize_win_rate_to_fraction(
+        _finite_or(metrics.get("win_rate", 0.0), 0.0)
+    )
+
     out = {
         "symbol": symbol,
         "sub_window": WINDOW_A_ID,
@@ -241,7 +256,7 @@ def _process_phase2_cell(args: dict) -> dict:
         "profit_factor": round(
             _finite_or(metrics.get("profit_factor", 0.0), _PROFIT_FACTOR_INF_SENTINEL), 4,
         ),
-        "win_rate": round(_finite_or(metrics.get("win_rate", 0.0), 0.0), 4),
+        "win_rate": round(win_rate_fraction, 4),
         "max_drawdown_pct": round(
             _finite_or(metrics.get("max_drawdown_pct", 0.0), 0.0), 4,
         ),
