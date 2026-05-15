@@ -89,7 +89,7 @@ Three independent sub-questions, each with locked pass criterion:
 |---|---|---|
 | **Q1** | Overall edge vs equal-weighted basket B&H | Strategy total_return_pct − basket_bh_return_pct ≥ **1 percentage point** |
 | **Q2** | Operator filtering edge (MANUAL exits vs SL/TP auto exits) | avg(MANUAL P&L) > avg(SL_HIT P&L) AND bootstrap 95% CI on difference excludes 0 |
-| **Q3** | Approved vs rejected signal counterfactual | avg(APPROVED hypothetical_24h_return) − avg(REJECTED hypothetical_24h_return) ≥ **0.5 percentage point** AND bootstrap 95% CI excludes 0 |
+| **Q3** | Approved vs rejected signal counterfactual | avg(APPROVED hypothetical_24h_return) − avg(REJECTED hypothetical_24h_return) ≥ **Q-LE5 threshold (0.5 percentage point)** AND bootstrap 95% CI excludes 0 |
 
 **Q-LE locks** (operator-resolved via AskUserQuestion 2026-05-15):
 
@@ -98,7 +98,8 @@ Three independent sub-questions, each with locked pass criterion:
 | Q-LE1 | B&H benchmark choice | **Equal-weighted basket of 16 traded symbols** (BTC, ETH, RUNE, ZEC, TRX, XAUT, UNI, TON, PENDLE, SUI, SOL, LINK, HBAR, DOGE, XLM, AVAX) |
 | Q-LE2 | Q1 edge threshold | **≥ 1 percentage point** outperformance |
 | Q-LE3 | Counterfactual matching window | **± 1 hour** around `entry_ts` |
-| Q-LE4 | Verdict tree structure | **Tiered**: 3/3 STRONG, 2/3 PARTIAL, 1/3 WEAK, 0/3 NO_EDGE |
+| Q-LE4 | Verdict tree structure | **Tiered**: 3/3 STRONG, 2/3 PARTIAL (3 sub-combos), 1/3 WEAK, 0/3 NO_EDGE |
+| Q-LE5 | Q3 counterfactual threshold | **≥ 0.5 percentage point** (APPROVED − REJECTED hypothetical 24h return). Rationale: Q3 has n ~3,157 vs Q1's effective n=1 → higher statistical power justifies lower minimum effect size (mitad of Q1's 1pp). Combined with bootstrap 95% CI excludes 0. |
 
 ### §2.3 — Q1 operationalization
 
@@ -184,6 +185,7 @@ avg_rejected = MEAN(hypothetical_24h_return_pct for scans WHERE bucket='REJECTED
 bootstrap_diff = BOOTSTRAP(n=10000) of (avg_approved - avg_rejected)
 ci_95 = (percentile(bootstrap_diff, 2.5), percentile(bootstrap_diff, 97.5))
 
+# Q-LE5 lock: ≥ 0.5 percentage point minimum effect size
 Q3_pass = (avg_approved - avg_rejected) >= 0.5 AND ci_95[0] > 0
 ```
 
@@ -192,7 +194,7 @@ Q3_pass = (avg_approved - avg_rejected) >= 0.5 AND ci_95[0] > 0
 **Methodological:**
 - Hypothetical return assumes operator could have traded AT signal_ts at signal_price. Real execution would have slippage + spread. v2 cost model (Almgren-Chriss sqrt-participation, PR #341) NOT applied to counterfactual — too computationally heavy for ~3K signals. Acknowledge as upper-bound on rejected returns; effect on Q3 verdict directional (rejected returns slightly inflated; if APPROVED > REJECTED gap is robust, more confident).
 - Direction (LONG vs SHORT) inferred from `scan.estado` string ('SHORT' substring). Edge case: ambiguous cases → flag, not include.
-- 24h forward window arbitrary. Sensitivity sub-analysis: compute 1h, 4h, 24h, 72h returns; report whether Q3 verdict robust to window choice.
+- **Primary verdict uses 24h forward window** (established in §2.5 `hypothetical_24h_return_pct` definition). 1h, 4h, 72h returns computed only as informational sensitivity views; the primary Q3 verdict criterion is locked to 24h to prevent post-hoc window-choice cherry-picking. If sensitivity views diverge materially from 24h primary, flag in audit doc but do NOT override primary verdict.
 
 **Data:**
 - Some scans may have NULL price or be near OHLCV gaps. Exclude from counterfactual.
@@ -205,7 +207,9 @@ Q3_pass = (avg_approved - avg_rejected) >= 0.5 AND ci_95[0] > 0
 | Verdict | Condition | Action |
 |---|---|---|
 | **EDGE_STRONG** | Q1 ∧ Q2 ∧ Q3 all pass | Strong evidence of operator-filtered edge. Commit to operator-tooling investment (Direction A original framing). Open follow-up epic. |
-| **EDGE_PARTIAL** | Exactly 2 of 3 pass | Operator review required. Which dimension failed? Could be regime artifact, methodology choice, or genuine partial edge. Document + decide next iteration scope. |
+| **EDGE_PARTIAL_RETURN_FILTER** | Q1 ∧ Q2 ∧ ¬Q3 | Strategy beats B&H + operator filtering edge confirmed, but counterfactual fails. Interpretation: operator's MANUAL closes may capture edge that signal-at-entry alone doesn't (exit-timing edge), OR matching window misclassified positions. Action: dig deeper into MANUAL exit timing distribution + sensitivity views on match window. |
+| **EDGE_PARTIAL_RETURN_SELECTION** | Q1 ∧ Q3 ∧ ¬Q2 | Strategy beats B&H + operator selects winners (counterfactual pass), but MANUAL doesn't differ from SL_HIT. Interpretation: operator's edge is in entry selection, not exit timing. Letting SL fire is equivalent to manual closing. Action: focus follow-up on entry filtering signal (Direction A Phase D3 scope), de-prioritize exit-timing tooling. |
+| **EDGE_PARTIAL_FILTER_SELECTION** | Q2 ∧ Q3 ∧ ¬Q1 | Operator filtering + selection edge confirmed, but absolute return below B&H. Interpretation: regime artifact most likely (B&H went up a lot during window, operator's risk-adjusted edge real but absolute lagged). Action: extend evaluation window OR use risk-adjusted metric (Sharpe-like) in follow-up before committing to operator-tooling investment. |
 | **EDGE_WEAK** | Exactly 1 of 3 pass | Marginal evidence. Consider Direction B (signal-family swap) or C (asset swap) before more iterations of Direction A. |
 | **NO_EDGE** | All 3 fail | Strong evidence against operator-filtered edge. Operator decides: ramp-down, switch to alternative directions, or pivot to entirely different research. |
 | **INSUFFICIENT_DATA** | Data quality issues prevent ≥ 1 sub-question evaluation | Halt; document gaps. Likely require instrumentation + data collection going forward. |
@@ -303,10 +307,10 @@ Analysis script(s) lives in repo at `tools/live_edge_analysis.py` (NEW). NO modi
 | Q2 comparison | avg(MANUAL P&L) vs avg(SL_HIT P&L) | §2.4 |
 | Q2 threshold | avg(MANUAL) > avg(SL_HIT) AND bootstrap 95% CI excludes 0 | §2.4 |
 | Q3 matching | ± 1 hour around entry_ts (symbol-matched) | Q-LE3 lock |
-| Q3 counterfactual | 24h forward return from OHLCV; direction inferred from estado string | §2.5 |
-| Q3 threshold | (avg(APPROVED) − avg(REJECTED)) ≥ 0.5 pp AND bootstrap 95% CI excludes 0 | §2.5 |
+| Q3 counterfactual primary window | **24h forward return** from OHLCV (1h/4h/72h informational sensitivity only); direction inferred from estado string | §2.5, §2.6 |
+| Q3 threshold | (avg(APPROVED) − avg(REJECTED)) ≥ 0.5 pp AND bootstrap 95% CI excludes 0 | Q-LE5 lock |
 | Bootstrap iterations | 10,000 | §4.4 |
-| Verdict tree | Tiered (3/3 STRONG, 2/3 PARTIAL, 1/3 WEAK, 0/3 NO_EDGE) | Q-LE4 lock |
+| Verdict tree | Tiered: 3/3 STRONG, 2/3 PARTIAL (3 sub-combos: RETURN_FILTER / RETURN_SELECTION / FILTER_SELECTION), 1/3 WEAK, 0/3 NO_EDGE | Q-LE4 lock |
 | Auto-advance | Only on EDGE_STRONG; all others operator decision | §3 |
 | Live-path safety | Read-only on backup; production untouched | §5 |
 | Single-iteration discipline | First iteration on this dataset; no Phase D1.5 | §1.3, §6 |
@@ -375,7 +379,10 @@ Default §A.4 prose convention (CLAUDE.md auto-memory 2026-05-15). PyMC skill NO
 
 **Joint priors (under assumption of partial independence):**
 - P(EDGE_STRONG = 3/3): ~8-12%
-- P(EDGE_PARTIAL = 2/3): ~30-40%
+- P(EDGE_PARTIAL = 2/3, any of 3 sub-combos): ~30-40%
+  - P(EDGE_PARTIAL_RETURN_FILTER = Q1∧Q2∧¬Q3): ~10-15% (Q2 is strongest preliminary; Q3 most uncertain)
+  - P(EDGE_PARTIAL_RETURN_SELECTION = Q1∧Q3∧¬Q2): ~8-12%
+  - P(EDGE_PARTIAL_FILTER_SELECTION = Q2∧Q3∧¬Q1): ~10-15%
 - P(EDGE_WEAK = 1/3): ~30%
 - P(NO_EDGE = 0/3): ~15-25%
 - P(INSUFFICIENT_DATA): ~5%
@@ -383,7 +390,9 @@ Default §A.4 prose convention (CLAUDE.md auto-memory 2026-05-15). PyMC skill NO
 ### Bayesian update plan (post-Phase-D2):
 
 - **EDGE_STRONG**: P(live edge real) → ~70-80%; commit to Direction A Phase D3 (operator-tooling).
-- **EDGE_PARTIAL**: P(live edge partial) → ~40-55%; operator decides which dimension to follow up vs pivot to B/C.
+- **EDGE_PARTIAL_RETURN_FILTER** (Q1∧Q2∧¬Q3): P(exit-timing edge real, entry-selection unclear) → ~40-50%; follow-up on MANUAL exit timing distribution.
+- **EDGE_PARTIAL_RETURN_SELECTION** (Q1∧Q3∧¬Q2): P(entry-selection edge real, exit-timing not edge) → ~40-50%; focus follow-up on entry filtering signal.
+- **EDGE_PARTIAL_FILTER_SELECTION** (Q2∧Q3∧¬Q1): P(filtering+selection real but regime-masked) → ~30-45%; extend window or use risk-adjusted metric before Phase D3.
 - **EDGE_WEAK**: P(live edge marginal) → ~15-25%; lean toward Direction B/C exploration.
 - **NO_EDGE**: P(live edge absent) → ~75-85%; strong signal for ramp-down or fundamental research pivot.
 - **INSUFFICIENT_DATA**: P preserved at prior; identify data gap remediation.
@@ -412,6 +421,7 @@ Default §A.4 prose convention (CLAUDE.md auto-memory 2026-05-15). PyMC skill NO
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-15 | Pre-reg initial draft. Q-LE1..Q-LE4 locked via AskUserQuestion. Reconnaissance findings incorporated (data quality + signal_outcomes empty + scan_id NULL handling). Mirror del epic C pre-reg pattern, lighter scope (no sweep grid, single dataset analysis). | Claude Opus 4.7 + sssamuelll |
+| 2026-05-15 | **Review-fix amendments** (PR #356 reviewer feedback, 3 FLEXIBLE items): (1) Q-LE5 lock added formalizing Q3 threshold ≥ 0.5 pp with statistical-power rationale; (2) §3 EDGE_PARTIAL enumerated into 3 sub-combos (RETURN_FILTER / RETURN_SELECTION / FILTER_SELECTION) with distinct actions; (3) §2.6 re-affirms primary verdict uses 24h window (sensitivity views informational only); §7 summary table + §10 Bayesian priors updated to reflect enumeration. | Claude Opus 4.7 + sssamuelll |
 | TBD | Operator re-review + final approval | sssamuelll |
 | TBD | Phase D1 pre-reg PR merged | sssamuelll |
 | TBD | Phase D2 execution (separate PR after this pre-reg merge) | sssamuelll + Claude Opus 4.7 |
