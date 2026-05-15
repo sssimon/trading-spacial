@@ -264,3 +264,126 @@ def compute_ensemble_history(
     df["n_flat"] = n_lookbacks - df["n_long"] - df["n_short"]
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Epic C Phase 1 — observability instrumentation + A1 subset intervention
+# Pre-reg `docs/superpowers/plans/2026-05-15-signal-calibration-pre-reg.md`
+#   §2.1 schema lock (lines 99-126) + Q-PR6 A1 subset = (5, 10, 20)
+# ---------------------------------------------------------------------------
+
+
+def emit_observability_metrics(history_df: pd.DataFrame) -> dict:
+    """Emit per-lookback + aggregate observability for Phase 2 diagnostic verdict.
+
+    Pre-reg §2.1 locks the output schema literal. Used to distinguish H-signal-A
+    (dilution: short-lookbacks fire but aggregate vote dampened by flat
+    long-lookbacks) from H-signal-B (no-firing-enough: signals barely fire at
+    any lookback). Schema rationale per pre-reg comment line 105: magnitude_*
+    fields under per_lookback are aggregate |sum| stats replicated for
+    ergonomic access — same value across all N.
+
+    Args:
+        history_df: output of `compute_ensemble_history`. Must contain
+            `dir_{N}` columns and a `vote` column.
+
+    Returns:
+        {
+            "per_lookback": {
+                N: {
+                    "lookback_days", "count_long", "count_short", "count_flat",
+                    "firing_count",
+                    "magnitude_mean", "magnitude_std",
+                    "magnitude_p50", "magnitude_p95",
+                },
+                ...
+            },
+            "sum_distribution": {
+                "mean", "std", "p25", "p50", "p75", "p95", "bars_total",
+            },
+        }
+
+    Raises:
+        ValueError: history_df is empty, missing `dir_N` columns, or missing `vote`.
+    """
+    if len(history_df) == 0:
+        raise ValueError("history_df is empty; need at least one bar")
+
+    dir_cols = [c for c in history_df.columns if c.startswith("dir_")]
+    if not dir_cols:
+        raise ValueError(
+            "history_df missing dir_N columns; pass output of compute_ensemble_history"
+        )
+
+    if "vote" not in history_df.columns:
+        raise ValueError(
+            "history_df missing 'vote' column; pass output of compute_ensemble_history"
+        )
+
+    lookbacks = sorted(int(c.removeprefix("dir_")) for c in dir_cols)
+
+    abs_vote = history_df["vote"].abs()
+    sum_distribution = {
+        "mean": float(abs_vote.mean()),
+        "std": float(abs_vote.std(ddof=0)),
+        "p25": float(abs_vote.quantile(0.25)),
+        "p50": float(abs_vote.quantile(0.50)),
+        "p75": float(abs_vote.quantile(0.75)),
+        "p95": float(abs_vote.quantile(0.95)),
+        "bars_total": int(len(history_df)),
+    }
+
+    per_lookback: dict[int, dict] = {}
+    for n in lookbacks:
+        col = history_df[f"dir_{n}"]
+        count_long = int((col == 1).sum())
+        count_short = int((col == -1).sum())
+        count_flat = int((col == 0).sum())
+        per_lookback[n] = {
+            "lookback_days": n,
+            "count_long": count_long,
+            "count_short": count_short,
+            "count_flat": count_flat,
+            "firing_count": count_long + count_short,
+            "magnitude_mean": sum_distribution["mean"],
+            "magnitude_std": sum_distribution["std"],
+            "magnitude_p50": sum_distribution["p50"],
+            "magnitude_p95": sum_distribution["p95"],
+        }
+
+    return {
+        "per_lookback": per_lookback,
+        "sum_distribution": sum_distribution,
+    }
+
+
+def apply_subset_lookbacks(
+    *,
+    closes: pd.Series,
+    highs: pd.Series,
+    lows: pd.Series,
+    lookbacks_subset: tuple[int, ...] = (5, 10, 20),
+) -> pd.DataFrame:
+    """A1 intervention: restrict Donchian ensemble to a subset of lookbacks.
+
+    Pre-reg Q-PR6 lock: default A1 subset = (5, 10, 20). Used in Phase 3 IF
+    Phase 2 verdict = A_DETECTED. Thin wrapper around `compute_ensemble_history`
+    that documents intent at the call site (epic C A-set intervention vs
+    general-purpose ensemble computation).
+
+    Args:
+        closes, highs, lows: same as `compute_ensemble_history`.
+        lookbacks_subset: tuple of lookbacks to use. Default `(5, 10, 20)` per
+            Q-PR6. Must be non-empty.
+
+    Returns:
+        DataFrame from `compute_ensemble_history(lookbacks=lookbacks_subset)`.
+
+    Raises:
+        ValueError: lookbacks_subset is empty.
+    """
+    if not lookbacks_subset:
+        raise ValueError("lookbacks_subset is empty; A1 requires ≥ 1 lookback")
+    return compute_ensemble_history(
+        closes=closes, highs=highs, lows=lows, lookbacks=lookbacks_subset,
+    )
