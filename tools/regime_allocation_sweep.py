@@ -231,7 +231,6 @@ def _finite_or(value, fallback: float) -> float:
     """Coerce float to JSON-compliant finite. Use on metric fields where
     upstream calculate_metrics may emit math.inf (zero denominator).
     Mirrors _save_json's allow_nan=False discipline at the worker layer."""
-    import math
     v = float(value)
     return v if math.isfinite(v) else fallback
 
@@ -308,6 +307,14 @@ def _process_regime_allocation_cell(args: dict) -> dict:
 
     # df4h/df5m are unused by the regime-allocation path but required by
     # simulate_strategy's signature. Pass empty placeholders.
+    #
+    # CONTRACT (per epic #338 §4.2 + Phase 1C PR #345): when
+    # cfg.regime_allocation.enabled = True, _simulate_strategy_regime_allocation
+    # MUST NOT read df4h or df5m. The branch dispatches on the flag and
+    # only consumes df1h + df1d. If a future change to backtest.py begins
+    # touching df4h/df5m under the flag, this placeholder will silently
+    # propagate empty frames and produce undefined results. Asserted
+    # implicitly by the 104-test sweep + #345 byte-identical regression.
     empty_ohlcv = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
     err = None
@@ -374,6 +381,16 @@ def _process_regime_allocation_cell(args: dict) -> dict:
             # funding_cost_bps is on the notional; convert to USD via the
             # ratio funding/total_cost × total_cost_usd. Cheap and avoids
             # re-computing from bps.
+            #
+            # INVARIANT (per backtest.py cost model v2 PR #341): for any
+            # closed trade, total_cost_bps >= funding_cost_bps because
+            # total_cost_bps = slippage_cost_bps + funding_cost_bps (both
+            # non-negative). Therefore tc_bps == 0 implies f_bps == 0, and
+            # the silent `funding_usd = 0` in the else-branch is correct
+            # under invariant. If the invariant ever breaks upstream
+            # (e.g., negative slippage allowed), this site silently
+            # under-attributes funding cost — diagnose at backtest_costs.py
+            # rather than here.
             tc_bps = float(t.get("total_cost_bps", 0.0)) or 0.0
             tc_usd = float(t.get("total_cost_usd", 0.0)) or 0.0
             f_bps = float(t.get("funding_cost_bps", 0.0)) or 0.0
@@ -450,6 +467,14 @@ def _compute_btc_bh_baseline(args: dict) -> dict:
         df = df[df.index < cutoff_naive]
 
     # Find the first daily close >= sim_start and the last daily close <= sim_end.
+    #
+    # CONVENTION: `< sim_end_naive` (strict, NOT `<=`). The exact-boundary
+    # bar at sim_end is excluded. For Window C, sim_end = 2025-04-30 =
+    # holdout_start cutoff — strict < preserves anti-leakage (no bar at
+    # holdout boundary touched). For Windows A/B, the boundary bar at
+    # 2022-07-01 / 2023-07-01 is symmetrically excluded for consistency.
+    # All sub-window boundary handling in this file (BTC B&H + Hubrich)
+    # follows the same `[sim_start_naive, sim_end_naive)` semi-open interval.
     in_window = df[(df.index >= sim_start_naive) & (df.index < sim_end_naive)]
 
     if in_window.empty or len(in_window) < 2:

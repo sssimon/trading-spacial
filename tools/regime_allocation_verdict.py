@@ -67,7 +67,6 @@ Exit codes:
 from __future__ import annotations
 
 import json
-import statistics
 import sys
 from pathlib import Path
 from typing import Final
