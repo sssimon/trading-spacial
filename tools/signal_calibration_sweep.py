@@ -403,8 +403,12 @@ def build_smoke_job(app_config_path: str) -> dict:
 def aggregate_window_summary(cells: list[dict], window_id: str) -> dict:
     """For Phase 4 verdict, count `n_pass` over in-coverage cells in a window.
 
-    PRIMARY conditions per cell: n_trades ≥ 5 ∧ no bankruptcies ∧ win_rate ≥ 30%.
+    Delegates PRIMARY conditions (n_trades ≥ 5 ∧ no bankruptcies ∧ win_rate ≥ 30%)
+    to `signal_calibration_verdict.primary_cell_passes` — single source of truth
+    keeps WIN_RATE_FLOOR drift impossible if tuning later changes Q-PR3 lock.
     """
+    from tools.signal_calibration_verdict import primary_cell_passes
+
     in_cov = set(COVERAGE_BY_WINDOW[window_id])
     eligible = [
         c for c in cells
@@ -412,12 +416,7 @@ def aggregate_window_summary(cells: list[dict], window_id: str) -> dict:
         and c.get("symbol") in in_cov
         and abs(float(c.get("vol_target", 0.0)) - PRIMARY_VOL_TARGET) < 1e-9
     ]
-    n_pass = sum(
-        1 for c in eligible
-        if c.get("n_trades", 0) >= 5
-        and c.get("bankruptcy_count", 0) == 0
-        and c.get("win_rate", 0.0) >= 0.30
-    )
+    n_pass = sum(1 for c in eligible if primary_cell_passes(c))
     return {
         "window_id": window_id,
         "n_pass": n_pass,
@@ -430,7 +429,12 @@ def aggregate_sensitivity_per_window(
     sensitivity_cells: list[dict],
     window_id: str,
 ) -> dict:
-    """For Phase 4 sensitivity verdict input — count vol_target PASS in this window."""
+    """For Phase 4 sensitivity verdict input — count vol_target PASS in this window.
+
+    Delegates PRIMARY conditions to `primary_cell_passes` (see aggregate_window_summary).
+    """
+    from tools.signal_calibration_verdict import primary_cell_passes
+
     in_cov = set(COVERAGE_BY_WINDOW[window_id])
     threshold = _halt_count_threshold(len(in_cov))
 
@@ -443,12 +447,7 @@ def aggregate_sensitivity_per_window(
 
     n_pass = 0
     for cells_at_vt in by_vt.values():
-        n_cells_pass = sum(
-            1 for c in cells_at_vt
-            if c.get("n_trades", 0) >= 5
-            and c.get("bankruptcy_count", 0) == 0
-            and c.get("win_rate", 0.0) >= 0.30
-        )
+        n_cells_pass = sum(1 for c in cells_at_vt if primary_cell_passes(c))
         if n_cells_pass >= threshold:
             n_pass += 1
     return {
@@ -567,6 +566,29 @@ def _run_phase4(args) -> int:
     from tools.signal_calibration_verdict import classify_phase4_verdict
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Sequencing check: Phase 4 walk-forward requires Phase 3 PASS verdict on disk.
+    # Mirrors #349 BLOCK #2 discipline + pre-reg §4.5 operator gating. Operator
+    # override = delete phase3_verdict.json (signals explicit decision to bypass).
+    phase3_verdict_path = OUTPUT_DIR / "phase3_verdict.json"
+    if not phase3_verdict_path.exists():
+        sys.stderr.write(
+            f"ERROR: {phase3_verdict_path} missing. Phase 4 walk-forward requires "
+            "Phase 3 PASS verdict; run --phase 3 first.\n"
+        )
+        return 1
+    with open(phase3_verdict_path) as f:
+        phase3_verdict_data = json.load(f)
+    phase3_verdict_label = phase3_verdict_data.get("verdict")
+    pass_set = {"PHASE_3_A_PASS", "PHASE_3_A_PASS_CONDITIONAL"}
+    if phase3_verdict_label not in pass_set:
+        sys.stderr.write(
+            f"ERROR: Phase 3 verdict = {phase3_verdict_label!r}; Phase 4 only valid "
+            f"after PASS verdicts {pass_set}. Operator override = delete "
+            "phase3_verdict.json + open sub-spec doc per pre-reg §4.5 self-policing.\n"
+        )
+        return 1
+    print(f"[phase4] Phase 3 verdict OK: {phase3_verdict_label}")
 
     primary_jobs = build_phase4_primary_jobs(args.app_config)
     print(f"[phase4] primary: {len(primary_jobs)} cells (B + C walk-forward)")

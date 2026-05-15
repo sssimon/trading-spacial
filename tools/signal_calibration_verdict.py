@@ -186,7 +186,7 @@ def classify_phase2_verdict(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _primary_cell_passes(cell: dict) -> bool:
+def primary_cell_passes(cell: dict) -> bool:
     """Pre-reg §4.2 PRIMARY conditions per cell:
       n_trades ≥ 5 ∧ no bankruptcies ∧ win_rate ≥ 30% (Q-PR3).
     """
@@ -228,7 +228,7 @@ def _count_sensitivity_vol_target_pass(
 
     n_pass = 0
     for cells in by_vt.values():
-        n_cells_pass = sum(1 for c in cells if _primary_cell_passes(c))
+        n_cells_pass = sum(1 for c in cells if primary_cell_passes(c))
         if n_cells_pass >= threshold:
             n_pass += 1
     return n_pass
@@ -284,7 +284,7 @@ def classify_phase3_verdict(
         }
 
     threshold = _aggregate_match_threshold(in_coverage_count)
-    n_pass = sum(1 for c in primary_cells if _primary_cell_passes(c))
+    n_pass = sum(1 for c in primary_cells if primary_cell_passes(c))
     n_sens_pass = _count_sensitivity_vol_target_pass(sensitivity_cells, in_coverage_count)
 
     if n_pass >= threshold:
@@ -462,10 +462,20 @@ def main() -> int:
         out["phase2"] = phase2_result
 
     if phase3_primary is not None and isinstance(phase3_primary, list):
+        # Load baseline win_rates from Phase 2 diagnostic so H-C4 (intervention
+        # win_rate < 50% of baseline) can fire if applicable. Without this load
+        # the CLI silently disabled H-C4 — sweep tool's _run_phase3 does the same
+        # extraction (single source of truth: phase2_diagnostic.json).
+        baseline_win_rates: dict[str, float] = {}
+        if phase2_diag is not None and isinstance(phase2_diag, list):
+            for c in phase2_diag:
+                if isinstance(c, dict) and "symbol" in c:
+                    baseline_win_rates[c["symbol"]] = float(c.get("win_rate", 0.0))
+
         phase3_result = classify_phase3_verdict(
             phase3_primary,
             phase3_sensitivity if isinstance(phase3_sensitivity, list) else [],
-            baseline_win_rates={},
+            baseline_win_rates=baseline_win_rates,
             in_coverage_count=8,
             halt=halt,
         )

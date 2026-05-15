@@ -510,3 +510,7 @@ class TestSweepRunner:
         # with current backtest but protects against future contract change)
         assert _normalize_win_rate_to_fraction(0.40) == 0.40
         assert _normalize_win_rate_to_fraction(0.30) == 0.30
+        # Boundary case docstring-locked: 1.0 exact is ambiguous (could be 1% or 100%).
+        # Strict `>` operator treats 1.0 as fraction (preserved as-is). Locking this
+        # behavior prevents future refactors from silently flipping the semantic.
+        assert _normalize_win_rate_to_fraction(1.0) == 1.0
