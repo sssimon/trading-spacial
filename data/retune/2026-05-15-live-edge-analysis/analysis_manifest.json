@@ -1,0 +1,36 @@
+{
+  "bootstrap_n": 10000,
+  "bootstrap_seed": 20260515,
+  "code_commit": "2969fc31a2974448073a955c817f1cdc62a5bb8b",
+  "locks": {
+    "Q_LE1_amendment_note": "Restricted from 16 traded -> curated 10 (operator decision 2026-05-15)",
+    "Q_LE1_basket": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "PENDLEUSDT",
+      "JUPUSDT",
+      "RUNEUSDT"
+    ],
+    "Q_LE2_q1_threshold_pp": 1.0,
+    "Q_LE3_match_window_hours": 1.0,
+    "Q_LE4_verdict_tree": "tiered",
+    "Q_LE5_q3_threshold_pp": 0.5
+  },
+  "ohlcv_db_path": "C:\\Users\\simon\\Desktop\\Papa\\trading-spacial\\data\\ohlcv.db",
+  "primary_forward_window_h": 24,
+  "schema_version": 1,
+  "sensitivity_forward_windows_h": [
+    1,
+    4,
+    72
+  ],
+  "signals_db_path": "C:\\Users\\simon\\Desktop\\Papa\\trading_backup_extracted\\signals.db",
+  "spec_ref": "docs/superpowers/plans/2026-05-15-live-edge-analysis-pre-reg.md",
+  "window_end_iso": "2026-05-07T23:59:59+00:00",
+  "window_start_iso": "2026-03-30T00:00:00+00:00"
+}

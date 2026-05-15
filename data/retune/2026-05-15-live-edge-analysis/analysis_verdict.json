@@ -1,0 +1,9 @@
+{
+  "auto_advance_to_phase_d3": false,
+  "n_pass": 1,
+  "operator_decision_required": true,
+  "q1_pass": false,
+  "q2_pass": true,
+  "q3_pass": false,
+  "verdict": "EDGE_WEAK"
+}

@@ -1,0 +1,67 @@
+{
+  "basket_bh_return_pct": 22.0365,
+  "gap_pct": -21.2649,
+  "n_positions_in_strategy": 20,
+  "n_positions_sized": 19,
+  "n_symbols_in_basket": 10,
+  "n_symbols_with_data": 10,
+  "per_symbol_basket": {
+    "ADAUSDT": {
+      "price_end": 0.2627,
+      "price_start": 0.2421,
+      "return_pct": 8.508880627839726
+    },
+    "AVAXUSDT": {
+      "price_end": 9.5,
+      "price_start": 8.67,
+      "return_pct": 9.573241061130336
+    },
+    "BTCUSDT": {
+      "price_end": 80006.0,
+      "price_start": 66280.25,
+      "return_pct": 20.708657556361057
+    },
+    "DOGEUSDT": {
+      "price_end": 0.10783,
+      "price_start": 0.09128,
+      "return_pct": 18.131025416301487
+    },
+    "ETHUSDT": {
+      "price_end": 2291.06,
+      "price_start": 1997.25,
+      "return_pct": 14.710727249968706
+    },
+    "JUPUSDT": {
+      "price_end": 0.206,
+      "price_start": 0.1442,
+      "return_pct": 42.857142857142854
+    },
+    "PENDLEUSDT": {
+      "price_end": 1.872,
+      "price_start": 1.126,
+      "return_pct": 66.25222024866788
+    },
+    "RUNEUSDT": {
+      "price_end": 0.564,
+      "price_start": 0.395,
+      "return_pct": 42.78481012658226
+    },
+    "UNIUSDT": {
+      "price_end": 3.434,
+      "price_start": 3.382,
+      "return_pct": 1.5375517445298652
+    },
+    "XLMUSDT": {
+      "price_end": 0.1582,
+      "price_start": 0.166,
+      "return_pct": -4.698795180722892
+    }
+  },
+  "q1_pass": false,
+  "strategy_capital_basis_usd": 7250.0,
+  "strategy_pnl_usd": 55.9415,
+  "strategy_return_pct": 0.7716,
+  "threshold_pp": 1.0,
+  "window_end_iso": "2026-05-07T23:59:59+00:00",
+  "window_start_iso": "2026-03-30T00:00:00+00:00"
+}

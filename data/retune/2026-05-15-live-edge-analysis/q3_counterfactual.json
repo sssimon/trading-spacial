@@ -1,0 +1,95 @@
+{
+  "bootstrap_n": 10000,
+  "bootstrap_seed": 20260515,
+  "by_forward_window": {
+    "1": {
+      "bootstrap_diff_approved_minus_rejected": {
+        "ci_excludes_zero": false,
+        "ci_high": 0.1999722297213775,
+        "ci_low": -0.9258177307029115,
+        "diff": -0.331256599276868,
+        "mean_a": -0.1279791435938134,
+        "mean_b": 0.2032774556830546,
+        "n_a": 13,
+        "n_b": 1409
+      },
+      "mean_approved_pct": -0.1279791435938134,
+      "mean_rejected_pct": 0.2032774556830546,
+      "n_approved": 13,
+      "n_ohlcv_unavailable": 0,
+      "n_rejected": 1409
+    },
+    "24": {
+      "bootstrap_diff_approved_minus_rejected": {
+        "ci_excludes_zero": false,
+        "ci_high": 1.2824387821251082,
+        "ci_low": -1.4619688459673068,
+        "diff": -0.12228334648764172,
+        "mean_a": 0.4070194774451421,
+        "mean_b": 0.5293028239327838,
+        "n_a": 13,
+        "n_b": 1409
+      },
+      "mean_approved_pct": 0.4070194774451421,
+      "mean_rejected_pct": 0.5293028239327838,
+      "n_approved": 13,
+      "n_ohlcv_unavailable": 0,
+      "n_rejected": 1409
+    },
+    "4": {
+      "bootstrap_diff_approved_minus_rejected": {
+        "ci_excludes_zero": false,
+        "ci_high": 0.41222076328954826,
+        "ci_low": -0.8606846058572799,
+        "diff": -0.1808069665801134,
+        "mean_a": -0.010228017431743935,
+        "mean_b": 0.17057894914836946,
+        "n_a": 13,
+        "n_b": 1409
+      },
+      "mean_approved_pct": -0.010228017431743935,
+      "mean_rejected_pct": 0.17057894914836946,
+      "n_approved": 13,
+      "n_ohlcv_unavailable": 0,
+      "n_rejected": 1409
+    },
+    "72": {
+      "bootstrap_diff_approved_minus_rejected": {
+        "ci_excludes_zero": false,
+        "ci_high": 0.9346569135505313,
+        "ci_low": -3.7856939980199917,
+        "diff": -1.55381796538022,
+        "mean_a": 0.5220079476582782,
+        "mean_b": 2.075825913038498,
+        "n_a": 13,
+        "n_b": 1409
+      },
+      "mean_approved_pct": 0.5220079476582782,
+      "mean_rejected_pct": 2.075825913038498,
+      "n_approved": 13,
+      "n_ohlcv_unavailable": 0,
+      "n_rejected": 1409
+    }
+  },
+  "match_window_hours": 1.0,
+  "n_approved": 13,
+  "n_no_scan_match_positions": 7,
+  "n_signal_scans_in_window": 1422,
+  "no_scan_match_position_ids": [
+    1,
+    7,
+    24,
+    25,
+    27,
+    31,
+    33
+  ],
+  "primary_window_hours": 24,
+  "q3_pass": false,
+  "sensitivity_windows_hours": [
+    1,
+    4,
+    72
+  ],
+  "threshold_pp": 0.5
+}

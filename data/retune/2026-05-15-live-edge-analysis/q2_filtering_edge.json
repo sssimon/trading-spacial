@@ -1,0 +1,33 @@
+{
+  "bootstrap_diff_manual_minus_sl_hit": {
+    "ci_excludes_zero": true,
+    "ci_high": 15.34404328125,
+    "ci_low": 3.8117778125000004,
+    "diff": 10.04009375,
+    "mean_a": 4.805093749999999,
+    "mean_b": -5.235,
+    "n_a": 16,
+    "n_b": 4
+  },
+  "bootstrap_n": 10000,
+  "bootstrap_seed": 20260515,
+  "manual": {
+    "mean_pnl_usd": 4.805093749999999,
+    "n": 16,
+    "std_pnl_usd": 12.32679142077498,
+    "sum_pnl_usd": 76.88149999999999
+  },
+  "q2_pass": true,
+  "sl_hit": {
+    "mean_pnl_usd": -5.235,
+    "n": 4,
+    "std_pnl_usd": 1.0111327080721568,
+    "sum_pnl_usd": -20.94
+  },
+  "tp_hit": {
+    "mean_pnl_usd": 0.0,
+    "n": 0,
+    "std_pnl_usd": 0.0,
+    "sum_pnl_usd": 0.0
+  }
+}

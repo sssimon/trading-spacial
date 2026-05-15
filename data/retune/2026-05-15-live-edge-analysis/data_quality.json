@@ -1,0 +1,19 @@
+{
+  "amendment_2026_05_15": "Q-LE1 amended: basket restricted from 16 traded symbols to curated 10 (CLAUDE.md DEFAULT_SYMBOLS) after finding 6 off-curated traded symbols (LINK, SOL, TON, TRX, XAUT, ZEC) lack OHLCV cache. Operator rationale: 'antes ten\u00edamos 20 y curamos a 10, trabajemos con las 10 que tenemos actualmente'.",
+  "exclusions_log": {
+    "anomalies_zero_pnl_entry_eq_exit": 7,
+    "off_curated_closed": 16,
+    "off_curated_symbols": [
+      "LINKUSDT",
+      "SOLUSDT",
+      "TONUSDT",
+      "TRXUSDT",
+      "XAUTUSDT",
+      "ZECUSDT"
+    ],
+    "total_closed": 43,
+    "total_positions": 47
+  },
+  "q3_no_scan_match_count": 7,
+  "real_subset_count": 20
+}
