@@ -287,7 +287,7 @@ ELSE:  # mixed evidence
 
 **Per-symbol vs aggregate decision rule:** counts + magnitudes are computed **per cell** (per (símbolo, sub-window) pair). Verdict is computed at **aggregate level**: A_DETECTED if ≥ 6 of 8 in-coverage símbolos satisfy `counts_A_evidence AND magnitudes_A_evidence` individually (≥75% match heredar del #338 §10.4 threshold pattern; concrete count ≥6 in Window A coverage of 8 símbolos). Otherwise AMBIGUOUS or B_DETECTED depending on the split.
 
-**Tie-break:** if exactly 4/8 símbolos show A-evidence and 4/8 don't, verdict = AMBIGUOUS (operator escalation).
+**Worked example — 4/8 split (post-review 2026-05-15 clarification):** if exactly 4 of 8 in-coverage símbolos show A-evidence and 4 don't, the verdict falls into AMBIGUOUS via the "else" clause above (does not satisfy ≥6/8 for A_DETECTED, does not satisfy ≥6/8 NOT-A for B_DETECTED). Listed explicitly here so operator interpretation of edge cases is unambiguous. NOT a separate rule — derives directly from the verdict logic.
 
 ### §4.2 — Phase 3 sweep primary criterion (post A_DETECTED)
 
@@ -533,12 +533,13 @@ data/retune/2026-05-15-signal-calibration/
 
 La mayoría de decisiones materiales están locked vía Q1-Q6 (epic C spec) + Q-PR1..Q-PR6 (este pre-reg). Las preguntas restantes son operationalization details — operator review desired antes de Phase 1 execution.
 
-### §9.1 — [REQUIRED before Phase 1] Confirm baseline benchmark execution scope
+### §9.1 — [RESOLVED 2026-05-15 post-review] Baseline benchmark execution scope
 
-Per §2.5: baseline benchmarks heredables del #338 Phase 3 (PR #349 draft). Si #349 sigue draft cuando Phase 3 epic C arranca, baselines deben re-generarse:
+**LOCKED:** Path (a) — reuse #338 baselines si PR #349 mergeada antes de Phase 3 epic C arranque. Recommended merge order de cross-PR review establece #349 → #353 → Phase 1, así que la condición se satisface naturalmente.
 
-- (a) **Re-use #338 baseline si #349 mergeada (Recommended)** — depende de timing operator. Si #349 mergeada antes de Phase 3 epic C, reuse `data/retune/2026-05-14-regime-allocation/baseline_*.json` directly. Saves 15-20 min compute.
-- (b) Re-generate fresh baselines regardless — defensive against schema drift. +15-20 min compute, asegura consistency.
+**Fallback (b):** Si por timing operator #349 NO está mergeada cuando Phase 3 epic C arranque, re-generar fresh baselines (+15-20 min compute). Decisión deterministic, NO deferred — el harness chequea existencia de `data/retune/2026-05-14-regime-allocation/baseline_*.json` y emit warning + auto-regenerate si missing.
+
+**Rationale:** convención "operator pushback resolved BEFORE merge" preservada (cross-PR review observation). Lock evita ambiguity en el reviewer del Phase 3 epic C PR.
 
 ### §9.2 — [OPTIONAL] Observability disk budget
 
@@ -552,12 +553,11 @@ Per §5.8: aggregate observability metrics ~1MB total. Bar-by-bar log opcional d
 
 Resolved: Phase 1 branch `feat/signal-calibration-observability` (or analog), Phase 2 branch `feat/signal-calibration-phase2-diagnostic`, Phase 3 branch `feat/signal-calibration-phase3-sweep`, Phase 4 branch `feat/signal-calibration-phase4-walkforward`. PR titles follow `feat/docs(epic signal calibration Phase N): <description> (#350)` pattern matching #338.
 
-### §9.4 — [OPTIONAL — pre-Phase-2] Phase 1 implementation order
+### §9.4 — [RESOLVED 2026-05-15 post-review] Phase 1 implementation order
 
-Phase 1 has 2 components: (a) observability layer in `strategy/donchian_ensemble.py`, (b) A1 subset logic. Order:
+**LOCKED:** Path (a) — both observability layer + A1 subset logic shipped en single Phase 1 PR. Faster path to Phase 2 + reduces context-split for reviewer.
 
-- (a) **Both in single PR (Recommended)** — observability + A1 logic shipped together; faster path to Phase 2.
-- (b) Observability first, A1 separate PR — staged; lets operator review observability without A1 complexity.
+**Rationale:** ambas piezas operacionalmente coupled (Phase 2 diagnostic requires observability; Phase 3 sweep requires A1 subset; ambos blocked por mismo TDD pattern). Staging the two no agrega review value que justifique el extra PR overhead. Convención "operator pushback resolved BEFORE merge" preservada (cross-PR review observation).
 
 ---
 
@@ -703,6 +703,8 @@ Heredar del #338 Phase 2 pre-reg §13 + new epic C-specific:
 10. **Sub-window choice may not generalize.** Heredado #338 + Q4 lock (mismos Windows).
 11. **Independent-stream architecture vs Zarattini portfolio approach.** Heredado #338 Path B.
 12. **Diagnostic threshold sensitivity (NEW epic C-specific).** Q-PR1 T=5 + Q-PR2 p50<2 + Q-PR3 30% are pre-registered choices. Borderline data points (e.g., exactly 5 firings, exactly p50=2) deterministically fall into "fail A-evidence" by strict `<` operator. Future epics may revisit thresholds; under this pre-reg they're locked.
+
+    **Sub-limitation — random-walk null assumption underlying Q-PR2** (post-review 2026-05-15): Q-PR2 threshold `p50(|sum|) < 2` is anchored to the random-walk null binomial(9, 0.5) where `p50 ≈ 2.4` under independence assumption (§10.3). This stochastic-process null is an approximation; crypto-daily-closes exhibit non-random autocorrelation + clustering (well-documented en literatura), so empirical `p50` may diverge in either direction without the strategy class being defective. **If Phase 2 diagnostic verdicts hover near `p50 = 2` across many cells (e.g., `p50 ∈ [1.8, 2.2]` for ≥4/8 símbolos), eso es signal para revisitar Q-PR2 en un follow-up pre-reg, NOT to over-interpret a single borderline case as definitive.** The threshold-leakage risk is bounded: Q-PR2 is rule-derived (statistical null + operator-chosen partition), NOT data-fit on epic C-specific data; if revised, must follow the same pre-registration discipline.
 13. **A1 subset {5,10,20} is one of multiple A-set candidates (NEW epic C-specific).** Q-PR6 lock pre-registers A1 as default. A2/A3/A4 alternatives require operator override per §4.5 self-policing. If A1 FAIL, default verdict is `A_INTERVENTION_INSUFFICIENT` — epic C terminal without trying A2/A3/A4 under this pre-reg.
 14. **Phase 5 holdout joint gate (NEW epic C-specific).** Q5 lock makes Phase 5 conditional on epic D Phase final PASS. Epic C standalone PASS is necessary but NOT sufficient for holdout shot. Operator override via new issue + reasoning per §4.5 self-policing pattern.
 
@@ -713,6 +715,7 @@ Heredar del #338 Phase 2 pre-reg §13 + new epic C-specific:
 | Fecha | Cambio | Autor |
 |---|---|---|
 | 2026-05-15 | Pre-reg sub-spec inicial — drafted post epic C spec doc merge (PR #352, squash `00d6997`); 6 operator decisions Q-PR1..Q-PR6 locked vía 2 rounds AskUserQuestion; mirror del #338 Phase 2 pre-reg pattern; tension table con #338 §8.1 + §8.4 cited en §8 + §9 | Claude Opus 4.7 + sssamuelll |
+| 2026-05-15 | **Cross-PR review fixes applied** — §9.1 baseline reuse locked to Path (a) reuse #349 baselines (recommended merge order satisfies condition); §9.4 Phase 1 PR-split locked to Path (a) single PR; §13.12 extended con sub-limitation about Q-PR2 random-walk null assumption (rule-derived, not data-fit); §4.1 tie-break wording reformulated as worked example (4/8 split derives from "else" clause, not separate rule). Review identified items resolved inline per "operator pushback resolved BEFORE merge" convention. | Claude Opus 4.7 + sssamuelll (post-/ultrareview) |
 | TBD | Operator re-review + final approval | sssamuelll |
 | TBD | Phase 0 deliverable #3 PR merged via gh pr merge --squash → closes epic C Phase 0 | sssamuelll |
 | TBD | Phase 1 execution (separate PR after this pre-reg merge) | sssamuelll + Claude Opus 4.7 |
