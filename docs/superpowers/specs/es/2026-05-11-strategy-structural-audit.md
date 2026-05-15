@@ -503,6 +503,8 @@ P(full clean pass through to A.4-3 holdout pass) ≈ 4.7%. Pero "viable strategy
 - Después de R1: re-estimar P(strategy viable | R2+R1 result).
 - Antes de R3: explicit go/no-go basado en updated prior. Si estimate < 10%, **escalar a H5** en lugar de invertir Phase 2-R3.
 
+**Agent tooling note (added 2026-05-15).** Cuando un checkpoint §A.4 necesita posterior cuantificada en lugar de prosa, la skill `pymc-bayesian-modeling` (instalada 2026-05-15, disponible vía la tool `Skill`) es la herramienta canonical — PyMC + NUTS + LOO/WAIC + posterior predictive checks. Casos donde tiene sentido invocarla: posterior beta-binomial sobre PASS rate cross-stages R2/R1/R3, modelo jerárquico sobre el grid (símbolo × config) de #318, comparación LOO/WAIC entre hipótesis competidoras (strategy viable vs archived). Default sigue siendo prose update de 2-3 frases con magnitude shift; invocar PyMC solo on-demand cuando el operator quiera cuantificación formal.
+
 ### §A.5 — Phase 2 success path completo (steps 4–6) y branches de re-validation failure
 
 [Original §7 sólo describía Phase 2 trigger conditions, no el success path completo.]

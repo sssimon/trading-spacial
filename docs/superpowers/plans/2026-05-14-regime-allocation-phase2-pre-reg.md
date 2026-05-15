@@ -683,6 +683,8 @@ Epic §6.3 says ">80% de símbolos bancarrotan en >50% de cells". For regime-all
 
 **§A.4 prior re-evaluation checkpoint:** post-Phase-3 PR comment must include explicit Bayesian update with magnitude shift documented in 2-3 sentences. Same pattern as R1/R2/R3 per audit §A.4 + R3 §12 mirror.
 
+**Agent tooling note (added 2026-05-15).** Default §A.4 mechanic remains 2-3-sentence prose. For Phase 3 the formal-posterior case is particularly natural because the sensitivity sweep is structured (10 símbolos × 4 vol_target × 3 sub-windows = 120 cells), so a hierarchical model is well-posed. Cases where invoking the `pymc-bayesian-modeling` skill (installed 2026-05-15, available via the `Skill` tool) is the right call: (a) beta-binomial posterior over P(viable for live) given the verdict matrix; (b) hierarchical model on (símbolo × vol_target × sub-window) cell outcomes to decompose vol_target-sensitivity from símbolo-effect from regime-effect; (c) LOO/WAIC between {Path A INCONCLUSIVE-default, Path A operator-override} branches conditional on the 4-element self-policing requirement in §4.5. PyMC + NUTS + LOO/WAIC + posterior predictive checks ship with the skill. Default stays prose-only; PyMC is operator-on-demand.
+
 ---
 
 ## §13 · Methodology limitations carried forward

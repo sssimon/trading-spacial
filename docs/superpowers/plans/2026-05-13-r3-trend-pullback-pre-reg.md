@@ -653,6 +653,8 @@ The §10 halt-guard scope (§4.6 amendment) preserves R3 FAIL on partial-window 
 
 **§A.4 prior re-evaluation checkpoint:** post-R3 PR comment must include explicit Bayesian update with magnitude shift documented in 2-3 sentences. Same pattern as R2 + R1 per audit §A.4.
 
+**Agent tooling note (added 2026-05-15).** The 2-3-sentence prose update is the default §A.4 mechanic. If the operator wants the post-R3 update materialized as a formal posterior — beta-binomial over P(viable) given R3 verdict + R1/R2 stack, hierarchical model across símbolos × sub-window × cells in the 75-cell sweep, or LOO/WAIC between {R3 SUCCESS 3/3, R3 SUCCESS-CONDITIONAL 2/3, R3 INCONCLUSIVE, R3 FAIL clean, R3 FAIL degenerate} verdicts — invoke the `pymc-bayesian-modeling` skill (installed 2026-05-15, available via the `Skill` tool). PyMC + NUTS + LOO/WAIC + posterior predictive checks ship with the skill. Default remains prose-only; PyMC is on-demand.
+
 ---
 
 ## §13 · Methodology limitations carried forward

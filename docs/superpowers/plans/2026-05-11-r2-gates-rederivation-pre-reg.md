@@ -257,6 +257,8 @@ Notas:
 
 **Bayesian update plan:** After derivation step (before sweep), update prior on TL distribution observed. If new_TLs uniformly close to current_TLs, prior on "R2 SUCCESS" drops sharply.
 
+**Agent tooling note (added 2026-05-15).** The institutional update is 2-3-sentence prose magnitude shift (per audit §A.4). If the operator wants formal quantification — beta-binomial posterior over R2 PASS rate, hierarchical model on (símbolo × new_TL) for the derivation step output, or LOO/WAIC between {gates relaxed materially, gates equivalent} hypotheses — invoke the `pymc-bayesian-modeling` skill (installed 2026-05-15, available via the `Skill` tool). PyMC + NUTS sampling + posterior predictive checks ship with the skill. Default remains prose-only; PyMC is on-demand.
+
 ---
 
 ## §5 · Tightening risk: pre-registered rule
