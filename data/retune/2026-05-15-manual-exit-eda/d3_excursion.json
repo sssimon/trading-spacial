@@ -1,0 +1,209 @@
+{
+  "capture_rate_pct": {
+    "max": 96.73,
+    "mean": 57.80333333333335,
+    "median": 62.44,
+    "min": -10.77,
+    "n": 15,
+    "p25": 47.325,
+    "p75": 78.25
+  },
+  "max_adverse_pct": {
+    "max": 12.1111,
+    "mean": 1.6100124999999998,
+    "median": 0.8089,
+    "min": -0.1846,
+    "n": 16,
+    "p25": 0.4158,
+    "p75": 1.2336500000000001
+  },
+  "max_favorable_pct": {
+    "max": 16.0,
+    "mean": 3.2838875,
+    "median": 2.0730500000000003,
+    "min": -1.6667,
+    "n": 16,
+    "p25": 1.18595,
+    "p75": 3.241675
+  },
+  "n_capture_rate_negative": 1,
+  "n_no_ohlcv": 0,
+  "per_position": [
+    {
+      "capture_rate_pct": 12.89,
+      "direction": "SHORT",
+      "hold_hours": 14.43,
+      "id": 1,
+      "max_adverse_pct": 2.3891,
+      "max_favorable_pct": 1.2186,
+      "n_bars": 14,
+      "realized_pnl_pct": 0.1571,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "capture_rate_pct": 93.86,
+      "direction": "LONG",
+      "hold_hours": 21.7,
+      "id": 17,
+      "max_adverse_pct": 0.5154,
+      "max_favorable_pct": 2.7931,
+      "n_bars": 21,
+      "realized_pnl_pct": 2.6217,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "capture_rate_pct": 96.73,
+      "direction": "LONG",
+      "hold_hours": 21.69,
+      "id": 18,
+      "max_adverse_pct": 0.5785,
+      "max_favorable_pct": 2.5506,
+      "n_bars": 21,
+      "realized_pnl_pct": 2.4671,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "capture_rate_pct": 83.33,
+      "direction": "LONG",
+      "hold_hours": 16.86,
+      "id": 25,
+      "max_adverse_pct": 0.7087,
+      "max_favorable_pct": 6.6142,
+      "n_bars": 16,
+      "realized_pnl_pct": 5.5118,
+      "symbol": "PENDLEUSDT"
+    },
+    {
+      "capture_rate_pct": 52.63,
+      "direction": "SHORT",
+      "hold_hours": 34.6,
+      "id": 27,
+      "max_adverse_pct": 3.2653,
+      "max_favorable_pct": 3.8776,
+      "n_bars": 35,
+      "realized_pnl_pct": 2.0408,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "capture_rate_pct": null,
+      "direction": "LONG",
+      "hold_hours": 167.78,
+      "id": 28,
+      "max_adverse_pct": 12.1111,
+      "max_favorable_pct": -1.6667,
+      "n_bars": 168,
+      "realized_pnl_pct": -11.1111,
+      "symbol": "XLMUSDT"
+    },
+    {
+      "capture_rate_pct": 67.93,
+      "direction": "LONG",
+      "hold_hours": 74.64,
+      "id": 29,
+      "max_adverse_pct": 0.9235,
+      "max_favorable_pct": 3.0297,
+      "n_bars": 74,
+      "realized_pnl_pct": 2.058,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "capture_rate_pct": 62.44,
+      "direction": "LONG",
+      "hold_hours": 37.04,
+      "id": 31,
+      "max_adverse_pct": 1.8164,
+      "max_favorable_pct": 1.088,
+      "n_bars": 37,
+      "realized_pnl_pct": 0.6794,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "capture_rate_pct": 73.17,
+      "direction": "LONG",
+      "hold_hours": 28.51,
+      "id": 33,
+      "max_adverse_pct": 0.2,
+      "max_favorable_pct": 8.2,
+      "n_bars": 28,
+      "realized_pnl_pct": 6.0,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "capture_rate_pct": 59.82,
+      "direction": "LONG",
+      "hold_hours": 15.75,
+      "id": 34,
+      "max_adverse_pct": 0.2706,
+      "max_favorable_pct": 2.2999,
+      "n_bars": 16,
+      "realized_pnl_pct": 1.3757,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "capture_rate_pct": 25.6,
+      "direction": "SHORT",
+      "hold_hours": 11.05,
+      "id": 35,
+      "max_adverse_pct": 1.0394,
+      "max_favorable_pct": 0.9725,
+      "n_bars": 11,
+      "realized_pnl_pct": 0.249,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "capture_rate_pct": 83.34,
+      "direction": "SHORT",
+      "hold_hours": 5.8,
+      "id": 37,
+      "max_adverse_pct": -0.1846,
+      "max_favorable_pct": 1.8462,
+      "n_bars": 6,
+      "realized_pnl_pct": 1.5385,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "capture_rate_pct": 49.2,
+      "direction": "SHORT",
+      "hold_hours": 5.79,
+      "id": 38,
+      "max_adverse_pct": -0.1696,
+      "max_favorable_pct": 1.418,
+      "n_bars": 6,
+      "realized_pnl_pct": 0.6977,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "capture_rate_pct": 71.43,
+      "direction": "SHORT",
+      "hold_hours": 10.34,
+      "id": 39,
+      "max_adverse_pct": 0.9231,
+      "max_favorable_pct": 1.2923,
+      "n_bars": 10,
+      "realized_pnl_pct": 0.9231,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "capture_rate_pct": -10.77,
+      "direction": "LONG",
+      "hold_hours": 6.93,
+      "id": 42,
+      "max_adverse_pct": 0.4642,
+      "max_favorable_pct": 1.0082,
+      "n_bars": 7,
+      "realized_pnl_pct": -0.1086,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "capture_rate_pct": 45.45,
+      "direction": "LONG",
+      "hold_hours": 157.08,
+      "id": 47,
+      "max_adverse_pct": 0.9091,
+      "max_favorable_pct": 16.0,
+      "n_bars": 157,
+      "realized_pnl_pct": 7.2727,
+      "symbol": "RUNEUSDT"
+    }
+  ]
+}

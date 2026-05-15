@@ -1,0 +1,356 @@
+{
+  "BTCUSDT": {
+    "capture_rate_pct": {
+      "max": 93.86,
+      "mean": 43.647999999999996,
+      "median": 59.82,
+      "min": -10.77,
+      "n": 5,
+      "p25": 12.89,
+      "p75": 62.44
+    },
+    "hold_hours": {
+      "max": 37.04,
+      "mean": 19.169999999999998,
+      "median": 15.75,
+      "min": 6.93,
+      "n": 5,
+      "p25": 14.43,
+      "p75": 21.7
+    },
+    "max_favorable_pct": {
+      "max": 2.7931,
+      "mean": 1.68156,
+      "median": 1.2186,
+      "min": 1.0082,
+      "n": 5,
+      "p25": 1.088,
+      "p75": 2.2999
+    },
+    "n_losers": 1,
+    "n_trades": 5,
+    "n_winners": 4,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": 2.6217,
+      "mean": 0.94506,
+      "median": 0.6794,
+      "min": -0.1086,
+      "n": 5,
+      "p25": 0.1571,
+      "p75": 1.3757
+    }
+  },
+  "ETHUSDT": {
+    "capture_rate_pct": {
+      "max": 96.73,
+      "mean": 59.86500000000001,
+      "median": 58.565000000000005,
+      "min": 25.6,
+      "n": 4,
+      "p25": 43.300000000000004,
+      "p75": 75.13000000000001
+    },
+    "hold_hours": {
+      "max": 74.64,
+      "mean": 28.2925,
+      "median": 16.37,
+      "min": 5.79,
+      "n": 4,
+      "p25": 9.735000000000001,
+      "p75": 34.9275
+    },
+    "max_favorable_pct": {
+      "max": 3.0297,
+      "mean": 1.9927000000000001,
+      "median": 1.9843000000000002,
+      "min": 0.9725,
+      "n": 4,
+      "p25": 1.306625,
+      "p75": 2.670375
+    },
+    "n_losers": 0,
+    "n_trades": 4,
+    "n_winners": 4,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": 2.4671,
+      "mean": 1.36795,
+      "median": 1.37785,
+      "min": 0.249,
+      "n": 4,
+      "p25": 0.585525,
+      "p75": 2.160275
+    }
+  },
+  "PENDLEUSDT": {
+    "capture_rate_pct": {
+      "max": 83.33,
+      "mean": 83.33,
+      "median": 83.33,
+      "min": 83.33,
+      "n": 1,
+      "p25": 83.33,
+      "p75": 83.33
+    },
+    "hold_hours": {
+      "max": 16.86,
+      "mean": 16.86,
+      "median": 16.86,
+      "min": 16.86,
+      "n": 1,
+      "p25": 16.86,
+      "p75": 16.86
+    },
+    "max_favorable_pct": {
+      "max": 6.6142,
+      "mean": 6.6142,
+      "median": 6.6142,
+      "min": 6.6142,
+      "n": 1,
+      "p25": 6.6142,
+      "p75": 6.6142
+    },
+    "n_losers": 0,
+    "n_trades": 1,
+    "n_winners": 1,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": 5.5118,
+      "mean": 5.5118,
+      "median": 5.5118,
+      "min": 5.5118,
+      "n": 1,
+      "p25": 5.5118,
+      "p75": 5.5118
+    }
+  },
+  "RUNEUSDT": {
+    "capture_rate_pct": {
+      "max": 73.17,
+      "mean": 57.083333333333336,
+      "median": 52.63,
+      "min": 45.45,
+      "n": 3,
+      "p25": 49.040000000000006,
+      "p75": 62.900000000000006
+    },
+    "hold_hours": {
+      "max": 157.08,
+      "mean": 73.39666666666666,
+      "median": 34.6,
+      "min": 28.51,
+      "n": 3,
+      "p25": 31.555,
+      "p75": 95.84
+    },
+    "max_favorable_pct": {
+      "max": 16.0,
+      "mean": 9.3592,
+      "median": 8.2,
+      "min": 3.8776,
+      "n": 3,
+      "p25": 6.0388,
+      "p75": 12.1
+    },
+    "n_losers": 1,
+    "n_trades": 3,
+    "n_winners": 2,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": 7.2727,
+      "mean": 5.104500000000001,
+      "median": 6.0,
+      "min": 2.0408,
+      "n": 3,
+      "p25": 4.0204,
+      "p75": 6.63635
+    }
+  },
+  "UNIUSDT": {
+    "capture_rate_pct": {
+      "max": 83.34,
+      "mean": 77.385,
+      "median": 77.385,
+      "min": 71.43,
+      "n": 2,
+      "p25": 74.4075,
+      "p75": 80.36250000000001
+    },
+    "hold_hours": {
+      "max": 10.34,
+      "mean": 8.07,
+      "median": 8.07,
+      "min": 5.8,
+      "n": 2,
+      "p25": 6.935,
+      "p75": 9.205
+    },
+    "max_favorable_pct": {
+      "max": 1.8462,
+      "mean": 1.56925,
+      "median": 1.56925,
+      "min": 1.2923,
+      "n": 2,
+      "p25": 1.4307750000000001,
+      "p75": 1.707725
+    },
+    "n_losers": 0,
+    "n_trades": 2,
+    "n_winners": 2,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": 1.5385,
+      "mean": 1.2308,
+      "median": 1.2308,
+      "min": 0.9231,
+      "n": 2,
+      "p25": 1.07695,
+      "p75": 1.38465
+    }
+  },
+  "XLMUSDT": {
+    "capture_rate_pct": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "hold_hours": {
+      "max": 167.78,
+      "mean": 167.78,
+      "median": 167.78,
+      "min": 167.78,
+      "n": 1,
+      "p25": 167.78,
+      "p75": 167.78
+    },
+    "max_favorable_pct": {
+      "max": -1.6667,
+      "mean": -1.6667,
+      "median": -1.6667,
+      "min": -1.6667,
+      "n": 1,
+      "p25": -1.6667,
+      "p75": -1.6667
+    },
+    "n_losers": 1,
+    "n_trades": 1,
+    "n_winners": 0,
+    "pct_of_sl_traveled": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "pct_of_tp_captured": {
+      "max": null,
+      "mean": null,
+      "median": null,
+      "min": null,
+      "n": 0,
+      "p25": null,
+      "p75": null
+    },
+    "realized_pnl_pct": {
+      "max": -11.1111,
+      "mean": -11.1111,
+      "median": -11.1111,
+      "min": -11.1111,
+      "n": 1,
+      "p25": -11.1111,
+      "p75": -11.1111
+    }
+  }
+}

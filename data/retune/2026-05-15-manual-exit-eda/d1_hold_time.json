@@ -1,0 +1,175 @@
+{
+  "all": {
+    "max": 167.78,
+    "mean": 39.374375,
+    "median": 19.275,
+    "min": 5.79,
+    "n": 16,
+    "p25": 10.8725,
+    "p75": 35.21
+  },
+  "losers": {
+    "max": 167.78,
+    "mean": 69.77,
+    "median": 34.6,
+    "min": 6.93,
+    "n": 3,
+    "p25": 20.765,
+    "p75": 101.19
+  },
+  "per_position": [
+    {
+      "direction": "SHORT",
+      "hold_hours": 14.43,
+      "id": 1,
+      "is_winner": true,
+      "pnl_pct": 0.1571,
+      "pnl_usd": 0.3927,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 21.7,
+      "id": 17,
+      "is_winner": true,
+      "pnl_pct": 2.6217,
+      "pnl_usd": 13.1086,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 21.69,
+      "id": 18,
+      "is_winner": true,
+      "pnl_pct": 2.4671,
+      "pnl_usd": 12.3354,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 16.86,
+      "id": 25,
+      "is_winner": true,
+      "pnl_pct": 5.5118,
+      "pnl_usd": 16.5354,
+      "symbol": "PENDLEUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "hold_hours": 34.6,
+      "id": 27,
+      "is_winner": false,
+      "pnl_pct": 2.0408,
+      "pnl_usd": 0.0,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 167.78,
+      "id": 28,
+      "is_winner": false,
+      "pnl_pct": -11.1111,
+      "pnl_usd": -33.3333,
+      "symbol": "XLMUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 74.64,
+      "id": 29,
+      "is_winner": true,
+      "pnl_pct": 2.058,
+      "pnl_usd": 6.174,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 37.04,
+      "id": 31,
+      "is_winner": true,
+      "pnl_pct": 0.6794,
+      "pnl_usd": 3.3971,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 28.51,
+      "id": 33,
+      "is_winner": true,
+      "pnl_pct": 6.0,
+      "pnl_usd": 18.0,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 15.75,
+      "id": 34,
+      "is_winner": true,
+      "pnl_pct": 1.3757,
+      "pnl_usd": 6.8783,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "hold_hours": 11.05,
+      "id": 35,
+      "is_winner": true,
+      "pnl_pct": 0.249,
+      "pnl_usd": 1.2449,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "hold_hours": 5.8,
+      "id": 37,
+      "is_winner": true,
+      "pnl_pct": 1.5385,
+      "pnl_usd": 4.6154,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "hold_hours": 5.79,
+      "id": 38,
+      "is_winner": true,
+      "pnl_pct": 0.6977,
+      "pnl_usd": 3.4887,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "direction": "SHORT",
+      "hold_hours": 10.34,
+      "id": 39,
+      "is_winner": true,
+      "pnl_pct": 0.9231,
+      "pnl_usd": 2.7692,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 6.93,
+      "id": 42,
+      "is_winner": false,
+      "pnl_pct": -0.1086,
+      "pnl_usd": -0.5431,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "direction": "LONG",
+      "hold_hours": 157.08,
+      "id": 47,
+      "is_winner": true,
+      "pnl_pct": 7.2727,
+      "pnl_usd": 21.8182,
+      "symbol": "RUNEUSDT"
+    }
+  ],
+  "winners": {
+    "max": 157.08,
+    "mean": 32.36000000000001,
+    "median": 16.86,
+    "min": 5.79,
+    "n": 13,
+    "p25": 11.05,
+    "p75": 28.51
+  }
+}
