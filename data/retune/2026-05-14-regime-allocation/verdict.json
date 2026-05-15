@@ -1,0 +1,186 @@
+{
+  "bayesian_update_template": "P(viable) preserved at pre-Phase-3 prior (~26-39% range). \u00a74.6 halt-guard activated under partial windows. Operator decides next step (re-run with adjusted halt thresholds OR archive). NO inferential weight from the partial windows.",
+  "classification": {
+    "degenerate_predominant": true,
+    "halt": true,
+    "halt_guard_applied": true,
+    "n_degenerate_windows": 1,
+    "n_primary_pass_windows": 1,
+    "n_sensitivity_pass_out_of_4": 0,
+    "n_windows_available": 1,
+    "naive_verdict_before_halt_guard": "STRONG_PASS",
+    "primary_pass_per_window": {
+      "A": true
+    },
+    "sensitivity_label": "FAIL_CLEAN",
+    "verdict": "PHASE_3_INSUFFICIENT_DATA"
+  },
+  "halt_diagnostic_loaded": true,
+  "halt_fired": true,
+  "operator_override": null,
+  "operator_override_schema": {
+    "description": "Operator override block per pre-reg \u00a74.5 self-policing requirement (4-element check). Populate when invoking Phase 4 advance from a non-PASS-strong/robust verdict. Element 4: this block; plus element 1 (Bayesian update in derivation_audit.md), element 2 (separate sub-spec doc mirror A.4-1.5 mechanism), element 3 (auditor counter-signoff). All 4 elements required atomically; any Phase 4 advance lacking these is methodologically invalid under this pre-reg.",
+    "fields": {
+      "auditor_counter_signoff": {
+        "agent_id": "Agent name/model that performed counter-signoff (e.g., code-review-excellence)",
+        "signoff_timestamp": "ISO 8601 UTC datetime of counter-signoff"
+      },
+      "rationale": "Operator's written reason for overriding default verdict; must reference the Bayesian update prose",
+      "sub_spec_doc": "Relative path to sub-spec doc capturing override scope (e.g., docs/superpowers/plans/2026-MM-DD-phase-3-override-XXX.md)",
+      "timestamp": "ISO 8601 UTC datetime when operator invoked override"
+    }
+  },
+  "phase_4_advance_decision": {
+    "auto_advance_to_phase_4": false,
+    "decision_note": "No advance to Phase 4. Verdict=PHASE_3_INSUFFICIENT_DATA per pre-reg \u00a74.5: FAIL variants archive the strategy class (FAIL_CLEAN: open question on basket adequacy; FAIL_DEGENERATE: signal miscalibration; SWEET_SPOT_FAIL: calibration overfit; PHASE_3_INSUFFICIENT_DATA: \u00a74.6 halt-guard activated).",
+    "operator_decision_required": false,
+    "self_policing_required": false
+  },
+  "primary_per_window": {
+    "A": {
+      "bankruptcy_count_total": 0,
+      "btc_bh_total_return_usd": -45610.3263,
+      "hubrich_total_return_usd": 0.0,
+      "insufficient_data_count": 8,
+      "lrc_archived_total_return_usd": -35380.23,
+      "n_in_coverage": 8,
+      "n_trades_total": 14,
+      "per_symbol": [
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 2,
+          "net_pnl_usd": 1055.93,
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 1,
+          "net_pnl_usd": 1032.45,
+          "symbol": "ADAUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 1,
+          "net_pnl_usd": 844.42,
+          "symbol": "UNIUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 2,
+          "net_pnl_usd": 826.53,
+          "symbol": "ETHUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 2,
+          "net_pnl_usd": 782.84,
+          "symbol": "BTCUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 1,
+          "net_pnl_usd": 605.61,
+          "symbol": "XLMUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 2,
+          "net_pnl_usd": 292.26,
+          "symbol": "RUNEUSDT"
+        },
+        {
+          "bankruptcy_count": 0,
+          "insufficient_data": true,
+          "n_trades": 3,
+          "net_pnl_usd": -180.46,
+          "symbol": "DOGEUSDT"
+        }
+      ],
+      "primary_criterion_pass": true,
+      "strategy_total_return_usd": 5259.58,
+      "vol_target": 0.3,
+      "window_id": "A"
+    }
+  },
+  "schema_version": 2,
+  "sensitivity_per_vol_target": {
+    "0.25": {
+      "n_available_windows": 0,
+      "n_primary_pass_windows": 0,
+      "per_window": {
+        "A": {
+          "available": false
+        },
+        "B": {
+          "available": false
+        },
+        "C": {
+          "available": false
+        }
+      },
+      "vol_target_pass": false
+    },
+    "0.3": {
+      "n_available_windows": 0,
+      "n_primary_pass_windows": 0,
+      "per_window": {
+        "A": {
+          "available": false
+        },
+        "B": {
+          "available": false
+        },
+        "C": {
+          "available": false
+        }
+      },
+      "vol_target_pass": false
+    },
+    "0.35": {
+      "n_available_windows": 0,
+      "n_primary_pass_windows": 0,
+      "per_window": {
+        "A": {
+          "available": false
+        },
+        "B": {
+          "available": false
+        },
+        "C": {
+          "available": false
+        }
+      },
+      "vol_target_pass": false
+    },
+    "0.4": {
+      "n_available_windows": 0,
+      "n_primary_pass_windows": 0,
+      "per_window": {
+        "A": {
+          "available": false
+        },
+        "B": {
+          "available": false
+        },
+        "C": {
+          "available": false
+        }
+      },
+      "vol_target_pass": false
+    }
+  },
+  "sensitivity_summary": {
+    "n_available_out_of_4": 0,
+    "n_pass_out_of_4": 0,
+    "sensitivity_verdict_label": "FAIL_CLEAN"
+  },
+  "spec_ref": "docs/superpowers/plans/2026-05-14-regime-allocation-phase2-pre-reg.md",
+  "verdict": "PHASE_3_INSUFFICIENT_DATA"
+}

@@ -1,0 +1,159 @@
+[
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 1,
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 874.02,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.67,
+    "n_trades": 2,
+    "net_pnl_usd": 782.84,
+    "profit_factor": 6.01,
+    "sub_window": "A",
+    "symbol": "BTCUSDT",
+    "total_funding_usd": 50.8387,
+    "total_slippage_usd": 40.3413,
+    "vol_target": 0.3,
+    "win_rate": 50.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 1,
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 910.4,
+    "insufficient_data": true,
+    "max_drawdown_pct": -4.92,
+    "n_trades": 2,
+    "net_pnl_usd": 826.53,
+    "profit_factor": 3.73,
+    "sub_window": "A",
+    "symbol": "ETHUSDT",
+    "total_funding_usd": 42.0726,
+    "total_slippage_usd": 41.8074,
+    "vol_target": 0.3,
+    "win_rate": 50.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 1229.7,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.82,
+    "n_trades": 1,
+    "net_pnl_usd": 1032.45,
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "ADAUSDT",
+    "total_funding_usd": 109.2013,
+    "total_slippage_usd": 88.0487,
+    "vol_target": 0.3,
+    "win_rate": 100.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIGNAL_FLIP": 1,
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 1324.4,
+    "insufficient_data": true,
+    "max_drawdown_pct": -4.99,
+    "n_trades": 2,
+    "net_pnl_usd": 1055.93,
+    "profit_factor": 3.9,
+    "sub_window": "A",
+    "symbol": "AVAXUSDT",
+    "total_funding_usd": 109.1993,
+    "total_slippage_usd": 159.2607,
+    "vol_target": 0.3,
+    "win_rate": 50.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 2,
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 154.89,
+    "insufficient_data": true,
+    "max_drawdown_pct": -11.72,
+    "n_trades": 3,
+    "net_pnl_usd": -180.46,
+    "profit_factor": 0.73,
+    "sub_window": "A",
+    "symbol": "DOGEUSDT",
+    "total_funding_usd": 72.5294,
+    "total_slippage_usd": 262.8106,
+    "vol_target": 0.3,
+    "win_rate": 33.3
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 1160.62,
+    "insufficient_data": true,
+    "max_drawdown_pct": -3.01,
+    "n_trades": 1,
+    "net_pnl_usd": 844.42,
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "UNIUSDT",
+    "total_funding_usd": 109.2,
+    "total_slippage_usd": 207.0,
+    "vol_target": 0.3,
+    "win_rate": 100.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 915.81,
+    "insufficient_data": true,
+    "max_drawdown_pct": -2.76,
+    "n_trades": 1,
+    "net_pnl_usd": 605.61,
+    "profit_factor": 99999.0,
+    "sub_window": "A",
+    "symbol": "XLMUSDT",
+    "total_funding_usd": 103.2,
+    "total_slippage_usd": 207.0,
+    "vol_target": 0.3,
+    "win_rate": 100.0
+  },
+  {
+    "bankruptcy_count": 0,
+    "clamped_trade_count": 0,
+    "exit_reasons": {
+      "SIGNAL_FLIP": 1,
+      "SIM_END": 1
+    },
+    "gross_pnl_usd": 848.53,
+    "insufficient_data": true,
+    "max_drawdown_pct": -11.48,
+    "n_trades": 2,
+    "net_pnl_usd": 292.26,
+    "profit_factor": 1.37,
+    "sub_window": "A",
+    "symbol": "RUNEUSDT",
+    "total_funding_usd": 260.6559,
+    "total_slippage_usd": 295.6141,
+    "vol_target": 0.3,
+    "win_rate": 50.0
+  }
+]

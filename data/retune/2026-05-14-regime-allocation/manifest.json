@@ -1,15 +1,15 @@
 {
   "cli_args": {
     "app_config": "C:\\Users\\simon\\Desktop\\Papa\\trading-spacial\\config.defaults.json",
-    "baselines_only": true,
-    "skip_baselines": false,
+    "baselines_only": false,
+    "skip_baselines": true,
     "skip_sensitivity": false,
     "smoke": false,
     "strict_halt": false,
     "window": "all",
-    "workers": 1
+    "workers": 4
   },
-  "code_commit": "dd8ab714f13c8bdd4eac932772f78353bd1139f0",
+  "code_commit": "f7e12bdb4479e7030120af0b4ec04d5723dd16d7",
   "coverage_by_window": {
     "A": [
       "BTCUSDT",
@@ -45,8 +45,10 @@
   },
   "cutoff_iso": "2025-04-30T00:00:00+00:00",
   "epic_spec_ref": "docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md",
-  "halt_after_a_fired": false,
-  "halt_after_a_reasons": [],
+  "halt_after_a_fired": true,
+  "halt_after_a_reasons": [
+    "H2_signal_degenerate"
+  ],
   "harness": "tools.regime_allocation_sweep",
   "leakage_check": {
     "all_sub_windows_end_le_cutoff": true,
@@ -83,7 +85,7 @@
       360
     ]
   },
-  "ran_at_iso": "2026-05-14T20:11:33.729320+00:00",
+  "ran_at_iso": "2026-05-14T21:00:23.580491+00:00",
   "spec_ref": "docs/superpowers/plans/2026-05-14-regime-allocation-phase2-pre-reg.md",
   "sub_windows": {
     "A": {

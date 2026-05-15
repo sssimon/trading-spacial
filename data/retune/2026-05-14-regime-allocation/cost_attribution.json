@@ -1,0 +1,89 @@
+{
+  "cost_dominated_flag": false,
+  "cost_dominated_flag_min_cells_fraction": 0.5,
+  "cost_dominated_threshold_gross_pct": 30.0,
+  "n_cells_with_trades": 8,
+  "n_cost_dominated": 3,
+  "per_cell": {
+    "ADAUSDT_A_0.30": {
+      "gross_pnl_usd": 1229.7,
+      "net_pnl_usd": 1032.45,
+      "sub_window": "A",
+      "symbol": "ADAUSDT",
+      "total_cost_usd": 197.25,
+      "total_funding_usd": 109.2013,
+      "total_slippage_usd": 88.0487,
+      "vol_target": 0.3
+    },
+    "AVAXUSDT_A_0.30": {
+      "gross_pnl_usd": 1324.4,
+      "net_pnl_usd": 1055.93,
+      "sub_window": "A",
+      "symbol": "AVAXUSDT",
+      "total_cost_usd": 268.46,
+      "total_funding_usd": 109.1993,
+      "total_slippage_usd": 159.2607,
+      "vol_target": 0.3
+    },
+    "BTCUSDT_A_0.30": {
+      "gross_pnl_usd": 874.02,
+      "net_pnl_usd": 782.84,
+      "sub_window": "A",
+      "symbol": "BTCUSDT",
+      "total_cost_usd": 91.18,
+      "total_funding_usd": 50.8387,
+      "total_slippage_usd": 40.3413,
+      "vol_target": 0.3
+    },
+    "DOGEUSDT_A_0.30": {
+      "gross_pnl_usd": 154.89,
+      "net_pnl_usd": -180.46,
+      "sub_window": "A",
+      "symbol": "DOGEUSDT",
+      "total_cost_usd": 335.34,
+      "total_funding_usd": 72.5294,
+      "total_slippage_usd": 262.8106,
+      "vol_target": 0.3
+    },
+    "ETHUSDT_A_0.30": {
+      "gross_pnl_usd": 910.4,
+      "net_pnl_usd": 826.53,
+      "sub_window": "A",
+      "symbol": "ETHUSDT",
+      "total_cost_usd": 83.88,
+      "total_funding_usd": 42.0726,
+      "total_slippage_usd": 41.8074,
+      "vol_target": 0.3
+    },
+    "RUNEUSDT_A_0.30": {
+      "gross_pnl_usd": 848.53,
+      "net_pnl_usd": 292.26,
+      "sub_window": "A",
+      "symbol": "RUNEUSDT",
+      "total_cost_usd": 556.27,
+      "total_funding_usd": 260.6559,
+      "total_slippage_usd": 295.6141,
+      "vol_target": 0.3
+    },
+    "UNIUSDT_A_0.30": {
+      "gross_pnl_usd": 1160.62,
+      "net_pnl_usd": 844.42,
+      "sub_window": "A",
+      "symbol": "UNIUSDT",
+      "total_cost_usd": 316.2,
+      "total_funding_usd": 109.2,
+      "total_slippage_usd": 207.0,
+      "vol_target": 0.3
+    },
+    "XLMUSDT_A_0.30": {
+      "gross_pnl_usd": 915.81,
+      "net_pnl_usd": 605.61,
+      "sub_window": "A",
+      "symbol": "XLMUSDT",
+      "total_cost_usd": 310.2,
+      "total_funding_usd": 103.2,
+      "total_slippage_usd": 207.0,
+      "vol_target": 0.3
+    }
+  }
+}

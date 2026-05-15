@@ -1,0 +1,95 @@
+{
+  "ADAUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 1,
+    "sub_window": "A",
+    "symbol": "ADAUSDT",
+    "vol_target": 0.3
+  },
+  "AVAXUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIGNAL_FLIP": 1,
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 2,
+    "sub_window": "A",
+    "symbol": "AVAXUSDT",
+    "vol_target": 0.3
+  },
+  "BTCUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 1,
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 2,
+    "sub_window": "A",
+    "symbol": "BTCUSDT",
+    "vol_target": 0.3
+  },
+  "DOGEUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 2,
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 3,
+    "sub_window": "A",
+    "symbol": "DOGEUSDT",
+    "vol_target": 0.3
+  },
+  "ETHUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIGNAL_EXIT": 1,
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 2,
+    "sub_window": "A",
+    "symbol": "ETHUSDT",
+    "vol_target": 0.3
+  },
+  "RUNEUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIGNAL_FLIP": 1,
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 2,
+    "sub_window": "A",
+    "symbol": "RUNEUSDT",
+    "vol_target": 0.3
+  },
+  "UNIUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 1,
+    "sub_window": "A",
+    "symbol": "UNIUSDT",
+    "vol_target": 0.3
+  },
+  "XLMUSDT_A_0.30": {
+    "bankruptcy_count": 0,
+    "exit_reasons": {
+      "SIM_END": 1
+    },
+    "insufficient_data": true,
+    "n_trades": 1,
+    "sub_window": "A",
+    "symbol": "XLMUSDT",
+    "vol_target": 0.3
+  }
+}
