@@ -7,16 +7,26 @@ ALTER TABLE statements wrapped in try/except to handle the case where
 the column already exists (sqlite3 has no IF NOT EXISTS for ALTER).
 
 Tables:
-- scans (one row per scan; signal=1 if score reached threshold)
-- webhooks_sent (audit trail of webhook deliveries)
-- positions (open/closed positions; CRUD via db/positions.py in PR4)
-- signal_outcomes (1h/4h/24h price tracking for back-validation)
-- tune_results (auto-tune proposal lifecycle)
-- notifications_sent (in-app notifications)
-- symbol_health + symbol_health_events (kill-switch v1 health state)
+- scans (one row per scan; signal=1 if score reached threshold) — GLOBAL
+- webhooks_sent (audit trail of webhook deliveries) — GLOBAL
+- positions (open/closed positions; CRUD via db/positions.py in PR4) — PER-USER
+- signal_outcomes (1h/4h/24h price tracking for back-validation) — PER-USER
+- tune_results (auto-tune proposal lifecycle) — GLOBAL
+- notifications_sent (in-app notifications) — PER-USER
+- symbol_health + symbol_health_events (kill-switch v1 health state) — GLOBAL
 - kill_switch_decisions + kill_switch_v2_state + kill_switch_v2_baseline
-  + kill_switch_recommendations (kill-switch v2)
-- portfolio_health_events (portfolio-level circuit breaker)
+  + kill_switch_recommendations (kill-switch v2) — GLOBAL (deferred per B.1)
+- portfolio_health_events (portfolio-level circuit breaker) — PER-USER
+- capital (per-user notional capital tracking) — PER-USER (new in B.1)
+- user_preferences (per-user notification + filter config) — PER-USER (new in B.1)
+
+## Multi-tenancy (Epic B #253 B.1 — 2026-05-15)
+
+Per-user tables have a `tenant_id INTEGER` column (informal FK to users.id;
+nullable in B.1, enforcement deferred to B.5 API layer + B.8 migration).
+Backfill via `backfill_tenant(user_id)` for existing pre-multi-tenant rows.
+
+Per pre-reg `docs/superpowers/plans/2026-05-15-multi-tenant-b1-schema-pre-reg.md`.
 """
 from __future__ import annotations
 
@@ -277,3 +287,132 @@ def init_db() -> None:
         con_mig2.close()
     except Exception as e:
         log.warning(f"DB migration B5 PROBATION: {e}")
+
+    # Multi-tenant B.1 migration (Epic B #253, issue #254) — 2026-05-15.
+    # Adds nullable tenant_id to per-user tables + new capital + user_preferences.
+    # Pre-reg: docs/superpowers/plans/2026-05-15-multi-tenant-b1-schema-pre-reg.md
+    _migrate_multi_tenant_b1()
+
+
+# Per-user tables that need a tenant_id column (Epic B B.1).
+# kill_switch_* tables intentionally NOT in this list — kept global for B.1
+# per pre-reg §2.3 (conservative default; future sub-issue may move them).
+PER_USER_TABLES: tuple[str, ...] = (
+    "positions",
+    "signal_outcomes",
+    "notifications_sent",
+    "portfolio_health_events",
+)
+
+
+def _migrate_multi_tenant_b1() -> None:
+    """Idempotent multi-tenant B.1 migration: add tenant_id to per-user tables
+    + new capital + user_preferences tables + indexes.
+
+    Pre-reg §3.1-§3.2: ALTER TABLE in try/except (column-exists handling); new
+    tables via CREATE TABLE IF NOT EXISTS; new indexes via CREATE INDEX IF NOT
+    EXISTS. Safe to call repeatedly.
+    """
+    con = get_db()
+    try:
+        # Step 1: Add nullable tenant_id to each per-user table
+        for table in PER_USER_TABLES:
+            try:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER")
+                log.info(f"DB migration B.1: added tenant_id column to {table}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+        # Step 2: Create capital table (single row per user)
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS capital (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id         INTEGER NOT NULL,
+                balance           REAL NOT NULL,
+                peak_balance      REAL NOT NULL,
+                max_drawdown_pct  REAL,
+                updated_at        TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_capital_tenant "
+            "ON capital(tenant_id)"
+        )
+
+        # Step 3: Create user_preferences table (single row per user)
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id            INTEGER NOT NULL,
+                symbol_filter_json   TEXT,
+                min_score            INTEGER DEFAULT 4,
+                notify_channels_json TEXT,
+                updated_at           TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prefs_tenant "
+            "ON user_preferences(tenant_id)"
+        )
+
+        # Step 4: Tenant-scoped indexes on per-user tables
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_positions_tenant "
+            "ON positions(tenant_id)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signal_outcomes_tenant "
+            "ON signal_outcomes(tenant_id)"
+        )
+        # New tenant-aware unread index (does NOT drop the existing global one;
+        # both can coexist — SQLite picks the more selective for each query)
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notif_tenant_unread "
+            "ON notifications_sent(tenant_id, sent_at DESC) WHERE read_at IS NULL"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_portfolio_events_tenant_ts "
+            "ON portfolio_health_events(tenant_id, ts DESC)"
+        )
+
+        con.commit()
+    finally:
+        con.close()
+
+
+def backfill_tenant(user_id: int) -> dict[str, int]:
+    """Set `tenant_id = user_id` for all rows where tenant_id IS NULL.
+
+    Pre-reg §3.3: idempotent — running twice is a no-op (no NULL rows after
+    first run). Returns `{table_name: rows_updated}` for observability.
+
+    NOT called from init_db(). Caller (B.8 migration script or test setup)
+    invokes explicitly. Typical usage:
+
+      from db.schema import backfill_tenant
+      counts = backfill_tenant(samuel_user_id)
+      log.info(f"Backfill complete: {counts}")
+
+    Args:
+        user_id: target user ID to receive ownership of pre-multi-tenant rows.
+
+    Returns:
+        Dict mapping table name to count of rows updated.
+    """
+    affected: dict[str, int] = {}
+    con = get_db()
+    try:
+        for table in PER_USER_TABLES:
+            cursor = con.execute(
+                f"UPDATE {table} SET tenant_id = ? WHERE tenant_id IS NULL",
+                (user_id,),
+            )
+            affected[table] = cursor.rowcount
+        con.commit()
+    finally:
+        con.close()
+    return affected
