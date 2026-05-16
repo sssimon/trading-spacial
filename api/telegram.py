@@ -122,18 +122,30 @@ def push_telegram_direct(rep: dict, cfg: dict):
         log.warning("push_telegram_direct: health lookup failed for %s: %s", symbol, e)
         health_state = "NORMAL"
 
-    receipts = notify(
-        SignalEvent(
-            symbol=symbol,
-            score=int(rep.get("score", 0) or 0),
-            direction=rep.get("direction", "LONG"),
-            entry=float(rep.get("price") or 0.0),
-            sl=float((rep.get("sizing_1h") or {}).get("sl_precio") or 0.0),
-            tp=float((rep.get("sizing_1h") or {}).get("tp_precio") or 0.0),
-            health_state=health_state,
-        ),
-        cfg=cfg,
+    event = SignalEvent(
+        symbol=symbol,
+        score=int(rep.get("score", 0) or 0),
+        direction=rep.get("direction", "LONG"),
+        entry=float(rep.get("price") or 0.0),
+        sl=float((rep.get("sizing_1h") or {}).get("sl_precio") or 0.0),
+        tp=float((rep.get("sizing_1h") or {}).get("tp_precio") or 0.0),
+        health_state=health_state,
     )
+    # B.4 #257: per-user fan-out with symbol/min_score filtering + channel
+    # routing. If zero active users exist (fresh DB, pre-setup), fall back
+    # to the legacy broadcast so the signal isn't silently dropped during
+    # the bootstrap window.
+    from notifier.dispatch_per_user import dispatch_signal_to_users, _list_active_users
+    if _list_active_users():
+        per_user = dispatch_signal_to_users(event, cfg)
+        # "ok" = at least one user received via at least one channel.
+        return any(
+            r.status == "ok"
+            for receipts in per_user.values()
+            for r in receipts
+        )
+    # No users yet: legacy broadcast path
+    receipts = notify(event, cfg=cfg)
     return bool(receipts and receipts[0].status == "ok")
 
 

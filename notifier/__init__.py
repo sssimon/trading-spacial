@@ -63,11 +63,21 @@ def _resolve_dedupe_window(event: Event, cfg: dict) -> int:
     return _DEFAULT_DEDUPE_SECONDS_BY_EVENT_TYPE.get(event.event_type, 0)
 
 
-def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
+def notify(
+    event: Event,
+    cfg: dict,
+    *,
+    tenant_id: int | None = None,
+) -> list[DeliveryReceipt]:
     """Send an event through configured channels with dedupe + ratelimit.
 
     Returns [] if: notifier disabled, or the event was deduped, or no channels configured.
     Returns list of DeliveryReceipt (one per channel attempted) otherwise.
+
+    B.4 #257: when `tenant_id` is provided, the dedupe key is prefixed with
+    `tenant:{id}:` so each user's stream is independent, and the delivery
+    record is stamped with that tenant_id. Existing broadcast callers
+    (tenant_id=None) keep byte-identical behavior.
     """
     notif_cfg = cfg.get("notifier", {}) or {}
     if not notif_cfg.get("enabled", True):
@@ -75,11 +85,16 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
                   event.event_type, event.dedupe_key)
         return []
 
+    # B.4: tenant-scoped dedupe key when per-user dispatch
+    dedupe_key = (
+        f"tenant:{tenant_id}:{event.dedupe_key}"
+        if tenant_id is not None else event.dedupe_key
+    )
     window_seconds = _resolve_dedupe_window(event, cfg)
-    if not dedupe.should_send(event.event_type, event.dedupe_key,
+    if not dedupe.should_send(event.event_type, dedupe_key,
                                 window_seconds=window_seconds,
                                 priority=event.priority):
-        log.debug("notify deduped: %s %s", event.event_type, event.dedupe_key)
+        log.debug("notify deduped: %s %s", event.event_type, dedupe_key)
         return []
 
     test_mode = notif_cfg.get("test_mode", False)
@@ -153,6 +168,7 @@ def notify(event: Event, cfg: dict) -> list[DeliveryReceipt]:
             channels_sent=channels_sent or ["none"],
             delivery_status=delivery_status,
             error_log=any_error,
+            tenant_id=tenant_id,  # B.4: NULL for broadcasts, int for per-user fan-out
         )
     except Exception:
         log.exception("notifier failed to persist delivery record")
