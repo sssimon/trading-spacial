@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
+from db.capital import apply_pnl_to_capital
 from db.connection import get_db
 from db.positions import (
     _calc_pnl,
@@ -46,6 +47,32 @@ _EVENT_LOG_LABELS = {
     "TIME_LIMIT_HIT": "TIME LIMIT",
     "SL_HIT": "STOP LOSS",
 }
+
+
+def _apply_close_to_capital(closed_pos: dict) -> None:
+    """B.2 #255: roll realized P&L from a just-closed position into the
+    owner's capital ledger.
+
+    Skips positions with tenant_id=NULL (legacy/scanner pre-multi-tenant) or
+    pnl_usd=None (no quantified outcome — e.g. qty=0). Locks: pre-reg §2.1, §2.2.
+    """
+    tenant_id = closed_pos.get("tenant_id")
+    pnl_usd = closed_pos.get("pnl_usd")
+    if tenant_id is None or pnl_usd is None:
+        log.debug(
+            "skip capital update for position #%s (tenant_id=%s, pnl_usd=%s)",
+            closed_pos.get("id"), tenant_id, pnl_usd,
+        )
+        return
+    try:
+        apply_pnl_to_capital(int(tenant_id), float(pnl_usd))
+    except Exception as e:
+        # Capital update is best-effort: a ledger failure must NOT block the
+        # position-close lifecycle. Operator reconciles via separate audit.
+        log.warning(
+            "apply_pnl_to_capital failed for position #%s (tenant_id=%s): %s",
+            closed_pos.get("id"), tenant_id, e,
+        )
 
 
 def _validated_time_limit_hours(value, symbol: str) -> float | None:
@@ -198,9 +225,12 @@ def check_position_stops(symbol: str, price: float, now: datetime | None = None)
                     reason, exit_price = "TIME_LIMIT_HIT", price
 
         if reason:
-            db_close_position(pos["id"], exit_price, reason)
+            closed = db_close_position(pos["id"], exit_price, reason)
             log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
             _write_position_event_log(pos, reason, exit_price)
+            # B.2 #255: roll realized P&L into owner's capital (no-op if NULL tenant)
+            if closed:
+                _apply_close_to_capital(closed)
 
             # Send exit notification via the centralized notifier (#162 PR B).
             entry = pos.get("entry_price", 0)
@@ -304,6 +334,8 @@ def close_position(
     if not pos:
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     _write_position_event_log(pos, exit_reason, float(exit_price))
+    # B.2 #255: roll realized P&L into the JWT-authenticated owner's capital
+    _apply_close_to_capital(pos)
     update_positions_json()
     return {"ok": True, "position": pos}
 

@@ -1348,10 +1348,19 @@ class TestPositionsAPI:
 
     @pytest.fixture
     def client(self):
-        """TestClient with position routes registered."""
+        """TestClient with position routes registered.
+
+        After B.5 #258 wired Depends(get_current_tenant_id) into every per-user
+        endpoint, this stripped test_app must override that dependency — the
+        tests pre-date the auth migration and operate as a single synthetic
+        tenant. dependency_overrides keeps the test surface minimal without
+        spinning up the full AuthMiddleware + JWT cookie flow.
+        """
         from fastapi.testclient import TestClient
         from fastapi import FastAPI
         import api.positions as _pos
+        from auth.dependencies import get_current_tenant_id
+        from api.deps import verify_api_key
 
         test_app = FastAPI()
         test_app.get("/positions")(_pos.list_positions)
@@ -1359,6 +1368,8 @@ class TestPositionsAPI:
         test_app.put("/positions/{pos_id}")(_pos.edit_position)
         test_app.post("/positions/{pos_id}/close")(_pos.close_position)
         test_app.delete("/positions/{pos_id}")(_pos.delete_position)
+        test_app.dependency_overrides[get_current_tenant_id] = lambda: 1
+        test_app.dependency_overrides[verify_api_key] = lambda: None
 
         return TestClient(test_app)
 
@@ -1646,8 +1657,13 @@ class TestSignalPerformance:
         from fastapi.testclient import TestClient
         from fastapi import FastAPI
         import btc_api
+        from auth.dependencies import get_current_tenant_id
+
         test_app = FastAPI()
         test_app.get("/signals/performance")(btc_api.get_signals_performance)
+        # B.5 #258: signals/performance is per-tenant. Override the JWT dep
+        # so this legacy test stays auth-free (single synthetic tenant_id=1).
+        test_app.dependency_overrides[get_current_tenant_id] = lambda: 1
         return TestClient(test_app)
 
     def test_performance_no_data(self, client):
@@ -1728,16 +1744,16 @@ class TestSignalPerformance:
     def test_performance_with_data(self, client):
         import btc_api
         con = btc_api.get_db()
-        # Insert completed signals
-        # Signal 1: Win (score 8)
+        # B.5: rows must carry tenant_id matching the JWT override (1)
+        # so the strict-filter GET surfaces them. NULL tenant_id rows are
+        # invisible to per-tenant queries by design.
         con.execute("""
-            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status)
-            VALUES (1, 'BTCUSDT', '2025-01-01T00:00:00', 60000.0, 8, 62000.0, 5.0, -1.0, 'completed')
+            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
+            VALUES (1, 'BTCUSDT', '2025-01-01T00:00:00', 60000.0, 8, 62000.0, 5.0, -1.0, 'completed', 1)
         """)
-        # Signal 2: Loss (score 4)
         con.execute("""
-            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status)
-            VALUES (2, 'ETHUSDT', '2025-01-01T01:00:00', 3000.0, 4, 2900.0, 1.0, -5.0, 'completed')
+            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
+            VALUES (2, 'ETHUSDT', '2025-01-01T01:00:00', 3000.0, 4, 2900.0, 1.0, -5.0, 'completed', 1)
         """)
         con.commit()
         con.close()

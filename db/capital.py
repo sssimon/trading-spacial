@@ -15,6 +15,11 @@ from db.connection import get_db
 
 log = logging.getLogger("db.capital")
 
+# Default starting balance for a tenant whose first position closes before
+# any explicit PUT /capital was issued. Matches the per-symbol convention in
+# backtest.py:80 — keeping the value consistent across simulator + live ledger.
+INITIAL_CAPITAL_DEFAULT = 10_000.0
+
 
 def db_get_capital(tenant_id: int) -> Optional[dict]:
     """Return current capital row for tenant, or None if uninitialized."""
@@ -26,6 +31,39 @@ def db_get_capital(tenant_id: int) -> Optional[dict]:
     finally:
         con.close()
     return dict(row) if row else None
+
+
+def apply_pnl_to_capital(tenant_id: int, pnl_usd: float) -> Optional[dict]:
+    """B.2 hook: a position closed for `tenant_id` with realized `pnl_usd`.
+
+    Updates the tenant's capital row with monotonic-peak + current-drawdown
+    semantics. If no prior row exists, auto-init from INITIAL_CAPITAL_DEFAULT
+    (the first close stamps the row).
+
+    Returns the resulting capital row. Locks are documented in
+    docs/superpowers/plans/2026-05-16-multi-tenant-b2-capital-tracker-pre-reg.md §2.3.
+    """
+    row = db_get_capital(tenant_id)
+    if row is None:
+        prior_balance = INITIAL_CAPITAL_DEFAULT
+        prior_peak = INITIAL_CAPITAL_DEFAULT
+    else:
+        prior_balance = float(row["balance"])
+        prior_peak = float(row["peak_balance"])
+
+    new_balance = prior_balance + float(pnl_usd)
+    new_peak = max(prior_peak, new_balance)  # monotonic — never decreases
+    if new_peak > 0:
+        new_dd_pct = (new_peak - new_balance) / new_peak * 100.0
+    else:
+        new_dd_pct = None  # peak ≤ 0 leaves drawdown undefined
+
+    return db_upsert_capital(
+        tenant_id,
+        balance=new_balance,
+        peak_balance=new_peak,
+        max_drawdown_pct=new_dd_pct,
+    )
 
 
 def db_upsert_capital(
