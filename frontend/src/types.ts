@@ -370,3 +370,38 @@ export interface DashboardResponse {
   alerts: DashboardAlertSummary;
   generated_at: string;
 }
+
+// ---- Multi-tenant: capital + user preferences (Epic B #253, B.5 follow-up B) ----
+//
+// Both are per-user resources. The API derives tenant_id from JWT —
+// the frontend NEVER sends tenant_id / user_id in any request.
+
+export interface Capital {
+  id: number;
+  tenant_id: number;
+  balance: number;
+  peak_balance: number;
+  max_drawdown_pct: number | null;
+  updated_at: string;
+}
+
+export interface CapitalPutPayload {
+  balance: number;
+  peak_balance?: number;
+  max_drawdown_pct?: number;
+}
+
+export interface UserPreferences {
+  id?: number;
+  tenant_id: number;
+  symbol_filter: string[] | null;
+  min_score: number;
+  notify_channels: Record<string, unknown> | null;
+  updated_at?: string;
+}
+
+export interface PreferencesPutPayload {
+  symbol_filter?: string[] | null;
+  min_score?: number;
+  notify_channels?: Record<string, unknown> | null;
+}

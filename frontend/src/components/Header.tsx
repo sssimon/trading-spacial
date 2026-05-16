@@ -1,9 +1,10 @@
 // ============================================================
-// Header.tsx — Top navigation bar with scanner status
+// Header.tsx — Top navigation bar with scanner status + user identity
 // ============================================================
 
 import React from 'react';
 import NotificationBell from './NotificationBell';
+import { useAuth } from '../auth/useAuth';
 
 interface HeaderProps {
   scannerRunning: boolean;
@@ -35,6 +36,19 @@ const Header: React.FC<HeaderProps> = ({
   hasPendingTune,
   onTuneOpen,
 }) => {
+  // B.6 #259: surface current user identity. JWT cookie is httpOnly;
+  // useAuth() reads the hydrated user from AuthContext (not from cookie directly).
+  const { user, logout } = useAuth();
+  const handleLogout = async () => {
+    try {
+      await logout();
+      // After logout, App-level routing will redirect to /login.
+    } catch (err) {
+      // Logout treated as best-effort; cookie may already be invalidated.
+      // eslint-disable-next-line no-console
+      console.warn('[header] logout error:', err);
+    }
+  };
   return (
     <header className="header">
       {/* Left: brand */}
@@ -108,6 +122,24 @@ const Header: React.FC<HeaderProps> = ({
         >
           ⚙
         </button>
+        {user && (
+          <div className="header-user" aria-label="Usuario autenticado">
+            <span
+              className="header-user-email"
+              title={`Sesión iniciada como ${user.email} (rol: ${user.role})`}
+            >
+              {user.email}
+            </span>
+            <button
+              className="btn btn-secondary header-logout"
+              onClick={handleLogout}
+              title="Cerrar sesión"
+              aria-label="Cerrar sesión"
+            >
+              Salir
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

@@ -25,6 +25,10 @@ import type {
   KillSwitchCurrentStateResponse,
   KillSwitchEngine,
   DashboardResponse,
+  Capital,
+  CapitalPutPayload,
+  UserPreferences,
+  PreferencesPutPayload,
 } from './types';
 
 const BASE_URL = '/api';
@@ -300,4 +304,35 @@ export async function getKillSwitchCurrentState(
 
 export async function getHealthDashboard(): Promise<DashboardResponse> {
   return request<DashboardResponse>('/health/dashboard');
+}
+
+// ---- Multi-tenant resources (Epic B #253, B.5 follow-up B) ----
+//
+// tenant_id is derived from JWT on the backend — these functions intentionally
+// do NOT accept tenant_id / user_id arguments. The JWT cookie is httpOnly
+// (set by /auth/login) and is automatically attached via credentials:'include'
+// in request(). Frontend cannot read it.
+
+export async function getCapital(): Promise<Capital> {
+  return request<Capital>('/capital');
+}
+
+export async function putCapital(payload: CapitalPutPayload): Promise<{ ok: boolean; capital: Capital }> {
+  return request<{ ok: boolean; capital: Capital }>('/capital', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getPreferences(): Promise<UserPreferences> {
+  return request<UserPreferences>('/preferences');
+}
+
+export async function putPreferences(
+  payload: PreferencesPutPayload,
+): Promise<{ ok: boolean; preferences: UserPreferences }> {
+  return request<{ ok: boolean; preferences: UserPreferences }>('/preferences', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
