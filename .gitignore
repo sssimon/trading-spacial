@@ -7,6 +7,15 @@
 config.json
 config.secrets.json
 
+# ── Env vars (AUTH_JWT_SECRET, port overrides, etc.) ──────────
+# .env.example IS committed as documentation — .env is your local copy
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
 # ── Datos de backtesting (descargados de Binance) ────────────
 data/backtest/
 data/regime_cache.json

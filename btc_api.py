@@ -12,6 +12,16 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
+# Load .env (if present) BEFORE any module reads env vars. python-dotenv is a
+# dev-quality-of-life: production deployments set vars at the process level.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed → fall back to plain os.environ.
+    # Same path the prod systemd unit uses (no .env file, env set via unit).
+    pass
+
 import requests as req_lib  # tests patch btc_api.req_lib.post (test_api.py); also used directly at line 187
 from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,8 +102,8 @@ from scanner.runtime import (
 
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")  # noqa: F841 — patched by tests
 LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")  # noqa: F841 — patched by tests
-API_HOST = "0.0.0.0"
-API_PORT = 8000
+API_HOST = os.environ.get("TRADING_API_HOST", "0.0.0.0")
+API_PORT = int(os.environ.get("TRADING_API_PORT", "8000"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
