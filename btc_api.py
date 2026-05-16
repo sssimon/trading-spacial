@@ -46,9 +46,11 @@ from api.config import CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE, get_config, sav
 from api.config import router as config_router
 from api.deps import verify_api_key
 from api.health import router as health_router
+from api.capital import router as capital_router
 from api.kill_switch import router as kill_switch_router
 from api.notifications import router as notifications_router
 from api.ohlcv import router as ohlcv_router
+from api.user_preferences import router as user_preferences_router
 # check_position_stops: called as btc_api.check_position_stops in test_api.py (lines 1115–1188)
 # POSITIONS_JSON_FILE: monkeypatched as btc_api.POSITIONS_JSON_FILE in test_api.py (line 1343)
 from api.positions import check_position_stops, POSITIONS_JSON_FILE  # noqa: F401
@@ -260,6 +262,8 @@ app.include_router(kill_switch_router)
 app.include_router(tune_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
+app.include_router(capital_router)
+app.include_router(user_preferences_router)
 
 
 @app.get("/", summary="Bienvenida y estado general")
