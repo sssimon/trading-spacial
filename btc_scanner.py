@@ -223,7 +223,15 @@ def scan(symbol: str = None):
     df5  = md.get_klines(symbol, "5m",  limit=210)   # gatillo
     df1h = md.get_klines(symbol, "1h",  limit=210)   # señal principal
     df4h = md.get_klines(symbol, "4h",  limit=150)   # contexto macro
-    price = df1h["close"].iloc[-1]   # precio de cierre de la última vela 1H
+    price = df1h["close"].iloc[-1]   # precio de cierre de la última vela 1H (decisión / SL / TP / sizing)
+    # live_price = close de la vela 5m más reciente. Solo para display — refresca
+    # con cada scan (~5 min) en vez de quedarse pegado al cierre 1H (~1 h).
+    # No alimenta scoring / SL / TP / sizing, esos siguen usando `price`.
+    try:
+        live_price = float(df5["close"].iloc[-1])
+    except Exception:
+        live_price = float(price)
+    rep["live_price"] = round(live_price, 8)
 
     # ── Load config (reused for regime_mode + symbol_overrides) ─────────────
     _cfg_path = os.path.join(SCRIPT_DIR, "config.json")

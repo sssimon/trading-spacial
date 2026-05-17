@@ -247,7 +247,7 @@ const ChartModal: React.FC<ChartModalProps> = ({ symbol, onClose }) => {
 
   if (!symbol) return null;
 
-  const displayPrice = hoverPrice ?? symbol.price ?? 0;
+  const displayPrice = hoverPrice ?? symbol.live_price ?? symbol.price ?? 0;
   const lrc          = symbol.lrc_pct;
   const score        = symbol.score ?? 0;
   const lrcColor     = lrc != null && lrc <= 25 ? C_GREEN : C_RED;

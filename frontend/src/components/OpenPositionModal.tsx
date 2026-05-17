@@ -26,10 +26,11 @@ const OpenPositionModal: React.FC<OpenPositionModalProps> = ({
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
-  // When symbol changes, fill entry price from current price
+  // When symbol changes, fill entry price from current price (prefer live).
   useEffect(() => {
     const sym = symbols.find(s => s.symbol === symbol);
-    if (sym?.price && !prefill?.price) setEntryPrice(String(sym.price));
+    const current = sym?.live_price ?? sym?.price;
+    if (current && !prefill?.price) setEntryPrice(String(current));
   }, [symbol, symbols, prefill]);
 
   // Derived calculations

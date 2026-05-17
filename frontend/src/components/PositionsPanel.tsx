@@ -19,7 +19,8 @@ interface PositionsPanelProps {
 function priceMap(symbols: SymbolStatus[]): Record<string, number> {
   const map: Record<string, number> = {};
   for (const s of symbols) {
-    if (s.price != null) map[s.symbol] = s.price;
+    const p = s.live_price ?? s.price;
+    if (p != null) map[s.symbol] = p;
   }
   return map;
 }

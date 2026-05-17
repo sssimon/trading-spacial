@@ -19,7 +19,10 @@ export interface Sizing1h {
 export interface SymbolStatus {
   symbol: string;
   estado: string;
+  /** Decision-time price (1H close). Used by SL/TP/sizing on the backend; stable across 5-min scans within an hour. */
   price: number | null;
+  /** Display price (5m close). Refreshes every scan. Prefer this for rendering; fall back to `price`. */
+  live_price?: number | null;
   lrc_pct: number | null;
   score: number | null;
   señal: boolean;

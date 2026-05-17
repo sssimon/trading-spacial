@@ -43,7 +43,7 @@ const SymbolCard: React.FC<SymbolCardProps> = ({ symbol, onClick }) => {
 
   const lrc    = symbol.lrc_pct ?? 0;
   const score  = symbol.score   ?? 0;
-  const price  = symbol.price   ?? 0;
+  const price  = symbol.live_price ?? symbol.price ?? 0;
 
   // Clamp lrc_pct to 0–100 for bar display
   const lrcBarPct   = Math.min(100, Math.max(0, lrc));
@@ -109,7 +109,7 @@ const SymbolCard: React.FC<SymbolCardProps> = ({ symbol, onClick }) => {
       <div className="card-price">
         <span className="price-currency">$</span>
         <span className="price-value">
-          {symbol.price != null ? formatPrice(price) : '—'}
+          {(symbol.live_price ?? symbol.price) != null ? formatPrice(price) : '—'}
         </span>
       </div>
 

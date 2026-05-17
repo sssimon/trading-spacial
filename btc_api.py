@@ -293,21 +293,32 @@ def root():
 @app.get("/symbols", summary="Estado actual de cada par monitoreado")
 def list_symbols():
     """Retorna el último escaneo de cada símbolo, ordenado por señal y score."""
+    import json as _json  # noqa: PLC0415 — local import keeps the module-level surface unchanged
     symbols = _scanner_state.get("symbols_active") or get_active_symbols()
     rows    = get_signals_summary()
     by_sym  = {r["symbol"]: r for r in rows}
     result  = []
     for sym in symbols:
         row = by_sym.get(sym)
+        # `price` is the 1H close (decision-time price for SL/TP/sizing).
+        # `live_price` (lives in payload JSON) is the 5m close — refreshes every
+        # scan so the dashboard doesn't appear stuck between 1H bar closes.
+        live_price = None
+        if row and row.get("payload"):
+            try:
+                live_price = _json.loads(row["payload"]).get("live_price")
+            except (ValueError, TypeError):
+                live_price = None
         result.append({
-            "symbol":  sym,
-            "estado":  row["estado"]        if row else "Sin datos aun",
-            "price":   row["price"]         if row else None,
-            "lrc_pct": row["lrc_pct"]       if row else None,
-            "score":   row["score"]         if row else None,
-            "señal":   bool(row["señal"])   if row else False,
-            "gatillo": bool(row["gatillo"]) if row else False,
-            "ts":      row["ts"]            if row else None,
+            "symbol":     sym,
+            "estado":     row["estado"]        if row else "Sin datos aun",
+            "price":      row["price"]         if row else None,
+            "live_price": live_price,
+            "lrc_pct":    row["lrc_pct"]       if row else None,
+            "score":      row["score"]         if row else None,
+            "señal":      bool(row["señal"])   if row else False,
+            "gatillo":    bool(row["gatillo"]) if row else False,
+            "ts":         row["ts"]            if row else None,
         })
     return {"total": len(result), "symbols": result}
 
