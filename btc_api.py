@@ -290,6 +290,47 @@ def root():
     }
 
 
+# Module-level cache for the live ticker endpoint. TTL kept short so the
+# dashboard feels live, but long enough to dedupe bursts (multiple tabs,
+# remounts) into a single upstream call.
+_ticker_cache: dict = {"ts": 0.0, "data": {}}
+_TICKER_CACHE_TTL_SEC = 2.5
+
+
+@app.get("/ticker", summary="Precios spot en vivo (cacheado ~2.5s)")
+def get_ticker():
+    """Return {symbol: price} for the curated watchlist symbols.
+
+    Hits Binance batch /api/v3/ticker/price in a single request. Results
+    cached server-side for ~2.5s so multiple polling tabs converge to one
+    upstream call. Independent of the scanner: prices refresh in seconds
+    instead of every 5-min scan cycle.
+    """
+    import json as _json   # noqa: PLC0415
+    import time as _time   # noqa: PLC0415
+    now = _time.monotonic()
+    if now - _ticker_cache["ts"] < _TICKER_CACHE_TTL_SEC and _ticker_cache["data"]:
+        return {"prices": _ticker_cache["data"], "cached": True}
+
+    symbols = _scanner_state.get("symbols_active") or get_active_symbols()
+    try:
+        # Binance rejects whitespace inside the symbols array. Compact JSON
+        # (no spaces) is required: `["BTC","ETH"]` not `["BTC", "ETH"]`.
+        r = req_lib.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbols": _json.dumps(symbols, separators=(",", ":"))},
+            timeout=5,
+        )
+        r.raise_for_status()
+        out = {item["symbol"]: float(item["price"]) for item in r.json()}
+        _ticker_cache.update(ts=now, data=out)
+        return {"prices": out, "cached": False}
+    except Exception as e:
+        log.warning("ticker endpoint failed: %s", e)
+        # Serve last-known cache on failure (better stale than nothing).
+        return {"prices": _ticker_cache["data"], "error": str(e)}
+
+
 @app.get("/symbols", summary="Estado actual de cada par monitoreado")
 def list_symbols():
     """Retorna el último escaneo de cada símbolo, ordenado por señal y score."""

@@ -2,9 +2,10 @@
 // App.tsx — Main application component
 // ============================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSymbols, getStatus, getSignals, forceScan, getTuneLatest, applyTune, rejectTune } from './api';
 import type { SymbolStatus, StatusResponse, Signal, TuneResult } from './types';
+import { useLiveTicker } from './hooks/useLiveTicker';
 import ChartModal from './components/ChartModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
@@ -23,7 +24,9 @@ type MainTab    = 'mercado' | 'posiciones' | 'kill-switch';
 const REFRESH_INTERVAL_MS = 30_000;
 
 const App: React.FC = () => {
-  const [symbols,     setSymbols]     = useState<SymbolStatus[]>([]);
+  // Raw symbols from /symbols. The exposed `symbols` (below) overlays live
+  // ticker prices on top so the dashboard refreshes in seconds.
+  const [symbolsRaw,  setSymbols]     = useState<SymbolStatus[]>([]);
   const [status,      setStatus]      = useState<StatusResponse | null>(null);
   const [signals,     setSignals]     = useState<Signal[]>([]);
   const [scanning,    setScanning]    = useState(false);
@@ -67,6 +70,16 @@ const App: React.FC = () => {
     const id = setInterval(fetchAll, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [fetchAll]);
+
+  // Live ticker poll (3s). Overrides `live_price` from /symbols so prices
+  // refresh in seconds instead of every 5-min scan cycle.
+  const tickerPrices = useLiveTicker(3000);
+  const symbols = useMemo(
+    () => symbolsRaw.map((s) => (
+      tickerPrices[s.symbol] != null ? { ...s, live_price: tickerPrices[s.symbol] } : s
+    )),
+    [symbolsRaw, tickerPrices],
+  );
 
   const handleRefresh = useCallback(async () => {
     setLoading(true);
