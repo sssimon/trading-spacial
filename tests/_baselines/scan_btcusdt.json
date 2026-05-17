@@ -95,6 +95,7 @@
     "vela_5m_alcista": false
   },
   "gatillo_activo": false,
+  "live_price": 76622.47,
   "lrc_1h": {
     "lower": 76374.26,
     "mid": 77440.95,
