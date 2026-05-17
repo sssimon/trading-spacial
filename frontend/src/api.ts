@@ -114,6 +114,16 @@ export async function getSymbols(): Promise<SymbolsResponse> {
   return request<SymbolsResponse>('/symbols');
 }
 
+// GET /ticker — live spot prices (server-cached ~2.5s)
+export interface TickerResponse {
+  prices: Record<string, number>;
+  cached?: boolean;
+  error?: string;
+}
+export async function getTicker(): Promise<TickerResponse> {
+  return request<TickerResponse>('/ticker');
+}
+
 // GET /status
 export async function getStatus(): Promise<StatusResponse> {
   return request<StatusResponse>('/status');
