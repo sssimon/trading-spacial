@@ -1,0 +1,89 @@
+# One-shot workflow para correr scripts/bootstrap-atomic-deploy.sh en el
+# server vía SSH usando los mismos secrets que deploy.yml. Es de disparo
+# manual (workflow_dispatch) — NO se ejecuta automáticamente.
+#
+# Uso:
+#   1. Desde el web UI: Actions → Bootstrap atomic deploy → Run workflow
+#      → seleccionar mode = "dry-run" o "apply"
+#   2. Desde CLI:
+#        gh workflow run "Bootstrap atomic deploy" -f mode=dry-run
+#        gh workflow run "Bootstrap atomic deploy" -f mode=apply
+#
+# El primer paso recomendado es siempre "dry-run" para ver el diff del
+# systemd unit y la lista de archivos que se moverían. Después, "apply".
+#
+# Es idempotente: si el bootstrap ya corrió, el script detecta /current
+# y sale limpio sin tocar nada.
+
+name: Bootstrap atomic deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = preview sin aplicar; apply = ejecuta el bootstrap'
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - apply
+
+# Sin concurrency group: queremos que cada dispatch corra independiente.
+# Si alguien dispara dos al hilo, GitHub los serializa por defecto pero
+# tampoco hay riesgo (script es idempotente).
+
+jobs:
+  bootstrap:
+    name: Bootstrap server (mode=${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST:    ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload bootstrap script to server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            scripts/bootstrap-atomic-deploy.sh \
+            ubuntu@${HOST}:/tmp/bootstrap-atomic-deploy.sh
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} \
+            "chmod +x /tmp/bootstrap-atomic-deploy.sh"
+
+      - name: Run bootstrap (${{ inputs.mode }})
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$MODE" = "dry-run" ]; then
+            FLAG="--dry-run"
+          else
+            FLAG="--yes"
+          fi
+          echo "::group::Running bootstrap with $FLAG"
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} \
+            "/tmp/bootstrap-atomic-deploy.sh $FLAG"
+          echo "::endgroup::"
+
+      - name: Cleanup remote script
+        if: always()
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} \
+            "rm -f /tmp/bootstrap-atomic-deploy.sh" || true
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -49,30 +49,53 @@ Por qué linkear `.env`, `.venv`, `data/` en vez de tenerlos por-release:
   pero solo aplica deltas.
 - **`data/`**: la DB y los logs. Obvio que no podemos tirarlos cada deploy.
 
-## Pasos del bootstrap (una vez, en el server)
+## Pasos del bootstrap
 
-### 0. Pre-requisitos
+Hay dos formas de correr el bootstrap. Elegí la que aplique a tu situación.
+
+### Opción A — Via GitHub Actions (sin SSH key local)
+
+Si NO tenés SSH key al server pero sí acceso al repo en GitHub:
+
+1. Ir a **Actions → "Bootstrap atomic deploy" → Run workflow**.
+2. Primer dispatch: `mode = dry-run`. Mira el log — especialmente el diff
+   del systemd unit y la lista de archivos que se moverían. Si todo se ve
+   razonable, seguí al paso 3.
+3. Segundo dispatch: `mode = apply`. Esto ejecuta el bootstrap completo
+   (sin confirmaciones interactivas, ya las hiciste vos al revisar el
+   dry-run). Termina con un health check; si falla, los logs te muestran
+   los comandos para revertir manualmente.
+
+Equivalente vía CLI:
+
+```bash
+gh workflow run "Bootstrap atomic deploy" -f mode=dry-run
+gh run watch    # mirá el log del dry-run
+gh workflow run "Bootstrap atomic deploy" -f mode=apply
+gh run watch    # confirmá que apply completó OK
+```
+
+El workflow usa los mismos secrets `DEPLOY_SSH_KEY` + `DEPLOY_HOST` que
+`deploy.yml`. Es idempotente: si `current` ya existe, sale sin tocar nada.
+
+### Opción B — Via SSH directo (interactivo)
+
+Pre-requisitos:
 
 - Acceso SSH al server como `ubuntu`.
 - Permisos `sudo` (para `systemctl` y escribir en `/etc/systemd/system/`).
 - El service `trading-spacial` está corriendo en el layout viejo
   (`/var/www/trading/btc_api.py`, etc).
 
-### 1. Subir el script al server
-
-Desde tu máquina (la que tiene SSH key):
-
 ```bash
 scp scripts/bootstrap-atomic-deploy.sh ubuntu@<DEPLOY_HOST>:/tmp/
 ssh ubuntu@<DEPLOY_HOST>
-```
-
-### 2. Ejecutar el bootstrap
-
-```bash
 cd /tmp
 chmod +x bootstrap-atomic-deploy.sh
-./bootstrap-atomic-deploy.sh
+./bootstrap-atomic-deploy.sh                # default: pide confirmación tras mostrar el diff
+# o:
+./bootstrap-atomic-deploy.sh --dry-run      # solo preview
+./bootstrap-atomic-deploy.sh --yes          # apply sin prompts
 ```
 
 El script:
