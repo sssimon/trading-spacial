@@ -153,7 +153,12 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
 
     for r in [dict(row) for row in rows]:
         try:
-            sig_ts = datetime.fromisoformat(r["signal_ts"])
+            # signal_outcomes.signal_ts is written by btc_scanner.py:219 as
+            # '%Y-%m-%d %H:%M:%S UTC'. fromisoformat doesn't accept the literal
+            # ' UTC' suffix — strip it before parsing.
+            ts_raw = (r["signal_ts"] or "").strip()
+            clean  = ts_raw.removesuffix(" UTC").strip().replace(" ", "T")
+            sig_ts = datetime.fromisoformat(clean)
             if sig_ts.tzinfo is None:
                 sig_ts = sig_ts.replace(tzinfo=timezone.utc)
 

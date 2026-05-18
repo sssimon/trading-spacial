@@ -1713,6 +1713,55 @@ class TestSignalPerformance:
         con.close()
         assert row["price_1h"] == 61500.0
 
+    def test_check_pending_handles_utc_suffix_format(self, caplog):
+        """signal_outcomes.signal_ts is written by btc_scanner.py as
+        '%Y-%m-%d %H:%M:%S UTC' (display format with literal UTC suffix).
+        Regression: check_pending_signal_outcomes must parse it without
+        raising 'Invalid isoformat string' warnings.
+        """
+        import logging
+        import btc_api
+        from unittest.mock import patch
+
+        ts_2h_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+
+        con = btc_api.get_db()
+        con.execute("""
+            INSERT INTO signal_outcomes
+            (scan_id, symbol, signal_ts, signal_price, score, status)
+            VALUES (300, 'BTCUSDT', ?, 60000.0, 5, 'pending')
+        """, (ts_2h_ago,))
+        con.commit()
+        con.close()
+
+        with patch.object(btc_api.md, "get_klines") as mock_klines:
+            import pandas as pd
+            mock_klines.return_value = pd.DataFrame({
+                "open": [59000.0], "high": [62000.0],
+                "low": [58000.0], "close": [61000.0],
+                "volume": [100.0], "taker_buy_base": [50.0],
+            })
+            with caplog.at_level(logging.WARNING, logger="scanner.runtime"):
+                btc_api.check_pending_signal_outcomes({"BTCUSDT": 61500.0})
+
+        bad_warnings = [
+            rec for rec in caplog.records
+            if "Invalid isoformat" in rec.getMessage()
+        ]
+        assert not bad_warnings, (
+            f"check_pending_signal_outcomes raised isoformat warnings for "
+            f"production timestamp format: {[r.getMessage() for r in bad_warnings]}"
+        )
+
+        con = btc_api.get_db()
+        row = con.execute("SELECT * FROM signal_outcomes WHERE scan_id = 300").fetchone()
+        con.close()
+        assert row["price_1h"] == 61500.0, (
+            "Row update was skipped — fix did not reach the update branch"
+        )
+
     def test_check_pending_groups_by_symbol(self):
         """Multiple pending signals for same symbol share one klines call."""
         import btc_api
