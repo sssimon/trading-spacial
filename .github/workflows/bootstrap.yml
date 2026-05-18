@@ -1,18 +1,33 @@
+# ============================================================================
+# DISABLED — atomic deploy migration was reverted (PR #377 closed)
+# ============================================================================
+# Este workflow está retenido como herramienta diagnóstica pero el approach
+# de atomic deploy fue revertido. Tres bloqueos no resueltos:
+#   1. Shebangs del venv (status=203/EXEC) tras mover .venv
+#   2. ReadWritePaths vs symlinks → SQLite readonly
+#   3. SQLite WAL + cwd-vía-symlink → "attempt to write a readonly database"
+# Ver el closing comment de PR #377 para el análisis completo y las 3
+# opciones forward (PYTHONPATH v3, eliminar WAL, migrar a Postgres).
+#
+# Los modos apply/repair/rollback están bloqueados por un gate explícito.
+# Solo diagnose y dry-run son ejecutables sin override.
+# ============================================================================
+#
 # One-shot workflow para correr scripts/bootstrap-atomic-deploy.sh en el
 # server vía SSH usando los mismos secrets que deploy.yml. Es de disparo
 # manual (workflow_dispatch) — NO se ejecuta automáticamente.
 #
 # Modos:
-#   dry-run = preview de qué haría el bootstrap sin ejecutarlo
-#   apply   = ejecuta el bootstrap (migración del layout)
-#   repair  = post-bootstrap fix: crea symlink legacy /var/www/trading/.venv
-#             → shared/.venv para que los shebangs del venv resuelvan.
-#             También resetea el restart-counter del service y lo restartea.
+#   diagnose = print server state (read-only, siempre safe)
+#   dry-run  = preview de qué haría el bootstrap sin ejecutarlo
+#   apply    = ejecuta el bootstrap (DISABLED — requiere ack explícito)
+#   repair   = post-bootstrap fix (DISABLED — requiere ack explícito)
+#   rollback = revierte al layout flat (DISABLED — requiere ack explícito)
 #
 # Uso:
-#   gh workflow run "Bootstrap atomic deploy" -f mode=dry-run
-#   gh workflow run "Bootstrap atomic deploy" -f mode=apply
-#   gh workflow run "Bootstrap atomic deploy" -f mode=repair
+#   gh workflow run "Bootstrap atomic deploy" -f mode=diagnose
+#   gh workflow run "Bootstrap atomic deploy" -f mode=apply \
+#     -f i_understand_pr_377_was_closed=yes
 
 name: Bootstrap atomic deploy
 
@@ -20,16 +35,21 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'dry-run = preview; apply = ejecuta; repair = fix post-apply; rollback = revierte; diagnose = print server state'
+        description: 'diagnose = read-only state; dry-run = preview; apply/repair/rollback = DISABLED unless ack'
         required: true
         type: choice
-        default: dry-run
+        default: diagnose
         options:
+          - diagnose
           - dry-run
           - apply
           - repair
           - rollback
-          - diagnose
+      i_understand_pr_377_was_closed:
+        description: 'Required for apply/repair/rollback. Set to "yes" to override the disabled gate.'
+        required: false
+        type: string
+        default: 'no'
 
 jobs:
   bootstrap:
@@ -38,6 +58,31 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
+      - name: Disabled gate — block apply/repair/rollback without ack
+        env:
+          MODE: ${{ inputs.mode }}
+          ACK: ${{ inputs.i_understand_pr_377_was_closed }}
+        run: |
+          case "$MODE" in
+            diagnose|dry-run)
+              echo "::notice::Mode '$MODE' is read-only/preview — gate bypassed."
+              exit 0
+              ;;
+            apply|repair|rollback)
+              if [ "$ACK" != "yes" ]; then
+                echo "::error::Mode '$MODE' is DISABLED. Atomic deploy migration was reverted (PR #377 closed)."
+                echo "::error::To override, re-run with i_understand_pr_377_was_closed=yes."
+                echo "::error::See PR #377 closing comment for the 3 forward options before re-enabling."
+                exit 1
+              fi
+              echo "::warning::Override accepted for mode '$MODE'. Proceeding despite PR #377 being closed."
+              ;;
+            *)
+              echo "::error::Unknown mode: $MODE"
+              exit 1
+              ;;
+          esac
 
       - name: Setup SSH
         env:
@@ -69,7 +114,7 @@ jobs:
           if [ "$MODE" = "dry-run" ]; then
             FLAG="--dry-run"
           else
-            FLAG="--yes"
+            FLAG="--yes --i-understand-pr-377-was-closed"
           fi
           echo "::group::Running bootstrap with $FLAG"
           ssh -i ~/.ssh/deploy_key ubuntu@${HOST} \

@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 # bootstrap-atomic-deploy.sh — migración al layout atómico (v2, simplificado).
 #
+# ============================================================================
+# DISABLED — atomic deploy migration was reverted (PR #377 closed)
+# ============================================================================
+# Este script está retenido como referencia. El approach fue revertido por
+# tres bloqueos no resueltos:
+#   1. Shebangs del venv (status=203/EXEC) tras mover .venv
+#   2. ReadWritePaths vs symlinks → SQLite readonly
+#   3. SQLite WAL + cwd-vía-symlink → "attempt to write a readonly database"
+# Ver closing comment de PR #377 para análisis + 3 opciones forward
+# (PYTHONPATH v3, eliminar WAL, migrar a Postgres).
+#
+# Para correr de todas formas (NO recomendado sin haber resuelto uno de los
+# tres bloqueos), pasar --i-understand-pr-377-was-closed.
+# --dry-run sigue funcionando sin override (solo preview, no destructivo).
+# ============================================================================
+#
 # Diseño:
 #
 #   /var/www/trading/
@@ -25,9 +41,10 @@
 # Idempotente: si /var/www/trading/current ya existe, sale sin hacer nada.
 #
 # Flags:
-#   --dry-run   Preview sin destruir. Implica --yes.
-#   --yes       Skip prompt interactivo después del diff del unit.
-#   --sha=<id>  ID para el release inicial (default pre-atomic-<ts>).
+#   --dry-run                            Preview sin destruir. Implica --yes.
+#   --yes                                Skip prompt interactivo después del diff del unit.
+#   --sha=<id>                           ID para el release inicial (default pre-atomic-<ts>).
+#   --i-understand-pr-377-was-closed     Override del gate de DISABLED.
 
 set -euo pipefail
 
@@ -36,23 +53,41 @@ set -euo pipefail
 DRY_RUN=0
 ASSUME_YES=0
 INITIAL_SHA=""
+OVERRIDE_DISABLED=0
 
 for arg in "$@"; do
   case "$arg" in
-    --dry-run)  DRY_RUN=1; ASSUME_YES=1 ;;
-    --yes)      ASSUME_YES=1 ;;
-    --sha=*)    INITIAL_SHA="${arg#--sha=}" ;;
+    --dry-run)                        DRY_RUN=1; ASSUME_YES=1 ;;
+    --yes)                            ASSUME_YES=1 ;;
+    --sha=*)                          INITIAL_SHA="${arg#--sha=}" ;;
+    --i-understand-pr-377-was-closed) OVERRIDE_DISABLED=1 ;;
     -h|--help)
       sed -n '1,/^set -e/p' "$0" | sed 's/^# \?//' | head -n -1
       exit 0
       ;;
     *)
       echo "::error::Flag desconocido: $arg"
-      echo "Usage: $0 [--dry-run] [--yes] [--sha=<id>]"
+      echo "Usage: $0 [--dry-run] [--yes] [--sha=<id>] [--i-understand-pr-377-was-closed]"
       exit 2
       ;;
   esac
 done
+
+# ── Disabled gate ────────────────────────────────────────────
+# Bloquea acciones destructivas si no se pasó el override.
+# --dry-run es siempre safe (no modifica nada) y no requiere override.
+
+if [ "$DRY_RUN" -eq 0 ] && [ "$OVERRIDE_DISABLED" -eq 0 ]; then
+  echo "::error::This script is DISABLED. Atomic deploy migration was reverted (PR #377 closed)."
+  echo "::error::Three unresolved blockers: venv shebangs, ReadWritePaths vs symlinks, SQLite WAL + cwd-symlink."
+  echo "::error::To override and run anyway, pass --i-understand-pr-377-was-closed."
+  echo "::error::To preview without running, use --dry-run."
+  exit 1
+fi
+
+if [ "$OVERRIDE_DISABLED" -eq 1 ]; then
+  echo "::warning::Override accepted. Proceeding despite PR #377 being closed."
+fi
 
 if [ -z "$INITIAL_SHA" ]; then
   INITIAL_SHA="pre-atomic-$(date +%Y%m%d-%H%M%S)"

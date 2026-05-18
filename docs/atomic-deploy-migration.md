@@ -1,5 +1,28 @@
 # Migración al deploy atómico — guía operativa
 
+> **⚠️ DISABLED — PR #377 fue cerrado tras varios intentos fallidos.**
+>
+> Tres bloqueos no resueltos:
+> 1. Shebangs del venv (`status=203/EXEC`) tras mover `.venv`.
+> 2. `ReadWritePaths` vs symlinks → SQLite readonly.
+> 3. SQLite WAL + `cwd`-vía-symlink → `attempt to write a readonly database`.
+>
+> El workflow (`bootstrap.yml`) y el script (`bootstrap-atomic-deploy.sh`)
+> quedan retenidos como herramienta diagnóstica. Los modos destructivos
+> (`apply`/`repair`/`rollback`) están bloqueados por un gate explícito que
+> requiere pasar `i_understand_pr_377_was_closed=yes` (workflow) o
+> `--i-understand-pr-377-was-closed` (script). `diagnose` y `dry-run` siguen
+> sin override.
+>
+> **Tres opciones forward** documentadas en el closing comment de PR #377:
+> 1. PYTHONPATH v3 (cwd sin symlink, código vía PYTHONPATH).
+> 2. Eliminar `PRAGMA journal_mode=WAL` en `db/schema.py`.
+> 3. Migrar a Postgres (epic separado).
+>
+> El resto de este doc describe el approach intentado, por valor histórico.
+
+---
+
 Esta es una migración **one-time** del layout actual del server
 (`/var/www/trading/` plano) al layout con `releases/<sha>` + symlink
 `current` que permite deploys atómicos con rollback.
