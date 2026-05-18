@@ -1,12 +1,29 @@
-# Deploy in-place. Trade-off conocido: si el rsync de frontend falla
-# después del rsync de backend, el sistema queda con backend nuevo y
-# frontend viejo hasta el siguiente deploy. Aceptable mientras el sistema
-# sea single-user sin capital real. Para capital real, migrar a deploy
-# atómico con symlink swap (releases/<sha> → /var/www/trading current).
+# Atomic deploy con symlink swap.
 #
-# Bootstrap manual del server requerido ANTES del primer deploy:
-#   docs/superpowers/specs/es/2026-04-29-trading-sdar-dev-deploy-design.md §6
-# El step "Verify .env exists" abajo falla fast si no se hizo.
+# Layout en el server (creado por scripts/bootstrap-atomic-deploy.sh):
+#
+#   /var/www/trading/
+#   ├── current → releases/<sha>     (symlink al release activo)
+#   ├── releases/
+#   │   ├── <sha-N>/                  (copy completo de la app por deploy)
+#   │   │   ├── btc_api.py / ...
+#   │   │   ├── dist/                 (frontend build)
+#   │   │   ├── .env    → ../../shared/.env
+#   │   │   ├── .venv   → ../../shared/.venv
+#   │   │   └── data    → ../../shared/data
+#   │   └── <sha-N-1>/                (release anterior — para rollback)
+#   └── shared/                       (persiste entre deploys)
+#       ├── .env
+#       ├── .venv/
+#       └── data/
+#
+# El cutover es atómico (mv -Tf sobre el symlink usa rename(2) atómico de
+# Linux). Si el health check falla, se hace rollback automático al release
+# anterior antes de devolver exit 1.
+#
+# Bootstrap manual requerido ANTES del primer deploy con este workflow:
+#   docs/atomic-deploy-migration.md
+# El step "Verify atomic layout" abajo falla fast si no se hizo.
 
 name: Deploy to Production
 
@@ -52,19 +69,58 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Verify .env exists on server (fail-fast if bootstrap missing)
+      - name: Verify atomic layout (fail-fast if bootstrap missing)
+        # Chequeo de que el server ya corrió scripts/bootstrap-atomic-deploy.sh.
+        # Sin esto, los rsync/symlink subsiguientes romperían el deploy
+        # actual del server. Fail fast antes de tocar nada.
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "test -f /var/www/trading/.env"; then
-            echo "::error::/var/www/trading/.env no existe en el server."
-            echo "::error::Ejecutar bootstrap manual primero (ver docs/superpowers/specs/es/2026-04-29-trading-sdar-dev-deploy-design.md §6)."
+          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            test -L /var/www/trading/current &&
+            test -d /var/www/trading/releases &&
+            test -d /var/www/trading/shared &&
+            test -f /var/www/trading/shared/.env &&
+            test -d /var/www/trading/shared/.venv
+          "; then
+            echo "::error::Server no está migrado al layout atómico."
+            echo "::error::Ejecutar scripts/bootstrap-atomic-deploy.sh primero."
+            echo "::error::Ver docs/atomic-deploy-migration.md"
             exit 1
           fi
 
-      - name: rsync backend source
+      - name: Compute release paths
+        id: paths
+        run: |
+          SHA=${GITHUB_SHA::12}
+          echo "sha=$SHA"                                   >> $GITHUB_OUTPUT
+          echo "release_dir=/var/www/trading/releases/$SHA" >> $GITHUB_OUTPUT
+
+      - name: Capture previous release (for rollback)
+        # Leemos el target del symlink current ANTES de tocarlo. Si el health
+        # check post-cutover falla, hacemos `ln -sfn $PREV current` para volver.
+        id: prev
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          PREV=$(ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "readlink /var/www/trading/current || echo ''")
+          echo "prev=$PREV" >> $GITHUB_OUTPUT
+          echo "Previous release symlink target: $PREV"
+
+      - name: Stage release directory
+        env:
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            mkdir -p ${RELEASE_DIR} &&
+            mkdir -p ${RELEASE_DIR}/dist
+          "
+
+      - name: rsync backend source to release dir
+        env:
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
@@ -76,39 +132,104 @@ jobs:
             --exclude='Dashboard/' --exclude='docs/' --exclude='*.bat' \
             --exclude='*.ps1' --exclude='.env' --exclude='.env.*' \
             --exclude='.claude/' \
-            --exclude='data/*.json' --exclude='data/*.csv' \
-            --exclude='data/*.xlsx' --exclude='data/backtest/' \
-            ./ ubuntu@${HOST}:/var/www/trading/
+            --exclude='data/' \
+            --exclude='dist/' \
+            ./ ubuntu@${HOST}:${RELEASE_DIR}/
 
-      - name: rsync frontend dist
+      - name: rsync frontend dist to release dir
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
-            frontend/dist/ ubuntu@${HOST}:/var/www/trading/dist/
+            frontend/dist/ ubuntu@${HOST}:${RELEASE_DIR}/dist/
 
-      - name: pip install + restart service
+      - name: Link shared resources into release
+        # .env, .venv, data/ viven en shared/ y se linkean dentro del release.
+        # Esto garantiza que los releases comparten el mismo virtualenv (sin
+        # reinstalar pip deps salvo que requirements cambie) y la misma DB.
+        env:
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            cd ${RELEASE_DIR} &&
+            ln -sfn ../../shared/.env  .env &&
+            ln -sfn ../../shared/.venv .venv &&
+            ln -sfn ../../shared/data  data
+          "
+
+      - name: pip install in new release
+        env:
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            cd ${RELEASE_DIR} &&
+            .venv/bin/pip install --upgrade -r requirements.txt
+          "
+
+      - name: Atomic cutover (swap symlink + restart)
+        # `mv -Tf` sobre un symlink existente usa rename(2) que es atómico en
+        # Linux: el proceso del kernel garantiza que ningún lector ve un
+        # estado intermedio. `ln -sfn current.new current` también funciona
+        # pero `mv -T` es más explícitamente atómico.
+        env:
+          HOST:        ${{ secrets.DEPLOY_HOST }}
+          RELEASE_DIR: ${{ steps.paths.outputs.release_dir }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+            cd /var/www/trading &&
+            ln -sfn releases/$(basename ${RELEASE_DIR}) current.new &&
+            mv -Tf current.new current &&
+            sudo systemctl restart trading-spacial
+          "
+
+      - name: Health check + auto-rollback on failure
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PREV: ${{ steps.prev.outputs.prev }}
+        run: |
+          sleep 15
+          if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health"; then
+            echo "::notice::Deploy OK. Release activo: ${{ steps.paths.outputs.sha }}"
+            exit 0
+          fi
+
+          echo "::error::Health check falló post-cutover."
+          if [ -n "$PREV" ]; then
+            echo "::warning::Rolling back a $PREV..."
+            ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
+              cd /var/www/trading &&
+              ln -sfn $PREV current.new &&
+              mv -Tf current.new current &&
+              sudo systemctl restart trading-spacial
+            "
+            sleep 10
+            if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health"; then
+              echo "::warning::Rollback OK. Release activo: $PREV"
+            else
+              echo "::error::Rollback también falló. Estado del server desconocido."
+              ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
+            fi
+          else
+            echo "::error::No hay release previo registrado para rollback."
+          fi
+          exit 1
+
+      - name: Cleanup old releases (keep last 5)
+        # Sólo si el deploy fue exitoso. Si falló y rolled back, mantenemos
+        # el release fallido para inspección manual.
+        if: success()
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
-            cd /var/www/trading &&
-            .venv/bin/pip install --upgrade -r requirements.txt &&
-            sudo systemctl restart trading-spacial
+            cd /var/www/trading/releases &&
+            ls -1t | tail -n +6 | xargs -r rm -rf
           "
 
-      - name: Health check
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          sleep 15
-          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health"; then
-            echo "::error::Health check falló. Logs del servicio:"
-            ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
-            exit 1
-          fi
-
-      - name: Cleanup
+      - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
