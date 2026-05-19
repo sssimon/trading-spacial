@@ -427,12 +427,16 @@ def agent_chat(body: _AgentRequest):
     # the env var) now correctly gets a 503 here instead of the request
     # silently sailing through. Closes the cfg-vs-env consistency gap
     # flagged in PR #402 review.
+    #
+    # get_agent_status() already guarantees ANTHROPIC_API_KEY is present
+    # and non-empty when status.enabled is True — no need for a redundant
+    # os.environ check below (PR #403 review issue 5).
     from api.agent.config import get_agent_status  # noqa: PLC0415
     _agent_status = get_agent_status()
     if not _agent_status.enabled:
         from fastapi import HTTPException  # noqa: PLC0415
         raise HTTPException(status_code=503, detail=_agent_status.reason)
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = os.environ["ANTHROPIC_API_KEY"].strip()
 
     payload = {
         "model":      "claude-haiku-4-5",

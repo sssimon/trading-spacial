@@ -149,14 +149,19 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
 
 # Sanity invariant: every entry in TOOL_CATALOG has a corresponding
 # schema in TOOL_INPUT_SCHEMAS, and vice versa. If you add a tool to one
-# and forget the other, this fires at import time — surfaces in CI as
-# a test_tool_registry_consistency failure.
+# and forget the other, this raises at import time so the process refuses
+# to start in production with an inconsistent registry. The test in
+# tests/test_agent_tools.py covers the same invariant in CI.
+#
+# `raise RuntimeError`, not `assert`: `python -O` strips assert
+# statements out of the bytecode entirely (PR #403 review issue 4).
 _CATALOG_NAMES = {t.name for t in TOOL_CATALOG}
 _SCHEMA_NAMES = set(TOOL_INPUT_SCHEMAS.keys())
-assert _CATALOG_NAMES == _SCHEMA_NAMES, (
-    f"Tool catalog/schema mismatch — catalog: {_CATALOG_NAMES}, "
-    f"schemas: {_SCHEMA_NAMES}"
-)
+if _CATALOG_NAMES != _SCHEMA_NAMES:
+    raise RuntimeError(
+        f"Tool catalog/schema mismatch — catalog: {_CATALOG_NAMES}, "
+        f"schemas: {_SCHEMA_NAMES}"
+    )
 
 
 def tools_for_surface(surface: Surface) -> tuple[ToolSpec, ...]:

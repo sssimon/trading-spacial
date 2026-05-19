@@ -329,6 +329,27 @@ def test_tenant_id_is_not_an_input_field_on_any_schema():
         )
 
 
+# ── 5b. Error-shape consistency across handlers (PR #403 review issue 1)
+
+
+def test_get_portfolio_overview_surfaces_error_when_dashboard_fails(tmp_db, monkeypatch):
+    """When get_dashboard_state raises, the handler must return a
+    closed-shape error (consistent with get_kill_switch_state), NOT a
+    partial result with null equity. Returning nulls would be ambiguous
+    to the model — could read as "user has zero equity" vs. "we couldn't
+    read it"."""
+    from api.agent.tools import handlers as h
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated dashboard failure")
+
+    # Patch the local reference inside the handler module.
+    import health
+    monkeypatch.setattr(health, "get_dashboard_state", _boom)
+    out = h.get_portfolio_overview(tenant_id=1)
+    assert out == {"error": "dashboard_unavailable"}
+
+
 # ── 6. Registry consistency + per-surface subsets ───────────────────────
 
 

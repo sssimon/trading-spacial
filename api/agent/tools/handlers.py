@@ -97,18 +97,23 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
 
     try:
         dashboard = get_dashboard_state(load_config(), tenant_id=tenant_id)
-        portfolio = dashboard.get("portfolio", {})
     except Exception:  # noqa: BLE001
         log.warning("get_portfolio_overview: dashboard fetch failed", exc_info=True)
-        portfolio = {}
+        # Consistent with get_kill_switch_state: when the dashboard is
+        # unavailable, surface the failure explicitly so the model knows
+        # the equity numbers are missing because of an outage, NOT
+        # because the user has zero equity. Returning nulls would be
+        # ambiguous (PR #403 review issue 1).
+        return {"error": "dashboard_unavailable"}
 
+    portfolio = dashboard.get("portfolio", {})
     return {
-        "open_positions_count":  open_count,
-        "open_positions_notional_usd": round(total_notional, 2),
-        "current_equity_usd":    portfolio.get("current_equity"),
-        "peak_equity_usd":       portfolio.get("peak_equity"),
-        "drawdown_pct":          portfolio.get("dd_pct"),
-        "portfolio_tier":        portfolio.get("tier"),
+        "open_positions_count":          open_count,
+        "open_positions_notional_usd":   round(total_notional, 2),
+        "current_equity_usd":            portfolio.get("current_equity"),
+        "peak_equity_usd":               portfolio.get("peak_equity"),
+        "drawdown_pct":                  portfolio.get("dd_pct"),
+        "portfolio_tier":                portfolio.get("tier"),
     }
 
 
