@@ -149,28 +149,25 @@ def get_symbols_with_signals(*, tenant_id: int, limit: int = 10) -> dict:  # noq
     is accepted for signature uniformity but does not gate the result.
     The scanner state is global (one snapshot per symbol regardless of
     tenant) — the per-user notion enters at the signal-outcomes layer.
+
+    De-dupe by symbol happens in SQL (one row per symbol = the latest
+    scan), so the caller gets up to `limit` *distinct* symbols rather
+    than `limit` raw scan rows that may all be the same symbol.
     """
-    from db.signals import get_scans
-    rows = get_scans(limit=limit, only_signals=False)
-    # `get_scans` already orders newest-first; the model can reason about
-    # ordering itself, so we project to the fields it needs.
-    out = []
-    seen_symbols: set[str] = set()
-    for r in rows:
-        sym = r.get("symbol")
-        if not sym or sym in seen_symbols:
-            continue
-        seen_symbols.add(sym)
-        out.append({
-            "symbol":    sym,
-            "score":     r.get("score"),
-            "estado":    r.get("estado"),
-            "signal":    bool(r.get("señal") or 0),
-            "ts":        r.get("ts"),
-        })
-        if len(out) >= limit:
-            break
-    return {"symbols": out}
+    from db.signals import get_latest_scan_per_symbol
+    rows = get_latest_scan_per_symbol(limit=limit, only_signals=False)
+    return {
+        "symbols": [
+            {
+                "symbol":    r.get("symbol"),
+                "score":     r.get("score"),
+                "estado":    r.get("estado"),
+                "signal":    bool(r.get("señal") or 0),
+                "ts":        r.get("ts"),
+            }
+            for r in rows if r.get("symbol")
+        ]
+    }
 
 
 def get_symbol_setup(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
@@ -243,16 +240,23 @@ def get_recent_signals(*, tenant_id: int, limit: int = 10, since_hours: int = 24
 
 
 def get_closed_trades(*, tenant_id: int, window: str = "30d") -> dict:
-    """Closed positions for this tenant, windowed."""
+    """Closed positions for this tenant, windowed.
+
+    The window is pushed into SQL via `db_get_positions(since=...)` so
+    we don't load the full history just to filter it down in Python
+    (PR #403 review issue 3).
+    """
     from datetime import datetime, timedelta, timezone
     from db.positions import db_get_positions
 
-    rows = db_get_positions(status="closed", tenant_id=tenant_id)
-    if window != "all":
+    if window == "all":
+        rows = db_get_positions(status="closed", tenant_id=tenant_id)
+    else:
         days = {"7d": 7, "30d": 30, "90d": 90}.get(window, 30)
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        cutoff_iso = cutoff.isoformat()
-        rows = [r for r in rows if (r.get("exit_ts") or "") >= cutoff_iso]
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        rows = db_get_positions(
+            status="closed", tenant_id=tenant_id, since=cutoff_iso,
+        )
     return {"trades": [_position_to_summary(r) for r in rows]}
 
 

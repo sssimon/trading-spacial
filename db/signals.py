@@ -82,6 +82,52 @@ def get_scans(limit=50, only_signals=False, only_setups=False,
     return [dict(r) for r in rows]
 
 
+def get_latest_scan_per_symbol(
+    limit: int = 10,
+    only_signals: bool = False,
+    since_hours: Optional[float] = None,
+) -> list:
+    """Return the latest scan per symbol, newest-first, capped at `limit`.
+
+    Why this exists (PR #403 review issue 2): the agent's
+    `get_symbols_with_signals` tool used to fetch `limit` raw rows from
+    `get_scans()` and de-dupe client-side. Because the scanner persists
+    many scans per symbol, a request for `limit=10` could surface only
+    4 unique symbols after the de-dupe, leaving the model uncertain
+    whether "4 results" meant "4 symbols matched" or "we silently cut
+    the result set". Doing the de-dupe in SQL guarantees the caller
+    gets up to `limit` distinct symbols.
+
+    Implementation: subquery picks `MAX(id)` per symbol (the scans table
+    is INSERT-only with monotonically increasing ids = newest), then
+    project rows by that id set and order by ts DESC. Identical
+    filtering semantics to `get_scans()`.
+    """
+    con = get_db()
+    conds: list[str] = []
+    params: list = []
+    if only_signals:
+        conds.append("señal = 1")
+    if since_hours is not None and since_hours > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+        conds.append("ts >= ?")
+        params.append(cutoff)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params.append(limit)
+    rows = con.execute(
+        f"""SELECT * FROM scans
+            WHERE id IN (
+                SELECT MAX(id) FROM scans {where}
+                GROUP BY symbol
+            )
+            ORDER BY ts DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
 def get_latest_signal(symbol: Optional[str] = None) -> Optional[dict]:
     con = get_db()
     if symbol:

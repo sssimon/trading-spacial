@@ -115,11 +115,18 @@ def db_last_exit_ts(symbol: str, tenant_id: Optional[int] = None) -> Optional[da
 def db_get_positions(
     status: Optional[str] = None,
     tenant_id: Optional[int] = None,
+    since: Optional[str] = None,
 ) -> list:
-    """List positions, optionally filtered by status and tenant_id.
+    """List positions, optionally filtered by status, tenant_id, and since.
 
     Per B.5: when tenant_id is None (default), returns all rows (legacy).
     When tenant_id is int, filters strict to that tenant.
+
+    `since`: ISO 8601 string. When provided, filters to rows with
+    `exit_ts >= since` for status='closed' (the typical use — windowed
+    historial) or `entry_ts >= since` otherwise. Pushed into SQL so the
+    caller doesn't load the full history into Python just to discard it
+    (PR #403 review issue 3).
     """
     con = get_db()
     clauses: list[str] = []
@@ -130,6 +137,13 @@ def db_get_positions(
     if tenant_id is not None:
         clauses.append("tenant_id=?")
         params.append(tenant_id)
+    if since is not None:
+        # Use exit_ts when filtering closed trades (the historial case);
+        # otherwise entry_ts. Both columns are ISO 8601 strings so a
+        # lexicographic compare is correct.
+        ts_col = "exit_ts" if status == "closed" else "entry_ts"
+        clauses.append(f"{ts_col} >= ?")
+        params.append(since)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     rows = con.execute(
         f"SELECT * FROM positions{where} ORDER BY id DESC", params,
