@@ -17,19 +17,19 @@ inline; centralizing them lets us:
     a broken deploy at process start);
   - keep `api/agent/router.py` focused on HTTP plumbing.
 
-Pricing context (cached 2026-04-29):
+Pricing source: the canonical $/1M-token map lives in
+`api/agent/loop.py:_MODEL_PRICING` (it's the dict the cost calculator
+actually reads). DO NOT duplicate numeric prices here — when Anthropic
+ships a price change, there is exactly one number to update, in one
+file (PR #407 review issue 2).
 
-  - claude-opus-4-7   — $5.00 / $25.00 per 1M tok in/out, 1M ctx
-  - claude-sonnet-4-6 — $3.00 / $15.00 per 1M tok in/out, 1M ctx
-  - claude-haiku-4-5  — $1.00 / $5.00  per 1M tok in/out, 200K ctx
-
-Surface defaults are calibrated to the kind of reasoning each view
-needs: Dock + KillSwitch + AutoTune get Sonnet because portfolio-level
-synthesis benefits from the deeper model. SymbolDetail + Historial get
-Haiku — narrower context, more about reading single-symbol setups or
-windowed history, faster and cheaper. The user can still flip to Opus
-on demand via the `model` override on the turn request (the router
-enforces the allowlist).
+Context-window capacities (informational, used to pick the right
+surface model — not for billing): Opus 4.7 + Sonnet 4.6 are 1M; Haiku
+4.5 is 200K. Surfaces that need broad portfolio synthesis use Sonnet
+(or Opus on override); surfaces scoped to a single symbol or windowed
+history use Haiku — narrower context, faster, cheaper. The user can
+flip to Opus on demand via the `model` override on the turn request
+(the router enforces the allowlist).
 """
 from __future__ import annotations
 

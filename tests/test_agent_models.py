@@ -196,22 +196,56 @@ def test_surfaces_match_router_literal():
     """Every surface in SURFACE_MODEL_DEFAULTS must also appear in the
     Literal[...] on api/agent/router.py's _AgentTurnRequest.surface, or
     the router will 422 a request for a surface the rest of the system
-    knows about. We can't inspect Literal directly without pulling
-    pydantic internals; we parse the source instead — narrow but
-    pragmatic, and the failure mode is unambiguous."""
+    knows about.
+
+    Implementation note: we walk the AST of router.py and collect string
+    literals from every `Literal[...]` subscript we find, then compare
+    the union against SURFACE_MODEL_DEFAULTS.keys(). PR #407 review
+    issue 1: an earlier version of this test used a substring `surface in
+    source` check, which produces false negatives when somebody removes
+    the Literal annotation but the surface name still appears elsewhere
+    in the module (a log line, an example, etc). The AST walk catches
+    that drift; the substring version did not.
+    """
+    import ast
     import inspect
     from api.agent import router as _router
     from api.agent.models import SURFACE_MODEL_DEFAULTS
 
     source = inspect.getsource(_router)
-    # The Literal lives on a single line per request schema; we look
-    # for the exact substring on each surface name. This is brittle to
-    # a refactor — but a brittle test with a clear message beats silent
-    # drift between the router schema and the models map.
-    for surface in SURFACE_MODEL_DEFAULTS:
-        token = f'"{surface}"'
-        assert token in source, (
-            f"surface {surface!r} declared in SURFACE_MODEL_DEFAULTS but "
-            f"not present as a literal in api/agent/router.py — "
-            f"requests for it will 422"
+    tree = ast.parse(source)
+
+    literal_strings: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        # Pydantic v2 schemas use `typing.Literal[...]`. We accept either
+        # `Literal` or `typing.Literal` as the subscript target — anything
+        # named Literal at the end of an attribute chain.
+        target = node.value
+        name = (
+            target.id if isinstance(target, ast.Name)
+            else target.attr if isinstance(target, ast.Attribute)
+            else None
         )
+        if name != "Literal":
+            continue
+        # The slice can be a single ast.Constant (one-arg Literal) or an
+        # ast.Tuple (multi-arg Literal). Older 3.x versions wrapped slice
+        # in ast.Index; 3.9+ collapsed it. We support both shapes
+        # defensively even though current CI runs on 3.12+.
+        slc = node.slice
+        if hasattr(ast, "Index") and isinstance(slc, ast.Index):  # py <= 3.8
+            slc = slc.value  # type: ignore[attr-defined]
+        elts = slc.elts if isinstance(slc, ast.Tuple) else [slc]
+        for elt in elts:
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                literal_strings.add(elt.value)
+
+    declared = set(SURFACE_MODEL_DEFAULTS.keys())
+    missing_from_router = declared - literal_strings
+    assert not missing_from_router, (
+        f"surfaces in SURFACE_MODEL_DEFAULTS missing from any Literal[...] "
+        f"in api/agent/router.py: {sorted(missing_from_router)} — "
+        f"requests for these will 422"
+    )

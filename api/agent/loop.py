@@ -162,7 +162,19 @@ def _strip_titles(node: Any) -> None:
 # Pricing in USD per 1M tokens, copied from the claude-api skill. Update
 # this map deliberately when bumping the anthropic SDK pin (pre-reg
 # §12.7 — Buffers internos).
-
+#
+# This dict is the canonical pricing source for the cost calculator.
+# Context-window capacities (1M / 1M / 200K) and the human-readable
+# "Opus is bigger, Haiku is cheaper" framing live in the api/agent/models.py
+# docstring — model selection logic + the cost-model dict are different
+# concerns, but pricing $$/$$/per-1M numbers must NOT be duplicated to
+# both files (PR #407 review issue 2). If Anthropic ships a price change,
+# the only number to update is here.
+#
+# Cached snapshot 2026-04-29:
+#   - claude-opus-4-7   — $5.00 in / $25.00 out, 1M ctx
+#   - claude-sonnet-4-6 — $3.00 in / $15.00 out, 1M ctx
+#   - claude-haiku-4-5  — $1.00 in / $5.00  out, 200K ctx
 _MODEL_PRICING = {
     "claude-opus-4-7":   {"in": 5.00, "out": 25.00},
     "claude-sonnet-4-6": {"in": 3.00, "out": 15.00},
