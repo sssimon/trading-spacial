@@ -461,19 +461,24 @@ const App: React.FC = () => {
   }, []);
 
   // Override negotiation — opens the dock with a confrontational prompt
-  // INSTEAD of releasing directly. The release only fires once the agent
-  // emits <<<TOOL:confirm_release:SYM>>> and the user clicks the amber
-  // button.
+  // so the user has to articulate WHY before releasing. Phase 2B note:
+  // this chat is articulation-only — there is no confirm-release button
+  // available from the Dock right now. Phase 3 of #400 will reintroduce
+  // it as a signed proposal event. Until then, use `scripts/release_pause.py`
+  // from a terminal once the conversation has clarified intent.
   const handleNegotiateRelease = useCallback((sym: DashboardSymbolState, verdict: CardVerdict | null) => {
     const base   = sym.symbol.replace('USDT', '');
     const sinceMs = sym.state_since ? Date.now() - new Date(sym.state_since).getTime() : 0;
     const sinceH  = Math.max(0, Math.round(sinceMs / 3600000));
     setDockInitialPrompt(
-      `Estoy por liberar ${base} (${sym.symbol}) manualmente antes del ciclo automático. ` +
+      `Estoy considerando liberar ${base} (${sym.symbol}) manualmente antes del ciclo automático. ` +
       `El sistema lo tiene en ${sym.state} desde hace ~${sinceH}h. ` +
       `Tu lectura inicial fue: "${verdict?.text ?? 'sin lectura previa'}". ` +
-      `Antes de confirmar, ayúdame a articular: ¿qué cambió en mi tesis del par para querer adelantarme al sistema? ` +
-      `Hazme preguntas concretas; no me dejes liberar sin justificación.`,
+      `Ayúdame a articular: ¿qué cambió en mi tesis del par para querer adelantarme al sistema? ` +
+      `Hazme preguntas concretas. ` +
+      `Nota: este chat es solo para pensar en voz alta. El botón de confirmar se ` +
+      `reintroduce en Phase 3 del rewire del copiloto; por ahora la acción la sigo ` +
+      `disparando yo desde un terminal.`,
     );
     setDockOpen(true);
   }, []);
@@ -527,17 +532,20 @@ const App: React.FC = () => {
     catch (err) { window.alert(`No se pudo rechazar el tune: ${err instanceof Error ? err.message : String(err)}`); }
   }, [fetchAll]);
 
-  // Negotiate is the friction-by-design path. Opens the dock with a
-  // confrontational prompt — the model now drives the conversation
-  // toward articulation via the system prompt (api/agent/prompts/system.py)
-  // instead of waiting for a hardcoded marker.
+  // Tune negotiation — same friction-by-design pattern. Phase 2B note:
+  // articulation-only until Phase 3 wires the confirm step as a signed
+  // proposal event. Operator runs `scripts/apply_tune.py` from a
+  // terminal after the chat has clarified intent.
   const handleTuneNegotiate = useCallback((tune: TuneRun) => {
     const changeCount = tune.results.filter((r) => r.recommendation === 'CHANGE').length;
     setDockInitialPrompt(
-      `Estoy por aplicar el auto-tune #${tune.id} (corrido hace ${tune.hoursAgo}h). ` +
+      `Estoy considerando aplicar el auto-tune #${tune.id} (corrido hace ${tune.hoursAgo}h). ` +
       `Propone ${changeCount} cambios sobre los multiplicadores ATR (SL/TP/BE) de la estrategia en vivo. ` +
-      `Antes de confirmar, ayúdame a articular: ¿qué riesgos ves? ¿Hay algún símbolo donde la ` +
-      `mejora se vea frágil? Hazme preguntas concretas, no me dejes aplicar sin justificación.`,
+      `Ayúdame a articular: ¿qué riesgos ves? ¿Hay algún símbolo donde la ` +
+      `mejora se vea frágil? Hazme preguntas concretas. ` +
+      `Nota: este chat es solo para pensar en voz alta. El botón de confirmar se ` +
+      `reintroduce en Phase 3 del rewire del copiloto; por ahora la acción la sigo ` +
+      `disparando yo desde un terminal.`,
     );
     setDockOpen(true);
   }, []);
@@ -767,10 +775,11 @@ const App: React.FC = () => {
           macro={macroState}
           initialPrompt={dockInitialPrompt}
           onOpenSymbol={openSymbolByPair}
-          // onConfirmRelease / onConfirmApplyTune handlers stay alive on
-          // the App.tsx side (KillSwitchView + AutoTuneView still call
-          // them directly). The Dock no longer parses <<<TOOL:...>>>
-          // markers — Phase 3 re-wires those into signed proposal events.
+          // onConfirmRelease / onConfirmApplyTune props removed in
+          // Phase 2B together with the <<<TOOL:...>>> marker protocol
+          // they used to fire. Phase 3 re-wires confirm actions as
+          // signed proposal events from the backend
+          // (POST /agent/proposals/{id}/confirm), not props.
         />
       )}
 

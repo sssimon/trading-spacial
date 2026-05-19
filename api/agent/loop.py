@@ -101,8 +101,13 @@ def _build_anthropic_tools(surface: str) -> tuple[dict, ...]:
     requires a process restart). maxsize=8 comfortably covers the 5
     declared surfaces + headroom (PR #404 review pickup).
 
-    Returns a tuple (not a list) so the cache value is immutable — a
-    caller that mutates the returned schema would corrupt the cache.
+    Returns a tuple wrapper so callers can't reassign list elements.
+    NOTE: the inner dicts remain mutable; callers MUST treat the return
+    value as read-only — mutating any nested schema (e.g.
+    `tools[0]["input_schema"]["properties"]["foo"] = ...`) corrupts the
+    cache for every subsequent request. We don't deepcopy on every call
+    because that would defeat the cache; the discipline lives at the
+    call sites (PR #405 review issue 3).
     """
     specs = tools_for_surface(surface)
     out = []
