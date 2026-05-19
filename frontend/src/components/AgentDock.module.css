@@ -232,6 +232,45 @@
   color: var(--nbc-primary-fg);
 }
 
+/* Tool-use status chips — inline under the assistant bubble while the
+ * turn is in flight. Mirrors the typed tool_use_start / tool_use_result
+ * SSE events: pending → spinner-style dim chip; ok → bull; error → bear.
+ * Phase 2B of epic #400. */
+.toolChipsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.toolChip {
+  font-family: var(--nbc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  padding: 3px 8px;
+  border: 1px solid;
+  background: transparent;
+  user-select: none;
+}
+.toolChipPending {
+  color: var(--nbc-fg-muted);
+  border-color: var(--nbc-border-dim);
+  opacity: 0.85;
+  animation: dockToolChipPulse 1.2s ease-in-out infinite;
+}
+.toolChipOk {
+  color: var(--bull);
+  border-color: var(--bull);
+}
+.toolChipError {
+  color: var(--bear);
+  border-color: var(--bear);
+}
+@keyframes dockToolChipPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
 /* confirm_release marker — destructive override, amber to signal weight */
 .toolConfirm {
   font-family: var(--nbc-font-mono);

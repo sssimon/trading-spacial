@@ -29,14 +29,12 @@ import {
   getSignals,
   forceScan,
   getTuneLatest,
-  applyTune,
   rejectTune,
   getPositions,
   getCapital,
   closePosition,
   updatePosition,
   getHealthDashboard,
-  releaseKillSwitch,
 } from './api';
 import type {
   SymbolStatus,
@@ -480,16 +478,11 @@ const App: React.FC = () => {
     setDockOpen(true);
   }, []);
 
-  // Confirm path — only fired by the dock when the agent emitted the
-  // confirm_release tool marker AND the user clicked the amber button.
-  const handleConfirmRelease = useCallback(async (symbol: string) => {
-    try {
-      await releaseKillSwitch(symbol, 'manual_override_via_copilot');
-      await fetchAll();
-    } catch (err) {
-      window.alert(`No se pudo liberar ${symbol}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [fetchAll]);
+  // handleConfirmRelease / handleConfirmApplyTune used to live here as
+  // post-marker callbacks fired by the legacy AgentDock <<<TOOL:...>>>
+  // parsing. Phase 2B kills the marker protocol; Phase 3 reintroduces
+  // these flows as signed proposal events through
+  // POST /agent/proposals/{id}/confirm.
 
   const handleAskAgent = useCallback((p: Position, insight: PositionInsight) => {
     const liveSym = symbols.find((s) => s.symbol === p.symbol);
@@ -534,28 +527,20 @@ const App: React.FC = () => {
     catch (err) { window.alert(`No se pudo rechazar el tune: ${err instanceof Error ? err.message : String(err)}`); }
   }, [fetchAll]);
 
-  // Apply is the friction-by-design path. Opens the dock with a
-  // confrontational prompt instead of calling the backend directly —
-  // the backend call happens later, only after the agent emits
-  // <<<TOOL:confirm_apply_tune:N>>> and the user clicks the amber button.
+  // Negotiate is the friction-by-design path. Opens the dock with a
+  // confrontational prompt — the model now drives the conversation
+  // toward articulation via the system prompt (api/agent/prompts/system.py)
+  // instead of waiting for a hardcoded marker.
   const handleTuneNegotiate = useCallback((tune: TuneRun) => {
     const changeCount = tune.results.filter((r) => r.recommendation === 'CHANGE').length;
     setDockInitialPrompt(
       `Estoy por aplicar el auto-tune #${tune.id} (corrido hace ${tune.hoursAgo}h). ` +
       `Propone ${changeCount} cambios sobre los multiplicadores ATR (SL/TP/BE) de la estrategia en vivo. ` +
       `Antes de confirmar, ayúdame a articular: ¿qué riesgos ves? ¿Hay algún símbolo donde la ` +
-      `mejora se vea frágil? Hazme preguntas concretas, no me dejes aplicar sin justificación. ` +
-      `Cuando estés convencido, emití <<<TOOL:confirm_apply_tune:${tune.id}>>>.`,
+      `mejora se vea frágil? Hazme preguntas concretas, no me dejes aplicar sin justificación.`,
     );
     setDockOpen(true);
   }, []);
-
-  // Final confirm — triggered by the inline button the dock renders when
-  // the agent emits the confirm_apply_tune marker.
-  const handleConfirmApplyTune = useCallback(async (_tuneId: number) => {
-    try { await applyTune(); await fetchAll(); }
-    catch (err) { window.alert(`No se pudo aplicar el tune: ${err instanceof Error ? err.message : String(err)}`); }
-  }, [fetchAll]);
 
   const handleLogout = async () => {
     try { await logout(); } catch (err) { console.warn('[app] logout error:', err); }
@@ -782,8 +767,10 @@ const App: React.FC = () => {
           macro={macroState}
           initialPrompt={dockInitialPrompt}
           onOpenSymbol={openSymbolByPair}
-          onConfirmRelease={handleConfirmRelease}
-          onConfirmApplyTune={handleConfirmApplyTune}
+          // onConfirmRelease / onConfirmApplyTune handlers stay alive on
+          // the App.tsx side (KillSwitchView + AutoTuneView still call
+          // them directly). The Dock no longer parses <<<TOOL:...>>>
+          // markers — Phase 3 re-wires those into signed proposal events.
         />
       )}
 
