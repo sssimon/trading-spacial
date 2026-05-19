@@ -521,11 +521,13 @@ def test_get_health_dashboard_isolates_tenants(client):
         # gain. If _load_open_positions ignored tenant_id, the dashboard for
         # tenant 1 would pick up this +$5,000 MTM and report current_equity
         # of $15,000 instead of $10,000.
+        # Note: SQLite (Python 3.11) does not accept numeric underscores in
+        # SQL literals, so we write 50000.0 instead of 50_000.0 here.
         conn.execute(
             """INSERT INTO positions
                (symbol, direction, status, entry_price, entry_ts,
                 qty, tenant_id)
-               VALUES ('BTC', 'LONG', 'open', 50_000.0,
+               VALUES ('BTC', 'LONG', 'open', 50000.0,
                        '2026-04-20T12:00:00+00:00', 1.0, 2)"""
         )
         conn.commit()
