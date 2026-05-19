@@ -293,6 +293,12 @@ def init_db() -> None:
     # Pre-reg: docs/superpowers/plans/2026-05-15-multi-tenant-b1-schema-pre-reg.md
     _migrate_multi_tenant_b1()
 
+    # Agent (copilot) audit + budget tables — epic #400 Phase 1.
+    # Pre-reg §9 / §10.1: every turn is audited, every side-effect carries
+    # an idempotency key, every tenant has a daily/monthly USD budget that
+    # resets computed-on-read (no cron).
+    _migrate_agent_audit()
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -380,6 +386,98 @@ def _migrate_multi_tenant_b1() -> None:
         )
 
         con.commit()
+    finally:
+        con.close()
+
+
+def _migrate_agent_audit() -> None:
+    """Idempotent Phase 1 migration for the copilot audit + budget surface.
+
+    Creates three tables and their indexes. Safe to call repeatedly:
+    CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+
+    Schema source: docs/superpowers/specs/es/2026-05-19-trading-copilot-production-grade-pre-reg.md §9.1.
+    """
+    con = get_db()
+    try:
+        # agent_conversations: every turn (user / assistant / tool_result)
+        # written by the server-side loop. content_json is the redacted
+        # payload — full tool_use input/output is NOT persisted here; the
+        # tool side-effect surface lives in agent_side_effects below.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id                   INTEGER NOT NULL,
+                surface                     TEXT    NOT NULL,
+                conversation_id             TEXT    NOT NULL,
+                ts                          TEXT    NOT NULL,
+                role                        TEXT,
+                model                       TEXT,
+                input_tokens                INTEGER,
+                output_tokens               INTEGER,
+                cache_read_input_tokens     INTEGER,
+                cache_creation_input_tokens INTEGER,
+                latency_ms                  INTEGER,
+                cost_usd                    REAL,
+                content_json                TEXT,
+                refused                     INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_tenant_ts "
+            "ON agent_conversations(tenant_id, ts DESC)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_conversation "
+            "ON agent_conversations(conversation_id, ts ASC)"
+        )
+
+        # agent_side_effects: the propose/confirm ledger. idempotency_key
+        # is UNIQUE so a double-click confirm cannot execute twice. action
+        # is one of: close_position | reactivate_symbol | apply_tune.
+        # result: ok | error | conflict | expired.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_side_effects (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id       INTEGER NOT NULL,
+                conversation_id TEXT,
+                ts              TEXT    NOT NULL,
+                action          TEXT    NOT NULL,
+                args_json       TEXT,
+                idempotency_key TEXT    NOT NULL UNIQUE,
+                result          TEXT,
+                http_status     INTEGER
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_side_effects_tenant_ts "
+            "ON agent_side_effects(tenant_id, ts DESC)"
+        )
+
+        # agent_quotas: one row per tenant. daily_window_start and
+        # monthly_window_start drive the computed-on-read reset (pre-reg
+        # §9.1) — no cron needed. UNIQUE on tenant_id so upserts via
+        # ON CONFLICT(tenant_id) DO UPDATE work.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_quotas (
+                tenant_id            INTEGER PRIMARY KEY,
+                daily_usd_used       REAL    NOT NULL DEFAULT 0,
+                daily_usd_cap        REAL    NOT NULL DEFAULT 1.0,
+                daily_window_start   TEXT    NOT NULL,
+                monthly_usd_used     REAL    NOT NULL DEFAULT 0,
+                monthly_window_start TEXT    NOT NULL
+            )
+            """
+        )
+        con.commit()
+        log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
+    except Exception as e:  # noqa: BLE001
+        log.warning("DB migration agent audit: %s", e)
     finally:
         con.close()
 
