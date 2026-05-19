@@ -489,8 +489,17 @@ def test_get_health_dashboard_isolates_tenants(client):
     """Multi-tenant isolation (per "todo tiene que ser multitenant" policy):
     tenant 1's dashboard MUST NOT reflect tenant 2's positions, regardless
     of who has the bigger drawdown. Each tenant sees only their own ledger.
+
+    Covers both leak vectors:
+      (a) Closed trades for tenant 2 must not show in tenant 1's realized
+          balance — `_load_closed_trades(tenant_id=...)` filter is exercised
+          via the apply_pnl_to_capital ledger.
+      (b) Open positions for tenant 2 must not show in tenant 1's MTM —
+          `_load_open_positions(tenant_id=...)` filter is exercised by
+          seeding a price-cache MTM gain and asserting it stays absent.
     """
     from db.capital import db_upsert_capital, apply_pnl_to_capital
+    from strategy.kill_switch_v2_shadow import update_price
     import btc_api
 
     # Tenant 1 (active in fixture): balance $10K, no closed trades.
@@ -500,6 +509,7 @@ def test_get_health_dashboard_isolates_tenants(client):
     apply_pnl_to_capital(2, -1_000.0)
     conn = btc_api.get_db()
     try:
+        # (a) Tenant 2 has a closed losing trade for ETH.
         conn.execute(
             """INSERT INTO positions
                (symbol, direction, status, entry_price, entry_ts,
@@ -507,16 +517,34 @@ def test_get_health_dashboard_isolates_tenants(client):
                VALUES ('ETH', 'LONG', 'closed', 1000.0, '2026-04-20T12:00:00+00:00',
                        900.0, '2026-04-20T15:00:00+00:00', 'SL', -1000.0, -0.10, 2)"""
         )
+        # (b) Tenant 2 has an OPEN long BTC position with a large unrealized
+        # gain. If _load_open_positions ignored tenant_id, the dashboard for
+        # tenant 1 would pick up this +$5,000 MTM and report current_equity
+        # of $15,000 instead of $10,000.
+        conn.execute(
+            """INSERT INTO positions
+               (symbol, direction, status, entry_price, entry_ts,
+                qty, tenant_id)
+               VALUES ('BTC', 'LONG', 'open', 50_000.0,
+                       '2026-04-20T12:00:00+00:00', 1.0, 2)"""
+        )
         conn.commit()
     finally:
         conn.close()
+    # Make the price cache see BTC at $55K so the leak (if it existed) would
+    # surface a +$5,000 MTM on the tenant-2 position above.
+    update_price("BTC", 55_000.0)
 
     # Request runs as tenant 1 (fixture override). Should see clean $10K equity,
-    # NOT a -10% drawdown from tenant 2's loss.
+    # NOT a -10% drawdown from tenant 2's loss, NOT a +$5K MTM gain from
+    # tenant 2's open position.
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
     portfolio = resp.json()["portfolio"]
-    assert portfolio["current_equity"] == pytest.approx(10_000.0)
+    assert portfolio["current_equity"] == pytest.approx(10_000.0), (
+        f"Open-position leak: tenant 2's +$5K BTC MTM bled into tenant 1's "
+        f"dashboard (got ${portfolio['current_equity']})"
+    )
     assert portfolio["peak_equity"] == pytest.approx(10_000.0)
     assert portfolio["dd_pct"] == pytest.approx(0.0, abs=1e-9)
 
