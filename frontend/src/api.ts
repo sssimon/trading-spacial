@@ -256,12 +256,12 @@ export async function closePosition(id: number, payload: PositionClosePayload): 
   });
 }
 
-// DELETE /positions/{id}
-export async function cancelPosition(id: number): Promise<{ ok: boolean; message: string }> {
-  return request<{ ok: boolean; message: string }>(`/positions/${id}`, {
-    method: 'DELETE',
-  });
-}
+// NOTE: `cancelPosition` (DELETE /positions/{id}, marks status='cancelled'
+// without computing PnL — distinct from POST /close) used to live here but
+// was removed in #391: no UI flow ever called it, and POST /close covers
+// the operator-driven exit case. The backend endpoint is still live so
+// curl/script callers continue to work; reintroduce the wrapper here only
+// when a real UX flow needs the cancel-without-PnL semantics.
 
 // ---- Auto-Tune -------------------------------------------------------
 
@@ -318,6 +318,12 @@ export async function markAllNotificationsRead(): Promise<{ ok: boolean; marked:
 }
 
 // ---- Kill switch observability (#187 phase 1) ---------------------------
+//
+// `getKillSwitchDecisions` and `getKillSwitchCurrentState` have no consumer
+// in the redesigned UI yet (the new KillSwitchView reads /health/dashboard,
+// the aggregated form). Decommission vs. building an admin panel is tracked
+// in #390 — kept here so the eventual panel doesn't have to recreate the
+// wrappers from scratch.
 
 export async function getKillSwitchDecisions(
   opts: {
@@ -373,6 +379,11 @@ export async function releaseKillSwitch(
 // do NOT accept tenant_id / user_id arguments. The JWT cookie is httpOnly
 // (set by /auth/login) and is automatically attached via credentials:'include'
 // in request(). Frontend cannot read it.
+//
+// `putCapital`, `getPreferences`, and `putPreferences` have unit tests in
+// api.test.ts but no component consumer yet — that UI is tracked in #389
+// (multi-tenant preferences panel + capital editor). Kept here so the panel
+// can land without recreating the contracts.
 
 export async function getCapital(): Promise<Capital> {
   return request<Capital>('/capital');

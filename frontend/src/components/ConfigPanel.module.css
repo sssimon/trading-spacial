@@ -138,6 +138,27 @@
   text-transform: uppercase;
 }
 .pillBull { color: var(--bull); border-color: var(--bull); }
+.pillBear { color: var(--bear); border-color: var(--bear); }
+.pillDim  { color: var(--nbc-fg-muted); border-color: var(--nbc-border-dim); }
+
+.webhookResult {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--nbc-border-dim);
+  background: var(--nbc-bg-elevated, rgba(255,255,255,0.02));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.webhookRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+}
+.webhookChannel { color: var(--nbc-fg-muted); font-family: var(--nbc-font-mono); font-size: 11px; }
+.webhookDetail  { color: var(--nbc-fg-muted); font-size: 11px; line-height: 1.4; }
 
 .dashed {
   font-family: inherit;

@@ -117,10 +117,20 @@ export interface ScanResponse {
   results: ScanResult[];
 }
 
-export interface WebhookTestResponse {
+// Backend returns one entry per channel under the keys it actually tried.
+// `error` is set when ok=false; `status_code` and `url` are present when the
+// channel did an HTTP call.
+export interface WebhookTestChannelResult {
   ok: boolean;
-  status_code: number;
-  url: string;
+  status_code?: number;
+  error?: string;
+  url?: string;
+}
+
+export interface WebhookTestResponse {
+  ok: boolean;  // overall: at least one channel succeeded
+  telegram_directo: WebhookTestChannelResult;
+  webhook_n8n: WebhookTestChannelResult;
 }
 
 export interface SignalsParams {

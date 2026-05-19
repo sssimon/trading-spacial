@@ -7,8 +7,13 @@
 
 import React, { useEffect, useState } from 'react';
 import styles from './ConfigPanel.module.css';
-import type { SignalFilters, AppConfig } from '../types';
-import { getConfig, updateConfigFull } from '../api';
+import type {
+  SignalFilters,
+  AppConfig,
+  WebhookTestResponse,
+  WebhookTestChannelResult,
+} from '../types';
+import { getConfig, updateConfigFull, testWebhook } from '../api';
 
 interface ConfigPanelProps {
   open: boolean;
@@ -21,6 +26,12 @@ const DEFAULT_FILTERS: SignalFilters = {
   notify_setup: false,
 };
 
+type WebhookTestState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'done'; result: WebhookTestResponse }
+  | { status: 'error'; message: string };
+
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
   const [config, setConfig]   = useState<AppConfig | null>(null);
   const [filters, setFilters] = useState<SignalFilters>(DEFAULT_FILTERS);
@@ -28,6 +39,27 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
   const [saving, setSaving]   = useState(false);
   const [dirty, setDirty]     = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [webhookTest, setWebhookTest] = useState<WebhookTestState>({ status: 'idle' });
+
+  // Reset the webhook test status whenever the panel re-opens so the user
+  // sees a clean slate. (Otherwise the "OK" badge from a previous open
+  // would linger and create false confidence about the current config.)
+  useEffect(() => {
+    if (open) setWebhookTest({ status: 'idle' });
+  }, [open]);
+
+  const runWebhookTest = async () => {
+    setWebhookTest({ status: 'running' });
+    try {
+      const result = await testWebhook();
+      setWebhookTest({ status: 'done', result });
+    } catch (err) {
+      setWebhookTest({
+        status:  'error',
+        message: err instanceof Error ? err.message : 'Error inesperado',
+      });
+    }
+  };
 
   // Load config when opened.
   useEffect(() => {
@@ -131,6 +163,33 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
 
               <div className={styles.row}>
                 <div className={styles.rowLeft}>
+                  <div className={styles.rowLabel}>Probar entrega</div>
+                  <div className={`${styles.rowHint} prose`}>
+                    Envía un mensaje de prueba a Telegram y al webhook configurado.
+                  </div>
+                </div>
+                <div className={styles.rowRight}>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={runWebhookTest}
+                    disabled={webhookTest.status === 'running'}
+                  >
+                    <span className="btn__caret">▸</span>{' '}
+                    {webhookTest.status === 'running' ? 'probando…' : 'probar'}
+                  </button>
+                </div>
+              </div>
+
+              {webhookTest.status === 'done' && (
+                <WebhookTestResult result={webhookTest.result} />
+              )}
+              {webhookTest.status === 'error' && (
+                <div className={styles.error}>Falló: {webhookTest.message}</div>
+              )}
+
+              <div className={styles.row}>
+                <div className={styles.rowLeft}>
                   <div className={styles.rowLabel}>Intervalo de escaneo</div>
                   <div className={`${styles.rowHint} prose`}>Cada cuánto re-evalúa los pares.</div>
                 </div>
@@ -223,6 +282,48 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ open, onClose }) => {
         </footer>
       </aside>
     </>
+  );
+};
+
+// ─── WebhookTestResult ───
+// Renders the two-channel summary from GET /webhook/test. Each row is one
+// channel (telegram_directo, webhook_n8n). The pill color reflects ok/fail;
+// the error string (if any) is shown below in muted prose. We intentionally
+// don't conflate "no token configured" with "HTTP request failed" — both
+// arrive as ok=false but with distinct error messages from the backend.
+
+interface WebhookTestResultProps {
+  result: WebhookTestResponse;
+}
+const WebhookTestResult: React.FC<WebhookTestResultProps> = ({ result }) => {
+  const rows: Array<{ key: string; label: string; channel: WebhookTestChannelResult }> = [
+    { key: 'telegram', label: 'Telegram', channel: result.telegram_directo },
+    { key: 'webhook',  label: 'Webhook',  channel: result.webhook_n8n },
+  ];
+  return (
+    <div className={styles.webhookResult}>
+      {rows.map(({ key, label, channel }) => (
+        <div key={key} className={styles.webhookRow}>
+          <div>
+            <div>{label}</div>
+            {channel.error && (
+              <div className={`${styles.webhookDetail} prose`}>{channel.error}</div>
+            )}
+            {channel.url && (
+              <div className={styles.webhookChannel}>{channel.url}</div>
+            )}
+          </div>
+          <span
+            className={[
+              styles.pill,
+              channel.ok ? styles.pillBull : styles.pillBear,
+            ].join(' ')}
+          >
+            {channel.ok ? 'ok' : 'fail'}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 };
 
