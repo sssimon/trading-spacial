@@ -32,6 +32,7 @@ from api.agent.audit import TurnAuditWrapper
 from api.agent.clients import get_anthropic_client
 from api.agent.config import get_agent_status
 from api.agent.loop import run_turn
+from api.agent.models import ALLOWED_MODELS, default_model_for_surface
 from api.agent.proposals import (
     ACTION_APPLY_TUNE,
     ACTION_CLOSE_POSITION,
@@ -67,15 +68,11 @@ def get_status():
 
 
 # ── /agent/conversations/{id}/turn (Phase 2) ───────────────────────────
-
-
-_SURFACE_MODEL_DEFAULTS: dict[str, str] = {
-    "dock":          "claude-sonnet-4-6",
-    "symbol_detail": "claude-haiku-4-5",
-    "kill_switch":   "claude-sonnet-4-6",
-    "autotune":      "claude-sonnet-4-6",
-    "historial":     "claude-haiku-4-5",
-}
+#
+# Per-surface model defaults + the allowlist live in api/agent/models.py
+# (Phase 4 of #400). The router consumes them but never declares them
+# inline — keeping the data structure in one place makes the matrix easy
+# to inspect from telemetry / tests / a future admin endpoint.
 
 
 class _AgentMessage(BaseModel):
@@ -96,13 +93,6 @@ class _AgentTurnRequest(BaseModel):
     # Optional model override (e.g. when the user clicks "análisis profundo"
     # which flips the next turn to Opus). Server-side allowlist enforced.
     model:          Optional[str] = None
-
-
-_ALLOWED_MODELS: frozenset[str] = frozenset({
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
-    "claude-opus-4-7",
-})
 
 
 @router.post(
@@ -135,8 +125,8 @@ async def post_agent_turn(
     if not status.enabled:
         raise HTTPException(status_code=503, detail=status.reason)
 
-    model = body.model or _SURFACE_MODEL_DEFAULTS[body.surface]
-    if model not in _ALLOWED_MODELS:
+    model = body.model or default_model_for_surface(body.surface)
+    if model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail="model_not_allowed")
 
     # Convert the request's messages into the API's `messages` array.

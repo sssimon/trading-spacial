@@ -1,0 +1,82 @@
+"""Per-surface model selection — Phase 4 of epic #400.
+
+Pre-reg §4.3 ("ningún surface mezcla modelos dentro de la misma sesión"):
+the surface is fixed at session-start, the model is bound to that surface
+deterministically, and the prompt-cache prefix stays warm because tools +
+system prompt are stable for the surface.
+
+This module is the canonical source for both the per-surface default and
+the allowlist of legitimate model IDs. The router used to declare these
+inline; centralizing them lets us:
+
+  - re-use the same defaults from a future telemetry endpoint that
+    reports "what model are dock turns actually running on";
+  - add a single test surface for the invariant "every declared surface
+    maps to a model in the allowlist", which fires at import time and at
+    test time (defense in depth, since the import-time check rolls back
+    a broken deploy at process start);
+  - keep `api/agent/router.py` focused on HTTP plumbing.
+
+Pricing context (cached 2026-04-29):
+
+  - claude-opus-4-7   — $5.00 / $25.00 per 1M tok in/out, 1M ctx
+  - claude-sonnet-4-6 — $3.00 / $15.00 per 1M tok in/out, 1M ctx
+  - claude-haiku-4-5  — $1.00 / $5.00  per 1M tok in/out, 200K ctx
+
+Surface defaults are calibrated to the kind of reasoning each view
+needs: Dock + KillSwitch + AutoTune get Sonnet because portfolio-level
+synthesis benefits from the deeper model. SymbolDetail + Historial get
+Haiku — narrower context, more about reading single-symbol setups or
+windowed history, faster and cheaper. The user can still flip to Opus
+on demand via the `model` override on the turn request (the router
+enforces the allowlist).
+"""
+from __future__ import annotations
+
+
+# Canonical mapping. Adding a new surface here REQUIRES adding it to:
+#   - api/agent/prompts/surfaces.py  (micro-prompt)
+#   - api/agent/tools/registry.py    (tool subset via the `surfaces` field)
+#   - frontend/src/agent/surfaces.ts (UI metadata)
+#   - the Literal[...] in api/agent/router.py's _AgentTurnRequest
+# The invariant check below + test_models_invariants in
+# tests/test_agent_models.py catches the first two; a snapshot test on
+# the tool subset catches drift in the third.
+SURFACE_MODEL_DEFAULTS: dict[str, str] = {
+    "dock":          "claude-sonnet-4-6",
+    "symbol_detail": "claude-haiku-4-5",
+    "kill_switch":   "claude-sonnet-4-6",
+    "autotune":      "claude-sonnet-4-6",
+    "historial":     "claude-haiku-4-5",
+}
+
+
+# Closed allowlist of model IDs accepted by the turn endpoint. A user-
+# supplied `model` override on the turn request is rejected unless it
+# appears here. New models go through deliberate code review — pricing
+# + capability gates live in this set, not in env vars.
+ALLOWED_MODELS: frozenset[str] = frozenset({
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-opus-4-7",
+})
+
+
+def default_model_for_surface(surface: str) -> str:
+    """Return the default model id for a surface. Raises KeyError if the
+    surface is unknown — that's the right behavior at the call site,
+    since the router has already validated the surface via the Literal
+    on the request schema before we get here."""
+    return SURFACE_MODEL_DEFAULTS[surface]
+
+
+# Import-time invariant: every default must be in the allowlist. If a
+# typo lands in SURFACE_MODEL_DEFAULTS the process refuses to start. We
+# use RuntimeError (not assert) because `python -O` strips asserts and
+# we want this check to fire in production too (mirror of the same
+# pattern in api/agent/tools/registry.py).
+_bad = {s: m for s, m in SURFACE_MODEL_DEFAULTS.items() if m not in ALLOWED_MODELS}
+if _bad:
+    raise RuntimeError(
+        f"SURFACE_MODEL_DEFAULTS contains models not in ALLOWED_MODELS: {_bad}"
+    )

@@ -16,6 +16,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './AgentDock.module.css';
 import type { SymbolStatus, Position, MacroState } from '../types';
 import { useAgentStream } from '../agent/useAgentStream';
+import { SURFACE_DOCK } from '../agent/surfaces';
 import type { ProposalChip, ToolChip } from '../agent/types';
 
 interface AgentDockProps {
@@ -47,7 +48,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { msgs, loading, sendTurn, confirmProposal } = useAgentStream({ surface: 'dock' });
+  const { msgs, loading, sendTurn, confirmProposal } = useAgentStream({ surface: SURFACE_DOCK });
   // Synthetic welcome bubble before the first real turn so the dock
   // isn't an empty void on open. Lives outside the stream hook because
   // it never goes on the wire — purely UI. Derived (useMemo) instead

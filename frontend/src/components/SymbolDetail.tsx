@@ -34,6 +34,7 @@ import type { SymbolStatus, OhlcvCandle, OhlcvVolume } from '../types';
 import { formatPrice } from '../utils';
 import { getOhlcv } from '../api';
 import { useAgentStream } from '../agent/useAgentStream';
+import { SURFACE_SYMBOL_DETAIL } from '../agent/surfaces';
 import type { ProposalChip, ToolChip } from '../agent/types';
 import { SCORE_FACTORS } from '../constants/score-factors';
 
@@ -394,7 +395,7 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
   // (api/agent/prompts/system.py + surfaces.py), the tool schema, and
   // the audit. The model never sees a frontend-built system prompt.
   const { msgs, loading, sendTurn, confirmProposal } = useAgentStream({
-    surface: 'symbol_detail',
+    surface: SURFACE_SYMBOL_DETAIL,
   });
 
   // Proactive synthetic greeting computed locally — never goes on the
