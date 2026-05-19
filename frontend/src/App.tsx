@@ -56,7 +56,7 @@ import { useLiveTicker } from './hooks/useLiveTicker';
 import { useMacro } from './hooks/useMacro';
 import { computeFocus } from './helpers/hierarchy';
 
-import SymbolDetail, { type PositionPreset } from './components/SymbolDetail';
+import SymbolDetail from './components/SymbolDetail';
 import AgentBrief from './components/AgentBrief';
 import AgentDock from './components/AgentDock';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -124,9 +124,6 @@ const App: React.FC = () => {
 
   // Signal to open as position (passed from SignalsTable)
   const [signalForPos, setSignalForPos] = useState<Signal | null>(null);
-
-  // Preset to open as position (passed from SymbolDetail)
-  const [presetForPos, setPresetForPos] = useState<PositionPreset | null>(null);
 
   // AgentDock state — open flag + optional prompt the AgentBrief chip
   // injected when the user clicked one of the canned questions.
@@ -233,23 +230,6 @@ const App: React.FC = () => {
       setSignalForPos(null);
     }
   }, [signalForPos]);
-
-  useEffect(() => {
-    if (presetForPos) {
-      // PositionPreset carries qty (base coin units); the modal's Capital
-      // field wants USD notional, so derive sizeUsd = qty × entry.
-      setOpenPositionPrefill({
-        symbol:    presetForPos.symbol,
-        price:     presetForPos.entry,
-        sl:        presetForPos.sl,
-        tp:        presetForPos.tp,
-        direction: presetForPos.direction,
-        sizeUsd:   presetForPos.qty * presetForPos.entry,
-      });
-      setOpenPositionModalOpen(true);
-      setPresetForPos(null);
-    }
-  }, [presetForPos]);
 
   // Compose the MacroState the agent (Brief + Dock) consumes — merges the
   // /macro response with /status scanner counters. Kill-switch count isn't
@@ -389,12 +369,6 @@ const App: React.FC = () => {
 
   const handleOpenFromSignal = useCallback((signal: Signal) => {
     setSignalForPos(signal);
-    setMainTab('posiciones');
-  }, []);
-
-  const handleOpenFromPreset = useCallback((preset: PositionPreset) => {
-    setSelectedSymbol(null);      // close SymbolDetail
-    setPresetForPos(preset);
     setMainTab('posiciones');
   }, []);
 
@@ -761,7 +735,6 @@ const App: React.FC = () => {
       <SymbolDetail
         symbol={selectedSymbol}
         onClose={() => setSelectedSymbol(null)}
-        onOpenPosition={handleOpenFromPreset}
         agentEnabled={AGENT_ENABLED}
       />
 

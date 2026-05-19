@@ -271,12 +271,25 @@
   50%      { opacity: 1; }
 }
 
-/* confirm_release marker — destructive override, amber to signal weight.
- * NOTE: temporarily unused after the Phase 2B rewire (the marker
- * protocol it served is dead). Phase 3 of #400 reintroduces the
- * amber-button UX as the render target for signed proposal events
- * (propose_close_position / propose_reactivate_symbol / propose_apply_tune).
- * Keeping the class alive avoids churn when Phase 3 lands. */
+/* Phase 3 of #400 — signed-proposal confirm button. Amber by default
+ * (destructive side-effects deserve weight), transitions to bull on
+ * success or bear on drift/expired/error. The row groups a summary
+ * line above the action button. */
+.proposalRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--nbc-border-dim);
+  background: rgba(255, 184, 78, 0.03);
+}
+.proposalSummary {
+  font-family: var(--nbc-font-mono);
+  font-size: 11px;
+  color: var(--nbc-fg);
+  line-height: 1.4;
+}
 .toolConfirm {
   font-family: var(--nbc-font-mono);
   font-size: 11px;
@@ -290,9 +303,26 @@
   align-self: flex-start;
   transition: all 80ms ease;
 }
-.toolConfirm:hover {
+.toolConfirm:hover:not(:disabled) {
   background: var(--warn);
   color: var(--nbc-bg);
+}
+.toolConfirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.toolConfirmInFlight {
+  animation: dockToolChipPulse 1s ease-in-out infinite;
+}
+.toolConfirmOk {
+  background: rgba(34, 211, 134, 0.08);
+  border-color: var(--bull);
+  color: var(--bull);
+}
+.toolConfirmError {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: var(--bear);
+  color: var(--bear);
 }
 
 /* Suggestion chips */

@@ -474,6 +474,19 @@ def _migrate_agent_audit() -> None:
             )
             """
         )
+
+        # Phase 3 (#400): agent_side_effects gains `expires_at` so the
+        # confirm endpoint can short-circuit expired proposals without
+        # re-deriving the TTL from the signed payload. Idempotent ADD
+        # COLUMN (the existing rows have NULL — they predate the column,
+        # and a NULL expires_at is treated as "no TTL enforcement" for
+        # rows seeded before this migration).
+        try:
+            con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
+            log.info("DB migration: added expires_at column to agent_side_effects")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
         con.commit()
         log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
     except Exception as e:  # noqa: BLE001

@@ -33,6 +33,9 @@ from api.agent.tools.schemas import (
     GetSymbolSetupIn,
     GetSymbolsWithSignalsIn,
     GetTuneProposalIn,
+    ProposeApplyTuneIn,
+    ProposeClosePositionIn,
+    ProposeReactivateSymbolIn,
 )
 
 
@@ -142,6 +145,44 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
             "the user is on the AutoTune view or asks about parameter changes."
         ),
         schema=GetTuneProposalIn,
+        surfaces=frozenset({"dock", "autotune"}),
+    ),
+    # ── Propose tools (Phase 3). These NEVER execute the action — the
+    # tool signs a proposal envelope; the UI shows an amber confirm
+    # button; only on user confirmation does the downstream handler run.
+    # The model receives a user-facing summary, never the signed token.
+    ToolSpec(
+        name="propose_close_position",
+        description=(
+            "Propose closing one of the user's open positions. Server signs a "
+            "5-min-TTL proposal; the UI renders an amber confirm button. NEVER "
+            "do this unless the user explicitly asked to close the position AND "
+            "has articulated a rationale. The downstream close fires only on "
+            "user confirmation."
+        ),
+        schema=ProposeClosePositionIn,
+        surfaces=frozenset({"dock"}),
+    ),
+    ToolSpec(
+        name="propose_reactivate_symbol",
+        description=(
+            "Propose moving a PAUSED symbol back to PROBATION. Use this when "
+            "the user has articulated a concrete reason for the override (a "
+            "regime change, a specific catalyst, etc), NOT for vague feelings. "
+            "Server signs + persists the proposal; the UI confirms."
+        ),
+        schema=ProposeReactivateSymbolIn,
+        surfaces=frozenset({"dock", "kill_switch"}),
+    ),
+    ToolSpec(
+        name="propose_apply_tune",
+        description=(
+            "Propose applying a pending auto-tune to the live config. The "
+            "tune_id must come from a prior get_tune_proposal call in the "
+            "same conversation. Use this when the user has reasoned through "
+            "the risks per-symbol."
+        ),
+        schema=ProposeApplyTuneIn,
         surfaces=frozenset({"dock", "autotune"}),
     ),
 )

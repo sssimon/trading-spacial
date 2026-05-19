@@ -30,28 +30,20 @@ import {
 } from 'lightweight-charts';
 
 import styles from './SymbolDetail.module.css';
-import type { SymbolStatus, Position, OhlcvCandle, OhlcvVolume } from '../types';
+import type { SymbolStatus, OhlcvCandle, OhlcvVolume } from '../types';
 import { formatPrice } from '../utils';
-import { getOhlcv, getPositions, chatAgent, type AgentMessage } from '../api';
+import { getOhlcv } from '../api';
+import { useAgentStream } from '../agent/useAgentStream';
+import type { ProposalChip, ToolChip } from '../agent/types';
 import { SCORE_FACTORS } from '../constants/score-factors';
 
 // ── Public types ─────────────────────────────────────────────
 
 export type Timeframe = '5m' | '15m' | '1h' | '4h' | '1d';
 
-export interface PositionPreset {
-  symbol:    string;
-  direction: 'LONG' | 'SHORT';
-  entry:     number;
-  sl:        number;
-  tp:        number;
-  qty:       number;
-}
-
 interface SymbolDetailProps {
   symbol:          SymbolStatus | null;
   onClose:         () => void;
-  onOpenPosition?: (preset: PositionPreset) => void;
   // Server-driven feature flag — App.tsx owns the polling via
   // useAgentEnabled() (epic #400 Phase 0). Pass `true` to enable the
   // copilot input row, `false` to render the read-only fallback. This
@@ -103,15 +95,12 @@ function buildFactors(symbol: SymbolStatus) {
   return SCORE_FACTORS.map((f, idx) => ({ ...f, pass: passes.has(idx) }));
 }
 
-// Strip and collect `<<<TOOL:name>>>` markers from agent text.
-function extractTools(text: string): { tools: string[]; cleaned: string } {
-  const tools: string[] = [];
-  const cleaned = text.replace(/<<<TOOL:([a-z_]+)>>>/g, (_, name: string) => {
-    tools.push(name);
-    return '';
-  }).trim();
-  return { tools, cleaned };
-}
+// Note: the `<<<TOOL:name>>>` marker protocol the Copilot used to parse
+// is dead post-Phase-3. The model now emits typed tool_use events; the
+// renderer below consumes those via useAgentStream's tool_chips and
+// proposals state. The Setup/Position/History card components remain in
+// this file (below) but are no longer wired up — they'll be revived via
+// a future inline-card protocol if the UX needs the richer surfaces back.
 
 const TIMEFRAMES: { v: Timeframe; l: string }[] = [
   { v: '5m',  l: '5m'  },
@@ -125,7 +114,7 @@ const TIMEFRAMES: { v: Timeframe; l: string }[] = [
 // MAIN — SymbolDetail
 // ============================================================
 
-const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, onOpenPosition, agentEnabled }) => {
+const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, agentEnabled }) => {
   // Local alias keeps the rest of the file readable (rename-only change).
   const AGENT_ENABLED = agentEnabled;
   const [tf, setTf] = useState<Timeframe>('1h');
@@ -216,7 +205,7 @@ const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, onOpenPosi
             </div>
           </section>
 
-          <Copilot symbol={symbol} onOpenPosition={onOpenPosition} agentEnabled={AGENT_ENABLED} />
+          <Copilot symbol={symbol} agentEnabled={AGENT_ENABLED} />
         </div>
 
         {/* ── Footer ── */}
@@ -382,14 +371,6 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({ symbol, timeframe }) => {
 
 type Verdict = 'bull' | 'warn' | 'bear';
 
-interface CopilotMsg {
-  role:    'user' | 'assistant';
-  text:    string;
-  tools?:  string[];
-  verdict?: Verdict;
-  error?:  boolean;
-}
-
 const SUGGESTIONS = [
   { label: '¿qué muestra el score?', msg: 'Explícame el desglose del score.' },
   { label: 'simular posición $1000',  msg: 'Si abro $1000 aquí con 1% de riesgo, ¿cómo queda?' },
@@ -399,21 +380,28 @@ const SUGGESTIONS = [
 
 interface CopilotProps {
   symbol:          SymbolStatus;
-  onOpenPosition?: (preset: PositionPreset) => void;
   // Server-driven feature flag forwarded from <SymbolDetail/>.
   agentEnabled:    boolean;
 }
 
-const Copilot: React.FC<CopilotProps> = ({ symbol, onOpenPosition, agentEnabled }) => {
+const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
   const AGENT_ENABLED = agentEnabled;
-  const [msgs,    setMsgs]    = useState<CopilotMsg[]>([]);
-  const [input,   setInput]   = useState('');
-  const [loading, setLoading] = useState(false);
+  const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Proactive greeting when a symbol opens — runs sync, no API call.
-  useEffect(() => {
-    if (!symbol) return;
+  // Phase 3 rewire: replace the legacy one-shot chatAgent + frontend
+  // system prompt with the streaming hook. The server owns the prompt
+  // (api/agent/prompts/system.py + surfaces.py), the tool schema, and
+  // the audit. The model never sees a frontend-built system prompt.
+  const { msgs, loading, sendTurn, confirmProposal } = useAgentStream({
+    surface: 'symbol_detail',
+  });
+
+  // Proactive synthetic greeting computed locally — never goes on the
+  // wire, never enters the rolling transcript. Re-derives whenever
+  // the symbol or its score-relevant fields change.
+  const greeting = useMemo<{ text: string; verdict: Verdict } | null>(() => {
+    if (!symbol) return null;
     const factors = buildFactors(symbol);
     const passing = factors.filter((f) => f.pass);
     const failing = factors.filter((f) => !f.pass);
@@ -422,15 +410,14 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, onOpenPosition, agentEnabled 
       passing.length >= 4 ? 'warn' :
       'bear';
     const base = symbol.symbol.replace('USDT', '');
-    const greeting =
+    const text =
       verdict === 'bull'
         ? `Detecté **setup firme** en ${base}. Score ${passing.length}/9, gatillo activo. ¿Quieres que te explique los factores o prefieres simular una posición?`
         : verdict === 'warn'
         ? `${base} muestra **setup parcial** (${passing.length}/9). Faltan ${failing.length} confirmaciones. ¿Te explico cuáles?`
         : `${base} **no recomienda entrar ahora** — sólo ${passing.length} de 9 filtros se cumplen. ¿Te muestro qué falta?`;
-
-    setMsgs([{ role: 'assistant', text: greeting, verdict, tools: ['setup'] }]);
-  }, [symbol.symbol]);
+    return { text, verdict };
+  }, [symbol]);
 
   // Autoscroll on new messages
   useEffect(() => {
@@ -440,59 +427,12 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, onOpenPosition, agentEnabled 
   const send = async (text: string) => {
     const t = text.trim();
     if (!t || loading) return;
-    setMsgs((prev) => [...prev, { role: 'user', text: t }]);
     setInput('');
     if (!AGENT_ENABLED) return;
-    setLoading(true);
-
-    try {
-      const factors = buildFactors(symbol);
-      const passing = factors.filter((f) => f.pass);
-      const failing = factors.filter((f) => !f.pass);
-      const base    = symbol.symbol.replace('USDT', '');
-      const sysPrompt = `Eres un copiloto de trading conversando en español casual y directo.
-El usuario está mirando el par ${base}/USDT a $${formatPrice(symbol.live_price ?? symbol.price ?? 0)}.
-
-DATOS ACTUALES:
-- Score: ${passing.length}/9
-- LRC%: ${(symbol.lrc_pct ?? 0).toFixed(1)}%
-- Cambio 24h: ${(symbol.change_24h ?? 0).toFixed(2)}%
-- Side sugerido: ${symbol.direction ?? 'LONG'}
-- Gatillo 5M activo: ${symbol.señal ? 'sí' : 'no'}
-
-FACTORES QUE PASAN: ${passing.map((f) => f.key).join(', ') || 'ninguno'}
-FACTORES QUE FALLAN: ${failing.map((f) => f.key).join(', ') || 'ninguno'}
-
-INSTRUCCIONES:
-- Responde MUY breve (1-3 oraciones máximo). El usuario está en una UI compacta.
-- Si el usuario pregunta sobre el score o factores, termina tu respuesta con <<<TOOL:setup>>>
-- Si quiere simular una posición o calcular riesgo, termina con <<<TOOL:position>>>
-- Si pregunta por historial pasado, termina con <<<TOOL:history>>>
-- Si pregunta "¿debo operar?", da una recomendación clara basada en el score y termina con <<<TOOL:setup>>>
-- NUNCA inventes datos. Si no sabes algo, dilo.
-- No uses asteriscos para negrita más de 1-2 veces por respuesta.`;
-
-      // Keep last 6 turns of context — enough for follow-ups, cheap on tokens.
-      const history: AgentMessage[] = msgs.slice(-6).map((m) => ({
-        role:    m.role,
-        content: m.text,
-      }));
-
-      const resp = await chatAgent({
-        system:   sysPrompt,
-        messages: [...history, { role: 'user', content: t }],
-      });
-      const { tools, cleaned } = extractTools(resp.text || '');
-      setMsgs((prev) => [...prev, { role: 'assistant', text: cleaned, tools }]);
-    } catch (err) {
-      setMsgs((prev) => [...prev, {
-        role:  'assistant',
-        text:  err instanceof Error ? `No pude analizar eso: ${err.message}` : 'No pude analizar eso. Intenta de nuevo.',
-        error: true,
-      }]);
-    } finally {
-      setLoading(false);
-    }
+    // Pass the current symbol as a context hint so the server-side
+    // prompt can scope its tool calls (e.g. default get_symbol_setup
+    // to this pair).
+    await sendTurn(t, { symbol: symbol.symbol });
   };
 
   const submitInput = (e: React.FormEvent) => {
@@ -519,10 +459,26 @@ INSTRUCCIONES:
       </header>
 
       <div className={styles.cpScroll} ref={scrollRef}>
+        {greeting && msgs.length === 0 && (
+          <CopilotMessage
+            role="assistant"
+            text={greeting.text}
+            verdict={greeting.verdict}
+          />
+        )}
         {msgs.map((m, i) => (
-          <CopilotMessage key={i} message={m} symbol={symbol} onOpenPosition={onOpenPosition} />
+          <CopilotMessage
+            key={i}
+            role={m.role}
+            text={m.text}
+            toolChips={m.tool_chips}
+            proposals={m.proposals}
+            onConfirmProposal={confirmProposal}
+            showTyping={
+              m.role === 'assistant' && loading && i === msgs.length - 1 && m.text === ''
+            }
+          />
         ))}
-        {loading && <TypingBubble />}
       </div>
 
       {AGENT_ENABLED ? (
@@ -566,39 +522,93 @@ INSTRUCCIONES:
 // ── CopilotMessage + helpers ─────────────────────────────────
 
 interface CopilotMessageProps {
-  message:         CopilotMsg;
-  symbol:          SymbolStatus;
-  onOpenPosition?: (preset: PositionPreset) => void;
+  role:               'user' | 'assistant';
+  text:               string;
+  verdict?:           Verdict;
+  toolChips?:         ToolChip[];
+  proposals?:         ProposalChip[];
+  onConfirmProposal?: (proposal_id: string) => void;
+  showTyping?:        boolean;
 }
-const CopilotMessage: React.FC<CopilotMessageProps> = ({ message, symbol, onOpenPosition }) => {
-  if (message.role === 'user') {
+const CopilotMessage: React.FC<CopilotMessageProps> = ({
+  role, text, verdict, toolChips, proposals, onConfirmProposal, showTyping,
+}) => {
+  if (role === 'user') {
     return (
       <div className={`${styles.cpMsg} ${styles.cpMsgUser}`}>
-        <div className={`${styles.cpBubble} ${styles.cpBubbleUser}`}>{message.text}</div>
+        <div className={`${styles.cpBubble} ${styles.cpBubbleUser}`}>{text}</div>
       </div>
     );
   }
 
   const verdictClass =
-    message.verdict === 'bull' ? styles.cpBubbleVerdictBull :
-    message.verdict === 'warn' ? styles.cpBubbleVerdictWarn :
-    message.verdict === 'bear' ? styles.cpBubbleVerdictBear : '';
-  const errorClass = message.error ? styles.cpBubbleError : '';
+    verdict === 'bull' ? styles.cpBubbleVerdictBull :
+    verdict === 'warn' ? styles.cpBubbleVerdictWarn :
+    verdict === 'bear' ? styles.cpBubbleVerdictBear : '';
 
   return (
     <div className={`${styles.cpMsg} ${styles.cpMsgAsst}`}>
       <div className={styles.cpMsgAvatar}>◈</div>
       <div className={styles.cpMsgBody}>
-        {message.text && (
-          <div className={[styles.cpBubble, styles.cpBubbleAsst, errorClass, verdictClass].filter(Boolean).join(' ')}>
-            <FormattedText text={message.text} />
+        {showTyping && (
+          <div className={`${styles.cpBubble} ${styles.cpBubbleAsst} ${styles.cpBubbleTyping}`}>
+            <span className={styles.cpTypingDot} />
+            <span className={styles.cpTypingDot} />
+            <span className={styles.cpTypingDot} />
           </div>
         )}
-        {message.tools?.map((t, i) => {
-          if (t === 'setup')    return <SetupCard    key={i} symbol={symbol} />;
-          if (t === 'position') return <PositionCard key={i} symbol={symbol} onOpen={onOpenPosition} />;
-          if (t === 'history')  return <HistoryCard  key={i} symbol={symbol} />;
-          return null;
+        {!showTyping && text && (
+          <div className={[styles.cpBubble, styles.cpBubbleAsst, verdictClass].filter(Boolean).join(' ')}>
+            <FormattedText text={text} />
+          </div>
+        )}
+        {toolChips && toolChips.length > 0 && (
+          <div className={styles.toolChipsRow}>
+            {toolChips.map((c, i) => (
+              <span
+                key={i}
+                className={[
+                  styles.toolChip,
+                  c.status === 'pending' ? styles.toolChipPending :
+                  c.status === 'ok'      ? styles.toolChipOk :
+                                            styles.toolChipError,
+                ].join(' ')}
+                title={`tool ${c.tool} — ${c.status}`}
+              >
+                {c.status === 'pending' ? '⋯' : c.status === 'ok' ? '✓' : '✗'} {c.tool}
+              </span>
+            ))}
+          </div>
+        )}
+        {proposals && proposals.length > 0 && proposals.map((p) => {
+          const labelByState: Record<ProposalChip['state'], string> = {
+            pending:   'Confirmar',
+            in_flight: 'Procesando…',
+            ok:        'Confirmado ✓',
+            expired:   'Expirado',
+            drift:     'Estado cambió — re-pregunta',
+            error:     'Falló — re-pregunta',
+          };
+          const stateClass =
+            p.state === 'in_flight' ? styles.toolConfirmInFlight :
+            p.state === 'ok'        ? styles.toolConfirmOk :
+            (p.state === 'expired' || p.state === 'drift' || p.state === 'error')
+                                    ? styles.toolConfirmError :
+            '';
+          const isInteractive = p.state === 'pending';
+          return (
+            <div key={p.proposal_id} className={styles.proposalRow}>
+              <div className={styles.proposalSummary}>{p.summary}</div>
+              <button
+                type="button"
+                className={[styles.toolConfirm, stateClass].filter(Boolean).join(' ')}
+                disabled={!isInteractive}
+                onClick={() => isInteractive && onConfirmProposal?.(p.proposal_id)}
+              >
+                {labelByState[p.state]}
+              </button>
+            </div>
+          );
         })}
       </div>
     </div>
@@ -625,309 +635,9 @@ const FormattedText: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const TypingBubble: React.FC = () => (
-  <div className={`${styles.cpMsg} ${styles.cpMsgAsst}`}>
-    <div className={styles.cpMsgAvatar}>◈</div>
-    <div className={styles.cpMsgBody}>
-      <div className={`${styles.cpBubble} ${styles.cpBubbleAsst} ${styles.cpBubbleTyping}`}>
-        <span className={styles.cpTypingDot} />
-        <span className={styles.cpTypingDot} />
-        <span className={styles.cpTypingDot} />
-      </div>
-    </div>
-  </div>
-);
-
-// ============================================================
-// SETUP CARD — two-column pass/fail breakdown
-// ============================================================
-
-const SetupCard: React.FC<{ symbol: SymbolStatus }> = ({ symbol }) => {
-  const factors = useMemo(() => buildFactors(symbol), [symbol]);
-  const passing = factors.filter((f) => f.pass);
-  const failing = factors.filter((f) => !f.pass);
-  return (
-    <div className={styles.cpCard}>
-      <div className={styles.cpCardHead}>
-        <span className={styles.cpCardIcon}>◧</span>
-        <span className={styles.cpCardTitle}>Desglose del score</span>
-        <span className={`${styles.cpCardScore} num`}>{passing.length}/9</span>
-      </div>
-      <div className={styles.cpFactCols}>
-        <div>
-          <div className={styles.cpFactColsHd}>
-            <span className={`${styles.cpFactColsDot} ${styles.cpFactColsDotOk}`} />
-            <span className={styles.cpFactColsLabel}>PASAN ({passing.length})</span>
-          </div>
-          <ul className={styles.cpFactList}>
-            {passing.length === 0 ? (
-              <li className={`${styles.cpFact} ${styles.cpFactEmpty} prose`}>— ninguno todavía</li>
-            ) : passing.map((f) => (
-              <li key={f.key} className={`${styles.cpFact} ${styles.cpFactPass}`}>
-                <span className={styles.cpFactKey}>{f.key}</span>
-                <span className={styles.cpFactTxt}>{f.label}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className={styles.cpFactColsHd}>
-            <span className={`${styles.cpFactColsDot} ${styles.cpFactColsDotNo}`} />
-            <span className={styles.cpFactColsLabel}>FALLAN ({failing.length})</span>
-          </div>
-          <ul className={styles.cpFactList}>
-            {failing.length === 0 ? (
-              <li className={`${styles.cpFact} ${styles.cpFactEmpty} prose`}>— ninguno, score perfecto</li>
-            ) : failing.map((f) => (
-              <li key={f.key} className={`${styles.cpFact} ${styles.cpFactFail}`}>
-                <span className={styles.cpFactKey}>{f.key}</span>
-                <span className={styles.cpFactTxt}>{f.label}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================
-// POSITION CARD — inline knobs + RR + outputs + CTA
-// ============================================================
-
-interface PositionCardProps {
-  symbol: SymbolStatus;
-  onOpen?: (preset: PositionPreset) => void;
-}
-const PositionCard: React.FC<PositionCardProps> = ({ symbol, onOpen }) => {
-  const [capital, setCapital] = useState(1000);
-  const [riskPct, setRiskPct] = useState(1);
-  const [rr,      setRr]      = useState(2);
-  const [slPct,   setSlPct]   = useState(2.5);
-
-  const entry  = symbol.live_price ?? symbol.price ?? 0;
-  const isLong = (symbol.direction ?? 'LONG') === 'LONG';
-  const sl     = isLong ? entry * (1 - slPct / 100) : entry * (1 + slPct / 100);
-  const tp     = isLong ? entry * (1 + (slPct * rr) / 100) : entry * (1 - (slPct * rr) / 100);
-  const riskUsd   = capital * (riskPct / 100);
-  const slDistAbs = Math.abs(entry - sl);
-  const qty       = slDistAbs > 0 ? riskUsd / slDistAbs : 0;
-  const posValue  = qty * entry;
-  const rewardUsd = qty * Math.abs(tp - entry);
-
-  const minBar = Math.min(sl, entry, tp);
-  const maxBar = Math.max(sl, entry, tp);
-  const span   = (maxBar - minBar) || 1;
-  const posOf  = (p: number) => ((p - minBar) / span) * 100;
-
-  const disabled = entry <= 0 || qty <= 0;
-
-  const handleOpen = () => {
-    if (!onOpen || disabled) return;
-    onOpen({
-      symbol:    symbol.symbol,
-      direction: isLong ? 'LONG' : 'SHORT',
-      entry,
-      sl,
-      tp,
-      qty,
-    });
-  };
-
-  return (
-    <div className={styles.cpCard}>
-      <div className={styles.cpCardHead}>
-        <span className={styles.cpCardIcon}>✦</span>
-        <span className={styles.cpCardTitle}>Calculadora de posición</span>
-        <span className={styles.cpCardScore}>
-          <span className="num">${posValue.toFixed(0)}</span>
-        </span>
-      </div>
-
-      <div className={styles.cpKnobs}>
-        <Knob label="capital"  value={`$${capital}`}             onMinus={() => setCapital(Math.max(100, capital - 100))} onPlus={() => setCapital(capital + 100)} />
-        <Knob label="riesgo %" value={riskPct.toFixed(1)}        onMinus={() => setRiskPct(Math.max(0.1, +(riskPct - 0.1).toFixed(1)))} onPlus={() => setRiskPct(+(riskPct + 0.1).toFixed(1))} />
-        <Knob label="sl %"     value={slPct.toFixed(2)}          onMinus={() => setSlPct(Math.max(0.5, +(slPct - 0.25).toFixed(2)))}   onPlus={() => setSlPct(+(slPct + 0.25).toFixed(2))} />
-        <Knob label="r:r"      value={`1:${rr}`}                 onMinus={() => setRr(Math.max(1, rr - 0.5))} onPlus={() => setRr(rr + 0.5)} />
-      </div>
-
-      <div className={styles.cpRr}>
-        <div className={styles.cpRrBar}>
-          <div className={`${styles.cpRrZone} ${styles.cpRrZoneLoss}`} style={{ left: '0%', width: `${posOf(entry)}%` }} />
-          <div className={`${styles.cpRrZone} ${styles.cpRrZoneGain}`} style={{ left: `${posOf(entry)}%`, right: '0%' }} />
-          {[
-            { name: 'sl' as const,    val: sl,    cls: styles.cpRrMarkSl },
-            { name: 'entry' as const, val: entry, cls: styles.cpRrMarkEntry },
-            { name: 'tp' as const,    val: tp,    cls: styles.cpRrMarkTp },
-          ].map((m) => (
-            <div key={m.name} className={`${styles.cpRrMark} ${m.cls}`} style={{ left: `${posOf(m.val)}%` }}>
-              <span className={styles.cpRrMarkLbl}>{m.name.toUpperCase()}</span>
-              <span className={`${styles.cpRrMarkVal} num`}>{formatPrice(m.val)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={styles.cpOuts}>
-        <KV label="qty"          value={qty.toFixed(4)}              tone="neutral" />
-        <KV label="-riesgo"      value={`$${riskUsd.toFixed(2)}`}    tone="bear" />
-        <KV label="+reward"      value={`$${rewardUsd.toFixed(2)}`}  tone="bull" />
-        <KV label="risk:reward"  value={`1:${rr}`}                   tone="neutral" />
-      </div>
-
-      <button className={styles.cpCardCta} onClick={handleOpen} disabled={disabled}>
-        <span style={{ color: 'var(--bull)' }}>▸</span> abrir esta posición
-      </button>
-    </div>
-  );
-};
-
-// ============================================================
-// HISTORY CARD — real closed positions for this pair
-// ============================================================
-
-interface HistoryEntry {
-  daysAgo: number;
-  outcome: 'tp' | 'sl' | 'manual';
-  pnl:     number;
-}
-
-const HistoryCard: React.FC<{ symbol: SymbolStatus }> = ({ symbol }) => {
-  const [items, setItems] = useState<HistoryEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setItems(null);
-    setError(null);
-    // TODO: when /positions accepts `?symbol=X`, drop the client-side filter.
-    getPositions('closed')
-      .then((resp) => {
-        if (!alive) return;
-        const now = Date.now();
-        const list: HistoryEntry[] = (resp.positions ?? [])
-          .filter((p: Position) => p.symbol === symbol.symbol)
-          .slice(0, 6)
-          .map((p: Position) => {
-            const ts = p.exit_ts ?? p.entry_ts;
-            const daysAgo = ts
-              ? Math.max(0, Math.round((now - new Date(ts).getTime()) / (1000 * 60 * 60 * 24)))
-              : 0;
-            return {
-              daysAgo,
-              outcome: p.exit_reason === 'TP_HIT' ? 'tp' : p.exit_reason === 'SL_HIT' ? 'sl' : 'manual',
-              pnl:     p.pnl_pct ?? 0,
-            };
-          });
-        setItems(list);
-      })
-      .catch((err) => { if (alive) setError(err instanceof Error ? err.message : 'Error cargando historial'); });
-    return () => { alive = false; };
-  }, [symbol.symbol]);
-
-  if (items === null && !error) {
-    return (
-      <div className={styles.cpCard}>
-        <div className={styles.cpCardHead}>
-          <span className={styles.cpCardIcon}>◉</span>
-          <span className={styles.cpCardTitle}>Historial reciente</span>
-        </div>
-        <div className={`${styles.cpHistEmpty} prose`}>Cargando…</div>
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className={styles.cpCard}>
-        <div className={styles.cpCardHead}>
-          <span className={styles.cpCardIcon}>◉</span>
-          <span className={styles.cpCardTitle}>Historial reciente</span>
-        </div>
-        <div className={`${styles.cpHistEmpty} prose`}>Error: {error}</div>
-      </div>
-    );
-  }
-  const list = items ?? [];
-  if (list.length === 0) {
-    return (
-      <div className={styles.cpCard}>
-        <div className={styles.cpCardHead}>
-          <span className={styles.cpCardIcon}>◉</span>
-          <span className={styles.cpCardTitle}>Historial reciente</span>
-        </div>
-        <div className={`${styles.cpHistEmpty} prose`}>Sin operaciones previas en este par.</div>
-      </div>
-    );
-  }
-  const wins = list.filter((h) => h.pnl > 0).length;
-  const wr   = (wins / list.length) * 100;
-
-  return (
-    <div className={styles.cpCard}>
-      <div className={styles.cpCardHead}>
-        <span className={styles.cpCardIcon}>◉</span>
-        <span className={styles.cpCardTitle}>Historial reciente</span>
-        <span className={styles.cpCardScore}>
-          <span className="num">{wr.toFixed(0)}%</span>
-          <span className={styles.cpCardScoreSuf}>WR · {list.length}</span>
-        </span>
-      </div>
-      <div className={styles.cpHistStrip}>
-        {list.map((h, i) => {
-          const tone: 'bull' | 'bear' | 'warn' = h.pnl > 0 ? 'bull' : h.pnl < 0 ? 'bear' : 'warn';
-          const tag  = h.outcome === 'tp' ? 'TP' : h.outcome === 'sl' ? 'SL' : 'MAN';
-          const toneCellClass =
-            tone === 'bull' ? styles.cpHistCellBull :
-            tone === 'bear' ? styles.cpHistCellBear : styles.cpHistCellWarn;
-          const tonePnlClass =
-            tone === 'bull' ? styles.cpHistCellPnlBull :
-            tone === 'bear' ? styles.cpHistCellPnlBear : styles.cpHistCellPnlWarn;
-          return (
-            <div
-              key={i}
-              className={`${styles.cpHistCell} ${toneCellClass}`}
-              title={`hace ${h.daysAgo}d · ${tag} · ${h.pnl.toFixed(2)}%`}
-            >
-              <span className={styles.cpHistCellTag}>{tag}</span>
-              <span className={`${styles.cpHistCellPnl} num ${tonePnlClass}`}>
-                {h.pnl > 0 ? '+' : ''}{h.pnl.toFixed(1)}%
-              </span>
-              <span className={`${styles.cpHistCellWhen} prose`}>{h.daysAgo}d</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
 // ============================================================
 // Tiny atoms
 // ============================================================
-
-const Knob: React.FC<{ label: string; value: string; onMinus: () => void; onPlus: () => void }> = ({ label, value, onMinus, onPlus }) => (
-  <div className={styles.cpKnob}>
-    <span className={styles.cpKnobLabel}>{label}</span>
-    <button className={`${styles.cpKnobBtn} ${styles.cpKnobBtnMinus}`} onClick={onMinus}>−</button>
-    <span className={`${styles.cpKnobVal} num`}>{value}</span>
-    <button className={`${styles.cpKnobBtn} ${styles.cpKnobBtnPlus}`} onClick={onPlus}>+</button>
-  </div>
-);
-
-type KvTone = 'bull' | 'bear' | 'warn' | 'neutral';
-const KV: React.FC<{ label: string; value: React.ReactNode; tone: KvTone }> = ({ label, value, tone }) => {
-  const toneClass =
-    tone === 'bull'    ? styles.cpKvBull :
-    tone === 'bear'    ? styles.cpKvBear :
-    tone === 'warn'    ? styles.cpKvWarn :
-                         styles.cpKvNeutral;
-  return (
-    <div className={`${styles.cpKv} ${toneClass}`}>
-      <span className={styles.cpKvLabel}>{label}</span>
-      <span className={`${styles.cpKvVal} num`}>{value}</span>
-    </div>
-  );
-};
 
 type ChipTone = 'bull' | 'bear' | 'warn' | 'dim';
 const Chip: React.FC<{ label: string; value: string; tone: ChipTone; long?: boolean }> = ({ label, value, tone, long }) => {

@@ -134,3 +134,59 @@ export function newConversationId(): string {
   crypto.getRandomValues(buf);
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+// ── Phase 3: proposal confirm ────────────────────────────────────────
+
+/**
+ * Result of POST /agent/proposals/{id}/confirm. The frontend uses the
+ * `result` enum to drive the UI chip into a terminal state. The wire
+ * shape mirrors api/agent/router.py's response model.
+ */
+export interface ConfirmProposalResult {
+  ok:           boolean;
+  result:       'ok' | 'state_drift' | 'expired' | 'error';
+  http_status?: number;
+  idempotent?:  boolean;
+}
+
+/**
+ * Confirm a signed proposal. The signed_payload is the opaque token
+ * received in the `proposal` SSE frame — we echo it back to the server
+ * untouched so the HMAC verifies.
+ */
+export async function confirmAgentProposal(args: {
+  proposal_id:    string;
+  signed_payload: string;
+  signal?:        AbortSignal;
+}): Promise<ConfirmProposalResult> {
+  const path = `${BASE_URL}/agent/proposals/${encodeURIComponent(args.proposal_id)}/confirm`;
+  const resp = await fetch(path, {
+    method:      'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type':  'application/json',
+      'X-CSRF-Token':  readCsrfCookie(),
+    },
+    body:        JSON.stringify({ signed_payload: args.signed_payload }),
+    signal:      args.signal,
+  });
+
+  if (resp.status === 200) {
+    return (await resp.json()) as ConfirmProposalResult;
+  }
+
+  // Closed-enum mapping. 409 → state_drift, 410 → expired,
+  // anything else → error. We DO read `detail` to keep the http_status
+  // visible for debugging, but the UI surfaces only the bucket.
+  let detail: string | undefined;
+  try {
+    const body = await resp.json();
+    if (typeof body?.detail === 'string') detail = body.detail;
+  } catch {
+    /* non-json error body — ignore */
+  }
+  let bucket: ConfirmProposalResult['result'] = 'error';
+  if (resp.status === 409 || detail === 'state_drift') bucket = 'state_drift';
+  else if (resp.status === 410 || detail === 'expired') bucket = 'expired';
+  return { ok: false, result: bucket, http_status: resp.status };
+}

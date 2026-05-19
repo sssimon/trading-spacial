@@ -248,6 +248,215 @@ describe('useAgentStream', () => {
     ]);
   });
 
+  // ── Phase 3 of #400 — signed-proposal flow ─────────────────────────
+
+  it('attaches a proposal chip to the assistant bubble on a proposal event', async () => {
+    stubFetchOnce(sseReadable([
+      { type: 'text_delta', text: 'Listo, te dejo el confirm.' },
+      {
+        type:           'proposal',
+        proposal_id:    'prop_abc123',
+        signed_payload: 'mac.payload',
+        action:         'close_position',
+        args:           { position_id: 7, exit_price: 51000 },
+        expires_at:     '2030-01-01T00:00:00+00:00',
+        summary:        'Cerrar BTCUSDT LONG #7 a 51,000',
+      },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn', cost_usd: 0,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    await act(async () => {
+      await result.current.sendTurn('cierra #7');
+    });
+
+    const asst = result.current.msgs[1];
+    expect(asst.proposals).toHaveLength(1);
+    expect(asst.proposals![0]).toMatchObject({
+      proposal_id:    'prop_abc123',
+      signed_payload: 'mac.payload',
+      action:         'close_position',
+      summary:        'Cerrar BTCUSDT LONG #7 a 51,000',
+      state:          'pending',
+    });
+  });
+
+  it('confirmProposal transitions pending → ok on 200, sending signed_payload verbatim', async () => {
+    // Turn 1 fetch: stream with a proposal event.
+    const streamWithProposal = sseReadable([
+      {
+        type:           'proposal',
+        proposal_id:    'prop_xyz',
+        signed_payload: 'opaque.token.value',
+        action:         'close_position',
+        args:           { position_id: 1, exit_price: 100 },
+        expires_at:     '2030-01-01T00:00:00+00:00',
+        summary:        'Cerrar #1 a 100',
+      },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn', cost_usd: 0,
+      },
+    ]);
+
+    let confirmBody: any = null;
+    let confirmUrl = '';
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      if (url.endsWith('/turn')) {
+        return Promise.resolve(new Response(streamWithProposal, {
+          status: 200, headers: { 'Content-Type': 'text/event-stream' },
+        }));
+      }
+      // The confirm POST.
+      confirmUrl = url;
+      confirmBody = JSON.parse(init.body as string);
+      return Promise.resolve(new Response(
+        JSON.stringify({ ok: true, result: 'ok', idempotent: false }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ));
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => {
+      await result.current.sendTurn('cierra');
+    });
+
+    // pre-condition
+    expect(result.current.msgs[1].proposals![0].state).toBe('pending');
+
+    await act(async () => {
+      await result.current.confirmProposal('prop_xyz');
+    });
+
+    // The confirm POST hit /api/agent/proposals/prop_xyz/confirm with the
+    // exact signed_payload from the SSE frame.
+    expect(confirmUrl).toContain('/api/agent/proposals/prop_xyz/confirm');
+    expect(confirmBody).toEqual({ signed_payload: 'opaque.token.value' });
+
+    // And the UI chip landed in the ok terminal state.
+    expect(result.current.msgs[1].proposals![0].state).toBe('ok');
+  });
+
+  it('confirmProposal lands in drift on 409', async () => {
+    const stream = sseReadable([
+      {
+        type:           'proposal',
+        proposal_id:    'prop_drift',
+        signed_payload: 'm.p',
+        action:         'close_position',
+        args:           { position_id: 1, exit_price: 1 },
+        expires_at:     '2030-01-01T00:00:00+00:00',
+        summary:        'x',
+      },
+      { type: 'message_end', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: 'end_turn', cost_usd: 0 },
+    ]);
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/turn')) {
+        return Promise.resolve(new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ detail: 'state_drift' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      ));
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => { await result.current.sendTurn('cierra'); });
+    await act(async () => { await result.current.confirmProposal('prop_drift'); });
+
+    expect(result.current.msgs[1].proposals![0].state).toBe('drift');
+  });
+
+  it('confirmProposal lands in expired on 410', async () => {
+    const stream = sseReadable([
+      {
+        type:           'proposal',
+        proposal_id:    'prop_exp',
+        signed_payload: 'm.p',
+        action:         'close_position',
+        args:           { position_id: 1, exit_price: 1 },
+        expires_at:     '2020-01-01T00:00:00+00:00',
+        summary:        'x',
+      },
+      { type: 'message_end', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: 'end_turn', cost_usd: 0 },
+    ]);
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/turn')) {
+        return Promise.resolve(new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ detail: 'expired' }),
+        { status: 410, headers: { 'Content-Type': 'application/json' } },
+      ));
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => { await result.current.sendTurn('cierra'); });
+    await act(async () => { await result.current.confirmProposal('prop_exp'); });
+
+    expect(result.current.msgs[1].proposals![0].state).toBe('expired');
+  });
+
+  it('confirmProposal is a no-op when called after a terminal state', async () => {
+    // After ok, a second confirmProposal must NOT issue another POST.
+    const stream = sseReadable([
+      {
+        type:           'proposal',
+        proposal_id:    'prop_once',
+        signed_payload: 'm.p',
+        action:         'close_position',
+        args:           { position_id: 1, exit_price: 1 },
+        expires_at:     '2030-01-01T00:00:00+00:00',
+        summary:        'x',
+      },
+      { type: 'message_end', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: 'end_turn', cost_usd: 0 },
+    ]);
+    const fetchCalls: string[] = [];
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      fetchCalls.push(url);
+      if (url.endsWith('/turn')) {
+        return Promise.resolve(new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ ok: true, result: 'ok' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ));
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => { await result.current.sendTurn('cierra'); });
+    await act(async () => { await result.current.confirmProposal('prop_once'); });
+    expect(result.current.msgs[1].proposals![0].state).toBe('ok');
+    const callsAfterFirst = fetchCalls.length;
+
+    // Second click — hook must short-circuit (state != 'pending').
+    await act(async () => { await result.current.confirmProposal('prop_once'); });
+    expect(fetchCalls.length).toBe(callsAfterFirst);  // no new POST
+    expect(result.current.msgs[1].proposals![0].state).toBe('ok');
+  });
+
+  it('confirmProposal is a no-op for an unknown proposal_id', async () => {
+    // No stream needed — we never reach the agent at all.
+    let calls = 0;
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation(() => { calls += 1; return Promise.resolve(new Response('')); });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => {
+      await result.current.confirmProposal('prop_does_not_exist');
+    });
+    expect(calls).toBe(0);
+  });
+
   it('refuses to send while a previous turn is in flight', async () => {
     // Create a stream that we control — the second sendTurn fires before
     // the first resolves.

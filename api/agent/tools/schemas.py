@@ -66,16 +66,49 @@ class GetTuneProposalIn(BaseModel):
     pass
 
 
+# ── Propose (side-effect) tool schemas ──────────────────────────────────
+
+
+class ProposeClosePositionIn(BaseModel):
+    """Propose closing one of the user's open positions. Server signs the
+    proposal; UI confirms; downstream POST /positions/{id}/close fires
+    only after the user approves. Tenant ownership is enforced server-side."""
+    position_id: int = Field(..., ge=1, description="Numeric position id (must belong to the user)")
+    exit_price:  float = Field(..., gt=0, description="Exit price in USD")
+    rationale:   str = Field(..., min_length=10, max_length=500,
+                             description="Why the close makes sense given current state. Surfaces in the confirm UI.")
+
+
+class ProposeReactivateSymbolIn(BaseModel):
+    """Propose moving a PAUSED symbol back to PROBATION. Operator-only
+    flow downstream; here we only emit the proposal envelope."""
+    symbol: str = Field(..., min_length=2, max_length=20, description="Ticker (e.g. 'BTCUSDT' or 'BTC')")
+    reason: str = Field(..., min_length=10, max_length=500,
+                        description="Why this symbol deserves to be reactivated now.")
+
+
+class ProposeApplyTuneIn(BaseModel):
+    """Propose applying a pending auto-tune to the live config. The
+    tune_id must come from a tool_result earlier in this conversation
+    (no hallucinated ids — pre-reg §11.4)."""
+    tune_id:    int = Field(..., ge=1)
+    rationale:  str = Field(..., min_length=10, max_length=500)
+
+
 # Convenience map for the registry. Order here is the canonical tool
 # ordering used in the system prompt's tool documentation block.
 TOOL_INPUT_SCHEMAS: dict[str, type[BaseModel]] = {
-    "get_portfolio_overview":   GetPortfolioOverviewIn,
-    "get_positions":            GetPositionsIn,
-    "get_position_detail":      GetPositionDetailIn,
-    "get_symbols_with_signals": GetSymbolsWithSignalsIn,
-    "get_symbol_setup":         GetSymbolSetupIn,
-    "get_kill_switch_state":    GetKillSwitchStateIn,
-    "get_recent_signals":       GetRecentSignalsIn,
-    "get_closed_trades":        GetClosedTradesIn,
-    "get_tune_proposal":        GetTuneProposalIn,
+    "get_portfolio_overview":      GetPortfolioOverviewIn,
+    "get_positions":               GetPositionsIn,
+    "get_position_detail":         GetPositionDetailIn,
+    "get_symbols_with_signals":    GetSymbolsWithSignalsIn,
+    "get_symbol_setup":            GetSymbolSetupIn,
+    "get_kill_switch_state":       GetKillSwitchStateIn,
+    "get_recent_signals":          GetRecentSignalsIn,
+    "get_closed_trades":           GetClosedTradesIn,
+    "get_tune_proposal":           GetTuneProposalIn,
+    # Propose / side-effect tools — Phase 3.
+    "propose_close_position":      ProposeClosePositionIn,
+    "propose_reactivate_symbol":   ProposeReactivateSymbolIn,
+    "propose_apply_tune":          ProposeApplyTuneIn,
 }

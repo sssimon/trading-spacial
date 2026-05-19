@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AgentStreamError,
+  confirmAgentProposal,
   newConversationId,
   streamAgentTurn,
 } from './client';
@@ -21,6 +22,8 @@ import type {
   AgentContextHints,
   AgentStreamEvent,
   AgentSurface,
+  ProposalChip,
+  ProposalState,
   ToolChip,
 } from './types';
 
@@ -30,6 +33,9 @@ export interface ChatMsg {
   // Inline tool-use chips that render below the bubble while the turn
   // is in flight. The hook clears this on the next user turn.
   tool_chips?: ToolChip[];
+  // Phase 3: signed proposal envelopes attached to this assistant
+  // message. The dock renders an amber confirm button per chip.
+  proposals?:  ProposalChip[];
 }
 
 export interface UseAgentStreamOptions {
@@ -37,10 +43,11 @@ export interface UseAgentStreamOptions {
 }
 
 export interface UseAgentStreamReturn {
-  msgs:           ChatMsg[];
-  loading:        boolean;
-  sendTurn:       (text: string, hints?: AgentContextHints) => Promise<void>;
+  msgs:              ChatMsg[];
+  loading:           boolean;
+  sendTurn:          (text: string, hints?: AgentContextHints) => Promise<void>;
   resetConversation: () => void;
+  confirmProposal:   (proposal_id: string) => Promise<void>;
 }
 
 /**
@@ -121,7 +128,60 @@ export function useAgentStream(opts: UseAgentStreamOptions): UseAgentStreamRetur
     [loading, opts.surface, resetConversation],
   );
 
-  return { msgs, loading, sendTurn, resetConversation };
+  const confirmProposal = useCallback(async (proposal_id: string) => {
+    // Find the proposal across all messages (Phase 3: one proposal per
+    // tool call, but the loop could in theory emit several in one turn).
+    let found: ProposalChip | null = null;
+    for (const m of msgsRef.current) {
+      const p = m.proposals?.find((q) => q.proposal_id === proposal_id);
+      if (p) {
+        found = p;
+        break;
+      }
+    }
+    if (!found || found.state !== 'pending') return;
+
+    setMsgs((cur) => updateProposalState(cur, proposal_id, 'in_flight'));
+
+    try {
+      const res = await confirmAgentProposal({
+        proposal_id,
+        signed_payload: found.signed_payload,
+      });
+      const nextState: ProposalState =
+        res.result === 'ok'          ? 'ok'      :
+        res.result === 'expired'     ? 'expired' :
+        res.result === 'state_drift' ? 'drift'   :
+        'error';
+      setMsgs((cur) => updateProposalState(cur, proposal_id, nextState));
+    } catch {
+      // Network / fetch-level failure. Drop the chip into the error
+      // terminal state — the user can re-ask the model to try again,
+      // which produces a fresh signed envelope.
+      setMsgs((cur) => updateProposalState(cur, proposal_id, 'error'));
+    }
+  }, []);
+
+  return { msgs, loading, sendTurn, resetConversation, confirmProposal };
+}
+
+/**
+ * Replace one proposal's state across the transcript. Pure (returns a
+ * new array) so it composes with setMsgs.
+ */
+function updateProposalState(
+  cur: ChatMsg[],
+  proposal_id: string,
+  next: ProposalState,
+): ChatMsg[] {
+  return cur.map((m) => {
+    if (!m.proposals?.length) return m;
+    const idx = m.proposals.findIndex((p) => p.proposal_id === proposal_id);
+    if (idx < 0) return m;
+    const updated = [...m.proposals];
+    updated[idx] = { ...updated[idx], state: next };
+    return { ...m, proposals: updated };
+  });
 }
 
 // ── pure-ish reducer for one event ─────────────────────────────────────
@@ -171,6 +231,32 @@ function applyEvent(
               : c,
           );
           updated[updated.length - 1] = { ...last, tool_chips: chips };
+        }
+        return updated;
+      });
+      break;
+
+    case 'proposal':
+      // Phase 3: a propose_* tool ran. Attach the signed envelope to
+      // the current assistant message. The dock will render an amber
+      // confirm button driven by the proposal's state.
+      setMsgs((cur) => {
+        const updated = [...cur];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant') {
+          const chip: ProposalChip = {
+            proposal_id:    ev.proposal_id,
+            signed_payload: ev.signed_payload,
+            action:         ev.action,
+            args:           ev.args,
+            expires_at:     ev.expires_at,
+            summary:        ev.summary,
+            state:          'pending',
+          };
+          updated[updated.length - 1] = {
+            ...last,
+            proposals: [...(last.proposals ?? []), chip],
+          };
         }
         return updated;
       });

@@ -287,10 +287,18 @@ def get_tune_proposal(*, tenant_id: int) -> dict:  # noqa: ARG001
 # ── Dispatch entry point ────────────────────────────────────────────────
 
 
-# Map of tool name → (input model class, handler function). The
-# conversation core in Phase 2 reads this to validate the model's input
-# and dispatch to the right handler with tenant_id bound.
+# Map of tool name → handler function. The conversation core in Phase 2
+# reads this to validate the model's input and dispatch to the right
+# handler with tenant_id bound.
+#
+# Phase 3 (#400) merges in PROPOSE_HANDLERS from propose_handlers.py.
+# Propose handlers carry an extra `conversation_id` kwarg (they need it
+# to link the persisted proposal back to the conversation in
+# agent_side_effects); read-only handlers ignore conversation_id.
+from api.agent.tools.propose_handlers import PROPOSE_HANDLERS  # noqa: E402
+
 TOOL_HANDLERS: dict[str, Any] = {
+    # Read-only tools (Phase 1).
     "get_portfolio_overview":   get_portfolio_overview,
     "get_positions":            get_positions,
     "get_position_detail":      get_position_detail,
@@ -300,13 +308,30 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_recent_signals":       get_recent_signals,
     "get_closed_trades":        get_closed_trades,
     "get_tune_proposal":        get_tune_proposal,
+    # Propose tools (Phase 3). Same dispatch surface; the conversation
+    # loop knows to route their output through the proposal SSE event.
+    **PROPOSE_HANDLERS,
 }
 
 
-def dispatch_tool(name: str, raw_input: dict, *, tenant_id: int) -> str:
+def _is_propose_handler(name: str) -> bool:
+    return name in PROPOSE_HANDLERS
+
+
+def dispatch_tool(
+    name: str,
+    raw_input: dict,
+    *,
+    tenant_id: int,
+    conversation_id: str = "",
+) -> str:
     """Validate the model's tool input against the schema, then run the
     handler with `tenant_id` bound. Returns a JSON string suitable for
     `tool_result.content`.
+
+    Propose handlers (Phase 3) ALSO receive `conversation_id` so the
+    persisted proposal in agent_side_effects links back to the
+    conversation that emitted it. Read-only handlers don't need it.
 
     Errors (unknown tool, schema mismatch, handler exception) are
     serialized as `{"error": "..."}` content with the calling convention
@@ -324,7 +349,14 @@ def dispatch_tool(name: str, raw_input: dict, *, tenant_id: int) -> str:
     try:
         handler = TOOL_HANDLERS[name]
         kwargs = validated.model_dump() if validated else {}
-        result = handler(tenant_id=tenant_id, **kwargs)
+        if _is_propose_handler(name):
+            result = handler(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                **kwargs,
+            )
+        else:
+            result = handler(tenant_id=tenant_id, **kwargs)
     except Exception as e:  # noqa: BLE001
         log.warning("dispatch_tool: %s raised %s", name, e, exc_info=True)
         return json.dumps({"error": "handler_error", "detail": str(e)})

@@ -53,12 +53,58 @@ export interface AgentErrorEvent {
   user_message:  string;
 }
 
+/**
+ * Phase 3 of epic #400 — emitted when a propose_* tool ran and the
+ * server signed a side-effect envelope. The frontend echoes
+ * `signed_payload` back verbatim to POST /agent/proposals/{id}/confirm
+ * on user click. The model never sees the signed_payload.
+ *
+ * `summary` is the user-facing one-line description ("Cerrar BTCUSDT
+ * LONG #42 a 51,000"). The action/args are exposed for UI grouping
+ * and labels but the wire authority is the signed_payload.
+ */
+export interface AgentProposalEvent {
+  type:           'proposal';
+  proposal_id:    string;
+  signed_payload: string;
+  action:         'close_position' | 'reactivate_symbol' | 'apply_tune';
+  args:           Record<string, unknown>;
+  expires_at:     string;
+  summary:        string;
+}
+
 export type AgentStreamEvent =
   | AgentTextDelta
   | AgentToolUseStart
   | AgentToolUseResult
+  | AgentProposalEvent
   | AgentMessageEnd
   | AgentErrorEvent;
+
+/**
+ * UI-side state of a proposal attached to an assistant message.
+ * The hook moves a proposal through:
+ *   pending → in_flight → ok | expired | drift | error
+ * Terminal states keep the row visible (button disabled) so the user
+ * sees the outcome without a toast.
+ */
+export type ProposalState =
+  | 'pending'
+  | 'in_flight'
+  | 'ok'
+  | 'expired'
+  | 'drift'
+  | 'error';
+
+export interface ProposalChip {
+  proposal_id:    string;
+  signed_payload: string;
+  action:         AgentProposalEvent['action'];
+  args:           AgentProposalEvent['args'];
+  expires_at:     string;
+  summary:        string;
+  state:          ProposalState;
+}
 
 // Wire shape of the messages we send in the body. Mirrors
 // _AgentMessage in api/agent/router.py.

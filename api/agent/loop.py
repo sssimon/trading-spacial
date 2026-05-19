@@ -73,6 +73,22 @@ class ToolUseResult:
 
 
 @dataclass(frozen=True)
+class ProposalEvent:
+    """Side-effect proposal emitted by a propose_* tool. Carries the
+    HMAC-signed payload that the frontend must echo back on confirm.
+    The model itself never sees the signed_payload — the loop strips
+    the `_proposal` envelope from the tool_result before handing it
+    back to the model. Pre-reg §10.
+    """
+    proposal_id:    str
+    signed_payload: str
+    action:         str
+    args:           dict
+    expires_at:     str
+    summary:        str
+
+
+@dataclass(frozen=True)
 class MessageEnd:
     usage: dict            # input_tokens / output_tokens / cache_read / cache_creation
     stop_reason: str
@@ -85,7 +101,10 @@ class ErrorEvent:
     user_message: str
 
 
-LoopEvent = TextDelta | ToolUseStart | ToolUseResult | MessageEnd | ErrorEvent
+LoopEvent = (
+    TextDelta | ToolUseStart | ToolUseResult | ProposalEvent
+    | MessageEnd | ErrorEvent
+)
 
 
 # ── Tool schema builder (registry → Anthropic tools array) ──────────────
@@ -183,6 +202,7 @@ async def run_turn(
     surface: str,
     messages: list[dict],
     tenant_id: int,
+    conversation_id: str = "",
     max_tokens: int = 4096,
 ) -> AsyncIterator[LoopEvent]:
     """Drive one user turn through the model + tool loop. Yields typed
@@ -280,7 +300,9 @@ async def run_turn(
         tool_results = []
         for tu in tool_uses:
             result_json = dispatch_tool(
-                tu.name or "", tu.input or {}, tenant_id=tenant_id,
+                tu.name or "", tu.input or {},
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
             )
             # is_error: structural detection (PR #404 review issue 2).
             # The previous `'"error"' in result_json` substring match
@@ -295,14 +317,36 @@ async def run_turn(
                 is_error = isinstance(parsed, dict) and "error" in parsed
             except json.JSONDecodeError:
                 is_error = True
+                parsed = None
             yield ToolUseResult(
                 tool=tu.name or "",
                 status=("error" if is_error else "ok"),
             )
+
+            # Phase 3 (#400): if a propose_* tool returned a `_proposal`
+            # envelope, yield a ProposalEvent so the frontend can render
+            # the amber confirm button. Strip the envelope from the
+            # tool_result content the model sees — the signed_payload
+            # NEVER flows through model context (pre-reg §10.1).
+            content_for_model = result_json
+            if not is_error and isinstance(parsed, dict) and "_proposal" in parsed:
+                env = parsed["_proposal"]
+                yield ProposalEvent(
+                    proposal_id=env["proposal_id"],
+                    signed_payload=env["signed_payload"],
+                    action=env["action"],
+                    args=env["args"],
+                    expires_at=env["expires_at"],
+                    summary=env["summary"],
+                )
+                # Rebuild the content without the _proposal envelope.
+                model_visible = {k: v for k, v in parsed.items() if k != "_proposal"}
+                content_for_model = json.dumps(model_visible, default=str)
+
             tool_results.append({
                 "type":          "tool_result",
                 "tool_use_id":   tu.id,
-                "content":       result_json,
+                "content":       content_for_model,
                 "is_error":      is_error,
             })
         messages.append({"role": "user", "content": tool_results})

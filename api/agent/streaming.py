@@ -19,6 +19,7 @@ from api.agent.loop import (
     ErrorEvent,
     LoopEvent,
     MessageEnd,
+    ProposalEvent,
     TextDelta,
     ToolUseResult,
     ToolUseStart,
@@ -48,6 +49,18 @@ async def sse_serialize(events: AsyncIterator[LoopEvent]) -> AsyncIterator[bytes
             yield _sse_frame("tool_use_result", {
                 "tool":   ev.tool,
                 "status": ev.status,
+            })
+        elif isinstance(ev, ProposalEvent):
+            # Phase 3: the frontend renders an amber confirm button.
+            # signed_payload is opaque on the wire — frontend echoes it
+            # back to POST /agent/proposals/{id}/confirm.
+            yield _sse_frame("proposal", {
+                "proposal_id":    ev.proposal_id,
+                "signed_payload": ev.signed_payload,
+                "action":         ev.action,
+                "args":           ev.args,
+                "expires_at":     ev.expires_at,
+                "summary":        ev.summary,
             })
         elif isinstance(ev, MessageEnd):
             yield _sse_frame("message_end", {
