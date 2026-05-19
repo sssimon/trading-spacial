@@ -61,11 +61,11 @@ Cerrar una posición, liberar un símbolo PAUSED, aplicar un tune al `config.jso
 
 | Superficie | Archivo | Patrón |
 |---|---|---|
-| Dock (flotante app-level) | `App.tsx:774` + `AgentDock.tsx` | Chat libre. System prompt construido en cliente con snapshot completo (positions, regime, F&G, funding, kill-switch state, símbolos con scores ≥5). Conversación: últimos 6 turnos. |
-| SymbolDetail drawer | `SymbolDetail.tsx:378-699` | Copiloto embedded con system prompt per-símbolo (factores que pasan/fallan, LRC, RSI, score). |
-| KillSwitchView | `App.tsx:701` + `KillSwitchView.tsx` | Botón "negociar release" inyecta state del símbolo (state, WR20, P&L30d, reason, next_conditions) y abre el Dock con prompt inicial. |
-| AutoTuneView | `App.tsx:749` + `AutoTuneView.tsx` | Verdict chips per-símbolo abren el Dock con contexto del tune propuesto. |
-| HistorialView | `App.tsx:748` + `HistorialView.tsx` | Brief headline + verdict chips; CTA abre el Dock con contexto del closed-trades. |
+| Dock (flotante app-level) | `frontend/src/App.tsx:774` + `frontend/src/components/AgentDock.tsx` | Chat libre. System prompt construido en cliente con snapshot completo (positions, regime, F&G, funding, kill-switch state, símbolos con scores ≥5). Conversación: últimos 6 turnos. |
+| SymbolDetail drawer | `frontend/src/components/SymbolDetail.tsx:378-699` | Copiloto embedded con system prompt per-símbolo (factores que pasan/fallan, LRC, RSI, score). |
+| KillSwitchView | `frontend/src/App.tsx:694` + `frontend/src/components/KillSwitchView.tsx` | Botón "negociar release" inyecta state del símbolo (state, WR20, P&L30d, reason, next_conditions) y abre el Dock con prompt inicial. |
+| AutoTuneView | `frontend/src/App.tsx:723` + `frontend/src/components/AutoTuneView.tsx` | Verdict chips per-símbolo abren el Dock con contexto del tune propuesto. |
+| HistorialView | `frontend/src/App.tsx:711` + `frontend/src/components/HistorialView.tsx` | Brief headline + verdict chips; CTA abre el Dock con contexto del closed-trades. |
 
 ### 3.3 Helpers síncronos (no se reescriben — siguen vivos)
 
@@ -187,44 +187,58 @@ Pattern completo en §10.
 ### 6.1 Server-side agentic loop
 
 ```python
-# pseudocódigo simplificado
+# pseudocódigo simplificado — el assistant message se appendea UNA vez
+# por turno (no por tool_use), y los tool_results van en UN solo user
+# message. La iteración real en Fase 2 será un while loop, no recursión.
+
+MAX_TOOL_HOPS = 4
+
 async def run_turn(conversation_id, surface, messages, tenant_id):
-    cfg = build_request(
-        system=layered_system_prompt(surface),  # con cache_control
-        tools=tool_schemas_for_surface(surface),
-        messages=messages,
-    )
-    async with client.messages.stream(**cfg) as stream:
-        async for event in stream:
-            if event.type == "text_delta":
-                yield sse("text_delta", text=event.delta.text)
-            elif event.type == "content_block_start":
-                if event.content_block.type == "tool_use":
-                    yield sse("tool_use_start", tool=event.content_block.name)
+    hops = 0
+    while True:
+        cfg = build_request(
+            system=layered_system_prompt(surface),  # con cache_control
+            tools=tool_schemas_for_surface(surface),
+            messages=messages,
+        )
+        async with client.messages.stream(**cfg) as stream:
+            async for event in stream:
+                if event.type == "text_delta":
+                    yield sse("text_delta", text=event.delta.text)
+                elif event.type == "content_block_start":
+                    if event.content_block.type == "tool_use":
+                        yield sse("tool_use_start", tool=event.content_block.name)
+            final = await stream.get_final_message()
 
-        final = await stream.get_final_message()
+        if final.stop_reason != "tool_use":
+            persist_turn_to_audit(final)
+            yield sse("message_end", usage=final.usage)
+            return
 
-    if final.stop_reason == "tool_use":
-        if hop_count >= MAX_TOOL_HOPS:  # 4
+        hops += 1
+        if hops > MAX_TOOL_HOPS:
             yield sse("error", reason="too_many_tool_hops")
             return
-        for tool_use in final.content if b.type == "tool_use":
+
+        # Append assistant message ONCE (carries all tool_use blocks).
+        messages.append({"role": "assistant", "content": final.content})
+
+        # Collect tool_results for ALL tool_use blocks in this turn,
+        # then append as ONE user message. The API rejects a turn that
+        # splits tool_results across multiple user messages.
+        tool_uses = [b for b in final.content if b.type == "tool_use"]
+        tool_results = []
+        for tu in tool_uses:
             result = await dispatch_tool(
-                tool_use.name, tool_use.input, tenant_id=tenant_id
+                tu.name, tu.input, tenant_id=tenant_id
             )
-            yield sse("tool_use_result", tool=tool_use.name)
-            messages.append({"role": "assistant", "content": final.content})
-            messages.append({"role": "user", "content": [{
+            yield sse("tool_use_result", tool=tu.name)
+            tool_results.append({
                 "type": "tool_result",
-                "tool_use_id": tool_use.id,
+                "tool_use_id": tu.id,
                 "content": result,
-            }]})
-        # recursivamente — Phase 2 implementa esto sin recursión
-        async for ev in run_turn(conversation_id, surface, messages, tenant_id):
-            yield ev
-    else:
-        persist_turn_to_audit(...)
-        yield sse("message_end", usage=final.usage)
+            })
+        messages.append({"role": "user", "content": tool_results})
 ```
 
 ### 6.2 Eventos SSE
@@ -247,8 +261,10 @@ async def run_turn(conversation_id, surface, messages, tenant_id):
 | Upstream 5xx | Mismo patrón de reintento | Mismo mensaje amable |
 | Tool exception | `tool_result` block con `is_error:true` | Modelo recibe el error, suele explicar al usuario |
 | Budget exhausted | Turn endpoint 402 con body | "Alcanzaste el límite diario del copiloto" |
-| Conversación > N tokens | Server compacta historia (Anthropic compaction beta) | Sin cambio visible |
+| Conversación > N turnos (default N=30) | Server retorna SSE `conversation_cap_reached` event en el turno N+1; frontend muestra CTA "Nueva conversación" | UI fuerza handoff a conversación fresca |
 | Tool hops > 4 | SSE `error` event con `reason: too_many_tool_hops` | "No pude completar la consulta — intenta reformularla" |
+
+**Decisión sobre compaction:** se descarta la beta de Anthropic compaction (rewrite del historial). Razón: la compaction invalida los cache breakpoints del último mensaje y degrada el cache hit rate post-compaction, lo que conflicta con el target ≥70% de §14. Optamos por hard cap por conversación (N=30 turns default, configurable) con UI que fuerza handoff a una conversación nueva. Simpler, predecible, cache-friendly.
 
 ---
 
@@ -413,10 +429,28 @@ CREATE TABLE agent_quotas (
   tenant_id INTEGER PRIMARY KEY,
   daily_usd_used REAL DEFAULT 0,
   daily_usd_cap REAL DEFAULT 1.0,
-  daily_reset_at TEXT,
-  monthly_usd_used REAL DEFAULT 0
+  daily_window_start TEXT NOT NULL,   -- ISO ts; defines start of current 24h window
+  monthly_usd_used REAL DEFAULT 0,
+  monthly_window_start TEXT NOT NULL
 );
 ```
+
+**Reset policy:** computed-on-read (no cron job).
+
+Cada vez que el pre-flight check (§9.3) lee `agent_quotas`, evalúa:
+
+```python
+now = datetime.now(timezone.utc)
+if now - row["daily_window_start"] >= timedelta(hours=24):
+    row["daily_usd_used"] = 0
+    row["daily_window_start"] = now
+if now - row["monthly_window_start"] >= timedelta(days=30):
+    row["monthly_usd_used"] = 0
+    row["monthly_window_start"] = now
+db_upsert_quota(row)  # atómico
+```
+
+Ventaja: cero infraestructura adicional (no cron, no scheduler). El primer turn del día actualiza la ventana inline.
 
 ### 9.2 Rate limiting
 
@@ -448,8 +482,10 @@ Post-turn: charge real basado en `response.usage`.
 
 2. Handler del tool (server-side):
    - Verifica que position 123 pertenezca al tenant_id del JWT.
-   - Firma payload: {action, args, idempotency_key, expires_at}
-     con HMAC-SHA256 usando JWT_SECRET.
+   - Firma payload: {action, args, tenant_id, idempotency_key, expires_at}
+     con HMAC-SHA256 usando AGENT_PROPOSAL_SECRET (variable de entorno
+     dedicada — separada del JWT_SECRET para que rotation del JWT_SECRET
+     no invalide proposals in-flight).
    - Persiste el proposal en agent_side_effects con result=NULL.
    - Devuelve al modelo: {"proposal_id": "...", "expires_in": 300}
 
@@ -670,6 +706,12 @@ Después de cada turno, parsear el texto del assistant y extraer position_ids, t
 | 5 — Tests + observability | 2.5 | medio |
 | 6 — Rollout | 0.5 active + 1 bake | bajo |
 | **Total** | **~13 dev-days + 1 bake** | |
+
+### Buffers internos (planificación, no escritos en el spec público)
+
+- **Fase 3 → buffer a 2.5-3 días.** Es la fase con más superficie de seguridad concentrada (HMAC + idempotency UNIQUE + TOCTOU + cross-tenant rejection + signature verification + 3 propose tools + frontend rendering + tests E2E). El 2.0 nominal asume cero re-trabajo. Planificar 2.5 días en cronograma interno; si llega antes, bonus.
+- **Fase 5 → riesgo de drift del `FakeAnthropicClient`.** Los tests dependen de que el fake reproduzca eventos del SDK real con fidelidad. Si actualizamos el SDK Anthropic mid-implementation, el fake puede driftear silenciosamente y los tests pasar mientras la integración real falla. Mitigación: pin de versión del SDK en `requirements.txt` desde Fase 0; bump explícito sólo después de Fase 5 con re-run de la suite contra el live model.
+- **"Análisis profundo" handoff (chip Opus 4.7) — feature v1.1.** La decisión §4.3 de no mezclar modelos dentro de una conversación implica que el chip "análisis profundo" abre una conversación nueva sin contexto. Esto puede frustrar al usuario que ya escribió 4 turnos contextualizando algo. Diseño del handoff (pasar resumen del Dock como primer user message a la conversación Opus) queda fuera de scope del v1 — se documenta en v1.1 (§14.1 implícito; ticket separado al cerrar el epic).
 
 ---
 
