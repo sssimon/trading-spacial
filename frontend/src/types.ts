@@ -127,6 +127,14 @@ export interface WebhookTestChannelResult {
   url?: string;
 }
 
+// Public agent feature status — served by GET /agent/status.
+// The `reason` field is a closed enum; never expand it with operator-only
+// strings (env-var names, paths, secret names). See api/agent/config.py.
+export interface AgentStatus {
+  enabled: boolean;
+  reason:  'ok' | 'agent_disabled';
+}
+
 export interface WebhookTestResponse {
   ok: boolean;  // overall: at least one channel succeeded
   telegram_directo: WebhookTestChannelResult;

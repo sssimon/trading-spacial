@@ -85,23 +85,24 @@ import Ticker from './components/Ticker';
 import FocusPanel from './components/FocusPanel';
 import NotificationBell from './components/NotificationBell';
 import UserMenu from './components/UserMenu';
+import { useAgentEnabled } from './hooks/useAgentEnabled';
 
 import appStyles from './App.module.css';
 
 const REFRESH_INTERVAL_MS = 30_000;
-
-// Agent feature flag — same gate the SymbolDetail copilot uses. When off,
-// FocusPanel stays in the briefing slot and the AgentDock FAB is hidden.
-const AGENT_ENABLED: boolean = (() => {
-  const flag = (import.meta.env.VITE_AGENT_ENABLED ?? '').toString().trim().toLowerCase();
-  return flag !== '0' && flag !== 'false' && flag !== 'off';
-})();
 
 type OverlayKind = 'notifs' | 'settings' | 'user' | null;
 
 const App: React.FC = () => {
   const { user, logout } = useAuth();
   const mobile = useIsMobile();
+
+  // Agent feature gate — server-driven via GET /agent/status (epic #400,
+  // Phase 0). Replaces the compile-time `VITE_AGENT_ENABLED` env-var-only
+  // gate so operator-side disables propagate without redeploying the
+  // frontend. The hook still honors VITE_AGENT_ENABLED=0 as a local dev
+  // override.
+  const AGENT_ENABLED = useAgentEnabled();
 
   // ── data ───────────────────────────────────────────────
   // Raw symbols from /symbols. The exposed `symbols` (further down) overlays
@@ -768,6 +769,7 @@ const App: React.FC = () => {
         symbol={selectedSymbol}
         onClose={() => setSelectedSymbol(null)}
         onOpenPosition={handleOpenFromPreset}
+        agentEnabled={AGENT_ENABLED}
       />
 
       {AGENT_ENABLED && (

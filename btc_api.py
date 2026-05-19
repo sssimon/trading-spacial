@@ -84,6 +84,7 @@ from api.signals import router as signals_router
 # push_webhook: called as btc_api.push_webhook in test_api.py (lines 521–575)
 from api.telegram import build_telegram_message, push_telegram_direct, push_webhook  # noqa: F401
 from api.tune import router as tune_router
+from api.agent.router import router as agent_router
 from btc_scanner import scan  # noqa: F401 — patch("btc_api.scan", ...) in test_api.py line 421
 from data import market_data as md  # used directly at line 145; patch.object(btc_api.md) in test_api.py
 # DB_FILE: monkeypatched as btc_api.DB_FILE by ~25 test files to redirect SQLite path
@@ -275,6 +276,7 @@ app.include_router(health_router)
 app.include_router(notifications_router)
 app.include_router(capital_router)
 app.include_router(user_preferences_router)
+app.include_router(agent_router)
 
 
 @app.get("/", summary="Bienvenida y estado general")
@@ -421,11 +423,13 @@ def agent_chat(body: _AgentRequest):
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
+        # Pre-reg §3.3 / §11.7: never leak env-var names, .env paths, or
+        # operator-only configuration detail through the wire. The frontend
+        # gates the dock on GET /agent/status (same closed-enum reason),
+        # so this 503 is the defense-in-depth case where someone bypasses
+        # the status check and calls /agent/chat directly.
         from fastapi import HTTPException  # noqa: PLC0415
-        raise HTTPException(
-            status_code=503,
-            detail="ANTHROPIC_API_KEY not configured. Set it in .env and restart the API.",
-        )
+        raise HTTPException(status_code=503, detail="agent_disabled")
 
     payload = {
         "model":      "claude-haiku-4-5",

@@ -29,6 +29,7 @@ import type {
   CapitalPutPayload,
   UserPreferences,
   PreferencesPutPayload,
+  AgentStatus,
 } from './types';
 
 const BASE_URL = '/api';
@@ -262,6 +263,18 @@ export async function closePosition(id: number, payload: PositionClosePayload): 
 // the operator-driven exit case. The backend endpoint is still live so
 // curl/script callers continue to work; reintroduce the wrapper here only
 // when a real UX flow needs the cancel-without-PnL semantics.
+
+// ---- Agent (copilot) -------------------------------------------------
+//
+// Phase 0 of the production-grade copilot rewrite (epic #400). For now
+// the only exposed endpoint is GET /agent/status, which the frontend
+// polls to decide whether to render the copilot UI at all. Phase 2 will
+// add the SSE streaming `turn` endpoint; Phase 3 adds proposal confirm.
+
+// GET /agent/status
+export async function getAgentStatus(): Promise<AgentStatus> {
+  return request<AgentStatus>('/agent/status');
+}
 
 // ---- Auto-Tune -------------------------------------------------------
 

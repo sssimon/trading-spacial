@@ -14,8 +14,10 @@
 //       <<<TOOL:position>>> → <PositionCard/>
 //       <<<TOOL:history>>>  → <HistoryCard/>
 //   - Agent backend: POST /agent/chat (proxies to Anthropic Haiku 4.5)
-//   - Feature flag: VITE_AGENT_ENABLED (default on). When off, the input
-//     row is hidden and only the synchronous greeting + setup card render.
+//   - Feature flag: server-driven via GET /agent/status (epic #400, Phase 0).
+//     App.tsx owns the polling (useAgentEnabled) and passes the resolved
+//     boolean down as `agentEnabled`. When false, the input row is hidden
+//     and only the synchronous greeting + setup card render.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -50,14 +52,12 @@ interface SymbolDetailProps {
   symbol:          SymbolStatus | null;
   onClose:         () => void;
   onOpenPosition?: (preset: PositionPreset) => void;
+  // Server-driven feature flag — App.tsx owns the polling via
+  // useAgentEnabled() (epic #400 Phase 0). Pass `true` to enable the
+  // copilot input row, `false` to render the read-only fallback. This
+  // replaces the previous compile-time `VITE_AGENT_ENABLED` read.
+  agentEnabled:    boolean;
 }
-
-// Read the agent feature flag once at module load. Default ENABLED.
-// Disable with `VITE_AGENT_ENABLED=0` in `frontend/.env.local`.
-const AGENT_ENABLED: boolean = (() => {
-  const flag = (import.meta.env.VITE_AGENT_ENABLED ?? '').toString().trim().toLowerCase();
-  return flag !== '0' && flag !== 'false' && flag !== 'off';
-})();
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -125,7 +125,9 @@ const TIMEFRAMES: { v: Timeframe; l: string }[] = [
 // MAIN — SymbolDetail
 // ============================================================
 
-const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, onOpenPosition }) => {
+const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, onOpenPosition, agentEnabled }) => {
+  // Local alias keeps the rest of the file readable (rename-only change).
+  const AGENT_ENABLED = agentEnabled;
   const [tf, setTf] = useState<Timeframe>('1h');
 
   useEffect(() => {
@@ -214,7 +216,7 @@ const SymbolDetail: React.FC<SymbolDetailProps> = ({ symbol, onClose, onOpenPosi
             </div>
           </section>
 
-          <Copilot symbol={symbol} onOpenPosition={onOpenPosition} />
+          <Copilot symbol={symbol} onOpenPosition={onOpenPosition} agentEnabled={AGENT_ENABLED} />
         </div>
 
         {/* ── Footer ── */}
@@ -398,9 +400,12 @@ const SUGGESTIONS = [
 interface CopilotProps {
   symbol:          SymbolStatus;
   onOpenPosition?: (preset: PositionPreset) => void;
+  // Server-driven feature flag forwarded from <SymbolDetail/>.
+  agentEnabled:    boolean;
 }
 
-const Copilot: React.FC<CopilotProps> = ({ symbol, onOpenPosition }) => {
+const Copilot: React.FC<CopilotProps> = ({ symbol, onOpenPosition, agentEnabled }) => {
+  const AGENT_ENABLED = agentEnabled;
   const [msgs,    setMsgs]    = useState<CopilotMsg[]>([]);
   const [input,   setInput]   = useState('');
   const [loading, setLoading] = useState(false);
@@ -551,7 +556,7 @@ INSTRUCCIONES:
         </>
       ) : (
         <div className={styles.cpFlagOff}>
-          copiloto desactivado (VITE_AGENT_ENABLED=0). Modo solo-lectura.
+          copiloto desactivado. Modo solo-lectura.
         </div>
       )}
     </section>
