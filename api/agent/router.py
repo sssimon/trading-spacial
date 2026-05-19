@@ -43,7 +43,8 @@ from api.agent.proposals import (
     verify_proposal,
 )
 from api.agent.streaming import sse_serialize
-from auth.dependencies import get_current_tenant_id
+from auth.dependencies import get_current_tenant_id, get_current_user
+from auth.models import User
 
 log = logging.getLogger("api.agent.router")
 
@@ -198,13 +199,14 @@ async def post_confirm_proposal(
         ..., min_length=1, max_length=128, pattern=r"^prop_[A-Za-z0-9_\-]+$",
     ),
     body: _ConfirmProposalRequest = ...,  # noqa: B008
-    tenant_id: int = Depends(get_current_tenant_id),
+    user: User = Depends(get_current_user),  # noqa: B008
 ):
     """Verify HMAC + TTL + ownership + idempotency, then run the downstream
     action with the user's session. Pre-reg §10.
 
     Failure modes (all return a closed-enum `detail`, never leak):
       - signature_mismatch       — HMAC failed; possible tampering.
+      - unsupported_version      — envelope v != 1.
       - invalid_payload          — token shape wrong.
       - not_found                — proposal_id absent from DB.
       - tenant_mismatch          — caller's tenant ≠ signed tenant.
@@ -213,7 +215,10 @@ async def post_confirm_proposal(
       - state_drift              — TOCTOU re-check failed (position closed,
                                    symbol no longer PAUSED, tune already
                                    applied, etc).
+      - role_required            — non-admin tried to execute a global
+                                   action (apply_tune / reactivate_symbol).
     """
+    tenant_id = user.id
     # 1. Status gate (same as the turn endpoint).
     status = get_agent_status()
     if not status.enabled:
@@ -263,12 +268,21 @@ async def post_confirm_proposal(
     args = _json.loads(row["args_json"] or "{}")
     try:
         result = _execute_proposed_action(
-            action=action, args=args, tenant_id=tenant_id,
+            action=action, args=args, tenant_id=tenant_id, user_role=user.role,
         )
     except HTTPException as he:
+        # 403 (role) is a different terminal state from 409 (drift).
+        # Persist with distinguishable result enum so audit can tell them
+        # apart; the http_status column also carries the canonical code.
+        if he.status_code == 403:
+            result_enum = "role_required"
+        elif he.status_code == 409:
+            result_enum = "state_drift"
+        else:
+            result_enum = "error"
         mark_proposal_result(
             proposal_id=proposal_id,
-            result="state_drift" if he.status_code == 409 else "error",
+            result=result_enum,
             http_status=he.status_code,
         )
         raise
@@ -277,11 +291,33 @@ async def post_confirm_proposal(
     return {"ok": True, "result": "ok", "action_result": result, "idempotent": False}
 
 
-def _execute_proposed_action(*, action: str, args: dict, tenant_id: int) -> dict:
+# Actions whose downstream mutates GLOBAL state (config.json shared
+# across all tenants, or symbol_health.state shared across all tenants).
+# These require role=admin at the confirm boundary — propose still runs
+# for any authenticated user (the model can reason about them), but the
+# actual mutation is gated. Per pre-reg §10.2 + review of PR #406.
+_ADMIN_ONLY_ACTIONS: frozenset[str] = frozenset({
+    ACTION_REACTIVATE_SYMBOL,
+    ACTION_APPLY_TUNE,
+})
+
+
+def _execute_proposed_action(
+    *, action: str, args: dict, tenant_id: int, user_role: str,
+) -> dict:
     """Dispatch the downstream action with tenant_id bound. Each action
     re-checks current state (TOCTOU) before mutating. Raises HTTPException
     on conflict so the caller can persist the right `result` enum.
+
+    Role gate: global-scope actions (reactivate_symbol, apply_tune) require
+    user_role == 'admin'. close_position is per-tenant and runs for any
+    authenticated owner.
     """
+    if action in _ADMIN_ONLY_ACTIONS and user_role != "admin":
+        # Closed-enum detail. The model-facing summary doesn't reveal
+        # which role; the operator can read http_status=403 + result=
+        # 'role_required' in audit.
+        raise HTTPException(status_code=403, detail="role_required")
     if action == ACTION_CLOSE_POSITION:
         from db.positions import db_close_position
         import btc_api

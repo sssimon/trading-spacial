@@ -34,6 +34,19 @@ Secrets:
   - AGENT_PROPOSAL_SECRET (env var) — used for HMAC. Separate from
     JWT_SECRET so rotating one doesn't invalidate the other (PR #404
     review issue 1 generalized).
+
+Envelope versioning (v field):
+  - The canonical payload includes "v": 1. verify_proposal rejects any
+    other value with reason="unsupported_version".
+  - ADDING A FIELD TO THE ENVELOPE IS A BREAKING CHANGE. Bumping the
+    schema means: (a) bump v to 2 in _canonical_payload, (b) update
+    verify_proposal to accept both 1 and 2 during a migration window,
+    (c) write a backfill / sunset plan for in-flight v=1 proposals
+    (worst case: their TTL of 5 min is the natural drain window).
+  - Adding a field without bumping v will silently invalidate every
+    proposal-in-flight: the new sign produces a different MAC than the
+    old verify can reconstruct, and the user sees an opaque
+    signature_mismatch.
 """
 from __future__ import annotations
 
@@ -218,6 +231,16 @@ def verify_proposal(signed_payload: str) -> dict:
         raise ProposalError("invalid_payload", f"json decode failed: {e}")
     if not isinstance(payload, dict):
         raise ProposalError("invalid_payload", "payload not an object")
+    # Envelope schema gate. We currently only know v=1; reject anything
+    # else loudly with a closed-enum reason so an attacker (or a future
+    # rollback that left a v=2 signer running against a v=1 verifier)
+    # gets a distinguishable error from "tampered MAC". See top-of-module
+    # docstring for the v contract.
+    if int(payload.get("v", 0)) != 1:
+        raise ProposalError(
+            "unsupported_version",
+            f"envelope v={payload.get('v')!r} not supported",
+        )
     # Re-canonicalize and compare MAC. Using compare_digest avoids
     # timing-side-channel.
     try:

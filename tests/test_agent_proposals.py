@@ -58,20 +58,56 @@ def tmp_db(tmp_path, monkeypatch):
     yield db_path
 
 
+def _fake_user(*, id: int = 1, role: str = "admin"):
+    """Minimal User dataclass for dependency overrides in tests."""
+    from auth.models import User
+    return User(
+        id=id, email=f"u{id}@example.com", role=role, is_active=True,
+        created_at="2026-05-19T00:00:00+00:00",
+        password_changed_at="2026-05-19T00:00:00+00:00",
+    )
+
+
 @pytest.fixture
 def authed_client(tmp_db, monkeypatch):
-    """TestClient with the agent dependencies overridden."""
+    """TestClient with the agent dependencies overridden as ADMIN tenant 1.
+
+    For non-admin scenarios use `make_authed_client(role='viewer')` from
+    inside the test — see test_confirm_403_when_viewer_tries_apply_tune.
+    """
     import btc_api
     from fastapi.testclient import TestClient
-    from auth.dependencies import get_current_tenant_id
+    from auth.dependencies import get_current_tenant_id, get_current_user
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test-key")
     monkeypatch.setenv("AGENT_PROPOSAL_SECRET", _TEST_SECRET)
     btc_api.app.dependency_overrides[get_current_tenant_id] = lambda: 1
+    btc_api.app.dependency_overrides[get_current_user] = lambda: _fake_user(id=1, role="admin")
     try:
         yield TestClient(btc_api.app)
     finally:
         btc_api.app.dependency_overrides.pop(get_current_tenant_id, None)
+        btc_api.app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture
+def viewer_client(tmp_db, monkeypatch):
+    """TestClient bound to tenant 1 with role='viewer'. Used to verify the
+    confirm endpoint rejects global-scope actions (apply_tune,
+    reactivate_symbol) for non-admin users."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from auth.dependencies import get_current_tenant_id, get_current_user
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test-key")
+    monkeypatch.setenv("AGENT_PROPOSAL_SECRET", _TEST_SECRET)
+    btc_api.app.dependency_overrides[get_current_tenant_id] = lambda: 1
+    btc_api.app.dependency_overrides[get_current_user] = lambda: _fake_user(id=1, role="viewer")
+    try:
+        yield TestClient(btc_api.app)
+    finally:
+        btc_api.app.dependency_overrides.pop(get_current_tenant_id, None)
+        btc_api.app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── sign/verify round-trip ─────────────────────────────────────────────
@@ -99,6 +135,38 @@ def test_verify_rejects_tampered_mac(proposal_env):
     with pytest.raises(ProposalError) as exc_info:
         verify_proposal(bad)
     assert exc_info.value.reason == "signature_mismatch"
+
+
+def test_verify_rejects_unsupported_version(proposal_env):
+    """Bumping `v` to 2 without a verifier update must fail loudly with
+    a distinguishable closed-enum reason (NOT signature_mismatch), so
+    rollback / split-deploy debugging is possible. Defense recommended
+    in PR #406 review."""
+    from api.agent.proposals import ProposalError, _canonical_payload, _secret, verify_proposal
+    import base64
+    import hmac
+    import hashlib
+    # Manually craft a properly-signed v=2 envelope.
+    payload_v2 = {
+        "v":          2,
+        "proposal_id": "prop_v2test",
+        "action":     "close_position",
+        "args":       {"position_id": 1, "exit_price": 1.0},
+        "tenant_id":  1,
+        "expires_at": "2030-01-01T00:00:00+00:00",
+    }
+    import json as _json
+    raw = _json.dumps(payload_v2, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
+    mac = hmac.new(_secret(), raw, hashlib.sha256).hexdigest()
+    payload_b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    signed = f"{mac}.{payload_b64}"
+
+    with pytest.raises(ProposalError) as exc_info:
+        verify_proposal(signed)
+    assert exc_info.value.reason == "unsupported_version"
+    # Bonus: the v=1 path (which the existing tests cover) remains
+    # untouched — verify_proposal still accepts a real v=1 envelope.
+    # (No extra assertion here; the broader suite already proves it.)
 
 
 def test_verify_rejects_tampered_payload(proposal_env):
@@ -455,6 +523,162 @@ def test_confirm_returns_409_on_state_drift(authed_client):
     finally:
         con.close()
     assert dict(row)["result"] == "state_drift"
+
+
+def test_confirm_rejects_proposal_id_mismatch(authed_client):
+    """A signed_payload from proposal A submitted at the URL of proposal
+    B → 400 proposal_id_mismatch. Defense against confused-deputy attacks
+    where an attacker swaps URLs but keeps a valid signature."""
+    import btc_api
+    from api.agent.proposals import sign_proposal, persist_proposal
+    client = authed_client
+
+    # Build two distinct proposals.
+    con = btc_api.get_db()
+    try:
+        pos_id_a = _seed_position(con, tenant_id=1, status="open")
+        pos_id_b = _seed_position(con, tenant_id=1, status="open")
+    finally:
+        con.close()
+    p_a = sign_proposal(action="close_position",
+                         args={"position_id": pos_id_a, "exit_price": 10.0},
+                         tenant_id=1)
+    p_b = sign_proposal(action="close_position",
+                         args={"position_id": pos_id_b, "exit_price": 20.0},
+                         tenant_id=1)
+    persist_proposal(tenant_id=1, conversation_id="c", proposal=p_a)
+    persist_proposal(tenant_id=1, conversation_id="c", proposal=p_b)
+
+    # Send A's signed payload to B's URL → 400.
+    resp = client.post(
+        f"/agent/proposals/{p_b.proposal_id}/confirm",
+        json={"signed_payload": p_a.signed_payload},
+    )
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "proposal_id_mismatch"}
+
+    # And neither position closed.
+    con = btc_api.get_db()
+    try:
+        rows = con.execute("SELECT status FROM positions WHERE id IN (?,?)",
+                            (pos_id_a, pos_id_b)).fetchall()
+    finally:
+        con.close()
+    assert all(dict(r)["status"] == "open" for r in rows)
+
+
+def test_confirm_403_when_viewer_tries_apply_tune(viewer_client, monkeypatch):
+    """A viewer-role user cannot confirm a global-scope action even if
+    the propose grounding succeeded. The role gate fires inside
+    _execute_proposed_action; the row in agent_side_effects records
+    result='role_required' for audit visibility."""
+    import btc_api
+    from api.agent.proposals import sign_proposal, persist_proposal
+    client = viewer_client
+
+    p = sign_proposal(
+        action="apply_tune",
+        args={"tune_id": 1},
+        tenant_id=1,
+    )
+    persist_proposal(tenant_id=1, conversation_id="c", proposal=p)
+
+    resp = client.post(
+        f"/agent/proposals/{p.proposal_id}/confirm",
+        json={"signed_payload": p.signed_payload},
+    )
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "role_required"}
+
+    # Audit trail records the role rejection (not 'error', not 'state_drift').
+    con = btc_api.get_db()
+    try:
+        row = con.execute(
+            "SELECT result, http_status FROM agent_side_effects "
+            "WHERE idempotency_key = ?",
+            (p.proposal_id,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert dict(row)["result"] == "role_required"
+    assert dict(row)["http_status"] == 403
+
+
+def test_confirm_403_when_viewer_tries_reactivate_symbol(viewer_client):
+    """Same pattern for reactivate_symbol — global-scope symbol_health
+    state is admin-only."""
+    import btc_api
+    from api.agent.proposals import sign_proposal, persist_proposal
+    client = viewer_client
+
+    p = sign_proposal(
+        action="reactivate_symbol",
+        args={"symbol": "BTCUSDT", "reason": "manual_override_via_copilot"},
+        tenant_id=1,
+    )
+    persist_proposal(tenant_id=1, conversation_id="c", proposal=p)
+
+    resp = client.post(
+        f"/agent/proposals/{p.proposal_id}/confirm",
+        json={"signed_payload": p.signed_payload},
+    )
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "role_required"}
+
+
+def test_confirm_close_position_works_for_viewer_on_own_position(viewer_client):
+    """close_position is PER-TENANT scope (the position's tenant_id must
+    match the JWT-resolved one). A viewer who owns the position can
+    confirm — close_position is not in _ADMIN_ONLY_ACTIONS. This locks
+    in the distinction with apply_tune / reactivate_symbol."""
+    import btc_api
+    client = viewer_client
+
+    con = btc_api.get_db()
+    try:
+        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
+    finally:
+        con.close()
+
+    resp = client.post(
+        f"/agent/proposals/{proposal.proposal_id}/confirm",
+        json={"signed_payload": proposal.signed_payload},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "ok"
+
+    con = btc_api.get_db()
+    try:
+        row = con.execute(
+            "SELECT status, exit_reason FROM positions WHERE id = ?", (pos_id,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert dict(row)["status"] == "closed"
+    assert dict(row)["exit_reason"] == "MANUAL_AGENT"
+
+
+def test_propose_handlers_signatures_require_conversation_id():
+    """Phase 1's contract was 'all read-only handlers take tenant_id as
+    KEYWORD_ONLY'; Phase 3 extends propose handlers with the same
+    discipline for conversation_id. This invariant locks the wire:
+    nobody can quietly land a propose handler that forgets to namespace
+    its proposal row to a conversation. PR #406 review pickup."""
+    import inspect
+    from api.agent.tools.propose_handlers import PROPOSE_HANDLERS
+
+    for name, fn in PROPOSE_HANDLERS.items():
+        sig = inspect.signature(fn)
+        tparam = sig.parameters.get("tenant_id")
+        cparam = sig.parameters.get("conversation_id")
+        assert tparam is not None, f"{name} missing tenant_id"
+        assert tparam.kind == inspect.Parameter.KEYWORD_ONLY, (
+            f"{name} tenant_id must be KEYWORD_ONLY"
+        )
+        assert cparam is not None, f"{name} missing conversation_id"
+        assert cparam.kind == inspect.Parameter.KEYWORD_ONLY, (
+            f"{name} conversation_id must be KEYWORD_ONLY"
+        )
 
 
 def test_confirm_503_when_agent_disabled(authed_client, monkeypatch):
