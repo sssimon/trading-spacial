@@ -421,15 +421,18 @@ def agent_chat(body: _AgentRequest):
     its input row when the feature flag is off — but in case it slips, we
     return a 503 with a clear reason so the UI can render a graceful note.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        # Pre-reg §3.3 / §11.7: never leak env-var names, .env paths, or
-        # operator-only configuration detail through the wire. The frontend
-        # gates the dock on GET /agent/status (same closed-enum reason),
-        # so this 503 is the defense-in-depth case where someone bypasses
-        # the status check and calls /agent/chat directly.
+    # Delegate the availability check to the same resolver that backs
+    # GET /agent/status. This keeps the two surfaces in sync: an operator
+    # who disables the agent via cfg.agent.enabled=False (without touching
+    # the env var) now correctly gets a 503 here instead of the request
+    # silently sailing through. Closes the cfg-vs-env consistency gap
+    # flagged in PR #402 review.
+    from api.agent.config import get_agent_status  # noqa: PLC0415
+    _agent_status = get_agent_status()
+    if not _agent_status.enabled:
         from fastapi import HTTPException  # noqa: PLC0415
-        raise HTTPException(status_code=503, detail="agent_disabled")
+        raise HTTPException(status_code=503, detail=_agent_status.reason)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
     payload = {
         "model":      "claude-haiku-4-5",

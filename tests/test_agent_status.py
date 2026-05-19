@@ -80,14 +80,14 @@ def test_agent_status_disabled_when_api_key_whitespace(client, monkeypatch):
 
 
 def test_agent_status_disabled_when_cfg_disabled(client, monkeypatch):
-    """Operator-driven disable wins even if ANTHROPIC_API_KEY is set."""
-    import btc_api
+    """Operator-driven disable wins even if ANTHROPIC_API_KEY is set.
+
+    The router resolves load_config via the local reference imported in
+    api/agent/config.py (`from api.config import load_config`). That's the
+    only patch point that affects the flow; patching btc_api.load_config
+    would be a no-op for this code path.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test-key")
-    monkeypatch.setattr(
-        btc_api, "load_config",
-        lambda: {"agent": {"enabled": False}},
-    )
-    # The router calls load_config via api.agent.config; patch that path too.
     import api.agent.config as agent_cfg
     monkeypatch.setattr(
         agent_cfg, "load_config",
@@ -133,6 +133,26 @@ def test_agent_chat_503_body_no_longer_leaks(client, monkeypatch):
             f"Body: {body_text!r}"
         )
     # And it carries the closed-enum reason instead of the prose leak.
+    assert resp.json() == {"detail": "agent_disabled"}
+
+
+def test_agent_chat_503_when_cfg_disabled_even_with_api_key(client, monkeypatch):
+    """Closes the cfg-vs-env consistency gap flagged in PR #402 review:
+    if the operator sets cfg.agent.enabled=False but leaves the env var
+    populated, /agent/chat must 503 (same way /agent/status does) instead
+    of silently letting the request through to Anthropic.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-but-real-looking")
+    import api.agent.config as agent_cfg
+    monkeypatch.setattr(
+        agent_cfg, "load_config",
+        lambda: {"agent": {"enabled": False}},
+    )
+    resp = client.post(
+        "/agent/chat",
+        json={"system": "test", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 503
     assert resp.json() == {"detail": "agent_disabled"}
 
 
