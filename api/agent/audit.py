@@ -104,6 +104,11 @@ class TurnAuditWrapper:
         self._conversation_id = conversation_id
         self._model = model
         self._t_start = time.monotonic()
+        # PR #405 + Phase 5 pickup: track terminal-event observation so a
+        # client disconnect / asyncio cancellation can still record an
+        # audit row. Without this, mid-stream client aborts go silent
+        # in the audit table — bad for operator debugging.
+        self._terminal_recorded = False
 
     def __aiter__(self):
         return self
@@ -117,6 +122,13 @@ class TurnAuditWrapper:
         try:
             ev = await self._events.__anext__()
         except StopAsyncIteration:
+            # Iterator ended without a MessageEnd / ErrorEvent. This is
+            # the cancellation / disconnect path: the loop yielded
+            # nothing terminal but the consumer is done. Record a
+            # synthetic 'cancelled' error so the audit table reflects
+            # the failure mode.
+            if not self._terminal_recorded:
+                self._record_cancelled()
             raise
 
         if isinstance(ev, MessageEnd):
@@ -135,6 +147,12 @@ class TurnAuditWrapper:
                 cost_usd=ev.cost_usd,
                 refused=False,
             )
+            # Charge the tenant's daily/monthly quota AFTER the turn
+            # completed successfully — best-effort, swallows exceptions
+            # (see api/agent/quotas.py:record_spend docstring).
+            from api.agent.quotas import record_spend
+            record_spend(self._tenant_id, ev.cost_usd or 0.0)
+            self._terminal_recorded = True
         elif isinstance(ev, ErrorEvent):
             latency_ms = int((time.monotonic() - self._t_start) * 1000)
             record_turn(
@@ -150,4 +168,42 @@ class TurnAuditWrapper:
                 content_summary=ev.reason,
                 refused=(ev.reason == "too_many_tool_hops"),
             )
+            self._terminal_recorded = True
         return ev
+
+    def _record_cancelled(self) -> None:
+        """Best-effort audit row for the iterator-ended-early path. Same
+        fail-quiet discipline as record_turn — a missed cancellation row
+        is annoying, raising here would surface as a 500 on a request
+        that's already torn down."""
+        try:
+            latency_ms = int((time.monotonic() - self._t_start) * 1000)
+            record_turn(
+                tenant_id=self._tenant_id,
+                surface=self._surface,
+                conversation_id=self._conversation_id,
+                role="error",
+                model=self._model,
+                latency_ms=latency_ms,
+                content_summary="cancelled",
+                refused=False,
+            )
+            self._terminal_recorded = True
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "TurnAuditWrapper._record_cancelled failed for tenant=%s conv=%s",
+                self._tenant_id, self._conversation_id, exc_info=True,
+            )
+
+    async def aclose(self) -> None:
+        """Called by FastAPI's StreamingResponse when the client
+        disconnects mid-stream. Forwards close to the underlying iterator
+        AND records a cancellation row if no terminal event fired."""
+        if not self._terminal_recorded:
+            self._record_cancelled()
+        inner_close = getattr(self._events, "aclose", None)
+        if inner_close is not None:
+            try:
+                await inner_close()
+            except Exception:  # noqa: BLE001
+                log.warning("inner loop aclose failed", exc_info=True)

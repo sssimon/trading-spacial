@@ -33,6 +33,7 @@ from api.agent.clients import get_anthropic_client
 from api.agent.config import get_agent_status
 from api.agent.loop import run_turn
 from api.agent.models import ALLOWED_MODELS, default_model_for_surface
+from api.agent.quotas import QuotaExceeded, check_quota_pretrun
 from api.agent.proposals import (
     ACTION_APPLY_TUNE,
     ACTION_CLOSE_POSITION,
@@ -44,7 +45,7 @@ from api.agent.proposals import (
     verify_proposal,
 )
 from api.agent.streaming import sse_serialize
-from auth.dependencies import get_current_tenant_id, get_current_user
+from auth.dependencies import get_current_tenant_id, get_current_user, require_role
 from auth.models import User
 
 log = logging.getLogger("api.agent.router")
@@ -128,6 +129,17 @@ async def post_agent_turn(
     model = body.model or default_model_for_surface(body.surface)
     if model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail="model_not_allowed")
+
+    # Phase 5: per-tenant daily spend quota. Distinct from the global
+    # breaker (which lives inside get_agent_status above) — quota is
+    # one-tenant-blocked-others-fine, breaker is everyone-halted.
+    # Raised as 429 with closed-enum detail so the frontend can render
+    # a per-tenant message ("agotaste tu presupuesto diario") different
+    # from the global breaker message ("el sistema está pausado").
+    try:
+        check_quota_pretrun(tenant_id)
+    except QuotaExceeded:
+        raise HTTPException(status_code=429, detail="quota_exceeded")
 
     # Convert the request's messages into the API's `messages` array.
     # The frontend owns the transcript and resends it every turn (same
@@ -360,3 +372,131 @@ def _execute_proposed_action(
     # Unknown action — closed enum, should never happen because the
     # propose handlers wrote it.
     raise HTTPException(status_code=400, detail="unknown_action")
+
+
+# ── /agent/metrics (Phase 5) ───────────────────────────────────────────
+
+
+@router.get(
+    "/agent/metrics",
+    summary="Operator-facing copilot metrics (admin only)",
+    dependencies=[Depends(require_role("admin"))],
+)
+def get_agent_metrics(
+    tenant_id: int = Depends(get_current_tenant_id),  # noqa: ARG001
+):
+    """Return operator dashboard data for the copilot.
+
+    Admin-only — role gate via require_role("admin"); a viewer-role
+    request returns 403. The tenant_id dep stays in the signature so
+    AuthMiddleware still resolves the user (otherwise the role check
+    would have nothing to read), but we don't actually USE the value —
+    this endpoint reports across all tenants, not per-tenant.
+
+    Shape (closed for the admin UI / debug panel):
+
+        {
+          "breaker": {
+            "tripped":          bool,
+            "reason":           "ok" | "breaker_open" | "agent_disabled",
+            "global_24h_usd":   float,
+          },
+          "today": {
+            "turn_count":       int,
+            "error_count":      int,
+            "refused_count":    int,
+            "total_usd":        float,
+          },
+          "top_tenants": [
+            {"tenant_id": int, "turn_count": int, "usd_24h": float},
+            ...   # top 10 by spend in last 24h
+          ],
+          "error_breakdown_24h": [
+            {"reason": str, "count": int},
+            ...   # closed-enum reasons surfaced as ErrorEvent
+          ],
+        }
+
+    Pre-reg §13.5 still applies — these numbers come from
+    agent_conversations, which only stores closed-enum reasons +
+    redacted content_summary, so this endpoint cannot accidentally
+    leak user prompts or API keys.
+    """
+    from datetime import datetime, timedelta, timezone
+    from api.agent.circuit_breaker import current_global_spend_24h
+    import btc_api
+
+    status = get_agent_status()
+    breaker_state = {
+        "tripped":          (not status.enabled and status.reason == "breaker_open"),
+        "reason":           status.reason,
+        "global_24h_usd":   current_global_spend_24h(),
+    }
+
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    today_iso  = datetime.now(timezone.utc).date().isoformat() + "T00:00:00+00:00"
+
+    con = btc_api.get_db()
+    try:
+        today_row = con.execute(
+            "SELECT "
+            "  COUNT(*) AS turn_count, "
+            "  SUM(CASE WHEN role = 'error' THEN 1 ELSE 0 END) AS error_count, "
+            "  SUM(CASE WHEN refused = 1 THEN 1 ELSE 0 END) AS refused_count, "
+            "  COALESCE(SUM(cost_usd), 0) AS total_usd "
+            "FROM agent_conversations WHERE ts >= ?",
+            (today_iso,),
+        ).fetchone()
+        today = dict(today_row) if today_row else {
+            "turn_count": 0, "error_count": 0, "refused_count": 0, "total_usd": 0,
+        }
+
+        top_rows = con.execute(
+            "SELECT tenant_id, "
+            "       COUNT(*) AS turn_count, "
+            "       COALESCE(SUM(cost_usd), 0) AS usd_24h "
+            "FROM agent_conversations "
+            "WHERE ts >= ? "
+            "GROUP BY tenant_id "
+            "ORDER BY usd_24h DESC "
+            "LIMIT 10",
+            (cutoff_iso,),
+        ).fetchall()
+        top_tenants = [dict(r) for r in top_rows]
+
+        err_rows = con.execute(
+            "SELECT content_json AS reason_json, COUNT(*) AS count "
+            "FROM agent_conversations "
+            "WHERE ts >= ? AND role = 'error' "
+            "GROUP BY content_json "
+            "ORDER BY count DESC "
+            "LIMIT 20",
+            (cutoff_iso,),
+        ).fetchall()
+        # content_json is a JSON-encoded string of the closed-enum
+        # reason (audit.record_turn wraps with json.dumps). Decode to
+        # surface the raw enum value on the wire.
+        import json as _json
+        error_breakdown_24h = []
+        for r in err_rows:
+            d = dict(r)
+            raw = d.get("reason_json")
+            try:
+                reason = _json.loads(raw) if raw else "unknown"
+            except (TypeError, ValueError):
+                reason = "unknown"
+            error_breakdown_24h.append({"reason": reason, "count": d["count"]})
+    finally:
+        con.close()
+
+    return {
+        "breaker":             breaker_state,
+        "today": {
+            "turn_count":    int(today.get("turn_count")    or 0),
+            "error_count":   int(today.get("error_count")   or 0),
+            "refused_count": int(today.get("refused_count") or 0),
+            "total_usd":     float(today.get("total_usd")   or 0),
+        },
+        "top_tenants":         top_tenants,
+        "error_breakdown_24h": error_breakdown_24h,
+    }

@@ -54,6 +54,17 @@ export interface AgentErrorEvent {
 }
 
 /**
+ * Phase 5: periodic heartbeat. Emitted by the server when the upstream
+ * model + tool pipeline stays silent for ~30s so intermediate proxies
+ * (nginx, cloudflare) don't kill the connection as idle. The hook
+ * IGNORES this frame entirely — it's a TCP / SSE keepalive only, no
+ * UI effect.
+ */
+export interface AgentKeepaliveEvent {
+  type: 'keepalive';
+}
+
+/**
  * Phase 3 of epic #400 — emitted when a propose_* tool ran and the
  * server signed a side-effect envelope. The frontend echoes
  * `signed_payload` back verbatim to POST /agent/proposals/{id}/confirm
@@ -79,7 +90,8 @@ export type AgentStreamEvent =
   | AgentToolUseResult
   | AgentProposalEvent
   | AgentMessageEnd
-  | AgentErrorEvent;
+  | AgentErrorEvent
+  | AgentKeepaliveEvent;
 
 /**
  * UI-side state of a proposal attached to an assistant message.

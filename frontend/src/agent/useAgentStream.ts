@@ -269,6 +269,11 @@ function applyEvent(
       // the row and move on.
       break;
 
+    case 'keepalive':
+      // Phase 5: TCP heartbeat from the server during long tool calls.
+      // Purely a proxy-keepalive signal — no UI effect.
+      break;
+
     case 'error':
       // Replace the placeholder (which is "" so far on a fast-error
       // path) with the friendly user_message. The closed-enum reason

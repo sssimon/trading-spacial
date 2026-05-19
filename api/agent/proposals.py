@@ -328,18 +328,41 @@ def mark_proposal_result(
     result:      str,
     http_status: Optional[int] = None,
 ) -> None:
-    """Update the result column. result ∈ ok/error/conflict/expired."""
-    con = get_db()
+    """Update the result column. result ∈ ok / error / state_drift /
+    role_required / expired.
+
+    Best-effort: a DB write that fails AFTER the downstream action
+    succeeded (e.g. the position closed but we can't record the
+    audit/idempotency state) is logged at WARN and swallowed. We do NOT
+    raise because the action ALREADY happened — propagating an exception
+    here turns a successful close into a 500 response, making the user
+    think nothing happened when in fact everything happened except the
+    bookkeeping.
+
+    PR #406 review issue 4 follow-up: if reconciliation matters more
+    than a missing audit row, the operator can run a one-off script to
+    cross-check positions.exit_reason='MANUAL_AGENT' against
+    agent_side_effects rows with result IS NULL — they should match.
+    """
     try:
-        con.execute(
-            "UPDATE agent_side_effects "
-            "SET result = ?, http_status = ? "
-            "WHERE idempotency_key = ?",
-            (result, http_status, proposal_id),
+        con = get_db()
+        try:
+            con.execute(
+                "UPDATE agent_side_effects "
+                "SET result = ?, http_status = ? "
+                "WHERE idempotency_key = ?",
+                (result, http_status, proposal_id),
+            )
+            con.commit()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "mark_proposal_result failed for proposal_id=%s — audit drift; "
+            "the downstream action already ran but this row stays NULL. "
+            "Reconcile via agent_side_effects + positions cross-check.",
+            proposal_id, exc_info=True,
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 def is_expired(proposal_row: dict) -> bool:

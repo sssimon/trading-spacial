@@ -24,8 +24,9 @@ log = logging.getLogger("api.agent.config")
 
 # Closed enum of user-safe status reasons. Never expand this with an
 # operator-only string (env var name, path, secret name, etc).
-_REASON_OK = "ok"
-_REASON_DISABLED = "agent_disabled"
+_REASON_OK            = "ok"
+_REASON_DISABLED      = "agent_disabled"
+_REASON_BREAKER_OPEN  = "breaker_open"   # Phase 5: global circuit breaker
 
 
 @dataclass(frozen=True)
@@ -40,12 +41,19 @@ def get_agent_status(cfg: Optional[dict] = None) -> AgentStatus:
     """Resolve the agent's runtime status.
 
     Precedence (any disabling source wins):
-      1. cfg["agent"]["enabled"] is explicitly False  → operator-disabled
+      1. cfg["agent"]["enabled"] is explicitly False  → agent_disabled
       2. ANTHROPIC_API_KEY missing or empty            → treated identically
          (we deliberately collapse "key missing" into the same reason as
          "operator disabled" so the wire format never leaks the existence
          of an env var named ANTHROPIC_API_KEY)
-      3. Otherwise                                     → enabled
+      3. Global circuit breaker tripped (explicit cfg.agent.breaker_open
+         OR automatic 24h global spend cap exceeded) → breaker_open
+      4. Otherwise                                     → enabled
+
+    breaker_open is intentionally a DIFFERENT closed-enum reason from
+    agent_disabled — the frontend can render different UX ("system
+    temporarily halted" vs "feature off") and the operator-facing
+    metrics page can tell the two states apart.
     """
     cfg = cfg if cfg is not None else load_config()
     agent_cfg = cfg.get("agent") or {}
@@ -55,5 +63,13 @@ def get_agent_status(cfg: Optional[dict] = None) -> AgentStatus:
     api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not api_key:
         return AgentStatus(enabled=False, reason=_REASON_DISABLED)
+
+    # Local import to avoid the circular: circuit_breaker reads cfg via
+    # api.config, which this module also imports — and a top-level
+    # import would also force every Phase 0 test to set up a DB before
+    # status could be probed.
+    from api.agent.circuit_breaker import is_breaker_tripped
+    if is_breaker_tripped(cfg):
+        return AgentStatus(enabled=False, reason=_REASON_BREAKER_OPEN)
 
     return AgentStatus(enabled=True, reason=_REASON_OK)
