@@ -41,6 +41,12 @@ class SignalEvent(_BaseEvent):
     entry: float = 0.0
     sl: float = 0.0
     tp: float = 0.0
+    # LRC percentile within the 100-bar 1h channel (0..100). 0..25 = lower
+    # quartile (LONG zone); 75..100 = upper quartile (SHORT zone). Optional:
+    # callers that don't have it (legacy paths, tests) pass None and the
+    # frontend renders "?" instead of inventing a value. Surfacing this in
+    # the NotificationBell summary closes #385.
+    lrc_pct: float | None = None
     # Kill-switch context (#138): "NORMAL" | "ALERT" | "REDUCED" | "PAUSED".
     # Determines whether the template prepends a warning prefix.
     health_state: str = "NORMAL"

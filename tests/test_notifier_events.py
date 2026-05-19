@@ -21,6 +21,34 @@ def test_signal_event_required_fields():
     assert ev.dedupe_key == "signal:BTCUSDT"
 
 
+def test_signal_event_lrc_pct_optional_default_none():
+    """#385: lrc_pct is optional — callers that don't have it (legacy paths,
+    tests) pass None and the frontend renders '?' instead of fabricating."""
+    from notifier import SignalEvent
+    ev = SignalEvent(
+        symbol="BTCUSDT", score=6, direction="LONG",
+        entry=50_000.0, sl=49_000.0, tp=55_000.0,
+    )
+    assert ev.lrc_pct is None
+    assert ev.to_dict()["lrc_pct"] is None
+
+
+def test_signal_event_lrc_pct_persisted_in_payload():
+    """#385: when callers DO have an LRC percentile, it survives to_dict()
+    so notifier.storage can persist it for the bell."""
+    from notifier import SignalEvent
+    ev = SignalEvent(
+        symbol="RUNEUSDT", score=4, direction="SHORT",
+        entry=4.20, sl=4.31, tp=4.05,
+        lrc_pct=87.3,
+    )
+    payload = ev.to_dict()
+    assert payload["lrc_pct"] == 87.3
+    # Round-trip through json (the bell payload_json column is text)
+    import json
+    assert json.loads(json.dumps(payload))["lrc_pct"] == 87.3
+
+
 def test_health_event_required_fields():
     from notifier import HealthEvent
     ev = HealthEvent(

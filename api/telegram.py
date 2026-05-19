@@ -122,6 +122,15 @@ def push_telegram_direct(rep: dict, cfg: dict):
         log.warning("push_telegram_direct: health lookup failed for %s: %s", symbol, e)
         health_state = "NORMAL"
 
+    # LRC% lives under rep["lrc_1h"]["pct"] (scanner schema). If the scanner
+    # report omitted it (corrupted run, partial fixture), pass None and let
+    # the consumer render "?" instead of fabricating a value.
+    _lrc_raw = (rep.get("lrc_1h") or {}).get("pct")
+    try:
+        lrc_pct = float(_lrc_raw) if _lrc_raw is not None else None
+    except (TypeError, ValueError):
+        lrc_pct = None
+
     event = SignalEvent(
         symbol=symbol,
         score=int(rep.get("score", 0) or 0),
@@ -129,6 +138,7 @@ def push_telegram_direct(rep: dict, cfg: dict):
         entry=float(rep.get("price") or 0.0),
         sl=float((rep.get("sizing_1h") or {}).get("sl_precio") or 0.0),
         tp=float((rep.get("sizing_1h") or {}).get("tp_precio") or 0.0),
+        lrc_pct=lrc_pct,
         health_state=health_state,
     )
     # B.4 #257: per-user fan-out with symbol/min_score filtering + channel

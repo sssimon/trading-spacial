@@ -72,3 +72,59 @@ def test_shim_unknown_symbol_defaults_to_normal(tmp_db):
     assert mock_post.call_count == 1, "no signal sent — later assertion would be misleading"
     sent_text = mock_post.call_args.kwargs["json"]["text"]
     assert not sent_text.startswith("⚠️"), f"unexpected prefix: {sent_text!r}"
+
+
+def test_shim_propagates_lrc_pct_from_rep_to_signal_event(tmp_db):
+    """#385: rep["lrc_1h"]["pct"] must land in the persisted notification
+    payload so the bell can render the percentage instead of '?'.
+    """
+    import btc_api, json
+    from notifier import _storage as storage
+
+    rep = {
+        "symbol": "PENDLE", "score": 5, "direction": "SHORT",
+        "price": 4.20,
+        "sizing_1h": {"sl_precio": 4.31, "tp_precio": 4.05},
+        "lrc_1h": {"pct": 87.3, "upper": 4.40, "lower": 3.90, "mid": 4.15},
+    }
+    fake_resp = MagicMock()
+    fake_resp.ok = True
+
+    with patch("notifier.channels.telegram.requests.post", return_value=fake_resp):
+        btc_api.push_telegram_direct(rep, _cfg())
+
+    # The notifier persists the SignalEvent payload to notifications_sent.
+    rows = storage.list_unread(tenant_id=None)
+    signal_rows = [r for r in rows if r["event_type"] == "signal"]
+    assert signal_rows, "no signal notification persisted"
+    payload = json.loads(signal_rows[0]["payload_json"])
+    assert payload.get("lrc_pct") == pytest.approx(87.3), (
+        f"lrc_pct missing from persisted payload — bell will still render '?'. "
+        f"Got payload keys: {list(payload.keys())}"
+    )
+
+
+def test_shim_handles_missing_lrc_gracefully(tmp_db):
+    """When the scanner report omits lrc_1h (corrupted run, partial fixture),
+    the persisted payload carries lrc_pct=None and the bell will render '?'
+    — never fabricates a value."""
+    import btc_api, json
+    from notifier import _storage as storage
+
+    rep = {
+        "symbol": "JUP", "score": 4, "direction": "LONG",
+        "price": 1.20,
+        "sizing_1h": {"sl_precio": 1.10, "tp_precio": 1.35},
+        # NO lrc_1h key on purpose
+    }
+    fake_resp = MagicMock()
+    fake_resp.ok = True
+
+    with patch("notifier.channels.telegram.requests.post", return_value=fake_resp):
+        btc_api.push_telegram_direct(rep, _cfg())
+
+    rows = storage.list_unread(tenant_id=None)
+    signal_rows = [r for r in rows if r["event_type"] == "signal"]
+    assert signal_rows, "no signal notification persisted"
+    payload = json.loads(signal_rows[0]["payload_json"])
+    assert payload.get("lrc_pct") is None
