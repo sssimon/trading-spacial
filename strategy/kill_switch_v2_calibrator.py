@@ -462,7 +462,22 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
                 triggers_fired.append("regime_change")
 
             # portfolio_dd_degradation
-            current_dd = _compute_current_portfolio_dd(cfg)
+            #
+            # Multi-tenant: evaluate the DD for each active tenant and fire on
+            # the most severe (most negative) value. The calibrator owns
+            # system-wide thresholds, so the conservative choice is to escalate
+            # when ANY tenant breaches them, not when the (meaningless) cross-
+            # tenant aggregate does.
+            from db.capital import db_list_active_tenant_ids
+            tenant_ids = db_list_active_tenant_ids()
+            if tenant_ids:
+                per_tenant_dd = [
+                    _compute_current_portfolio_dd(cfg, tenant_id=tid)
+                    for tid in tenant_ids
+                ]
+                current_dd = min(per_tenant_dd)  # most negative = worst DD
+            else:
+                current_dd = 0.0
             last_applied = _load_last_applied_recommendation()
             last_proj_dd = (last_applied or {}).get("projected_dd")
             multiplier = float(auto_cal.get("portfolio_dd_degradation_multiplier", 1.5))
@@ -564,11 +579,15 @@ def _load_current_regime_score() -> float | None:
         return None
 
 
-def _compute_current_portfolio_dd(cfg: dict[str, Any]) -> float:
-    """Compute live portfolio DD from closed trades + open positions MTM.
+def _compute_current_portfolio_dd(cfg: dict[str, Any], *, tenant_id: int) -> float:
+    """Compute live portfolio DD from `tenant_id`'s closed trades + open positions MTM.
 
     Reuses kill_switch_v2.compute_portfolio_dd + compute_portfolio_equity_curve.
     Returns 0.0 if anything fails (conservative — won't fire degradation trigger).
+
+    Per multi-tenant policy: `tenant_id` is required. The capital base is the
+    tenant's ledger balance when present, falling back to cfg["capital_usd"]
+    for tenants without a capital row (legacy / pre-onboarding case).
     """
     try:
         from strategy.kill_switch_v2 import (
@@ -577,17 +596,22 @@ def _compute_current_portfolio_dd(cfg: dict[str, Any]) -> float:
         from strategy.kill_switch_v2_shadow import (
             _load_closed_trades, _load_open_positions, _snapshot_prices,
         )
-        capital_base = float(cfg.get("capital_usd", 1000.0))
+        from db.capital import db_get_capital
+        cap_row = db_get_capital(tenant_id)
+        if cap_row and cap_row.get("balance") is not None:
+            capital_base = float(cap_row["balance"])
+        else:
+            capital_base = float(cfg.get("capital_usd", 1000.0))
         equity_curve = compute_portfolio_equity_curve(
-            closed_trades=_load_closed_trades(),
-            open_positions=_load_open_positions(),
+            closed_trades=_load_closed_trades(tenant_id=tenant_id),
+            open_positions=_load_open_positions(tenant_id=tenant_id),
             capital_base=capital_base,
             now_price_by_symbol=_snapshot_prices(),
         )
         return float(compute_portfolio_dd(equity_curve))
     except Exception as e:
         log.warning(
-            "compute_current_portfolio_dd failed: %s",
-            e, exc_info=True,
+            "compute_current_portfolio_dd failed for tenant_id=%s: %s",
+            tenant_id, e, exc_info=True,
         )
         return 0.0

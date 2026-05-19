@@ -25,21 +25,21 @@ def test_load_closed_positions_window_filters_by_window(tmp_path, monkeypatch):
         # Inside window (10d ago)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0, 1)",
             (inside, inside),
         )
         # Outside window (400d ago)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0, 1)",
             (outside, outside),
         )
         # Open position (no exit_ts)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?)",
+            "entry_ts, tenant_id) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?, 1)",
             (inside,),
         )
         conn.commit()
@@ -72,14 +72,14 @@ def test_load_closed_positions_window_orders_by_entry_ts(tmp_path, monkeypatch):
         # Insert later first (out of order)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 10.0, 1)",
             (later, later),
         )
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -5.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -5.0, 1)",
             (earlier, earlier),
         )
         conn.commit()
@@ -247,8 +247,8 @@ def test_run_optimization_v2_no_feasible_when_all_blow_target(tmp_path, monkeypa
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -200.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -200.0, 1)",
             (ts, ts),
         )
         conn.commit()
@@ -284,8 +284,8 @@ def test_run_optimization_v2_picks_max_pnl_among_feasible(tmp_path, monkeypatch)
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
         conn.commit()
@@ -381,16 +381,16 @@ def test_run_optimization_v2_filters_out_of_window_trades(tmp_path, monkeypatch)
         # Inside the 365-day window: profitable +50
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (inside_ts, inside_ts),
         )
         # Outside window (400 days ago): -1000 loss that would otherwise
         # blow the dd_target if included.
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -1000.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -1000.0, 1)",
             (outside_ts, outside_ts),
         )
         conn.commit()
@@ -430,15 +430,15 @@ def test_run_optimization_v2_excludes_null_pnl_trades(tmp_path, monkeypatch):
         # Valid trade with non-null pnl
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 25.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 25.0, 1)",
             (ts, ts),
         )
         # Corrupted row: NULL pnl_usd (column allows NULL per schema)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', NULL)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', NULL, 1)",
             (ts, ts),
         )
         conn.commit()
@@ -511,8 +511,8 @@ def test_run_optimization_v2_regime_score_can_change_recommended_slider(
         # A profitable trade — both regimes would take it (NORMAL portfolio)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
         conn.commit()
@@ -556,8 +556,8 @@ def test_calibrator_loop_uses_real_v2_with_profitable_trades(
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
         conn.commit()

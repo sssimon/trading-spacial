@@ -98,8 +98,8 @@ def _insert_closed_position(conn, symbol, pnl, exit_ts):
     conn.execute(
         """INSERT INTO positions
            (symbol, direction, status, entry_price, entry_ts,
-            exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', ?, ?)""",
+            exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
 
@@ -344,8 +344,8 @@ def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
             conn.execute(
                 """INSERT INTO positions
                    (symbol, direction, status, entry_price, entry_ts,
-                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-04-2{1+i}T12:00:00+00:00", f"2026-04-2{1+i}T13:00:00+00:00"),
             )
         # Seed an event
@@ -483,6 +483,42 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
     assert portfolio["peak_equity"] == pytest.approx(10_400.0)
     expected_dd = -(10_400.0 - 10_200.0) / 10_400.0
     assert portfolio["dd_pct"] == pytest.approx(expected_dd, abs=1e-6)
+
+
+def test_get_health_dashboard_isolates_tenants(client):
+    """Multi-tenant isolation (per "todo tiene que ser multitenant" policy):
+    tenant 1's dashboard MUST NOT reflect tenant 2's positions, regardless
+    of who has the bigger drawdown. Each tenant sees only their own ledger.
+    """
+    from db.capital import db_upsert_capital, apply_pnl_to_capital
+    import btc_api
+
+    # Tenant 1 (active in fixture): balance $10K, no closed trades.
+    db_upsert_capital(1, balance=10_000.0, peak_balance=10_000.0)
+
+    # Tenant 2 (NOT the request tenant): seed a -$1000 loss → balance $9K, peak $10K.
+    apply_pnl_to_capital(2, -1_000.0)
+    conn = btc_api.get_db()
+    try:
+        conn.execute(
+            """INSERT INTO positions
+               (symbol, direction, status, entry_price, entry_ts,
+                exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+               VALUES ('ETH', 'LONG', 'closed', 1000.0, '2026-04-20T12:00:00+00:00',
+                       900.0, '2026-04-20T15:00:00+00:00', 'SL', -1000.0, -0.10, 2)"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Request runs as tenant 1 (fixture override). Should see clean $10K equity,
+    # NOT a -10% drawdown from tenant 2's loss.
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    portfolio = resp.json()["portfolio"]
+    assert portfolio["current_equity"] == pytest.approx(10_000.0)
+    assert portfolio["peak_equity"] == pytest.approx(10_000.0)
+    assert portfolio["dd_pct"] == pytest.approx(0.0, abs=1e-9)
 
 
 # ── Portfolio transition recording integration ──────────────────────────────

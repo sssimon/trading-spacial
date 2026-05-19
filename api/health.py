@@ -87,15 +87,13 @@ def get_health_dashboard(tenant_id: int = Depends(get_current_tenant_id)):
     Read-only; safe even when kill_switch.enabled=False (returns last-evaluated
     snapshot).
 
-    Portfolio equity is sourced from the tenant's `capital` row when present
-    (multi-tenant epic B #253); falls back to `cfg["capital_usd"]` (legacy
-    single-tenant default $1000) when the tenant has no capital row yet.
+    Portfolio equity + positions are tenant-scoped (epic B #253). The dashboard
+    state is computed against the caller's tenant only; cross-tenant
+    aggregates are never produced.
     """
-    from db.capital import db_get_capital
     from health import get_dashboard_state
     cfg = load_config()
-    capital_row = db_get_capital(tenant_id)
-    return get_dashboard_state(cfg, capital=capital_row)
+    return get_dashboard_state(cfg, tenant_id=tenant_id)
 
 
 @router.post(

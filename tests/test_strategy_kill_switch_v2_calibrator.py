@@ -1752,8 +1752,8 @@ def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (inside, inside),
         )
         conn.commit()
@@ -1839,8 +1839,8 @@ def test_calibrator_loop_pending_sends_telegram_notification(
         # Seed a profitable trade so v2 returns pending
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (inside, inside),
         )
         conn.commit()

@@ -369,12 +369,12 @@ def test_emit_shadow_uses_cache_for_multi_symbol_mtm(tmp_path, monkeypatch, _cle
     conn = btc_api.get_db()
     try:
         conn.execute(
-            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts) "
-            "VALUES('BTCUSDT', 'LONG', 50000, 0.01, 'open', '2026-04-20T10:00:00+00:00')"
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts, tenant_id) "
+            "VALUES('BTCUSDT', 'LONG', 50000, 0.01, 'open', '2026-04-20T10:00:00+00:00', 1)"
         )
         conn.execute(
-            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts) "
-            "VALUES('ETHUSDT', 'LONG', 3000, 1.0, 'open', '2026-04-20T10:00:00+00:00')"
+            "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts, tenant_id) "
+            "VALUES('ETHUSDT', 'LONG', 3000, 1.0, 'open', '2026-04-20T10:00:00+00:00', 1)"
         )
         conn.commit()
     finally:
@@ -386,7 +386,7 @@ def test_emit_shadow_uses_cache_for_multi_symbol_mtm(tmp_path, monkeypatch, _cle
 
     # Current scan is for RUNEUSDT (no open position, irrelevant) — but ETH
     # and BTC MTMs should both land
-    emit_shadow_decision(symbol="RUNEUSDT", cfg={})
+    emit_shadow_decision(symbol="RUNEUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="RUNEUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -416,7 +416,7 @@ def test_emit_shadow_fail_open_swallows_exceptions(tmp_path, monkeypatch, caplog
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     # No exception escaped, warning logged with symbol context
     assert any(
@@ -447,14 +447,14 @@ def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd) VALUES('BTCUSDT', 'LONG', 50000, 0.01, "
-            "'closed', '2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', -50.0)"
+            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES('BTCUSDT', 'LONG', 50000, 0.01, "
+            "'closed', '2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', -50.0, 1)"
         )
         conn.commit()
     finally:
         conn.close()
 
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -484,7 +484,7 @@ def test_emit_shadow_warning_includes_traceback(tmp_path, monkeypatch, caplog, _
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     # At least one record has exc_info (traceback) attached
     assert any(rec.exc_info is not None for rec in caplog.records)
@@ -739,41 +739,41 @@ def test_load_recent_sl_timestamps_filters_by_symbol_and_reason(tmp_path, monkey
         # BTC SL inside window — should count
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
             (inside1, inside1),
         )
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
             (inside2, inside2),
         )
         # BTC SL outside window — skip
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
             (outside, outside),
         )
         # BTC TP inside window — skip (wrong exit_reason)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 30.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 30.0, 1)",
             (inside1, inside1),
         )
         # ETH SL inside window — skip (wrong symbol)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', ?, ?, 'SL', -20.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', ?, ?, 'SL', -20.0, 1)",
             (inside1, inside1),
         )
         # BTC still-open — skip (status != closed)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?)",
+            "entry_ts, tenant_id) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?, 1)",
             (inside1,),
         )
         conn.commit()
@@ -847,8 +847,8 @@ def test_emit_shadow_writes_velocity_active_true_on_trigger(
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -865,7 +865,7 @@ def test_emit_shadow_writes_velocity_active_true_on_trigger(
         },
         "velocity_cooldown_hours": 4,
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -911,8 +911,8 @@ def test_emit_shadow_writes_velocity_active_false_when_below_threshold(
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -927,7 +927,7 @@ def test_emit_shadow_writes_velocity_active_false_when_below_threshold(
         },
         "velocity_cooldown_hours": 4,
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert rows[0]["velocity_active"] is False
@@ -975,18 +975,18 @@ def test_emit_shadow_velocity_active_decays_after_cooldown_expires(
             ts = (t0 - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
     finally:
         conn.close()
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     t1 = t0 + timedelta(hours=10)
     monkeypatch.setattr(sh, "_now", lambda: t1)
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 2
@@ -1016,7 +1016,7 @@ def test_emit_shadow_velocity_fail_open_on_internal_error(
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -1057,7 +1057,7 @@ def test_emit_shadow_cooldown_boundary_at_exact_equality_is_expired(
 
     # No new SLs → detector returns False → compute_velocity_state leaves state
     # unchanged → _evaluate_velocity returns parsed > now → False.
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert rows[0]["velocity_active"] is False
@@ -1100,8 +1100,8 @@ def test_emit_shadow_does_not_touch_v1_decisions(
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, "
-                "status, entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "status, entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -1116,7 +1116,7 @@ def test_emit_shadow_does_not_touch_v1_decisions(
         },
         "velocity_cooldown_hours": 4,
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     # Assert v1 rows unchanged
     v1_after = observability.query_decisions(symbol="BTCUSDT", engine="v1")
@@ -1156,7 +1156,7 @@ def test_emit_shadow_multi_symbol_state_is_independent(
         },
         "velocity_cooldown_hours": 4,
     }}}
-    emit_shadow_decision(symbol="ETHUSDT", cfg=cfg)
+    emit_shadow_decision(symbol="ETHUSDT", cfg=cfg, tenant_id=1)
 
     rows = observability.query_decisions(symbol="ETHUSDT", engine="v2_shadow")
     assert rows[0]["velocity_active"] is False
@@ -1209,8 +1209,8 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, "
-                "status, entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "status, entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -1236,7 +1236,7 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg=cfg)
+        emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     # No decision row (record_decision failed)
     monkeypatch.setattr(obs_mod, "record_decision", original)
@@ -1410,7 +1410,7 @@ def test_emit_shadow_without_regime_score_backwards_compatible(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
 
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -1443,7 +1443,7 @@ def test_emit_shadow_bull_regime_applies_adjustment(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -1480,7 +1480,7 @@ def test_emit_shadow_bear_regime_applies_penalty(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=25.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=25.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
@@ -1513,7 +1513,7 @@ def test_emit_shadow_regime_disabled_records_enabled_false(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": False},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
@@ -1547,7 +1547,7 @@ def test_emit_shadow_regime_adjustment_failure_falls_back_to_original_cfg(
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={}, regime_score=75.0)
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -1585,8 +1585,8 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -52.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -52.0, 1)",
             ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
         )
         conn.commit()
@@ -1604,10 +1604,10 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
     }}}
 
     # First scan: NEUTRAL (score=50) → slider stays 50 → DD=-0.052 is NORMAL.
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=50.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=50.0, tenant_id=1)
 
     # Second scan (same state): BULL (score=75) → slider=60 → reduced_dd=-0.05 → REDUCED.
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     # Rows ordered ts DESC (latest first)
@@ -1640,8 +1640,8 @@ def test_bear_regime_makes_reduced_threshold_laxer_enough_to_flip_tier(
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -57.0)",
+            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -57.0, 1)",
             ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
         )
         conn.commit()
@@ -1658,8 +1658,8 @@ def test_bear_regime_makes_reduced_threshold_laxer_enough_to_flip_tier(
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
 
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=50.0)
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=25.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=50.0, tenant_id=1)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=25.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 2
@@ -1689,7 +1689,7 @@ def test_emit_shadow_regime_score_zero_classified_as_bear_not_unknown(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=0.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=0.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
@@ -1724,8 +1724,8 @@ def test_emit_shadow_bull_regime_cfg_eff_threaded_to_velocity_path(
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, "
-                "status, entry_ts, exit_ts, exit_reason, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0)",
+                "status, entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -1742,7 +1742,7 @@ def test_emit_shadow_bull_regime_cfg_eff_threaded_to_velocity_path(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
@@ -1776,7 +1776,7 @@ def test_emit_shadow_adjustment_status_failed_when_regime_adjustment_raises(
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={}, regime_score=75.0)
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -1808,7 +1808,7 @@ def test_emit_shadow_adjustment_status_ok_on_normal_path(
         "regime_adjustments": {"bull_bonus": 10, "bear_penalty": 10},
         "advanced_overrides": {"regime_adjustment_enabled": True},
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
@@ -2049,27 +2049,27 @@ def test_load_closed_trades_for_symbol_filters_by_symbol_and_status(tmp_path, mo
     try:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 10.0)",
+            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 10.0, 1)",
         )
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, pnl_usd) VALUES "
+            "entry_ts, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-            "'2026-04-20T10:00:00+00:00', -5.0)",
+            "'2026-04-20T10:00:00+00:00', -5.0, 1)",
         )
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts) VALUES "
+            "entry_ts, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'open', "
-            "'2026-04-20T10:00:00+00:00')",
+            "'2026-04-20T10:00:00+00:00', 1)",
         )
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd) VALUES "
+            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
             "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', "
-            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 20.0)",
+            "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 20.0, 1)",
         )
         conn.commit()
     finally:
@@ -2166,16 +2166,16 @@ def _seed_n_closed_trades(conn, symbol: str, n: int, win_rate: float):
         ts = f"2026-04-{(i % 28) + 1:02d}T12:00:00+00:00"
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd) VALUES "
-            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, 10.0)",
+            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
+            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, 10.0, 1)",
             (symbol, ts, ts),
         )
     for i in range(losses):
         ts = f"2026-04-{(i % 28) + 1:02d}T13:00:00+00:00"
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd) VALUES "
-            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0)",
+            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
+            "(?, 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0, 1)",
             (symbol, ts, ts),
         )
 
@@ -2249,23 +2249,23 @@ def test_evaluate_per_symbol_tier_with_telemetry_alert_fires(
         for _ in range(50):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0)",
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0, 1)",
             )
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0)",
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0, 1)",
             )
         # Last 20 trades all losses (rolling_wr=0.0). Use a later date so they slice.
         for i in range(20):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-04-20T10:00:00+00:00', ?, -5.0)",
+                "'2026-04-20T10:00:00+00:00', ?, -5.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
         conn.commit()
@@ -2359,9 +2359,9 @@ def test_evaluate_per_symbol_tier_with_telemetry_recomputes_when_stale(
         for i in range(100):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-04-20T10:00:00+00:00', ?, 10.0)",
+                "'2026-04-20T10:00:00+00:00', ?, 10.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
         conn.commit()
@@ -2405,7 +2405,7 @@ def test_emit_shadow_writes_per_symbol_tier_normal_when_no_history(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
 
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -2440,29 +2440,29 @@ def test_emit_shadow_writes_per_symbol_tier_alert_when_baseline_breaks(
         for _ in range(50):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0)",
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', 10.0, 1)",
             )
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0)",
+                "'2026-03-01T10:00:00+00:00', '2026-03-01T12:00:00+00:00', -5.0, 1)",
             )
         for i in range(20):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', "
-                "'2026-04-20T10:00:00+00:00', ?, -5.0)",
+                "'2026-04-20T10:00:00+00:00', ?, -5.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
         conn.commit()
     finally:
         conn.close()
 
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert rows[0]["per_symbol_tier"] == "ALERT"
@@ -2496,7 +2496,7 @@ def test_emit_shadow_per_symbol_fail_open_returns_normal_with_status_failed(
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
-        emit_shadow_decision(symbol="BTCUSDT", cfg={})
+        emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -2542,7 +2542,7 @@ def test_emit_shadow_backwards_compat_b1_b2_b3_still_pass(
         "baseline_min_trades": 100,
         "baseline_stale_days": 7,
     }}}
-    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0)
+    emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, regime_score=75.0, tenant_id=1)
 
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert len(rows) == 1
@@ -2617,8 +2617,8 @@ def test_evaluate_per_symbol_tier_with_telemetry_cached_count_gates_decision(
             ts = f"2026-04-20T{ts_h:02d}:00:00+00:00"
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-                "entry_ts, exit_ts, pnl_usd) VALUES "
-                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0)",
+                "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
+                "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0, 1)",
                 (ts, ts),
             )
         conn.commit()
@@ -2662,7 +2662,7 @@ def test_emit_shadow_per_symbol_fail_open_telemetry_keys_match_success_path(
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
 
     # Capture success-path keys via a normal call
-    emit_shadow_decision(symbol="BTCUSDT", cfg={})
+    emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     import json
     success_keys = set(json.loads(rows[0]["reasons_json"])["per_symbol"].keys())
@@ -2677,7 +2677,7 @@ def test_emit_shadow_per_symbol_fail_open_telemetry_keys_match_success_path(
         raise RuntimeError("simulated per-symbol eval failure")
     monkeypatch.setattr(sh, "_evaluate_per_symbol_tier_with_telemetry", _boom)
 
-    emit_shadow_decision(symbol="ETHUSDT", cfg={})
+    emit_shadow_decision(symbol="ETHUSDT", cfg={}, tenant_id=1)
     rows2 = observability.query_decisions(symbol="ETHUSDT", engine="v2_shadow")
     fail_keys = set(json.loads(rows2[0]["reasons_json"])["per_symbol"].keys())
 

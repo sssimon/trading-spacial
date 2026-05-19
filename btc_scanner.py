@@ -299,11 +299,23 @@ def scan(symbol: str = None):
                 "— falling back to NEUTRAL default (no regime adjustment applied)",
                 symbol, _rs_err, exc_info=True,
             )
-        emit_shadow_decision(
-            symbol=symbol,
-            cfg=_cfg if _cfg else {},
-            regime_score=_regime_score,
-        )
+        # Multi-tenant: emit one shadow decision per active tenant so the
+        # portfolio MTM + DD are computed against each tenant's own positions.
+        # When no tenants are onboarded yet, skip (no portfolios to evaluate).
+        from db.capital import db_list_active_tenant_ids
+        for _tid in db_list_active_tenant_ids():
+            try:
+                emit_shadow_decision(
+                    symbol=symbol,
+                    cfg=_cfg if _cfg else {},
+                    tenant_id=_tid,
+                    regime_score=_regime_score,
+                )
+            except Exception as _tenant_shadow_err:
+                log.warning(
+                    "kill_switch_v2_shadow emission failed for %s tenant=%s: %s",
+                    symbol, _tid, _tenant_shadow_err,
+                )
     except Exception as _shadow_err:
         log.warning("kill_switch_v2_shadow emission failed for %s: %s", symbol, _shadow_err)
 

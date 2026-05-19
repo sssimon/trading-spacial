@@ -236,8 +236,8 @@ def test_trigger_health_evaluation_decrements_then_evaluates(tmp_db):
             conn.execute(
                 """INSERT INTO positions
                    (symbol, direction, status, entry_price, entry_ts,
-                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
             )
         conn.commit()
@@ -274,8 +274,8 @@ def test_daily_cron_eval_does_not_decrement_probation(tmp_db):
             conn.execute(
                 """INSERT INTO positions
                    (symbol, direction, status, entry_price, entry_ts,
-                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10)""",
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
             )
         conn.commit()

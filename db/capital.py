@@ -33,6 +33,25 @@ def db_get_capital(tenant_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def db_list_active_tenant_ids() -> list[int]:
+    """Return tenant ids with an existing capital row, sorted ascending.
+
+    Used by background processes (scanner, calibrator, shadow emitter) to
+    iterate over every tenant the system actually serves — replacing the
+    legacy single-tenant single-pass pattern. An empty list means "no
+    onboarded tenants" and callers should treat that as a no-op rather
+    than computing implicit single-system aggregates.
+    """
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT tenant_id FROM capital ORDER BY tenant_id ASC"
+        ).fetchall()
+    finally:
+        con.close()
+    return [int(r[0]) for r in rows]
+
+
 def apply_pnl_to_capital(tenant_id: int, pnl_usd: float) -> Optional[dict]:
     """B.2 hook: a position closed for `tenant_id` with realized `pnl_usd`.
 

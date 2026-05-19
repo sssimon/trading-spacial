@@ -40,8 +40,14 @@ def _snapshot_prices() -> dict[str, float]:
     return dict(_PRICE_CACHE)
 
 
-def _load_closed_trades() -> list[dict[str, Any]]:
-    """Load closed positions from DB for portfolio equity computation."""
+def _load_closed_trades(*, tenant_id: int) -> list[dict[str, Any]]:
+    """Load closed positions for `tenant_id` from DB for portfolio equity computation.
+
+    Per the multi-tenant policy (epic B #253), `tenant_id` is required:
+    background processes that don't have a user context must iterate via
+    `db.capital.db_list_active_tenant_ids()` and call this loader once per
+    tenant. Aggregating across tenants implicitly is not allowed.
+    """
     import btc_api
     conn = btc_api.get_db()
     try:
@@ -49,7 +55,9 @@ def _load_closed_trades() -> list[dict[str, Any]]:
             """SELECT symbol, exit_ts, pnl_usd
                FROM positions
                WHERE status = 'closed' AND exit_ts IS NOT NULL
-               ORDER BY exit_ts"""
+                 AND tenant_id = ?
+               ORDER BY exit_ts""",
+            (tenant_id,),
         ).fetchall()
     finally:
         conn.close()
@@ -59,15 +67,19 @@ def _load_closed_trades() -> list[dict[str, Any]]:
     ]
 
 
-def _load_open_positions() -> list[dict[str, Any]]:
-    """Load open positions from DB for MTM."""
+def _load_open_positions(*, tenant_id: int) -> list[dict[str, Any]]:
+    """Load open positions for `tenant_id` from DB for MTM.
+
+    See `_load_closed_trades` for the multi-tenant policy rationale.
+    """
     import btc_api
     conn = btc_api.get_db()
     try:
         rows = conn.execute(
             """SELECT symbol, entry_price, qty, direction
                FROM positions
-               WHERE status = 'open'"""
+               WHERE status = 'open' AND tenant_id = ?""",
+            (tenant_id,),
         ).fetchall()
     finally:
         conn.close()
@@ -390,6 +402,8 @@ def _evaluate_per_symbol_tier_with_telemetry(
 def emit_shadow_decision(
     symbol: str,
     cfg: dict[str, Any],
+    *,
+    tenant_id: int,
     regime_score: float | None = None,
     now_price_by_symbol: dict[str, float] | None = None,
 ) -> None:
@@ -400,6 +414,11 @@ def emit_shadow_decision(
     provided, B3 regime-aware adjustment is applied to the slider before
     threshold computation. Fail-open: any exception is caught and logged
     with full traceback.
+
+    `tenant_id` is required: the portfolio MTM + DD must be computed against
+    the tenant's positions, not the system aggregate. Schedulers (scanner,
+    calibrator) iterate `db.capital.db_list_active_tenant_ids()` and call
+    this once per tenant.
     """
     from strategy.kill_switch_v2 import (
         compute_portfolio_equity_curve,
@@ -429,9 +448,20 @@ def emit_shadow_decision(
                 cfg_eff = cfg if isinstance(cfg, dict) else {}
             _regime_adjustment_status = "failed"
 
-        capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
-        closed = _load_closed_trades()
-        opens = _load_open_positions()
+        # Capital base for this tenant: ledger if present, else cfg default.
+        # (We still use the curve here for telemetry / transitions logging; the
+        # health dashboard switched to ledger+MTM to avoid double-counting,
+        # but emit_shadow is a write-side observer and historical curve
+        # consumers expect the same shape across the run.)
+        from db.capital import db_get_capital
+        _capital_row = db_get_capital(tenant_id)
+        if _capital_row and _capital_row.get("balance") is not None:
+            capital_base = float(_capital_row["balance"])
+        else:
+            capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
+
+        closed = _load_closed_trades(tenant_id=tenant_id)
+        opens = _load_open_positions(tenant_id=tenant_id)
         prices = _snapshot_prices()
         if now_price_by_symbol:
             prices.update(now_price_by_symbol)

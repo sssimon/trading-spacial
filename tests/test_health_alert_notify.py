@@ -24,8 +24,8 @@ def _insert_closed(conn, symbol, pnl, exit_ts):
     conn.execute(
         """INSERT INTO positions
            (symbol, direction, status, entry_price, entry_ts,
-            exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?)""",
+            exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
     conn.commit()

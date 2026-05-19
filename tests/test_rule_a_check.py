@@ -112,13 +112,14 @@ def synthetic_signals_db(tmp_path: Path) -> Path:
             entry_price REAL, entry_ts TEXT,
             sl_price REAL, tp_price REAL, size_usd REAL,
             exit_price REAL, exit_ts TEXT, exit_reason TEXT,
-            pnl_usd REAL, pnl_pct REAL
+            pnl_usd REAL, pnl_pct REAL,
+            tenant_id INTEGER
         )
     """)
     con.executemany("""
         INSERT INTO positions
-        (id, symbol, direction, status, entry_price, entry_ts, size_usd)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (id, symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     """, [
         (1, "BTCUSDT", "LONG", "open", 80000.0, "2026-05-15T10:00:00+00:00", 500),
         (2, "ETHUSDT", "LONG", "open", 2300.0, "2026-05-15T11:00:00+00:00", 300),
