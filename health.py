@@ -1151,38 +1151,93 @@ def get_dashboard_state(
                 "next_conditions": next_conditions,
             })
 
-        # Portfolio.
-        # When the caller passes a tenant `capital` row (multi-tenant path),
-        # override `cfg["capital_usd"]` for the simulator so DD%, equity curve,
-        # and the displayed peak/current all derive from the real tenant capital.
-        # Without an override, the legacy single-tenant default ($1000) applies.
+        # Portfolio equity & DD.
+        #
+        # Two paths depending on capital source:
+        #
+        # (a) Tenant capital row present (multi-tenant): the ledger is the single
+        #     source of truth for realized PnL — `apply_pnl_to_capital` already
+        #     folded every closed trade into `balance`. Re-applying the closed
+        #     trades on top of `balance` (via compute_portfolio_equity_curve)
+        #     would double-count. We display `balance + open_mtm` instead.
+        #     `peak_equity` honors the monotonic ledger peak, lifted only if the
+        #     current snapshot already exceeds it (intraday gain not yet closed).
+        #
+        # (b) No capital row (legacy single-tenant): preserve pre-fix behavior —
+        #     simulate from cfg.capital_usd × (1 + simulated_dd). Suitable for
+        #     pre-onboarding tenants and the single-tenant default install.
         if capital is not None and capital.get("balance") is not None:
-            tenant_balance = float(capital["balance"])
-            tenant_peak = float(capital.get("peak_balance") or tenant_balance)
-            cfg_portfolio = {**cfg, "capital_usd": tenant_balance}
+            realized_balance = float(capital["balance"])
+            peak_raw = capital.get("peak_balance")
+            ledger_peak = float(peak_raw) if peak_raw is not None else realized_balance
+
+            # MTM of open positions: (price_now - entry) × qty, signed by direction.
+            # NOTE: _load_open_positions does not yet filter by tenant_id (epic B
+            # B.2 wired apply_pnl_to_capital but didn't tenant-scope the loaders).
+            # With a single active tenant in prod today this is correct; the gap
+            # is tracked under epic B #253 follow-ups.
+            try:
+                from strategy.kill_switch_v2_shadow import (
+                    _load_open_positions, _snapshot_prices,
+                )
+                open_positions = _load_open_positions()
+                prices = _snapshot_prices()
+                open_mtm = 0.0
+                for pos in open_positions:
+                    sym = pos.get("symbol")
+                    if not sym or sym not in prices:
+                        continue
+                    entry = float(pos.get("entry_price") or 0)
+                    qty = float(pos.get("qty") or 0)
+                    direction = pos.get("direction", "LONG")
+                    price_now = float(prices[sym])
+                    if direction == "SHORT":
+                        open_mtm += (entry - price_now) * qty
+                    else:
+                        open_mtm += (price_now - entry) * qty
+            except Exception:
+                log.warning(
+                    "get_dashboard_state open-MTM computation failed; "
+                    "treating open_mtm as 0", exc_info=True,
+                )
+                open_mtm = 0.0
+
+            current_equity = realized_balance + open_mtm
+            peak_equity = max(ledger_peak, current_equity)
+            portfolio_dd = (
+                (peak_equity - current_equity) / peak_equity
+                if peak_equity > 0 else 0.0
+            )
+            # Sign convention: kill_switch_v2.compute_portfolio_dd returns a
+            # negative number when in drawdown; match it so evaluate_portfolio_tier
+            # interprets the threshold the same way.
+            portfolio_dd = -portfolio_dd
         else:
             tenant_balance = float(cfg.get("capital_usd", 1000.0))
-            tenant_peak = tenant_balance
-            cfg_portfolio = cfg
+            try:
+                from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+                portfolio_dd = _compute_current_portfolio_dd(cfg)
+            except Exception:
+                log.warning(
+                    "get_dashboard_state legacy DD computation failed", exc_info=True,
+                )
+                portfolio_dd = 0.0
+            current_equity = tenant_balance * (1.0 + portfolio_dd)
+            peak_equity = tenant_balance
 
         try:
             from strategy.kill_switch_v2 import evaluate_portfolio_tier
-            from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
-            portfolio_dd = _compute_current_portfolio_dd(cfg_portfolio)
             n_failures = conn.execute(
                 """SELECT COUNT(*) FROM symbol_health
                    WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
             ).fetchone()[0]
             portfolio_tier = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
-            current_equity = tenant_balance * (1.0 + portfolio_dd)
-            peak_equity = tenant_peak
         except Exception:
-            log.warning("get_dashboard_state portfolio computation failed", exc_info=True)
+            log.warning(
+                "get_dashboard_state portfolio tier evaluation failed", exc_info=True,
+            )
             portfolio_tier = {"tier": "NORMAL", "dd": 0.0, "concurrent_failures": 0}
-            portfolio_dd = 0.0
             n_failures = 0
-            current_equity = tenant_balance
-            peak_equity = tenant_peak
 
         portfolio_out = {
             "tier": portfolio_tier["tier"],

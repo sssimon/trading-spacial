@@ -295,9 +295,15 @@ def client(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
     # /health/dashboard now resolves capital per-tenant. In tests there's no
-    # JWT, so override the dependency to a fixed tenant id. With no capital
-    # row seeded for that tenant, the endpoint falls back to cfg.capital_usd
+    # JWT, so override the dependency to a fixed tenant id (1). With no capital
+    # row seeded for tenant 1, the endpoint falls back to cfg.capital_usd
     # (preserves pre-fix behavior in tests that don't seed capital).
+    #
+    # NOTE for future test authors: downstream tests in this file implicitly
+    # rely on `tenant_id=1` having NO capital row unless they explicitly seed
+    # one via db_upsert_capital. The fixture rebuilds the DB on each test, so
+    # state does not leak across tests — but within a single test, any seed
+    # changes the portfolio branch (multi-tenant vs. legacy).
     btc_api.app.dependency_overrides[get_current_tenant_id] = lambda: 1
     try:
         yield TestClient(btc_api.app)
@@ -393,16 +399,22 @@ def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeyp
 
 def test_get_health_dashboard_uses_tenant_capital_when_present(client):
     """Epic B #253 wire (issue #382): the dashboard reports the tenant's real
-    capital, not the legacy cfg.capital_usd default."""
+    capital, not the legacy cfg.capital_usd default.
+
+    With balance=$10K + peak=$12K (a prior drawdown stamped into the ledger)
+    and zero open positions, the dashboard should show current=$10K (no MTM
+    to add) and peak=$12K (ledger monotonic peak), with dd ≈ -16.67%.
+    """
     from db.capital import db_upsert_capital
     # tenant_id=1 matches the override in the client fixture above.
     db_upsert_capital(1, balance=10_000.0, peak_balance=12_000.0)
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
     portfolio = resp.json()["portfolio"]
-    # No closed trades + no open positions → portfolio_dd ≈ 0 → equity ≈ balance.
     assert portfolio["current_equity"] == pytest.approx(10_000.0)
     assert portfolio["peak_equity"] == pytest.approx(12_000.0)
+    # Sign convention matches kill_switch_v2.compute_portfolio_dd: negative in DD.
+    assert portfolio["dd_pct"] == pytest.approx(-(12_000.0 - 10_000.0) / 12_000.0)
 
 
 def test_get_health_dashboard_falls_back_when_tenant_has_no_capital(client):
@@ -413,6 +425,64 @@ def test_get_health_dashboard_falls_back_when_tenant_has_no_capital(client):
     portfolio = resp.json()["portfolio"]
     assert portfolio["current_equity"] == pytest.approx(1000.0)
     assert portfolio["peak_equity"] == pytest.approx(1000.0)
+
+
+def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
+    """Regression for #382 review: when the tenant has a non-trivial trade
+    history already folded into `capital.balance` via apply_pnl_to_capital,
+    the dashboard MUST NOT re-apply those PnLs by also walking the closed
+    trades in compute_portfolio_equity_curve.
+
+    Seed five non-monotonic trades (+200, +200, -300, +200, -100) → final
+    balance = $10,200 with a peak of $10,400. Insert matching `positions`
+    rows so _load_closed_trades sees them too. The dashboard should report
+    current_equity=$10,200 (from the ledger, not 10,200 + 200 inflation)
+    and peak_equity=$10,400.
+    """
+    from db.capital import apply_pnl_to_capital
+    import btc_api
+
+    pnl_sequence = [200.0, 200.0, -300.0, 200.0, -100.0]
+    # Stamp each trade into the capital ledger.
+    for pnl in pnl_sequence:
+        apply_pnl_to_capital(1, pnl)
+
+    # Also insert the closed positions so the (now-removed) equity-curve
+    # path would see them — if regression returns, the curve would double-
+    # count and inflate current_equity past $10,200.
+    conn = btc_api.get_db()
+    try:
+        for i, pnl in enumerate(pnl_sequence):
+            reason = "TP" if pnl > 0 else "SL"
+            conn.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct,
+                    tenant_id)
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, ?, ?, ?, ?, ?, 1)""",
+                (
+                    f"2026-04-2{i + 1}T12:00:00+00:00",
+                    100.0 + pnl / 10.0,
+                    f"2026-04-2{i + 1}T13:00:00+00:00",
+                    reason,
+                    pnl,
+                    pnl / 100.0,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    portfolio = resp.json()["portfolio"]
+    assert portfolio["current_equity"] == pytest.approx(10_200.0), (
+        f"Double-counting regression: expected $10,200 from ledger, got "
+        f"${portfolio['current_equity']}"
+    )
+    assert portfolio["peak_equity"] == pytest.approx(10_400.0)
+    expected_dd = -(10_400.0 - 10_200.0) / 10_400.0
+    assert portfolio["dd_pct"] == pytest.approx(expected_dd, abs=1e-6)
 
 
 # ── Portfolio transition recording integration ──────────────────────────────
