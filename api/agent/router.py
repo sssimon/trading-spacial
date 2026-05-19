@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -99,8 +99,14 @@ _ALLOWED_MODELS: frozenset[str] = frozenset({
     summary="Stream one agent turn (SSE)",
 )
 async def post_agent_turn(
-    conversation_id: str,
-    body: _AgentTurnRequest,
+    # Validated path param (PR #404 review issue 3): UUID / nanoid /
+    # other ascii-safe ids only, max 128 chars. Blocks pollution
+    # (whitespace, control chars, /, etc.) and minor DoS via huge ids
+    # being persisted to agent_conversations.
+    conversation_id: str = Path(
+        ..., min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_\-]+$",
+    ),
+    body: _AgentTurnRequest = ...,  # noqa: B008
     tenant_id: int = Depends(get_current_tenant_id),
     client = Depends(get_anthropic_client),  # noqa: B008
 ):

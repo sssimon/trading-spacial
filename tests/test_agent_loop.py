@@ -209,6 +209,43 @@ async def test_run_turn_dispatches_multiple_tools_in_one_user_message(tmp_db, mo
 
 
 @pytest.mark.anyio
+async def test_run_turn_does_not_misdetect_error_on_legitimate_payload(tmp_db, monkeypatch):
+    """PR #404 review issue 2: a tool can legitimately return a payload
+    that mentions the substring "error" (e.g. an exit_reason value of
+    "liquidation_error" or a state name of "no_error_state"). The
+    previous `'"error"' in result_json` substring check produced a
+    false positive here, telling the model the call failed when it
+    didn't. Switched to JSON-parse + top-level "error" key check.
+    """
+    from api.agent.loop import run_turn, ToolUseResult
+    from api.agent.tools import handlers as h
+
+    monkeypatch.setitem(
+        h.TOOL_HANDLERS, "get_recent_signals",
+        lambda **kw: {"signals": [{"symbol": "BTC", "estado": "no_error_state"}]},
+    )
+
+    c = FakeAnthropicClient()
+    c.queue_turn(
+        FakeTurnBuilder()
+        .tool_use("get_recent_signals", {})
+        .stop_tool_use()
+        .build()
+    )
+    c.queue_turn(FakeTurnBuilder().text("ok").end_turn().build())
+
+    msgs = [{"role": "user", "content": "señales recientes"}]
+    events = await _collect(run_turn(
+        client=c, model="claude-sonnet-4-6", surface="dock",
+        messages=msgs, tenant_id=1,
+    ))
+    results = [e for e in events if isinstance(e, ToolUseResult)]
+    # Substring match would have flagged this as an error; the JSON-parse
+    # check correctly recognizes it as a normal payload.
+    assert results == [ToolUseResult(tool="get_recent_signals", status="ok")]
+
+
+@pytest.mark.anyio
 async def test_run_turn_handles_hallucinated_position_id(tmp_db):
     """The model invents a position_id; the real handler returns
     not_found; the loop surfaces is_error:true on the tool_result so
@@ -617,6 +654,64 @@ def test_endpoint_audits_error_turns(authed_client):
     # content_json carries the reason enum value, JSON-encoded.
     assert json.loads(row["content_json"]) == "upstream"
     assert row["refused"] == 0  # upstream is not a refusal
+
+
+def test_endpoint_503_when_api_key_missing_via_direct_curl(authed_client, monkeypatch):
+    """PR #404 review issue 1 (BLOCKER): FastAPI resolves Depends() BEFORE
+    the handler body. Without the status guard inside get_anthropic_client,
+    a direct POST with ANTHROPIC_API_KEY missing would 500 with a
+    KeyError stack trace — re-leaking the env-var name that #381 closed.
+
+    This test reverts the dependency_overrides on get_anthropic_client so
+    the real resolver runs, then unsets the env var. Must 503 with the
+    closed-enum reason, NOT 500.
+    """
+    import btc_api
+    from api.agent.clients import get_anthropic_client
+    client, _fake = authed_client
+    # Revert the test fake so the real resolver runs.
+    btc_api.app.dependency_overrides.pop(get_anthropic_client, None)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    resp = client.post(
+        "/agent/conversations/bypass-test/turn",
+        json={"surface": "dock", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert resp.status_code == 503
+    assert resp.json() == {"detail": "agent_disabled"}
+    # And the body must not leak the env-var name on this path either.
+    for forbidden in ("ANTHROPIC_API_KEY", ".env", "restart"):
+        assert forbidden not in resp.text, (
+            f"/agent/conversations bypass-test leaked {forbidden!r}: {resp.text!r}"
+        )
+
+
+def test_endpoint_400_when_conversation_id_invalid(authed_client):
+    """PR #404 review issue 3: conversation_id must be alphanumeric +
+    _-, max 128 chars. Blocks pollution and minor DoS."""
+    client, fake = authed_client
+    # No queue — request should 422 on path validation before hitting the loop.
+    # Note: control characters (\n, \r, \0) are rejected by httpx URL
+    # validation before they reach the server, so we don't test them
+    # at the endpoint level — that's a separate layer of defense.
+    cases = [
+        "a" * 200,           # too long
+        "with/slash",        # path separator
+        "with space",        # whitespace (httpx encodes; FastAPI Path() rejects)
+        "",                  # empty
+    ]
+    for bad in cases:
+        resp = client.post(
+            f"/agent/conversations/{bad}/turn",
+            json={"surface": "dock", "messages": [{"role": "user", "content": "x"}]},
+        )
+        # FastAPI returns 422 on path validation failures; 404 if the path
+        # itself doesn't match the route (empty string case). Either is
+        # acceptable — what matters is we never reach the loop.
+        assert resp.status_code in (404, 422), (
+            f"conversation_id={bad!r} should be rejected, got {resp.status_code}"
+        )
+    assert fake.calls == []  # zero turns opened across all attempts
 
 
 def test_endpoint_audits_isolated_per_tenant(authed_client, monkeypatch):

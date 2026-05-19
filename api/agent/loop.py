@@ -36,6 +36,7 @@ Failure modes (pre-reg §6.3):
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional
@@ -265,7 +266,19 @@ async def run_turn(
             result_json = dispatch_tool(
                 tu.name or "", tu.input or {}, tenant_id=tenant_id,
             )
-            is_error = '"error"' in result_json
+            # is_error: structural detection (PR #404 review issue 2).
+            # The previous `'"error"' in result_json` substring match
+            # produced false positives on legitimate payloads carrying
+            # the string "error" inside a value (e.g. an enum like
+            # "no_error_state" or an exit_reason "liquidation_error").
+            # Parse the JSON and treat a top-level dict with an "error"
+            # key as an error response; parse failure is treated as
+            # error too (defensive).
+            try:
+                parsed = json.loads(result_json)
+                is_error = isinstance(parsed, dict) and "error" in parsed
+            except json.JSONDecodeError:
+                is_error = True
             yield ToolUseResult(
                 tool=tu.name or "",
                 status=("error" if is_error else "ok"),
