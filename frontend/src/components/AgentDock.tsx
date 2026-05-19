@@ -12,10 +12,11 @@
 // buttons) returns in Phase 3 via signed proposal events.
 // ============================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './AgentDock.module.css';
 import type { SymbolStatus, Position, MacroState } from '../types';
 import { useAgentStream } from '../agent/useAgentStream';
+import type { ToolChip } from '../agent/types';
 
 interface AgentDockProps {
   open:           boolean;
@@ -45,13 +46,20 @@ const AgentDock: React.FC<AgentDockProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const greetedRef = useRef(false);
 
   const { msgs, loading, sendTurn } = useAgentStream({ surface: 'dock' });
-  // We render a synthetic welcome bubble before the first real turn so
-  // the dock isn't an empty void on open. It lives outside the stream
-  // hook because it never goes on the wire — purely UI.
-  const [welcome, setWelcome] = useState<string | null>(null);
+  // Synthetic welcome bubble before the first real turn so the dock
+  // isn't an empty void on open. Lives outside the stream hook because
+  // it never goes on the wire — purely UI. Derived (useMemo) instead
+  // of stored, so it reflects current watchlist counts even after a
+  // conversation reset (PR #405 review nit).
+  const welcome = useMemo<string | null>(() => {
+    if (!open || msgs.length > 0 || initialPrompt) return null;
+    return (
+      `Hola. Estoy mirando tus ${symbols.length} pares y ${positions.length} posiciones. ` +
+      `Pregúntame lo que quieras.`
+    );
+  }, [open, msgs.length, initialPrompt, symbols.length, positions.length]);
 
   // Close on Escape
   useEffect(() => {
@@ -60,19 +68,6 @@ const AgentDock: React.FC<AgentDockProps> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
-
-  // Welcome message on first open. Only shown until the first real
-  // exchange — once msgs.length > 0 we hide it to avoid duplicate
-  // bubbles.
-  useEffect(() => {
-    if (open && !greetedRef.current && !initialPrompt) {
-      setWelcome(
-        `Hola. Estoy mirando tus ${symbols.length} pares y ${positions.length} posiciones. ` +
-        `Pregúntame lo que quieras.`,
-      );
-      greetedRef.current = true;
-    }
-  }, [open, initialPrompt, symbols.length, positions.length]);
 
   // Auto-send the initial prompt when one is passed in.
   useEffect(() => {
@@ -175,7 +170,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
 interface DockMessageProps {
   role:       'user' | 'assistant';
   text:       string;
-  toolChips?: Array<{ tool: string; status: 'pending' | 'ok' | 'error' }>;
+  toolChips?: ToolChip[];
   showTyping?: boolean;
 }
 

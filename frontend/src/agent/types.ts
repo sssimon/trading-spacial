@@ -9,6 +9,16 @@
 // Pre-reg §6.2. Phase 2B of epic #400.
 // ============================================================
 
+/**
+ * UI-level tool-call status chip rendered inline below an assistant
+ * bubble. Exported so future surfaces don't redefine the same shape
+ * (PR #405 review nit — single source of truth for the chip state enum).
+ */
+export interface ToolChip {
+  tool:   string;
+  status: 'pending' | 'ok' | 'error';
+}
+
 export interface AgentTextDelta {
   type: 'text_delta';
   text: string;

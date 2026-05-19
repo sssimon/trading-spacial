@@ -192,6 +192,62 @@ describe('useAgentStream', () => {
     expect(idsSent[0]).not.toBe(idsSent[1]);
   });
 
+  it('sends the full prior transcript on the second turn of a conversation', async () => {
+    // PR #405 review issue 4: the previous implementation captured
+    // prevMsgs inside a functional setState callback. Under StrictMode
+    // double-invocation, the assignment could race; in production it
+    // worked but the pattern was fragile. The refactor reads from a
+    // msgsRef parallel state. This test verifies the second turn
+    // carries the first user msg + first assistant msg in its body.
+
+    // First turn — fetch returns a short assistant response.
+    const stream1 = sseReadable([
+      { type: 'text_delta', text: 'Tienes ' },
+      { type: 'text_delta', text: '2 posiciones.' },
+      { type: 'message_end', usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: 'end_turn', cost_usd: 0 },
+    ]);
+    const stream2 = sseReadable([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'message_end', usage: { input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, stop_reason: 'end_turn', cost_usd: 0 },
+    ]);
+
+    const bodiesSent: any[] = [];
+    // @ts-expect-error — overriding global
+    global.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      bodiesSent.push(JSON.parse(init.body as string));
+      const streamForCall = bodiesSent.length === 1 ? stream1 : stream2;
+      return Promise.resolve(new Response(streamForCall, {
+        status: 200, headers: { 'Content-Type': 'text/event-stream' },
+      }));
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    // Turn 1: user asks; assistant streams "Tienes 2 posiciones."
+    await act(async () => {
+      await result.current.sendTurn('qué posiciones tengo');
+    });
+    // Turn 2: user follows up. The wire body must carry the FULL prior
+    // transcript (turn 1's user + turn 1's assistant), not just the
+    // new question.
+    await act(async () => {
+      await result.current.sendTurn('y cuál vale más');
+    });
+
+    expect(bodiesSent).toHaveLength(2);
+    // First call: only the first user turn in messages.
+    expect(bodiesSent[0].messages).toEqual([
+      { role: 'user', content: 'qué posiciones tengo' },
+    ]);
+    // Second call: prior user + prior assistant (with the accumulated
+    // text from the stream) + new user msg.
+    expect(bodiesSent[1].messages).toEqual([
+      { role: 'user',      content: 'qué posiciones tengo' },
+      { role: 'assistant', content: 'Tienes 2 posiciones.' },
+      { role: 'user',      content: 'y cuál vale más' },
+    ]);
+  });
+
   it('refuses to send while a previous turn is in flight', async () => {
     // Create a stream that we control — the second sendTurn fires before
     // the first resolves.

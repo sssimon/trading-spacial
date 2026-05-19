@@ -9,7 +9,7 @@
 // Phase 2B of epic #400.
 // ============================================================
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AgentStreamError,
@@ -21,6 +21,7 @@ import type {
   AgentContextHints,
   AgentStreamEvent,
   AgentSurface,
+  ToolChip,
 } from './types';
 
 export interface ChatMsg {
@@ -28,7 +29,7 @@ export interface ChatMsg {
   text:    string;
   // Inline tool-use chips that render below the bubble while the turn
   // is in flight. The hook clears this on the next user turn.
-  tool_chips?: Array<{ tool: string; status: 'pending' | 'ok' | 'error' }>;
+  tool_chips?: ToolChip[];
 }
 
 export interface UseAgentStreamOptions {
@@ -52,36 +53,42 @@ export function useAgentStream(opts: UseAgentStreamOptions): UseAgentStreamRetur
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [loading, setLoading] = useState(false);
   const conversationIdRef = useRef<string>(newConversationId());
+  // Parallel ref kept in sync with msgs so sendTurn can read the latest
+  // transcript without depending on closure freshness across renders.
+  // Phase 2B review issue 4: avoids the StrictMode double-invocation
+  // trap of assigning into a closed-over variable from inside a
+  // functional setState. Verified by test_send_turn_second_turn_carries_full_transcript.
+  const msgsRef = useRef<ChatMsg[]>([]);
+  useEffect(() => {
+    msgsRef.current = msgs;
+  }, [msgs]);
 
   const resetConversation = useCallback(() => {
     conversationIdRef.current = newConversationId();
     setMsgs([]);
+    msgsRef.current = [];
   }, []);
 
   const sendTurn = useCallback(
     async (text: string, hints?: AgentContextHints) => {
       if (!text.trim() || loading) return;
-      // Snapshot the transcript-up-to-now and append the user turn +
-      // an empty assistant placeholder atomically. The placeholder is
-      // what the streaming text appends to.
-      let prevMsgs: ChatMsg[] = [];
-      setMsgs((cur) => {
-        prevMsgs = cur;
-        return [
-          ...cur,
-          { role: 'user', text },
-          { role: 'assistant', text: '', tool_chips: [] },
-        ];
-      });
-      setLoading(true);
-
-      // Build the API request from the snapshot we just took. The
-      // backend rebuilds the system prompt server-side; we only ship
-      // the user/assistant transcript.
+      // Read the transcript from the ref (always fresh across re-renders);
+      // build the API messages BEFORE we append the user turn so the
+      // request payload mirrors the on-screen state at submit-time.
+      const transcriptSoFar = msgsRef.current;
       const apiMessages: AgentApiMessage[] = [
-        ...prevMsgs.map((m) => ({ role: m.role, content: m.text })),
+        ...transcriptSoFar.map((m) => ({ role: m.role, content: m.text })),
         { role: 'user' as const, content: text },
       ];
+
+      // Now append the user turn + empty assistant placeholder. The
+      // placeholder is what the streaming text appends to.
+      setMsgs((cur) => [
+        ...cur,
+        { role: 'user', text },
+        { role: 'assistant', text: '', tool_chips: [] },
+      ]);
+      setLoading(true);
 
       try {
         for await (const ev of streamAgentTurn({

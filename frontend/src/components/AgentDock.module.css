@@ -271,7 +271,12 @@
   50%      { opacity: 1; }
 }
 
-/* confirm_release marker — destructive override, amber to signal weight */
+/* confirm_release marker — destructive override, amber to signal weight.
+ * NOTE: temporarily unused after the Phase 2B rewire (the marker
+ * protocol it served is dead). Phase 3 of #400 reintroduces the
+ * amber-button UX as the render target for signed proposal events
+ * (propose_close_position / propose_reactivate_symbol / propose_apply_tune).
+ * Keeping the class alive avoids churn when Phase 3 lands. */
 .toolConfirm {
   font-family: var(--nbc-font-mono);
   font-size: 11px;
