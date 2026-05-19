@@ -288,12 +288,21 @@ def test_recent_portfolio_transitions_returns_last_5(tmp_db):
 def client(tmp_path, monkeypatch):
     import btc_api
     from fastapi.testclient import TestClient
+    from auth.dependencies import get_current_tenant_id
     db_path = str(tmp_path / "signals.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
     if hasattr(btc_api, "_db_conn"):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
-    return TestClient(btc_api.app)
+    # /health/dashboard now resolves capital per-tenant. In tests there's no
+    # JWT, so override the dependency to a fixed tenant id. With no capital
+    # row seeded for that tenant, the endpoint falls back to cfg.capital_usd
+    # (preserves pre-fix behavior in tests that don't seed capital).
+    btc_api.app.dependency_overrides[get_current_tenant_id] = lambda: 1
+    try:
+        yield TestClient(btc_api.app)
+    finally:
+        btc_api.app.dependency_overrides.pop(get_current_tenant_id, None)
 
 
 def test_get_health_dashboard_empty_db_returns_default_shape(client):
@@ -380,6 +389,30 @@ def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeyp
     monkeypatch.setattr(btc_api, "load_config", lambda: {"kill_switch": {"enabled": False}})
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
+
+
+def test_get_health_dashboard_uses_tenant_capital_when_present(client):
+    """Epic B #253 wire (issue #382): the dashboard reports the tenant's real
+    capital, not the legacy cfg.capital_usd default."""
+    from db.capital import db_upsert_capital
+    # tenant_id=1 matches the override in the client fixture above.
+    db_upsert_capital(1, balance=10_000.0, peak_balance=12_000.0)
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    portfolio = resp.json()["portfolio"]
+    # No closed trades + no open positions → portfolio_dd ≈ 0 → equity ≈ balance.
+    assert portfolio["current_equity"] == pytest.approx(10_000.0)
+    assert portfolio["peak_equity"] == pytest.approx(12_000.0)
+
+
+def test_get_health_dashboard_falls_back_when_tenant_has_no_capital(client):
+    """When the tenant has no capital row yet, the dashboard preserves the
+    legacy single-tenant behavior: cfg.capital_usd (default $1000)."""
+    resp = client.get("/health/dashboard")
+    assert resp.status_code == 200
+    portfolio = resp.json()["portfolio"]
+    assert portfolio["current_equity"] == pytest.approx(1000.0)
+    assert portfolio["peak_equity"] == pytest.approx(1000.0)
 
 
 # ── Portfolio transition recording integration ──────────────────────────────

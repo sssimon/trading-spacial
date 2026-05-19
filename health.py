@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 
 log = logging.getLogger("health")
@@ -1036,11 +1036,23 @@ def recent_portfolio_transitions(limit: int = 5) -> list[dict[str, Any]]:
     ]
 
 
-def get_dashboard_state(cfg: dict[str, Any]) -> dict[str, Any]:
+def get_dashboard_state(
+    cfg: dict[str, Any],
+    *,
+    capital: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """B6 orchestrator: assemble per-symbol + portfolio + alerts response.
 
     Reads from DB; computes next_conditions; builds the full DashboardResponse
     shape consumed by the frontend.
+
+    Args:
+        cfg: loaded config dict.
+        capital: optional row from `db.capital` for the current tenant. When
+            provided, its `balance` becomes the portfolio capital base
+            (driving both the DD% computation and the displayed equity) and
+            `peak_balance` becomes the peak equity. When `None`, falls back
+            to `cfg["capital_usd"]` (legacy single-tenant, default $1000).
     """
     from btc_scanner import DEFAULT_SYMBOLS
 
@@ -1139,25 +1151,38 @@ def get_dashboard_state(cfg: dict[str, Any]) -> dict[str, Any]:
                 "next_conditions": next_conditions,
             })
 
-        # Portfolio
+        # Portfolio.
+        # When the caller passes a tenant `capital` row (multi-tenant path),
+        # override `cfg["capital_usd"]` for the simulator so DD%, equity curve,
+        # and the displayed peak/current all derive from the real tenant capital.
+        # Without an override, the legacy single-tenant default ($1000) applies.
+        if capital is not None and capital.get("balance") is not None:
+            tenant_balance = float(capital["balance"])
+            tenant_peak = float(capital.get("peak_balance") or tenant_balance)
+            cfg_portfolio = {**cfg, "capital_usd": tenant_balance}
+        else:
+            tenant_balance = float(cfg.get("capital_usd", 1000.0))
+            tenant_peak = tenant_balance
+            cfg_portfolio = cfg
+
         try:
             from strategy.kill_switch_v2 import evaluate_portfolio_tier
             from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
-            portfolio_dd = _compute_current_portfolio_dd(cfg)
+            portfolio_dd = _compute_current_portfolio_dd(cfg_portfolio)
             n_failures = conn.execute(
                 """SELECT COUNT(*) FROM symbol_health
                    WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
             ).fetchone()[0]
             portfolio_tier = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
-            current_equity = float(cfg.get("capital_usd", 1000.0)) * (1.0 + portfolio_dd)
-            peak_equity = float(cfg.get("capital_usd", 1000.0))
+            current_equity = tenant_balance * (1.0 + portfolio_dd)
+            peak_equity = tenant_peak
         except Exception:
             log.warning("get_dashboard_state portfolio computation failed", exc_info=True)
             portfolio_tier = {"tier": "NORMAL", "dd": 0.0, "concurrent_failures": 0}
             portfolio_dd = 0.0
             n_failures = 0
-            current_equity = float(cfg.get("capital_usd", 1000.0))
-            peak_equity = current_equity
+            current_equity = tenant_balance
+            peak_equity = tenant_peak
 
         portfolio_out = {
             "tier": portfolio_tier["tier"],
