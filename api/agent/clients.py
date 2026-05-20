@@ -1,26 +1,29 @@
-"""Lazy construction of the Anthropic SDK client.
+"""FastAPI dependency that returns the active LLMProvider.
 
-This module exists as a FastAPI dependency seam so tests can override
-the production AsyncAnthropic with FakeAnthropicClient via
-`app.dependency_overrides[get_anthropic_client] = lambda: fake`. Phase 2
-of epic #400.
+Phase 1 of the multi-provider epic relocated the SDK construction logic
+into `api.agent.providers.anthropic_adapter`. This module now exists
+only as a thin shim so the router's `Depends(get_anthropic_client)`
+signature keeps working without changes — the dependency still does the
+same job (gate on agent_status, then return the provider for the active
+default model) but it returns an `LLMProvider` instead of a raw
+`AsyncAnthropic`.
 
-In production: returns a configured `anthropic.AsyncAnthropic`. The SDK
-is imported lazily — until ANTHROPIC_API_KEY is configured and the
-status endpoint reports enabled, the import is never triggered, so
-operators that never enable the copilot don't carry the dependency
-cost.
+The function is still named `get_anthropic_client` for backward
+compatibility — every endpoint test that does
+`app.dependency_overrides[get_anthropic_client] = lambda: fake`
+keeps working. A future PR may rename to `get_llm_provider` once the
+multi-provider epic stabilizes; deferred.
 
-Failure modes:
-  - SDK not installed → 503 agent_disabled (treated identically to "key
-    missing", same closed-enum reason).
-  - Key not in env → handled upstream by get_agent_status; this
-    function only runs after that check, so the env var is guaranteed.
+Failure modes (unchanged from Phase 0):
+  - agent_status disabled → 503 with closed-enum reason.
+  - SDK not installed → 503 agent_disabled (no leak of dependency).
+  - Provider for the default model can't resolve a key → handled
+    upstream by get_agent_status's §2.7 dual-key check; we never get
+    here in that case.
 """
 from __future__ import annotations
 
 import logging
-import os
 
 from fastapi import HTTPException
 
@@ -28,35 +31,42 @@ log = logging.getLogger("api.agent.clients")
 
 
 def get_anthropic_client():
-    """FastAPI dependency that returns a configured Anthropic async client.
+    """FastAPI dependency that returns the active LLMProvider.
 
-    In tests, override via `app.dependency_overrides[get_anthropic_client]`
-    with a function that returns a FakeAnthropicClient instance.
+    PHASE 1 NOTE: returns an LLMProvider, not a raw Anthropic SDK
+    client. The name is kept for backward-compat with the 13+ test
+    `dependency_overrides[get_anthropic_client]` call sites. Tests
+    inject `FakeAnthropicProvider` which implements the protocol.
 
-    Failure-mode correctness (PR #404 review issue #1, blocker): FastAPI
-    resolves ALL `Depends(...)` before executing the handler body. That
-    means this function runs BEFORE the in-handler `get_agent_status()`
-    check. If we read `os.environ["ANTHROPIC_API_KEY"]` blind here and
-    the key is missing, we KeyError → 500 with stack trace → leak the
-    env-var name on the wire. Exactly the bug Phase 0 closed for the
-    legacy /agent/chat.
-
-    Defense: gate on the same closed-enum status resolver before doing
-    any env read. When disabled, 503 with the closed-enum reason; only
-    proceed to construct the SDK client when status is enabled.
+    Returns the provider whose default surface model the registry
+    resolves. Today that's always Anthropic (default for `dock` is
+    `claude-sonnet-4-6`). Phase 3 of the multi-provider epic flips
+    the default to DeepSeek and this resolver follows.
     """
-    # Local import to dodge the circular: api.agent.config doesn't import
-    # this module, but api.agent.router imports both.
+    # Local import to dodge circulars (api.agent.config doesn't import
+    # this module, but the router imports both).
     from api.agent.config import get_agent_status  # noqa: PLC0415
     status = get_agent_status()
     if not status.enabled:
         raise HTTPException(status_code=503, detail=status.reason)
 
+    # Resolve the provider for the default surface model. We use "dock"
+    # as the canonical reference surface — the actual model the request
+    # ends up using may differ (the router supports per-request model
+    # override), but the dep injection happens before the body sees the
+    # request, so we resolve against the default at this point.
+    from api.agent.models import default_model_for_surface  # noqa: PLC0415
+    from api.agent.providers.registry import (  # noqa: PLC0415
+        UnknownProviderError, get_provider_for_model,
+    )
+    default_model = default_model_for_surface("dock")
     try:
-        from anthropic import AsyncAnthropic  # noqa: PLC0415
-    except ImportError as e:
-        log.error("anthropic SDK not installed: %s", e)
-        # Same closed-enum reason — the wire format never reveals
-        # whether it's a missing dependency vs a missing secret.
+        return get_provider_for_model(default_model)
+    except UnknownProviderError:
+        log.error("default model %s has no registered provider", default_model)
         raise HTTPException(status_code=503, detail="agent_disabled")
-    return AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
+    except ImportError as e:
+        # The provider's SDK (anthropic, etc) isn't installed — same
+        # closed-enum response as Phase 0's "key missing".
+        log.error("provider SDK not installed: %s", e)
+        raise HTTPException(status_code=503, detail="agent_disabled")

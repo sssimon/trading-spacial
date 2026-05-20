@@ -498,13 +498,29 @@ def test_cost_estimation_matches_published_pricing():
 # ── System prompt blocks are cache-control'd ───────────────────────────
 
 
-def test_system_blocks_carry_cache_control():
-    """All four blocks must have cache_control: {type: ephemeral} so the
-    Anthropic API serves them from cache. Pre-reg §7.5 silent invariant."""
+def test_system_blocks_carry_cache_control_after_anthropic_formatting():
+    """Phase 1 of the multi-provider epic split this invariant: the
+    cache_control:ephemeral wrapping moved out of build_system_blocks
+    (now provider-neutral, returns list[str]) and into the AnthropicProvider's
+    format_system_blocks. The end-to-end wire shape that goes to the
+    Anthropic Messages API still has the 4 cache_control'd text blocks.
+
+    This test verifies the full pipeline: build_system_blocks →
+    AnthropicProvider.format_system_blocks → wire shape with
+    cache_control on each of the 4 blocks. Other providers (DeepSeek,
+    Phase 2) have their own formatting tests in their own files.
+    """
     from api.agent.prompts import build_system_blocks
-    blocks = build_system_blocks("dock")
-    assert len(blocks) == 4
-    for b in blocks:
+    from api.agent.providers.anthropic_adapter import AnthropicProvider
+
+    raw_blocks = build_system_blocks("dock")
+    assert isinstance(raw_blocks, list)
+    assert len(raw_blocks) == 4
+    assert all(isinstance(b, str) for b in raw_blocks)
+
+    wire_blocks = AnthropicProvider().format_system_blocks(raw_blocks)
+    assert len(wire_blocks) == 4
+    for b in wire_blocks:
         assert b["type"] == "text"
         assert b["cache_control"] == {"type": "ephemeral"}
 
@@ -512,7 +528,9 @@ def test_system_blocks_carry_cache_control():
 def test_system_blocks_are_deterministic_across_calls():
     """Same surface → byte-identical output across calls. If this fails,
     the cache prefix shifts on every turn and the spec §14 cache-hit-rate
-    target ≥70% is unreachable."""
+    target ≥70% is unreachable. This invariant is provider-neutral —
+    determinism of the raw text drives BOTH Anthropic's cache_control
+    breakpoints AND DeepSeek's auto-prefix cache."""
     from api.agent.prompts import build_system_blocks
     a = build_system_blocks("dock")
     b = build_system_blocks("dock")

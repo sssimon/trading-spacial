@@ -299,31 +299,36 @@ class FakeStream:
         return self._final
 
 
-class FakeMessages:
-    """Mirror of `client.messages.*`. Phase 2 only uses `stream(**kwargs)`."""
+class FakeAnthropicProvider:
+    """Test double that satisfies the LLMProvider protocol.
 
-    def __init__(self, client: "FakeAnthropicClient"):
-        self._client = client
+    Phase 1 of the multi-provider epic. Previously this was
+    `FakeAnthropicClient` — a mock of `anthropic.AsyncAnthropic`. With
+    the loop now consuming an LLMProvider directly (no more
+    `client.messages.stream(...)` indirection), the fake implements the
+    protocol's `stream(...)` method directly and yields LLMEvent
+    instances on the wire.
 
-    def stream(self, **kwargs):
-        # Record the kwargs so tests can assert what the loop sent
-        # (model, system layout, tools, messages, etc).
-        self._client.calls.append(kwargs)
-        return self._client._next_stream()
+    The Anthropic-shape event TYPES (content_block_start, etc) still
+    live inside the builder pattern below — they remain the natural way
+    to express "the model emits text + tool_use" — but this provider
+    translates them to LLMEvent before yielding. That keeps the test
+    DX identical while making the fake provider-shaped.
 
-
-class FakeAnthropicClient:
-    """Drop-in replacement for `anthropic.AsyncAnthropic` in tests.
-
-    Each test queues one FakeStream per expected turn. If the loop opens
-    more streams than queued, the fake raises a loud error — silent
-    fall-through to "default response" is the kind of bug we won't catch.
+    Backward-compat: `FakeAnthropicClient` is an alias preserved at the
+    bottom of this module so existing test imports keep working.
     """
 
-    def __init__(self):
-        self.messages = FakeMessages(self)
+    name = "anthropic"
+
+    def __init__(self) -> None:
+        # Recording surface: each call to stream() appends its kwargs
+        # here. Tests assert against this list to verify what the loop
+        # actually sent (model id, tools list, message history, etc).
         self.calls: list[dict] = []
         self._queued: list[FakeStream] = []
+
+    # ── Test queueing API (unchanged from FakeAnthropicClient) ──────
 
     def queue_turn(self, built: tuple[list, "FakeFinalMessage"]) -> None:
         events, final = built
@@ -353,11 +358,95 @@ class FakeAnthropicClient:
     def _next_stream(self) -> FakeStream:
         if not self._queued:
             raise RuntimeError(
-                "FakeAnthropicClient: no queued turns. The loop opened "
+                "FakeAnthropicProvider: no queued turns. The loop opened "
                 "more streams than the test queued — likely a runaway "
                 "tool-use cycle. Inspect self.calls to see what was sent."
             )
         return self._queued.pop(0)
+
+    # ── LLMProvider protocol ──────────────────────────────────────
+
+    def supports_model(self, model: str) -> bool:
+        return model.startswith("claude-")
+
+    def has_api_key(self) -> bool:
+        return True
+
+    def format_system_blocks(self, blocks: list[str]) -> list[dict]:
+        # Delegate to the real adapter — the fake should produce
+        # byte-identical wire shape so cache verification tests pass.
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        return AnthropicProvider().format_system_blocks(blocks)
+
+    def format_tools(self, specs: tuple) -> list[dict]:
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        return AnthropicProvider().format_tools(specs)
+
+    def blocks_to_api_shape(self, blocks: list) -> list[dict]:
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        return AnthropicProvider().blocks_to_api_shape(blocks)
+
+    def estimate_cost(self, model: str, usage: dict) -> float:
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        return AnthropicProvider().estimate_cost(model, usage)
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        system_blocks: list[dict],
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int,
+    ):
+        """Yield LLMEvent instances translated from the next queued
+        FakeStream's Anthropic-shape events. Records the call kwargs
+        on `self.calls` so tests can assert against the wire shape.
+        """
+        # Lazy import — keeps test collection cheap when this module
+        # is touched but `stream` is never invoked.
+        from api.agent.providers.base import (
+            LLMStreamEnd, LLMTextDelta, LLMToolUseStart,
+        )
+
+        self.calls.append({
+            "model":         model,
+            "system_blocks": system_blocks,
+            "messages":      messages,
+            "tools":         tools,
+            "max_tokens":    max_tokens,
+        })
+        fake_stream = self._next_stream()
+        async with fake_stream as s:
+            async for ev in s:
+                if ev.type == "content_block_start":
+                    cb = ev.content_block
+                    if cb is not None and cb.type == "tool_use":
+                        yield LLMToolUseStart(
+                            id=cb.id or "", name=cb.name or "",
+                        )
+                elif ev.type == "content_block_delta":
+                    d = ev.delta
+                    if d is not None and d.type == "text_delta" and d.text:
+                        yield LLMTextDelta(text=d.text)
+            final = await s.get_final_message()
+        usage_dict = {
+            "input_tokens":                getattr(final.usage, "input_tokens", 0) or 0,
+            "output_tokens":               getattr(final.usage, "output_tokens", 0) or 0,
+            "cache_read_input_tokens":     getattr(final.usage, "cache_read_input_tokens", 0) or 0,
+            "cache_creation_input_tokens": getattr(final.usage, "cache_creation_input_tokens", 0) or 0,
+        }
+        yield LLMStreamEnd(
+            stop_reason=final.stop_reason,
+            usage=usage_dict,
+            content=list(final.content),
+        )
+
+
+# Backward-compat alias for existing tests that import FakeAnthropicClient.
+# The two names refer to the same class; new tests should use the
+# *Provider name to make the LLM-abstraction explicit.
+FakeAnthropicClient = FakeAnthropicProvider
 
 
 # Cheap self-test at import — failures here surface as ImportError at

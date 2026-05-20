@@ -117,41 +117,34 @@ def build_tool_docs(specs: Iterable[ToolSpec] | None = None) -> str:
 # ── Block assembly ──────────────────────────────────────────────────────
 
 
-def build_system_blocks(surface: str) -> list[dict]:
-    """Return the system prompt as a list of cache_control'd text blocks,
-    in the canonical render order:
+def build_system_blocks(surface: str) -> list[str]:
+    """Return the system prompt as a list of plain text blocks, in the
+    canonical render order:
 
       [persona, tool_docs, invariants, surface_micro_prompt]
 
-    Each block is marked `cache_control: {type: "ephemeral"}` so the
-    Anthropic API will serve it from cache on subsequent turns of the
-    same conversation (and across conversations on the same surface,
-    because surface 1-3 are surface-independent).
+    The list is provider-neutral: each entry is just the text. The
+    active LLMProvider's `format_system_blocks(...)` translates this
+    list into the wire shape for its API — Anthropic wraps each entry
+    in `{"type": "text", "text": ..., "cache_control": {"type": "ephemeral"}}`,
+    DeepSeek concatenates into a single user-prompt block, etc.
 
-    The Messages API accepts up to 4 cache_control breakpoints per
-    request; we use exactly that.
+    Pre-reg of multi-provider epic, §2.2 (cache strategy divergent):
+    the cache_control discipline is provider-specific, so it lives in
+    the adapter, not in the prompt assembly.
+
+    Determinism contract: same surface → byte-identical strings across
+    calls. The prompt cache (Anthropic) and the auto-cache (DeepSeek)
+    both rely on this — silent invalidators (whitespace drift, dict
+    ordering, locale-dependent string ops) break BOTH providers'
+    cache hit rates. Phase 1 doesn't change the determinism story;
+    block contents are unchanged from epic #400.
     """
     from api.agent.prompts.surfaces import for_surface
     surface_specs = tools_for_surface(surface)
     return [
-        {
-            "type": "text",
-            "text": PERSONA_AND_SAFETY,
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": build_tool_docs(surface_specs),
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": INVARIANTS,
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": for_surface(surface),
-            "cache_control": {"type": "ephemeral"},
-        },
+        PERSONA_AND_SAFETY,
+        build_tool_docs(surface_specs),
+        INVARIANTS,
+        for_surface(surface),
     ]

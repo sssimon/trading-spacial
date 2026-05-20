@@ -43,6 +43,11 @@ from functools import lru_cache
 from typing import Any, AsyncIterator, Optional
 
 from api.agent.prompts import build_system_blocks
+from api.agent.providers.base import (
+    LLMStreamEnd,
+    LLMTextDelta,
+    LLMToolUseStart,
+)
 from api.agent.tools.handlers import dispatch_tool
 from api.agent.tools.registry import tools_for_surface
 
@@ -107,101 +112,71 @@ LoopEvent = (
 )
 
 
-# ── Tool schema builder (registry → Anthropic tools array) ──────────────
+# ── Tool schema cache ──────────────────────────────────────────────────
 
 
-@lru_cache(maxsize=8)
-def _build_anthropic_tools(surface: str) -> tuple[dict, ...]:
-    """Convert the per-surface tool subset into the JSON Schema shape the
-    Messages API expects.
+@lru_cache(maxsize=16)
+def _cached_formatted_tools(surface: str, provider_name: str) -> tuple[dict, ...]:
+    """Cache the formatted tools array keyed on (surface, provider name).
 
-    Cached on `surface` because Pydantic's model_json_schema() is not
-    free and the tool catalog is immutable at runtime (any catalog edit
-    requires a process restart). maxsize=8 comfortably covers the 5
-    declared surfaces + headroom (PR #404 review pickup).
+    Phase 1 of the multi-provider epic: this replaces the previous
+    `_build_anthropic_tools(surface)` cache which assumed only one
+    provider. Now keyed on (surface, provider_name) because different
+    providers emit different wire shapes from the same ToolSpec.
 
-    Returns a tuple wrapper so callers can't reassign list elements.
-    NOTE: the inner dicts remain mutable; callers MUST treat the return
-    value as read-only — mutating any nested schema (e.g.
-    `tools[0]["input_schema"]["properties"]["foo"] = ...`) corrupts the
-    cache for every subsequent request. We don't deepcopy on every call
-    because that would defeat the cache; the discipline lives at the
-    call sites (PR #405 review issue 3).
+    `maxsize=16` covers 5 surfaces × up to 3 providers + headroom.
+
+    Returns a tuple so callers can't reassign elements. NOTE: inner
+    dicts remain mutable; callers MUST treat as read-only — mutating
+    any nested schema corrupts the cache for every subsequent request.
     """
+    from api.agent.providers.anthropic_adapter import AnthropicProvider
     specs = tools_for_surface(surface)
-    out = []
-    for spec in specs:
-        # Pydantic schemas → JSON Schema. We strip `title` keys for cache
-        # determinism (Pydantic injects "title" inferred from field
-        # names; removing them keeps the bytes stable across pydantic
-        # versions). DETERMINISTIC SERIALIZATION is the spine of the
-        # prompt cache strategy — pre-reg §7.5 silent invalidators.
-        schema = spec.schema.model_json_schema()
-        _strip_titles(schema)
-        out.append({
-            "name": spec.name,
-            "description": spec.description,
-            "input_schema": schema,
-        })
-    return tuple(out)
+    if provider_name == "anthropic":
+        # Construct a no-client adapter just for formatting. format_tools
+        # doesn't need the SDK; this avoids pulling in anthropic just to
+        # serialize a JSON schema.
+        return tuple(AnthropicProvider().format_tools(specs))
+    # Phase 2 of the multi-provider epic adds:
+    # if provider_name == "deepseek":
+    #     return tuple(DeepSeekProvider().format_tools(specs))
+    raise ValueError(
+        f"unknown provider name for tool formatting: {provider_name!r}"
+    )
 
 
-def _strip_titles(node: Any) -> None:
-    """Recursively remove `title` keys from a JSON-schema dict tree."""
-    if isinstance(node, dict):
-        node.pop("title", None)
-        for v in node.values():
-            _strip_titles(v)
-    elif isinstance(node, list):
-        for v in node:
-            _strip_titles(v)
+# Backward-compat shim: a couple of older tests imported
+# `_build_anthropic_tools` directly. The Phase 1 refactor split it into
+# `_cached_formatted_tools(surface, provider_name)`. Tests that still
+# use the old name get the Anthropic-shape result by default.
+def _build_anthropic_tools(surface: str) -> tuple[dict, ...]:
+    return _cached_formatted_tools(surface, "anthropic")
 
 
-# ── Cost model (token counts → USD) ─────────────────────────────────────
+# ── Cost calculator (compat shim) ──────────────────────────────────────
 #
-# Pricing in USD per 1M tokens, copied from the claude-api skill. Update
-# this map deliberately when bumping the anthropic SDK pin (pre-reg
-# §12.7 — Buffers internos).
+# Phase 1 of the multi-provider epic: pricing tables moved to each
+# provider's module (api/agent/providers/anthropic_adapter.py:MODEL_PRICING
+# for Anthropic). The loop no longer owns the numbers.
 #
-# This dict is the canonical pricing source for the cost calculator.
-# Context-window capacities (1M / 1M / 200K) and the human-readable
-# "Opus is bigger, Haiku is cheaper" framing live in the api/agent/models.py
-# docstring — model selection logic + the cost-model dict are different
-# concerns, but pricing $$/$$/per-1M numbers must NOT be duplicated to
-# both files (PR #407 review issue 2). If Anthropic ships a price change,
-# the only number to update is here.
-#
-# Cached snapshot 2026-04-29:
-#   - claude-opus-4-7   — $5.00 in / $25.00 out, 1M ctx
-#   - claude-sonnet-4-6 — $3.00 in / $15.00 out, 1M ctx
-#   - claude-haiku-4-5  — $1.00 in / $5.00  out, 200K ctx
-_MODEL_PRICING = {
-    "claude-opus-4-7":   {"in": 5.00, "out": 25.00},
-    "claude-sonnet-4-6": {"in": 3.00, "out": 15.00},
-    "claude-haiku-4-5":  {"in": 1.00, "out":  5.00},
-}
+# `_estimate_cost_usd` remains exported as a backward-compat shim because
+# test_agent_loop.py::test_cost_estimation_matches_published_pricing
+# imports it directly. The shim dispatches to whichever provider claims
+# the model — by prefix match against ALLOWED_MODELS.
 
 
 def _estimate_cost_usd(model: str, usage: dict) -> float:
-    """Compute the USD cost of a turn from `response.usage`. Cache reads
-    are billed at ~0.1× input; cache writes (creation) at ~1.25×.
+    """Compute the USD cost for one hop's `usage`. Dispatches to the
+    provider that owns the model via the registry.
+
+    Returns 0.0 if no provider claims the model (silent fallback —
+    matches pre-refactor behavior for unknown model ids).
     """
-    p = _MODEL_PRICING.get(model)
-    if not p:
-        return 0.0
-    in_per_m = p["in"]
-    out_per_m = p["out"]
-    in_uncached = (usage.get("input_tokens") or 0)
-    cache_read = (usage.get("cache_read_input_tokens") or 0)
-    cache_creation = (usage.get("cache_creation_input_tokens") or 0)
-    out_tokens = (usage.get("output_tokens") or 0)
-    cost = (
-        in_uncached * in_per_m
-        + cache_read * in_per_m * 0.1
-        + cache_creation * in_per_m * 1.25
-        + out_tokens * out_per_m
-    ) / 1_000_000.0
-    return round(cost, 6)
+    from api.agent.providers.anthropic_adapter import AnthropicProvider
+    if model.startswith("claude-"):
+        return AnthropicProvider().estimate_cost(model, usage)
+    # Phase 2 adds: if model.startswith("deepseek-"): ...
+    return 0.0
 
 
 # ── Loop ────────────────────────────────────────────────────────────────
@@ -225,6 +200,13 @@ async def run_turn(
     across turns; this function only handles one user-turn → final-text
     cycle.
 
+    Note on `client`: as of Phase 1 of the multi-provider epic, the
+    `client` parameter is actually an `LLMProvider` (not the
+    anthropic.AsyncAnthropic SDK client anymore). The parameter name is
+    preserved to minimize churn across the 13+ test call sites; a future
+    PR may rename. The provider's `stream(...)` method yields LLMEvent
+    instances which this loop translates to LoopEvent.
+
     Pre-reg §6.1.
     """
     if len(messages) > MAX_TURNS_PER_CONVERSATION:
@@ -237,12 +219,14 @@ async def run_turn(
         )
         return
 
-    system_blocks = build_system_blocks(surface)
-    tools = _build_anthropic_tools(surface)
+    provider = client  # local alias for readability — see docstring
+    raw_blocks = build_system_blocks(surface)
+    system_blocks = provider.format_system_blocks(raw_blocks)
+    tools = list(_cached_formatted_tools(surface, provider.name))
     hops = 0
 
     # PR #408 review fix: accumulate usage + cost across all hops of the
-    # turn. Anthropic bills per API call — a multi-hop turn fires N+1
+    # turn. The model bills per API call — a multi-hop turn fires N+1
     # calls (N tool_use intermediate + 1 final text). The original
     # implementation emitted only the final hop's cost in MessageEnd,
     # undercharging the tenant quota by 30-60% on turns with multiple
@@ -256,25 +240,32 @@ async def run_turn(
     total_cost_usd = 0.0
 
     while True:
-        # Open a fresh stream for each "model turn" in the agentic loop.
+        # Open a fresh stream for each model turn in the agentic loop.
+        # The provider yields LLMEvent dataclasses; we translate to the
+        # LoopEvent vocabulary (TextDelta / ToolUseStart / MessageEnd).
+        hop_usage: dict = {}
+        final_stop_reason: str = ""
+        final_content: list = []
         try:
-            async with client.messages.stream(
+            async for ev in provider.stream(
                 model=model,
-                max_tokens=max_tokens,
-                system=system_blocks,
-                tools=tools,
+                system_blocks=system_blocks,
                 messages=messages,
-            ) as stream:
-                async for event in stream:
-                    if event.type == "content_block_start":
-                        cb = event.content_block
-                        if cb is not None and cb.type == "tool_use":
-                            yield ToolUseStart(tool=cb.name or "")
-                    elif event.type == "content_block_delta":
-                        d = event.delta
-                        if d is not None and d.type == "text_delta" and d.text:
-                            yield TextDelta(text=d.text)
-                final = await stream.get_final_message()
+                tools=tools,
+                max_tokens=max_tokens,
+            ):
+                if isinstance(ev, LLMTextDelta):
+                    yield TextDelta(text=ev.text)
+                elif isinstance(ev, LLMToolUseStart):
+                    yield ToolUseStart(tool=ev.name)
+                elif isinstance(ev, LLMStreamEnd):
+                    hop_usage = ev.usage
+                    final_stop_reason = ev.stop_reason
+                    final_content = ev.content
+                # Other LLMEvent types (LLMReasoningDelta, LLMToolUseEnd)
+                # are silently dropped in Phase 1. Phase 3 of the
+                # multi-provider epic wires LLMReasoningDelta to a new
+                # LoopEvent + SSE frame.
         except Exception as e:  # noqa: BLE001
             log.warning("agent loop upstream error: %s", e, exc_info=True)
             yield ErrorEvent(
@@ -285,23 +276,17 @@ async def run_turn(
             )
             return
 
-        hop_usage = {
-            "input_tokens":                getattr(final.usage, "input_tokens", 0) or 0,
-            "output_tokens":               getattr(final.usage, "output_tokens", 0) or 0,
-            "cache_read_input_tokens":     getattr(final.usage, "cache_read_input_tokens", 0) or 0,
-            "cache_creation_input_tokens": getattr(final.usage, "cache_creation_input_tokens", 0) or 0,
-        }
         # Accumulate this hop's usage + cost into the per-turn totals.
         # MessageEnd (below, on the final hop) emits the sum so audit /
         # quota / breaker see the true cost — not just the last call.
         for k in total_usage:
-            total_usage[k] += hop_usage[k]
-        total_cost_usd += _estimate_cost_usd(model, hop_usage)
+            total_usage[k] += int(hop_usage.get(k, 0) or 0)
+        total_cost_usd += provider.estimate_cost(model, hop_usage)
 
-        if final.stop_reason != "tool_use":
+        if final_stop_reason != "tool_use":
             yield MessageEnd(
                 usage=total_usage,
-                stop_reason=final.stop_reason,
+                stop_reason=final_stop_reason,
                 cost_usd=total_cost_usd,
             )
             return
@@ -322,13 +307,13 @@ async def run_turn(
         # See pre-reg §6.1 — splitting per tool_use is a wire-format error.
         messages.append({
             "role": "assistant",
-            "content": _blocks_to_api_shape(final.content),
+            "content": provider.blocks_to_api_shape(final_content),
         })
 
         # Collect tool_results for ALL tool_use blocks in this turn into
         # ONE user message. The API rejects a turn that splits
         # tool_results across multiple user messages.
-        tool_uses = [b for b in final.content if b.type == "tool_use"]
+        tool_uses = [b for b in final_content if b.type == "tool_use"]
         tool_results = []
         for tu in tool_uses:
             result_json = dispatch_tool(
@@ -386,21 +371,7 @@ async def run_turn(
         # Loop back: send the tool_results to the model.
 
 
-def _blocks_to_api_shape(blocks: list) -> list[dict]:
-    """Convert the SDK's typed content blocks (or our fake's) into the
-    plain-dict shape the API accepts in the `messages` array.
-
-    The API doesn't accept the typed objects directly when echoed back —
-    it wants the raw dict form."""
-    out = []
-    for b in blocks:
-        if b.type == "text":
-            out.append({"type": "text", "text": b.text or ""})
-        elif b.type == "tool_use":
-            out.append({
-                "type":  "tool_use",
-                "id":    b.id,
-                "name":  b.name,
-                "input": b.input or {},
-            })
-    return out
+# Phase 1 of the multi-provider epic: `_blocks_to_api_shape` moved to
+# `AnthropicProvider.blocks_to_api_shape`. The loop now delegates via
+# `provider.blocks_to_api_shape(content)` so each provider owns the
+# coercion from its content-block shape back to wire-dict form.

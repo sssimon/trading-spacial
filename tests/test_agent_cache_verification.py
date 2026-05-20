@@ -52,12 +52,24 @@ def test_system_blocks_have_four_cache_breakpoints():
     """Anthropic Messages API accepts up to 4 cache_control breakpoints
     per request. We use exactly four — one per layer. Adding a 5th
     would silently lose the last one; dropping below 4 wastes cache
-    headroom."""
-    from api.agent.prompts.system import build_system_blocks
+    headroom.
 
-    blocks = build_system_blocks("dock")
-    assert len(blocks) == 4
-    for b in blocks:
+    Phase 1 of multi-provider epic: cache_control wrapping moved from
+    build_system_blocks (now returns plain strings) to the
+    AnthropicProvider.format_system_blocks adapter. The wire shape that
+    reaches the Anthropic API still has 4 cache_control'd blocks; this
+    test verifies the full pipeline.
+    """
+    from api.agent.prompts.system import build_system_blocks
+    from api.agent.providers.anthropic_adapter import AnthropicProvider
+
+    raw_blocks = build_system_blocks("dock")
+    assert len(raw_blocks) == 4
+    assert all(isinstance(b, str) for b in raw_blocks)
+
+    wire_blocks = AnthropicProvider().format_system_blocks(raw_blocks)
+    assert len(wire_blocks) == 4
+    for b in wire_blocks:
         assert b["type"] == "text"
         assert b.get("cache_control") == {"type": "ephemeral"}, (
             f"block missing cache_control: {b!r}"
@@ -77,13 +89,14 @@ def test_system_blocks_order_is_canonical():
     from api.agent.prompts.surfaces import for_surface
 
     blocks = build_system_blocks("dock")
-    assert blocks[0]["text"] == PERSONA_AND_SAFETY
+    # Phase 1 of multi-provider epic: blocks are now plain strings.
+    assert blocks[0] == PERSONA_AND_SAFETY
     # Block 1 is the tool docs — built from the surface's tool subset.
     # We only assert the header line is present (the rest is
     # registry-derived and tested in test_agent_models.py).
-    assert "TOOLS DISPONIBLES" in blocks[1]["text"]
-    assert blocks[2]["text"] == INVARIANTS
-    assert blocks[3]["text"] == for_surface("dock")
+    assert "TOOLS DISPONIBLES" in blocks[1]
+    assert blocks[2] == INVARIANTS
+    assert blocks[3] == for_surface("dock")
 
 
 # ── 2. Wire-reported cache usage ────────────────────────────────
