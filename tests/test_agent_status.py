@@ -190,8 +190,27 @@ def test_agent_status_reason_field_is_closed_enum(client, monkeypatch):
 
 def test_agent_status_does_not_require_auth(client, monkeypatch):
     """The frontend reads /agent/status before login completes in some
-    flows; the endpoint must respond without an auth cookie."""
+    flows; the endpoint must respond without an auth cookie.
+
+    This test DISABLES the conftest test bypass (AUTH_TEST_BYPASS_ROLE)
+    so the AuthMiddleware actually runs as it would in production.
+    Without this, the test would pass even if /agent/status was NOT in
+    the public-path whitelist — the bypass would let any path through.
+
+    Bug history: pre-2026-05-20 fix, /agent/status was NOT in
+    _PUBLIC_PATHS_EXACT. Tests passed via the bypass; papá's prod
+    smoke during Fase 5 rollout caught the 401 with curl. Test now
+    forces the middleware to exercise the whitelist for real.
+    """
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-fake")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    # No login, no cookies — should still succeed.
+    # Kill the conftest bypass so AuthMiddleware enforces the whitelist.
+    monkeypatch.delenv("AUTH_TEST_BYPASS_ROLE", raising=False)
+    # No login, no cookies — should still succeed via the whitelist.
     resp = client.get("/agent/status")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, (
+        f"GET /agent/status returned {resp.status_code} ({resp.text!r}). "
+        f"This usually means /agent/status is missing from "
+        f"auth/middleware.py:_PUBLIC_PATHS_EXACT. The endpoint MUST be "
+        f"public — the frontend hits it before the login flow resolves."
+    )
