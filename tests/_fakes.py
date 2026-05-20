@@ -327,6 +327,15 @@ class FakeAnthropicProvider:
         # actually sent (model id, tools list, message history, etc).
         self.calls: list[dict] = []
         self._queued: list[FakeStream] = []
+        # PR #412 review pickup 3: cache the real adapter once at
+        # construction time. format_system_blocks / format_tools /
+        # blocks_to_api_shape / estimate_cost all delegate to it — no
+        # need to re-instantiate per call. Constructing AnthropicProvider
+        # without a client is cheap (no SDK import), but the readability
+        # win is real: the fake declaratively says "I am Anthropic-
+        # shaped for wire concerns, custom for stream()".
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        self._real_adapter = AnthropicProvider()
 
     # ── Test queueing API (unchanged from FakeAnthropicClient) ──────
 
@@ -373,22 +382,19 @@ class FakeAnthropicProvider:
         return True
 
     def format_system_blocks(self, blocks: list[str]) -> list[dict]:
-        # Delegate to the real adapter — the fake should produce
-        # byte-identical wire shape so cache verification tests pass.
-        from api.agent.providers.anthropic_adapter import AnthropicProvider
-        return AnthropicProvider().format_system_blocks(blocks)
+        # Byte-identical wire shape — cache verification tests assert
+        # the cache_control:ephemeral wrapping that the real adapter
+        # produces.
+        return self._real_adapter.format_system_blocks(blocks)
 
     def format_tools(self, specs: tuple) -> list[dict]:
-        from api.agent.providers.anthropic_adapter import AnthropicProvider
-        return AnthropicProvider().format_tools(specs)
+        return self._real_adapter.format_tools(specs)
 
     def blocks_to_api_shape(self, blocks: list) -> list[dict]:
-        from api.agent.providers.anthropic_adapter import AnthropicProvider
-        return AnthropicProvider().blocks_to_api_shape(blocks)
+        return self._real_adapter.blocks_to_api_shape(blocks)
 
     def estimate_cost(self, model: str, usage: dict) -> float:
-        from api.agent.providers.anthropic_adapter import AnthropicProvider
-        return AnthropicProvider().estimate_cost(model, usage)
+        return self._real_adapter.estimate_cost(model, usage)
 
     async def stream(
         self,
