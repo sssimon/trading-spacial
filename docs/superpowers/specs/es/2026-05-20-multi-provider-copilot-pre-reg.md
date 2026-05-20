@@ -150,6 +150,68 @@ PROVIDER_BY_PREFIX = {
 }
 ```
 
+**Convention formalizada (PR #411 review pickup 4):**
+
+Para agregar un nuevo provider sin cambios estructurales:
+
+1. Sus model IDs **DEBEN** comenzar con el prefijo canónico del vendor:
+   - `gpt-` para OpenAI
+   - `gemini-` para Google
+   - `mistral-` para Mistral
+   - `command-` para Cohere
+   - `grok-` para xAI
+2. Agregar `api/agent/providers/{vendor}_adapter.py` que implementa `LLMProvider`.
+3. Update `PROVIDER_BY_PREFIX` registry con la entrada `{vendor_prefix: vendor_name}`.
+4. Update `ALLOWED_MODELS` para incluir los model IDs del vendor.
+5. Parametrizar los tests §11 con el nuevo `Fake{Vendor}Provider`.
+
+**Estimación por provider adicional:** ~1 día.
+
+**Invariant locked en CI** (test nuevo en `tests/test_provider_registry.py`):
+- Cada model id en `ALLOWED_MODELS` matchea exactamente UN prefijo de `PROVIDER_BY_PREFIX`.
+- Cada prefijo de `PROVIDER_BY_PREFIX` tiene al menos un model id en `ALLOWED_MODELS` (no prefixes huérfanos).
+
+Si esos invariantes se rompen al agregar provider nuevo, el test catchea antes del deploy.
+
+### 2.7 `/agent/status` con dual-key
+
+Edge case: si default model es `deepseek-chat` pero solo `ANTHROPIC_API_KEY` está set, ¿status reporta enabled=true (porque hay UNA key) o enabled=false (porque la del default no está)?
+
+**Decisión (PR #411 review pickup 3):** status chequea **la key del provider del default model**.
+
+```python
+def get_agent_status(cfg=None):
+    cfg = cfg or load_config()
+    if not cfg.get("agent", {}).get("enabled", False):
+        return AgentStatus(enabled=False, reason="agent_disabled")
+    # Resolve the default surface's model → its provider → that provider's key.
+    default_model = default_model_for_surface("dock")  # any surface works
+    provider = get_provider_for_model(default_model)
+    if not provider.has_api_key():
+        return AgentStatus(enabled=False, reason="agent_disabled")
+    # ... breaker checks unchanged ...
+```
+
+Razones:
+- **Simple:** una sola key check, sin lógica de fallback.
+- **Honest:** si el operator dejó solo Anthropic configurado pero el default es DS, mejor reportar disabled ahora que tirar 503 en el primer turn.
+- **No fallback silencioso:** un fallback "si el provider del default no tiene key, probá el otro" introduce magia que el operator no esperaba. Si quiere fallback, lo articula explícitamente cambiando defaults en config.json (sin code deploy).
+
+**Per-turn override:** un usuario que pide `model: "claude-opus-4-7"` cuando solo DS está configurado, su request falla con 503 en el moment del `provider.stream(...)` (no en pre-flight). Mensaje friendly `"upstream"` igual. Aceptable.
+
+### 2.8 Circuit breaker — cap global vs per-provider
+
+**Hoy:** `cfg.agent.global_daily_usd_cap = 5.0` es un solo número que aplica al total. Phase 5A.
+
+**Decisión para este epic (PR #411 review pickup 1):** se mantiene **global cap único**.
+
+Razones:
+- Visibilidad ya existe — `/agent/metrics.today.by_provider` reportará el breakdown a partir de Fase 4.
+- Per-provider caps duplican surface area del config sin ganancia operativa inmediata: si DS spend explota, el global cap trip → operator investiga → quita DS via config flip. Mismo resultado, menos config drift.
+- Cuando aparezca demanda real (operator quiere "max $0.50/día en Opus para experimentos pero $5/día total"), eso es **Phase Q+1**: extender el config a `per_provider_daily_caps` + extender `circuit_breaker.is_breaker_tripped` con un loop sobre providers. Estimación: 0.5 días + tests.
+
+Notado como pickup futuro en sección 8.
+
 ---
 
 ## 3. Arquitectura propuesta
@@ -274,7 +336,7 @@ Request hits /agent/conversations/{id}/turn
 **Entregables:**
 - `api/agent/providers/deepseek_adapter.py` — implements LLMProvider con HTTP cliente (httpx) contra `api.deepseek.com/v1/chat/completions`. No usamos el SDK de DeepSeek (es OpenAI fork; httpx directo es más simple y deja la cost model bajo nuestro control total).
 - `models.py` updated: `ALLOWED_MODELS` incluye `deepseek-chat`. `SURFACE_MODEL_DEFAULTS["dock"]` queda en `claude-sonnet-4-6` por default (no cambiamos defaults aún — primero hay que validar parity).
-- New env var: `DEEPSEEK_API_KEY`. Status endpoint sigue chequeando `ANTHROPIC_API_KEY` Y/O `DEEPSEEK_API_KEY` (al menos uno presente para enabled=true).
+- New env var: `DEEPSEEK_API_KEY`. Status endpoint chequea la key del **provider del default model** (§2.7 decision) — no "ANY key set".
 - `FakeDeepSeekProvider` en `tests/_fakes.py` — replica el wire de DeepSeek chat (OpenAI-style delta chunks).
 
 **Tests:**
@@ -287,17 +349,23 @@ Request hits /agent/conversations/{id}/turn
 
 **Objetivo:** Surface el razonamiento de R1 en la UI.
 
-**Entregables:**
+**Sub-secuenciamiento (PR #411 review pickup):** Fase 3 ata 2 cambios independientes (UX nueva del reasoning + migración de defaults). Si la UX rompe post-deploy, queda ambiguo si fue UI o routing. La fase se split en **2 PRs separados**:
+
+**PR 3a — Reasoning UX wired** (sin tocar defaults):
 - `deepseek_adapter.py` reconoce `delta.reasoning_content` y emite `ReasoningDelta`.
 - `streaming.py` agrega `reasoning_delta` al closed enum.
 - `frontend/src/agent/types.ts` agrega `AgentReasoningDelta`.
-- `frontend/src/agent/useAgentStream.ts` agrega `reasoning` state al `ChatMsg`, lo acumula como `tool_chips`.
+- `frontend/src/agent/useAgentStream.ts` agrega `reasoning` state al `ChatMsg`, lo acumula separado de `text`.
 - AgentDock + SymbolDetail renderizan `<details><summary>Razonamiento</summary>{texto}</details>` debajo del bubble cuando hay reasoning.
-- `SURFACE_MODEL_DEFAULTS` ACTUALIZADO: defaults migran a DeepSeek (los 5 surfaces). Anthropic queda en `ALLOWED_MODELS` para override manual.
+- Tests: stream parity (`FakeDeepSeekProvider.queue_reasoner_turn(...)`), vitest no-contamination del bubble principal.
+- Verificación manual con `model: "deepseek-reasoner"` override por-turn antes del merge.
 
-**Tests:**
-- Stream parity: `FakeDeepSeekProvider.queue_reasoner_turn(...)` produce reasoning + content; loop emits ReasoningDelta + TextDelta correctamente.
-- Vitest: reasoning event acumula en el ChatMsg sin contaminar el text principal.
+**PR 3b — Migrate defaults a DS** (separado de UX):
+- `SURFACE_MODEL_DEFAULTS` actualizado: defaults migran a DeepSeek (los 5 surfaces). Anthropic queda en `ALLOWED_MODELS` para override manual.
+- Snapshot tests de `test_agent_models.py` se actualizan (los frozensets EXPECTED).
+- Status endpoint requiere `DEEPSEEK_API_KEY` ahora (vía §2.7 logic, no por cambio del status code).
+
+Si PR 3a tiene bug post-merge, se revierte sin perder lo necesario para que PR 3b ship. Si PR 3b tiene bug post-merge, se revierte sin afectar la UX nueva.
 
 **Riesgo:** medio. R1's reasoning a veces es múltiples kilobytes — necesita streaming chunking que ya tenemos pero hay que confirmar el rendering del frontend no bloquea con detalles cerrados.
 
@@ -310,6 +378,7 @@ Request hits /agent/conversations/{id}/turn
 - `loop.py` calcula `total_cost_usd` usando el adapter activo (no la dict hardcoded).
 - `agent_conversations` schema gana columna `provider TEXT` (idempotent ALTER TABLE).
 - `/agent/metrics` agrega `today.by_provider: {anthropic: $..., deepseek: $...}`.
+- **(PR #411 review pickup — diferido a post-Fase-3)**: nueva columna `reasoning_tokens INTEGER` en `agent_conversations`, opcional, llenada solo por adapter de DS-reasoner. Permite telemetry "qué porcentaje del cost de un turn analytical fue reasoning vs final content" sin alterar el cost calculation.
 
 **Tests:** las assertions de cost en `test_agent_loop.py` se parametrizan con el provider del adapter — cada uno tiene su pricing table en su módulo.
 
@@ -320,8 +389,13 @@ Request hits /agent/conversations/{id}/turn
 **Objetivo:** flip a producción con DeepSeek como default.
 
 **Entregables:**
-- `docs/rollouts/2026-05-DD-multi-provider-flip.md` — runbook actualizado: setup de DEEPSEEK_API_KEY, smoke con el nuevo default, monitor 48h.
-- `scripts/agent_health_check.py` lee `by_provider` breakdown.
+- `docs/rollouts/2026-05-DD-multi-provider-flip.md` — runbook NUEVO (no edit del original; el de Phase 6 del epic #400 queda como artefacto histórico del plan inicial). Incluye:
+  - Setup de `DEEPSEEK_API_KEY` además de `ANTHROPIC_API_KEY` (la última queda opcional pero útil para fallback manual).
+  - Smoke con el nuevo default DS.
+  - Reasoning UX verification: usuario abre AutoTune, expande el `<details>`, verifica que el panel muestra texto coherente.
+  - Monitor 48h con el script actualizado.
+  - **Nota explícita** sobre el cost over-estimate (§6 risks): comparar `today.total_usd` en `/agent/metrics` contra DeepSeek Console al final del bake; diferencia esperada (we don't model DS auto-cache discount).
+- `scripts/agent_health_check.py` lee `by_provider` breakdown — separa Anthropic spend de DS spend en el output.
 - `config.defaults.json` sigue con `agent.enabled=false` (operator opta in via config.json).
 
 **Decisión que NO se toma en este epic:** ¿desactivamos Anthropic completamente, o queda como override on-demand? Recomendación: dejarlo en `ALLOWED_MODELS`. Si DS bake no convence, flip vía override de `cfg.agent.surface_models` (campo nuevo opcional) sin code deploy.
@@ -357,8 +431,9 @@ Nuevos tests específicos del epic:
 | Tool-calling de DS tiene bugs en JSON output (parámetros mal parseados) | media | alto | Validación Pydantic en el dispatch (ya existe) — cae a `is_error: invalid_input` |
 | Reasoning content de R1 se vuelve enorme y bloquea el stream | baja | medio | Chunking ya manejado por el adapter; el `<details>` colapsado por default minimiza render cost |
 | DeepSeek auto-cache no funciona en práctica (prefijo no es estable) | media | bajo | El test del prefix-stability lo cataloga; si no hay cache hit, el costo se mantiene plano (no hay explosión) |
-| Operator activa DS sin tener DEEPSEEK_API_KEY en .env | baja | medio | Status endpoint chequea: si default model es DS y no hay key, retorna `agent_disabled` |
+| Operator activa DS sin tener DEEPSEEK_API_KEY en .env | baja | medio | Status endpoint chequea **la key del provider del default model** (§2.7) — retorna `agent_disabled` antes de tirar 503 en el primer turn |
 | El cost diferencial es menor a lo esperado por DS reasoning más caro de lo previsto | media | bajo | El bake 48h captura el real cost; flip de defaults es config-level (sin code deploy) |
+| **Cost `cost_usd` over-estimated vs DeepSeek billing real** (PR #411 review pickup 2) | alta | bajo | DeepSeek auto-cachea el prefijo pero NO reporta cache stats en `usage` — nuestro `estimate_cost()` factura como si todo el input fuera fresh. Adicionalmente, DS aplica off-peak discount ~50% en 3h UTC que nuestro estimate no modela. Net effect: audit + circuit breaker ven **más** spend del que DS factura en realidad. Comportamiento conservador (safe — breaker trippa antes del límite real). Mitigación: runbook de Fase 5 documenta esto explícitamente; operator compara `today.total_usd` vs DeepSeek Console al cierre del bake para calibrar. Si la diferencia es grande, futura iteración modela el discount. |
 
 ---
 
@@ -373,14 +448,20 @@ Nuevos tests específicos del epic:
 
 ## 8. Pickups acumulados que NO bloquean este epic
 
-Del epic #400 review queue:
+**Del epic #400 review queue:**
 
 - Live-model safety regression test (`pytest -m live`) — pendiente desde Phase 5B.
 - Wire `assert_text_grounded` como production postcheck — pendiente desde Phase 5B.
 - Frontend mounts para KillSwitch / AutoTune / Historial — pendiente desde Phase 4.
 - `<ProposalConfirm/>` shared component extraction — pendiente desde Phase 4.
 
-Ninguno bloquea este epic. Pueden tomarse como Phase 6 después del flip multi-provider.
+**De PR #411 review (futuros, post-flip de este epic):**
+
+- **Per-provider daily caps en el circuit breaker** (§2.8). Hoy el cap es global. Cuando aparezca demanda real ("max $0.50/día en Opus pero $5/día total"), extender `cfg.agent.per_provider_daily_caps: dict[str, float]` + loop en `is_breaker_tripped()`. Estimación: 0.5 días + tests.
+- **DeepSeek auto-cache discount + off-peak modeling** en `provider.estimate_cost()` (§6 risk). Requiere observación empírica del ratio real (`/agent/metrics.today.total_usd` vs DeepSeek Console al cierre de bakes) para calibrar el discount factor. Estimación: 1 día (mecánico una vez se tiene el ratio).
+- **Telemetry de reasoning tokens** — columna `reasoning_tokens INTEGER` en `agent_conversations` + breakdown `today.reasoning_pct` en `/agent/metrics`. Útil para responder "qué % del cost de un turn analytical es razonamiento" sin tener que revisar logs. Estimación: 0.5 días.
+
+Ninguno bloquea el flip de este epic. Pueden tomarse después del bake.
 
 ---
 
@@ -397,13 +478,37 @@ Ninguno bloquea este epic. Pueden tomarse como Phase 6 después del flip multi-p
 
 ---
 
-## 10. Decisión pendiente del operator
+## 10. Decisiones tomadas (post-review de PR #411)
 
-Antes de empezar Fase 1 necesito confirmación explícita en estos puntos:
+Las 4 decisiones del spec original quedaron resueltas en el review de PR #411:
 
-1. ¿Approve la arquitectura adapter-por-provider (sección 2.1)? ¿O preferís evaluar la opción B (OpenAI-compat passthrough)?
-2. ¿Approve la decisión de surface reasoning como SSE event aparte (sección 2.3)?
-3. ¿Approve el plan de migrar defaults a DS en Fase 3, NO en Fase 2 (validamos parity con Anthropic primero)?
-4. ¿Hay otros providers que querés que el spec contemple desde día 1 aunque no se implementen (Gemini? Mistral? Open-router?), o el shape "interfaz + 2 adapters" es suficiente?
+| # | Decisión | Voto | Razón sumarizada |
+|---|---|---|---|
+| 1 | Adapter genuino vs OpenAI-compat passthrough | **A (adapter genuino)** | R1 reasoning_content no está en OpenAI spec; cost model per-provider awkward bajo passthrough; ~150 líneas por adapter es manejable |
+| 2 | Reasoning como SSE event aparte vs discard | **SSE event aparte** | En surfaces analíticas la transparencia del razonamiento ES valor; discard waste tokens facturados |
+| 3 | Migrar defaults a DS en Fase 3 (no Fase 2) | **Fase 3, además split en PR 3a + PR 3b** | Disciplina: opt-in primero con model override, después switch defaults; sub-split de Fase 3 reduce blast radius si la UX del reasoning rompe |
+| 4 | Otros providers desde día 1 | **NO** | El abstraction se prueba suficientemente con 2 implementaciones; YAGNI; cuando aparezca demand real, ~1 día por provider siguiendo la convention de §2.6 |
 
-Una vez confirmado, abro la rama, escribo Fase 1, y vamos PR-por-PR como con epic #400.
+Refinamientos adicionales aplicados:
+- §2.6: convention formalizada (prefix matching + CI test que catchea orphans)
+- §2.7: nueva sub-sección sobre el `/agent/status` dual-key edge case (check del default's provider key, no fallback mágico)
+- §2.8: nueva sub-sección sobre circuit breaker (cap global se mantiene; per-provider caps son pickup futuro)
+- §6: nueva fila de riesgo (cost over-estimate por auto-cache + off-peak no modelado en DS)
+- Fase 3: split en 2 PRs (3a UX, 3b defaults migration)
+- Fase 4: pickup futuro `reasoning_tokens` column anotado
+- Fase 5: runbook NUEVO (no edit del de epic #400); cost-vs-billing comparison documentada
+
+## 11. POC pre-Fase-1 — innecesario
+
+El reviewer ofreció armar un POC del `LLMProvider` protocol en un branch separado antes de comprometerse a Fase 1. **Decisión: skip el POC.** Razones:
+
+- La interfaz está bien especificada (§3.2 + §3.3). Cualquier ambigüedad surge en la implementación, no en el design.
+- Fase 1 es deliberately mecánica (mover código existente a vivir detrás de la interfaz, sin agregar providers nuevos). Si Fase 1 revela problemas con la interfaz, el costo de iterar es bajo — la rama no se mergea hasta que la interfaz pase los 160 tests existentes.
+- POC + Fase 1 son ~50% del mismo trabajo. Saltar al final.
+- La puerta queda abierta: si arrancando Fase 1 surge un issue estructural con la interfaz, paramos, ajustamos el spec, y volvemos. No commitment irrevocable.
+
+## 12. Estado actual
+
+**Spec:** aprobado por el operator vía review de PR #411 (PR queda en merge pending — actúa como changelog del epic una vez aprobado).
+
+**Próximo paso:** mergear este PR. Después se abre `feat/copilot-multi-provider-phase-1` y se inicia Fase 1 (provider interface + Anthropic adapter refactor, sin agregar DeepSeek aún).
