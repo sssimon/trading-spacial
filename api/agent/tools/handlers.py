@@ -358,6 +358,14 @@ def dispatch_tool(
         else:
             result = handler(tenant_id=tenant_id, **kwargs)
     except Exception as e:  # noqa: BLE001
+        # Full exception (with stack trace) goes to the operator log;
+        # the MODEL receives only the closed-enum reason. Internal
+        # exception messages can carry file paths, DB column names,
+        # secrets in error strings — echoing str(e) to the model is a
+        # leak vector that would surface in the assistant's paraphrase
+        # back to the user. Phase 5B test
+        # test_tool_handler_raise_lands_as_is_error_block locks the
+        # invariant.
         log.warning("dispatch_tool: %s raised %s", name, e, exc_info=True)
-        return json.dumps({"error": "handler_error", "detail": str(e)})
+        return json.dumps({"error": "handler_error"})
     return json.dumps(result, default=str)

@@ -244,7 +244,15 @@ def test_dispatch_handler_exception_returns_error_json(tmp_db, monkeypatch):
     """If a handler raises (DB unavailable, scanner error, etc), the
     dispatcher must serialize the failure — never propagate. The
     conversation core marks the tool_result as is_error:true so the
-    model can self-correct."""
+    model can self-correct.
+
+    Phase 5B fix: the dispatcher used to include str(e) as `detail`,
+    which leaked internal exception messages (file paths, DB column
+    names, secret-bearing error strings) into the assistant's context.
+    The fix sanitizes the wire payload to the closed-enum reason only;
+    full exception detail goes to the operator log instead. Locked
+    by test_tool_handler_raise_lands_as_is_error_block in
+    test_agent_graceful_failures.py."""
     from api.agent.tools import handlers as h
     from api.agent.tools.handlers import dispatch_tool
 
@@ -254,8 +262,9 @@ def test_dispatch_handler_exception_returns_error_json(tmp_db, monkeypatch):
     monkeypatch.setitem(h.TOOL_HANDLERS, "get_positions", _boom)
     out = dispatch_tool("get_positions", {}, tenant_id=1)
     parsed = json.loads(out)
-    assert parsed["error"] == "handler_error"
-    assert "simulated downstream failure" in parsed["detail"]
+    assert parsed == {"error": "handler_error"}
+    # Detail is intentionally absent — see fix note in docstring.
+    assert "simulated downstream failure" not in out
 
 
 def test_dispatch_passes_validated_input_to_handler(tmp_db):

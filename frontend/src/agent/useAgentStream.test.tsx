@@ -124,6 +124,33 @@ describe('useAgentStream', () => {
     expect(asst.text).toBe('Tienes 1 posición.');
   });
 
+  it('treats keepalive frames as a no-op (Phase 5 heartbeat ignored)', async () => {
+    // Two keepalive frames interleaved with text — the hook should
+    // skip them silently and accumulate text as if they weren't there.
+    // No console warnings, no message corruption.
+    stubFetchOnce(sseReadable([
+      { type: 'text_delta', text: 'Hola ' },
+      { type: 'keepalive' },
+      { type: 'text_delta', text: 'mundo' },
+      { type: 'keepalive' },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 5, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn',
+        cost_usd: 0.0001,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    await act(async () => {
+      await result.current.sendTurn('saluda');
+    });
+
+    expect(result.current.msgs).toHaveLength(2);
+    expect(result.current.msgs[1].role).toBe('assistant');
+    expect(result.current.msgs[1].text).toBe('Hola mundo');
+  });
+
   it('replaces the placeholder with user_message on an error event', async () => {
     stubFetchOnce(sseReadable([
       { type: 'error', reason: 'upstream', user_message: 'El copiloto está saturado, intenta en unos segundos.' },
