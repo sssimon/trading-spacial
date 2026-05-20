@@ -185,10 +185,11 @@ def test_assert_text_grounded_raises_on_invented_position_id():
 
 
 def test_assert_text_grounded_raises_on_invented_symbol():
-    """Text says SOL (not in curated set anyway; but pretend it WAS in
-    the curated set) — actually let's flip: the assistant mentions
-    XLM but the tool_result never surfaced XLM. Curated symbol BUT
-    ungrounded → raises."""
+    """The assistant mentions XLM (a curated symbol) but XLM never
+    surfaced in any tool_result of this conversation. Curated-but-
+    ungrounded is the case the guard exists to catch — the model
+    invented a reference to a real symbol from its training data
+    instead of from the user's actual data. Must raise."""
     from api.agent.safety import assert_text_grounded, HallucinationDetected
     messages = [{"role": "user", "content": [{
         "type": "tool_result",
