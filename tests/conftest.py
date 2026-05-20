@@ -60,6 +60,39 @@ os.environ.setdefault("AUTH_TEST_BYPASS_ROLE", "admin")
 
 
 @pytest.fixture(autouse=True)
+def _agent_enabled_in_tests(monkeypatch):
+    """Default the agent feature flag to ENABLED for the test suite.
+
+    Phase 6 of #400 added `agent.enabled = false` to config.defaults.json
+    so production deploys are off-by-default until the operator flips
+    the override in config.json. Without this fixture, every endpoint
+    test that POSTs to /agent/* would 503 with reason=agent_disabled.
+
+    Tests that explicitly verify the disabled state
+    (test_endpoint_503_when_status_disabled, test_status_disabled_wins_
+    over_breaker, etc.) re-override load_config inside the test body —
+    pytest applies the last monkeypatch.setattr in scope, so those work
+    correctly on top of this fixture.
+    """
+    import api.agent.config as _agent_config
+
+    real_loader = _agent_config.load_config
+
+    def _enabled_load_config():
+        cfg = real_loader()
+        # Don't mutate the underlying defaults file in memory — copy
+        # and override.
+        cfg = dict(cfg)
+        agent_block = dict(cfg.get("agent") or {})
+        agent_block["enabled"] = True
+        cfg["agent"] = agent_block
+        return cfg
+
+    monkeypatch.setattr(_agent_config, "load_config", _enabled_load_config)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _auth_bypass_default(monkeypatch):
     """Default every test to admin-bypass + test JWT secret.
 
