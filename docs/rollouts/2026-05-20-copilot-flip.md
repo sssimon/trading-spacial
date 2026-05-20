@@ -1,4 +1,8 @@
-# Copilot rollout — flip a producción (Phase 6 of #400)
+# Copilot rollout — flip a producción (Phase 6 of #400) **[DEPRECATED]**
+
+> **⚠️ DEPRECATED — superseded by [`2026-05-20-multi-provider-flip.md`](2026-05-20-multi-provider-flip.md).**
+>
+> This runbook described the Anthropic-only flip planned for Phase 6 of epic #400. The operator paused it pre-flip to add multi-provider support (the multi-provider epic, post-#400). The new flip (DeepSeek as default + Anthropic as override) lives in `2026-05-20-multi-provider-flip.md`. This file is kept as a historical artifact of the original plan — do NOT execute these steps.
 
 **Fecha planeada:** martes 2026-05-20, ~10:30 UTC.
 **Operator:** Simon.

@@ -118,6 +118,8 @@ python scripts/agent_health_check.py --window 24h
 
 Esperado: todas las métricas en `0.0000` con `[OK]`. La sección "Spend breakdown by provider" puede estar vacía (sin spend todavía).
 
+**Nota:** `[OK]` pre-flip significa "sin datos suficientes para alarmar", NO "el agente está funcionando". Lo que estás validando acá es que el script corre sin error contra una DB vacía + las queries no rompen. La validación funcional real del agente arranca en §2 post-flip.
+
 ---
 
 ## 1. El flip (~5 min)
@@ -152,6 +154,26 @@ Esperado: `{"enabled": true, "reason": "ok"}`.
 
 ## 2. Post-flip smoke (~10 min)
 
+### 2.0 Obtener cookie JWT (para los curls)
+
+Varios pasos abajo usan `curl` contra endpoints autenticados (`/agent/conversations/{id}/turn`, `/agent/metrics`). Esos requieren la cookie de sesión que el dashboard ya tiene.
+
+```powershell
+# 1. Abrí el dashboard normalmente en el browser, logueate.
+# 2. Abrí DevTools (F12) → tab Application (Chrome) o Storage (Firefox).
+# 3. Cookies → http://localhost:8000 → copiá el value de `access_token`
+#    (o como se llame la cookie JWT — chequeá tu setup de auth).
+# 4. Guardalo en una variable de PowerShell para reusar:
+
+$AUTH = "access_token=<copy-paste-aquí>"
+
+# Verificá que funciona:
+curl http://localhost:8000/auth/me -H "Cookie: $AUTH"
+# Esperado: 200 con tu user info. 401 → cookie expirada, refrescala.
+```
+
+Si tu setup usa otra cookie name (e.g. `agent_token`, `jwt`), ajustá `$AUTH` correspondientemente. Los curls siguientes referencian `$AUTH`.
+
 ### 2.1 Primer turn por el Dock (default: deepseek-chat)
 
 Abrí el dashboard, abrí el dock con el botón ◈, mandá:
@@ -165,32 +187,72 @@ Esperado:
 
 ### 2.2 Verificá el provider en la audit row
 
+`ORDER BY id DESC LIMIT 1` puede picar la row equivocada si tu dashboard polled `/agent/status` u otra cosa generó un row mientras tanto. Si querés precisión exacta, agarrá el `conversation_id` del turn que acabás de hacer (visible en DevTools: Network → `/agent/conversations/<id>/turn`):
+
 ```powershell
-python -c "import sqlite3; con=sqlite3.connect('signals.db'); con.row_factory=sqlite3.Row; r=con.execute('SELECT model, provider, reasoning_tokens, cost_usd FROM agent_conversations ORDER BY id DESC LIMIT 1').fetchone(); print(dict(r))"
+python -c "
+import sqlite3
+con = sqlite3.connect('signals.db')
+con.row_factory = sqlite3.Row
+# Últimas 5 rows — alguna debería ser tu smoke turn.
+for r in con.execute(
+    'SELECT id, conversation_id, model, provider, reasoning_tokens, cost_usd '
+    'FROM agent_conversations ORDER BY id DESC LIMIT 5'
+):
+    print(dict(r))
+"
 ```
 
-Esperado: algo como:
+Esperado: al menos una row con shape:
 ```
 {'model': 'deepseek-chat', 'provider': 'deepseek', 'reasoning_tokens': 0, 'cost_usd': 0.0001}
 ```
 
 `provider='deepseek'` confirma que el migration de Fase 3b + la audit wiring de Fase 4 funcionaron end-to-end. `reasoning_tokens=0` esperado (chat-V3 reporta 0).
 
-### 2.3 Turn analítico con R1 (verifica el panel de razonamiento)
+### 2.3 Verificá R1 reasoning end-to-end (override directo)
 
-En el AgentDock, mandá:
+**Importante:** el Dock por default usa `deepseek-chat` (no R1), así que un turn casual por el Dock NO ejercita el path de reasoning. Los surfaces que defaultean a R1 (`kill_switch`, `autotune`) no tienen frontend mount todavía (deferred al post-rollout — ver §4). Para validar que la cadena reasoning_delta → SSE frame → audit.reasoning_tokens funciona, hay que forzar R1 con un override per-turn.
 
-> qué surface usa razonamiento
+```powershell
+# Si querés correr el curl en PowerShell, primero obtené tu cookie JWT
+# desde DevTools (ver §2.4 abajo).
 
-(o algo que el modelo conteste con análisis — la pregunta no importa; lo que importa es que la respuesta venga de un surface que defaultea a R1).
+curl -X POST http://localhost:8000/agent/conversations/r1-smoke/turn `
+  -H "Content-Type: application/json" `
+  -H "Cookie: $AUTH" `
+  --data "{\"surface\":\"dock\",\"model\":\"deepseek-reasoner\",\"messages\":[{\"role\":\"user\",\"content\":\"razona brevemente sobre si BTC esta caro o barato\"}]}"
+```
 
-Esperado:
-- Streaming text aparece.
-- DEBAJO del bubble principal aparece `<details>` con summary "razonamiento" colapsado.
-- Click en "razonamiento" expande el panel con el chain-of-thought de R1 (puede ser largo — varios kilobytes).
-- Cierre con click de nuevo.
+Esperado en el SSE response (parsealo con `--no-buffer` o miralo en el log):
+- Frames `{"type": "reasoning_delta", "text": "..."}` — chain-of-thought del modelo.
+- Frames `{"type": "text_delta", "text": "..."}` — respuesta final.
+- Frame `{"type": "message_end", "usage": {...}, "cost_usd": ...}` para cerrar.
 
-**Si NO aparece el panel:** el surface default que estás invocando podría ser `dock` (que es `deepseek-chat`, no R1). El panel solo aparece en surfaces que defaultean a `deepseek-reasoner` — kill_switch / autotune por design. Para forzar R1 en cualquier surface, podés POST directo con `body.model="deepseek-reasoner"`.
+Verificá la audit row:
+
+```powershell
+python -c "
+import sqlite3
+con = sqlite3.connect('signals.db')
+con.row_factory = sqlite3.Row
+r = con.execute(
+    'SELECT model, provider, output_tokens, reasoning_tokens, cost_usd '
+    'FROM agent_conversations WHERE conversation_id = ?',
+    ('r1-smoke',),
+).fetchone()
+print(dict(r))
+"
+```
+
+Esperado: algo como
+```
+{'model': 'deepseek-reasoner', 'provider': 'deepseek', 'output_tokens': 400, 'reasoning_tokens': 320, 'cost_usd': 0.0009}
+```
+
+`reasoning_tokens > 0` confirma que el adapter parseó `completion_tokens_details.reasoning_tokens`. `output_tokens >= reasoning_tokens` confirma que `completion_tokens` cuenta el total (reasoning + content) per DS contract.
+
+**Verificación del panel UI (deferred parcialmente):** los surfaces que defaultean a R1 (`kill_switch`, `autotune`) no tienen frontend mount todavía — el `<details>Razonamiento</details>` colapsable se renderiza correctamente en `AgentDock` y `SymbolDetail` (probado por vitest), pero verificación visual end-to-end del panel queda hasta que esos mounts existan (futuro epic). Hasta entonces, el operator puede invocar R1 vía override desde la consola pero el render del panel se confirma viendo el `reasoning` field en `result.current.msgs[1]` en DevTools de React, no en un panel visible en el Dock.
 
 ### 2.4 Override path (claude-* per-turn)
 
@@ -199,7 +261,7 @@ Esperado:
 ```powershell
 curl -X POST http://localhost:8000/agent/conversations/override-test/turn `
   -H "Content-Type: application/json" `
-  -H "Cookie: <tu cookie JWT>" `
+  -H "Cookie: $AUTH" `
   --data "{\"surface\":\"dock\",\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":\"hola desde claude\"}]}"
 ```
 
@@ -214,7 +276,8 @@ Esperado: `{'model': 'claude-sonnet-4-6', 'provider': 'anthropic'}`. **Esto conf
 ### 2.5 Confirmá `/agent/metrics`
 
 ```powershell
-curl http://localhost:8000/agent/metrics
+# /agent/metrics requiere cookie admin (require_role("admin") gate).
+curl http://localhost:8000/agent/metrics -H "Cookie: $AUTH"
 ```
 
 Esperado en el JSON:
@@ -295,40 +358,42 @@ Si `/agent/metrics today.by_provider` muestra una key `"unknown"`:
 ### También dispara abort
 
 - Cualquier incident de **leak de tenant** (audit row con `tenant_id` distinto al del JWT del request).
+  - **Single-user note:** para este bake (papá solo), el invariant es trivial — todas las rows tienen `tenant_id=1`. La query de detección queda preparada para multi-user futuro: `SELECT tenant_id, COUNT(*) FROM agent_conversations WHERE ts >= datetime('now', '-1 hour') GROUP BY tenant_id;` — en single-user esperás exactamente una fila con `tenant_id=1`; cualquier otra fila es leak.
 - Cualquier **hallucination detectada** en sample (corré `assert_text_grounded` sobre 10-20 turns al azar).
 - **Reasoning content leak**: el panel `<details>` no debería contener info de OTROS tenants. Si lo hace, abort + investigar.
 
-### Abort: cómo flippar
+### Abort: cómo flippar (parcial vs total)
 
-```powershell
-# Editá config.json:
-#   "agent": { "breaker_open": true }
-```
+Dos paths según la severidad del breach. **NO hay un path "mid-bake provider swap"** — mezclar "respuesta al incident" con "decisión post-mortem sobre DS-vs-Anthropic" sólo confunde la observación. Si decidís volver a Anthropic después del incident, eso es un epic separado post-mortem que actualiza `SURFACE_MODEL_DEFAULTS` en código y vuelve a flippar limpio.
 
-`load_config` re-lee en cada request → cambio toma efecto inmediatamente. Esperado post-flip-breaker:
-
-```
-curl /agent/status → {"enabled": false, "reason": "breaker_open"}
-```
-
-Para rollback total al estado pre-Fase-5 (Anthropic como default), flippá `enabled: false` Y editá `config.json` para fijar:
+**Parcial — pausa todo, mantiene config.** Útil cuando el problema es transitorio (DS API saturada, spike de spend) y querés ver si se resuelve solo.
 
 ```json
 {
   "agent": {
-    "enabled": false,
-    "surface_model_overrides": {
-      "dock":          "claude-sonnet-4-6",
-      "symbol_detail": "claude-haiku-4-5",
-      "kill_switch":   "claude-sonnet-4-6",
-      "autotune":      "claude-sonnet-4-6",
-      "historial":     "claude-haiku-4-5"
-    }
+    "enabled":      true,
+    "breaker_open": true
   }
 }
 ```
 
-**NOTA:** la key `surface_model_overrides` no existe todavía en el codebase. Si necesitás este path de rollback, primero implementálo (es un agregado pequeño a `default_model_for_surface()` para chequear el override antes del default).
+Esperado: `GET /agent/status` → `{"enabled": false, "reason": "breaker_open"}`. El Dock se oculta, todos los `/turn` returns 503. El bake puede reanudar flippando `breaker_open: false`. Audit + quotas state se preservan.
+
+**Total — rollback al estado pre-Fase-5.** Útil cuando el problema es estructural (hallucination grave, tenant leak, comportamiento que no calibra con un breaker).
+
+```json
+{
+  "agent": {
+    "enabled": false
+  }
+}
+```
+
+Esperado: `GET /agent/status` → `{"enabled": false, "reason": "agent_disabled"}`. El Dock se oculta. Audit table se preserva (sirve para forensics del incident).
+
+Después del rollback total, la decisión "volver a DS post-fix vs migrar back a Anthropic" se toma en post-mortem, no in-situ. Eso es un PR aparte que actualiza `SURFACE_MODEL_DEFAULTS` (back a Anthropic) o que ajusta lo que rompió en DS.
+
+`load_config` re-lee en cada request → cualquiera de los 2 cambios toma efecto inmediatamente sin restart de `btc_api.py`.
 
 ---
 
@@ -336,7 +401,13 @@ Para rollback total al estado pre-Fase-5 (Anthropic como default), flippá `enab
 
 Después de 48h sin breach:
 
-- `cache_hit_rate` no aplica de la misma forma (DS no reporta cache stats); verificar que el prefijo del system prompt es estable inspeccionando 2 rows consecutivos.
+- `cache_hit_rate` no aplica de la misma forma (DS no reporta cache stats). Lo que validás es que el system prompt prefix es byte-idéntico turn-a-turn (única palanca para activar el auto-cache de DS):
+
+  ```powershell
+  python -c "from api.agent.prompts.system import build_system_blocks; a = build_system_blocks('dock'); b = build_system_blocks('dock'); print('identical:', a == b)"
+  ```
+
+  Esperado: `identical: True`. Si `False`, hay drift en el prefix (cualquier byte diferente) y el auto-cache no hits → costo más alto. Investigar antes de aceptar el bake.
 - `error_rate < 0.05`
 - `p95_latency_ms <= 4000` (puede ser un poco más para surfaces R1 — aceptable si reasoning es largo)
 - `daily_spend_usd < 5.00`
@@ -391,12 +462,24 @@ for r in con.execute('SELECT * FROM agent_quotas'):
     print(dict(r))
 "
 
-# Sum cost by provider (post-flip pre/post comparison)
+# Sum cost by provider (post-flip pre/post comparison).
+# NOTE: SQLite treats double-quoted "now" as a column name, not the
+# string literal. Use Python to compute the cutoff and pass as a
+# parameter (safer than quoting acrobatics inside a PowerShell-quoted
+# python -c body).
 python -c "
 import sqlite3
+from datetime import datetime, timedelta, timezone
 con = sqlite3.connect('signals.db')
 con.row_factory = sqlite3.Row
-for r in con.execute('SELECT COALESCE(provider, \"unknown\") AS p, SUM(cost_usd) AS total, COUNT(*) AS n FROM agent_conversations WHERE ts >= datetime(\"now\", \"-24 hours\") GROUP BY p'):
+cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+rows = con.execute(
+    'SELECT COALESCE(provider, ?) AS p, '
+    '       SUM(cost_usd) AS total, COUNT(*) AS n '
+    'FROM agent_conversations WHERE ts >= ? GROUP BY p',
+    ('unknown', cutoff),
+)
+for r in rows:
     print(dict(r))
 "
 ```
