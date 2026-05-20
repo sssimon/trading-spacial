@@ -31,17 +31,29 @@ log = logging.getLogger("api.agent.clients")
 
 
 def get_anthropic_client():
-    """FastAPI dependency that returns the active LLMProvider.
+    """FastAPI dependency — status gate ONLY.
 
-    PHASE 1 NOTE: returns an LLMProvider, not a raw Anthropic SDK
-    client. The name is kept for backward-compat with the 13+ test
-    `dependency_overrides[get_anthropic_client]` call sites. Tests
-    inject `FakeAnthropicProvider` which implements the protocol.
+    Fase 3b of the multi-provider epic + PR #415 review issue (critical
+    bug): the dep no longer returns a provider instance. The handler
+    resolves the provider PER-REQUEST via
+    `api.agent.router._resolve_provider_for_model(body.model)` so an
+    override like `body.model = "claude-opus-4-7"` actually routes to
+    AnthropicProvider, regardless of what the surface default points
+    to. Pre-fix, the dep resolved the default's provider (DS post-
+    migration) and the override path silently routed claude-* model
+    ids to DeepSeek's API → 400 → friendly fallback. Operator who
+    relied on Opus override discovered the bug in production.
 
-    Returns the provider whose default surface model the registry
-    resolves. Today that's always Anthropic (default for `dock` is
-    `claude-sonnet-4-6`). Phase 3 of the multi-provider epic flips
-    the default to DeepSeek and this resolver follows.
+    The function name stays `get_anthropic_client` for backward-compat
+    with 13+ test `dependency_overrides[get_anthropic_client]` call
+    sites. The override semantics also shift:
+      - Pre-fix: override replaces the provider used in the loop.
+      - Post-fix: override is just a status-gate bypass (return value
+        unused). To swap the provider, monkeypatch
+        `api.agent.router._resolve_provider_for_model` instead.
+
+    Returns True on success (sentinel — the value is unused; the act
+    of resolving without raising IS the OK signal).
     """
     # Local import to dodge circulars (api.agent.config doesn't import
     # this module, but the router imports both).
@@ -49,24 +61,4 @@ def get_anthropic_client():
     status = get_agent_status()
     if not status.enabled:
         raise HTTPException(status_code=503, detail=status.reason)
-
-    # Resolve the provider for the default surface model. We use "dock"
-    # as the canonical reference surface — the actual model the request
-    # ends up using may differ (the router supports per-request model
-    # override), but the dep injection happens before the body sees the
-    # request, so we resolve against the default at this point.
-    from api.agent.models import default_model_for_surface  # noqa: PLC0415
-    from api.agent.providers.registry import (  # noqa: PLC0415
-        UnknownProviderError, get_provider_for_model,
-    )
-    default_model = default_model_for_surface("dock")
-    try:
-        return get_provider_for_model(default_model)
-    except UnknownProviderError:
-        log.error("default model %s has no registered provider", default_model)
-        raise HTTPException(status_code=503, detail="agent_disabled")
-    except ImportError as e:
-        # The provider's SDK (anthropic, etc) isn't installed — same
-        # closed-enum response as Phase 0's "key missing".
-        log.error("provider SDK not installed: %s", e)
-        raise HTTPException(status_code=503, detail="agent_disabled")
+    return True

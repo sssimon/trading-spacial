@@ -652,12 +652,31 @@ def anyio_backend():
 @pytest.fixture
 def authed_client(tmp_path, monkeypatch):
     """TestClient with the agent dependencies overridden: tenant_id=1,
-    api-key-check bypassed, and the Anthropic client swapped for a
-    FakeAnthropicClient that the test mutates."""
+    api-key-check bypassed, and a `_resolve_provider_for_model` stub
+    that routes by model prefix.
+
+    Fase 3b PR #415 review fix: provider resolution moved to per-request
+    in the router. Tests can no longer just inject a single FakeProvider
+    via dependency_overrides — they must route by model id. This fixture
+    sets up a smart resolver:
+
+      - `claude-*` model IDs → return the shared FakeAnthropicProvider
+        (the one yielded to the test so it can `.queue_turn(...)` it).
+      - `deepseek-*` model IDs → return a FakeDeepSeekProvider also
+        constructed by the fixture (accessible via the `ds_fake`
+        attribute the fixture yields).
+
+    Backward compat: most existing tests use the surface default (which
+    is now deepseek-chat post-Fase-3b). The smart resolver routes to
+    the DS fake by default. Tests that explicitly pass model="claude-*"
+    via body.model route to the Anthropic fake. Tests assert on
+    `fake_client.calls` for Anthropic and on `ds_fake.calls` for DS.
+    """
     import btc_api
     from fastapi.testclient import TestClient
     from auth.dependencies import get_current_tenant_id
     from api.agent.clients import get_anthropic_client
+    from api.agent import router as _router
 
     db_path = str(tmp_path / "signals.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
@@ -665,10 +684,30 @@ def authed_client(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY",  "sk-ds-fake-test-key")
 
+    from tests._fakes import FakeDeepSeekProvider
     fake_client = FakeAnthropicClient()
+    ds_fake = FakeDeepSeekProvider()
+    # Attach the DS fake as an attribute so tests that need it can
+    # reach it (`fake.ds_fake`) without changing the 2-tuple yield
+    # shape that the 7 existing call sites destructure as
+    # `client, fake = authed_client`.
+    fake_client.ds_fake = ds_fake  # type: ignore[attr-defined]
+
+    def _smart_resolve(model: str):
+        if model.startswith("claude-"):
+            return fake_client
+        if model.startswith("deepseek-"):
+            return ds_fake
+        from api.agent.providers.registry import UnknownProviderError
+        raise UnknownProviderError(f"no fake for model {model!r}")
+
+    monkeypatch.setattr(_router, "_resolve_provider_for_model", _smart_resolve)
     btc_api.app.dependency_overrides[get_current_tenant_id] = lambda: 1
-    btc_api.app.dependency_overrides[get_anthropic_client] = lambda: fake_client
+    # Bypass the status-gate dep (no key check, no breaker check). Tests
+    # that exercise the gate's failure modes override this themselves.
+    btc_api.app.dependency_overrides[get_anthropic_client] = lambda: True
     try:
         yield TestClient(btc_api.app), fake_client
     finally:
@@ -685,10 +724,16 @@ def test_endpoint_streams_text_deltas_as_sse_frames(authed_client):
         .usage(input_tokens=10, output_tokens=2)
         .build()
     )
+    # Fase 3b PR #415 review fix: defaults now route to DS. We queue
+    # on the Anthropic fake (`fake`), so force Anthropic routing via
+    # explicit model override. Decouples this test from default
+    # migrations — the invariant under test (SSE wire format) is
+    # provider-agnostic.
     resp = client.post(
         "/agent/conversations/test-conv-1/turn",
         json={
             "surface":  "dock",
+            "model":    "claude-sonnet-4-6",
             "messages": [{"role": "user", "content": "saluda"}],
         },
     )
@@ -879,6 +924,84 @@ def test_endpoint_503_when_api_key_missing_via_direct_curl(authed_client, monkey
         )
 
 
+def test_override_model_routes_to_correct_provider_post_migration(authed_client):
+    """PR #415 review CRITICAL BUG fix: provider must be resolved
+    per-REQUEST based on the active model id, not per-DEFAULT-SURFACE.
+
+    Pre-fix scenario (Fase 3b without this fix):
+      1. Default surface 'dock' resolves to 'deepseek-chat' (DS).
+      2. Operator POSTs body.model='claude-opus-4-7' (override).
+      3. Depends(get_anthropic_client) resolved DS adapter (default).
+      4. run_turn(client=DS, model='claude-opus-4-7') called.
+      5. DS adapter sent claude-opus-4-7 to api.deepseek.com → 400 → user sees
+         friendly fallback "El copiloto está saturado...".
+      6. Override path silently broken.
+
+    Post-fix: the handler calls _resolve_provider_for_model(model) AFTER
+    determining the model (default or override). This test asserts the
+    Anthropic fake was used when body.model='claude-sonnet-4-6' on a
+    dock surface (whose default is deepseek-chat). Without the fix,
+    the DS fake would have been used and the assertion below would
+    not match.
+    """
+    client, fake = authed_client
+    fake.queue_turn(
+        FakeTurnBuilder()
+        .text("Anthropic respondió.")
+        .end_turn()
+        .usage(input_tokens=10, output_tokens=5)
+        .build()
+    )
+    # Surface defaults to deepseek-chat but we OVERRIDE with claude.
+    resp = client.post(
+        "/agent/conversations/override-route-test/turn",
+        json={
+            "surface":  "dock",
+            "model":    "claude-sonnet-4-6",  # override the DS default
+            "messages": [{"role": "user", "content": "x"}],
+        },
+    )
+    assert resp.status_code == 200
+    _ = resp.text  # drain
+
+    # The Anthropic fake's stream() was called — calls list has the
+    # request kwargs we just sent. The DS fake's stream() was NOT
+    # called — its calls list stays empty.
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["model"] == "claude-sonnet-4-6"
+    assert len(fake.ds_fake.calls) == 0
+
+
+def test_default_model_routes_to_ds_provider_post_migration(authed_client):
+    """Companion to the override test: when NO model override is
+    given, the dock default 'deepseek-chat' resolves to the DS fake.
+    If this test fails, the default migration in Fase 3b didn't take
+    effect end-to-end (the loop is still seeing claude-sonnet-4-6
+    somehow)."""
+    client, fake = authed_client
+    fake.ds_fake.queue_turn(
+        FakeTurnBuilder()
+        .text("DeepSeek respondió.")
+        .end_turn()
+        .usage(input_tokens=10, output_tokens=5)
+        .build()
+    )
+    resp = client.post(
+        "/agent/conversations/default-route-test/turn",
+        json={
+            "surface":  "dock",   # no model override
+            "messages": [{"role": "user", "content": "x"}],
+        },
+    )
+    assert resp.status_code == 200
+    _ = resp.text
+
+    assert len(fake.ds_fake.calls) == 1
+    assert fake.ds_fake.calls[0]["model"] == "deepseek-chat"
+    # And the Anthropic fake never ran.
+    assert len(fake.calls) == 0
+
+
 def test_endpoint_400_when_conversation_id_invalid(authed_client):
     """PR #404 review issue 3: conversation_id must be alphanumeric +
     _-, max 128 chars. Blocks pollution and minor DoS."""
@@ -913,7 +1036,9 @@ def test_endpoint_audits_isolated_per_tenant(authed_client, monkeypatch):
     import btc_api
     from auth.dependencies import get_current_tenant_id
 
-    # First turn as tenant=1
+    # First turn as tenant=1. Fase 3b PR #415 review fix: explicit
+    # claude model override so the smart resolver routes to the
+    # Anthropic fake we just queued on (the test pre-dates DS defaults).
     client, fake = authed_client
     fake.queue_turn(
         FakeTurnBuilder().text("turn-1").end_turn().usage(input_tokens=10).build()
@@ -922,6 +1047,7 @@ def test_endpoint_audits_isolated_per_tenant(authed_client, monkeypatch):
         "/agent/conversations/iso-conv/turn",
         json={
             "surface":  "dock",
+            "model":    "claude-sonnet-4-6",
             "messages": [{"role": "user", "content": "msg-1"}],
         },
     )
@@ -937,6 +1063,7 @@ def test_endpoint_audits_isolated_per_tenant(authed_client, monkeypatch):
         "/agent/conversations/iso-conv-tenant2/turn",
         json={
             "surface":  "dock",
+            "model":    "claude-sonnet-4-6",
             "messages": [{"role": "user", "content": "msg-2"}],
         },
     )

@@ -33,6 +33,10 @@ from api.agent.clients import get_anthropic_client
 from api.agent.config import get_agent_status
 from api.agent.loop import run_turn
 from api.agent.models import ALLOWED_MODELS, default_model_for_surface
+from api.agent.providers.registry import (
+    UnknownProviderError,
+    get_provider_for_model,
+)
 from api.agent.quotas import QuotaExceeded, check_quota_pretrun
 from api.agent.proposals import (
     ACTION_APPLY_TUNE,
@@ -51,6 +55,26 @@ from auth.models import User
 log = logging.getLogger("api.agent.router")
 
 router = APIRouter(tags=["agent"])
+
+
+# ── Provider resolution seam (Fase 3b review fix) ───────────────────────
+#
+# Why this is a module-level function instead of inline `get_provider_for
+# _model(...)` in the handler: tests monkeypatch this to inject fakes.
+# The previous fixture pattern (`dependency_overrides[get_anthropic_client]
+# = lambda: fake`) doesn't work for per-request resolution because the dep
+# only fires once with no model context. This indirection lets tests
+# route by model id:
+#
+#     def _stub_resolve(model):
+#         if model.startswith("claude-"): return FakeAnthropicProvider()
+#         if model.startswith("deepseek-"): return FakeDeepSeekProvider()
+#         raise UnknownProviderError(model)
+#     monkeypatch.setattr(router, "_resolve_provider_for_model", _stub_resolve)
+#
+# Production behavior delegates to the registry unchanged.
+def _resolve_provider_for_model(model: str):
+    return get_provider_for_model(model)
 
 
 # ── /agent/status (Phase 0) ────────────────────────────────────────────
@@ -110,7 +134,7 @@ async def post_agent_turn(
     ),
     body: _AgentTurnRequest = ...,  # noqa: B008
     tenant_id: int = Depends(get_current_tenant_id),
-    client = Depends(get_anthropic_client),  # noqa: B008
+    _agent_gate = Depends(get_anthropic_client),  # noqa: B008, ARG001
 ):
     """Stream a single user-turn through the model + tool loop.
 
@@ -119,9 +143,18 @@ async def post_agent_turn(
     (text_delta / tool_use_start / tool_use_result / message_end / error).
 
     Pre-reg §4.4. Auth: cookie JWT → tenant_id. The model never sees
-    tenant_id; every tool call is bound server-side. The Anthropic
-    client is injected via Depends so tests override with a fake.
+    tenant_id; every tool call is bound server-side. Provider is
+    resolved per-request via `_resolve_provider_for_model(model)` so
+    a `body.model` override routes to the correct adapter regardless
+    of what the surface default points to (PR #415 review fix).
+
+    `_agent_gate` is the status-gate dep — its return value is unused
+    but the Depends() call still fires the 503-on-disabled check
+    before the handler body runs.
     """
+    # Double-check status (the dep already did this, but being explicit
+    # here means a future refactor that drops the dep doesn't silently
+    # bypass the gate).
     status = get_agent_status()
     if not status.enabled:
         raise HTTPException(status_code=503, detail=status.reason)
@@ -129,6 +162,20 @@ async def post_agent_turn(
     model = body.model or default_model_for_surface(body.surface)
     if model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail="model_not_allowed")
+
+    # Resolve provider per-request based on the active model. The
+    # override path (body.model="claude-opus-4-7" when default is
+    # deepseek-chat) routes through this and lands on AnthropicProvider,
+    # not whatever the dock default points to (PR #415 review fix).
+    try:
+        client = _resolve_provider_for_model(model)
+    except UnknownProviderError:
+        raise HTTPException(status_code=400, detail="model_not_allowed")
+    except ImportError as e:
+        # Provider SDK missing in this deploy — same closed-enum
+        # response as "key missing" (Phase 0 §3.3 leak guard).
+        log.error("provider SDK not installed for %s: %s", model, e)
+        raise HTTPException(status_code=503, detail="agent_disabled")
 
     # Phase 5: per-tenant daily spend quota. Distinct from the global
     # breaker (which lives inside get_agent_status above) — quota is
