@@ -214,3 +214,24 @@ def test_agent_status_does_not_require_auth(client, monkeypatch):
         f"auth/middleware.py:_PUBLIC_PATHS_EXACT. The endpoint MUST be "
         f"public — the frontend hits it before the login flow resolves."
     )
+
+
+def test_protected_paths_still_require_auth(client, monkeypatch):
+    """Negative guard — the whitelist must stay restrictive.
+
+    Defends against the failure mode where someone copy-pastes the
+    /agent/status whitelist entry and accidentally adds a path that
+    should NOT be public (e.g. /positions, /admin/*, /health/symbols).
+
+    Same bypass-disable pattern as the test above so the middleware
+    actually runs. Picks /positions as the canary because it returns
+    tenant-scoped data and must never be reachable without a JWT.
+    """
+    monkeypatch.delenv("AUTH_TEST_BYPASS_ROLE", raising=False)
+    resp = client.get("/positions")
+    assert resp.status_code == 401, (
+        f"GET /positions returned {resp.status_code} ({resp.text!r}) "
+        f"without an auth cookie. /positions is tenant-scoped and MUST "
+        f"require auth. Did somebody accidentally add it (or a prefix "
+        f"that covers it) to auth/middleware.py:_PUBLIC_PATHS_EXACT?"
+    )

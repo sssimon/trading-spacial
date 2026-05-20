@@ -103,7 +103,7 @@ _PUBLIC_PATHS_EXACT: frozenset = frozenset({
     # closed-enum `{enabled, reason}` shape and NEVER leaks env-var
     # names / paths (locked by test_agent_status_body_never_leaks_*).
     # Without this entry, curl /agent/status returns 401 — caught by
-    # papá during Fase 5 rollout smoke. The test that should have
+    # the operator during Fase 5 rollout smoke. The test that should have
     # caught this earlier (test_agent_status_does_not_require_auth)
     # was passing in CI because conftest's autouse fixture activates
     # the test bypass; updated alongside this fix to disable bypass
