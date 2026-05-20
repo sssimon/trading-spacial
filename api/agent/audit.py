@@ -73,7 +73,7 @@ def record_turn(
                     int(input_tokens or 0), int(output_tokens or 0),
                     int(cache_read_input_tokens or 0),
                     int(cache_creation_input_tokens or 0),
-                    int(reasoning_tokens) if reasoning_tokens else None,
+                    int(reasoning_tokens) if reasoning_tokens is not None else None,
                     latency_ms,
                     cost_usd,
                     json.dumps(content_summary) if content_summary else None,

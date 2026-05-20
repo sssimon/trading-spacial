@@ -183,6 +183,76 @@ def test_record_turn_stores_null_reasoning_tokens_when_absent(tmp_path, monkeypa
     assert dict(row)["reasoning_tokens"] is None
 
 
+def test_record_turn_preserves_explicit_zero_reasoning_tokens(tmp_path, monkeypatch):
+    """PR #416 review issue 1: an explicit reasoning_tokens=0 is NOT
+    the same as None. DS chat-V3 emits 0 in
+    completion_tokens_details.reasoning_tokens (because the field is
+    present in the response even when there's no reasoning), and
+    analytics queries that count 'rows where the provider reported the
+    field at all' need to distinguish.
+
+    Pre-fix the audit code did `int(reasoning_tokens) if
+    reasoning_tokens else None` — falsy check colapsa 0 a NULL. The fix
+    is `is not None` instead.
+    """
+    import btc_api
+    from api.agent.audit import record_turn
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    btc_api.init_db()
+
+    record_turn(
+        tenant_id=1, surface="dock", conversation_id="c-zero",
+        role="assistant", model="deepseek-chat",
+        provider="deepseek",
+        input_tokens=100, output_tokens=50,
+        reasoning_tokens=0,  # explicit zero
+        cost_usd=0.01,
+    )
+    con = btc_api.get_db()
+    try:
+        row = con.execute(
+            "SELECT reasoning_tokens FROM agent_conversations "
+            "WHERE conversation_id = 'c-zero'"
+        ).fetchone()
+    finally:
+        con.close()
+    # 0 preserved, NOT collapsed to NULL.
+    assert dict(row)["reasoning_tokens"] == 0
+    assert dict(row)["reasoning_tokens"] is not None
+
+
+def test_provider_mapping_consistent_across_registry_and_audit():
+    """PR #416 review issue 2: the prefix→provider mapping lives in
+    THREE places (registry.PROVIDER_NAME_BY_PREFIX, audit._provider_
+    for_model, db/schema.py backfill SQL). audit.py deliberately
+    doesn't import registry.py (avoids the lazy SDK chain), but that
+    creates drift risk — adding a new provider to the registry without
+    updating audit silently buckets the new turns under 'unknown' in
+    /agent/metrics.
+
+    This test asserts the two Python sites stay in sync. The SQL
+    backfill in db/schema.py is also covered indirectly: if a new
+    prefix is added to the registry, the backfill UPDATE in
+    db/schema.py needs to be extended too — but that's a SQL string
+    that doesn't ergonomically participate in a runtime check; the
+    review of any provider-addition PR is the gate there.
+    """
+    from api.agent.audit import _provider_for_model
+    from api.agent.providers.registry import PROVIDER_NAME_BY_PREFIX
+
+    for prefix, expected_provider in PROVIDER_NAME_BY_PREFIX.items():
+        # Construct a sample model id with this prefix. Any suffix
+        # works — _provider_for_model only looks at the prefix.
+        sample = f"{prefix}-sample-model"
+        actual = _provider_for_model(sample)
+        assert actual == expected_provider, (
+            f"audit._provider_for_model({sample!r}) returned {actual!r}; "
+            f"expected {expected_provider!r}. audit.py and registry.py "
+            f"have drifted on the {prefix!r} prefix — update one or both."
+        )
+
+
 def test_turn_audit_wrapper_derives_provider_from_model():
     """Static check of the wrapper's provider derivation. Used at
     construction time, so the in-flight loop emits the right value."""
