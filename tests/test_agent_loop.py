@@ -398,6 +398,102 @@ async def test_run_turn_upstream_429_emits_error_no_raise(tmp_db):
            "intenta" in errors[0].user_message.lower()
 
 
+# ── ReasoningDelta translation (Fase 3a of multi-provider epic) ────────
+
+
+@pytest.mark.anyio
+async def test_run_turn_forwards_reasoning_delta_as_loop_event(tmp_db):
+    """When a provider yields LLMReasoningDelta in its stream, the
+    loop translates it into a ReasoningDelta LoopEvent. The frontend
+    receives the SSE `reasoning_delta` frame separately from
+    `text_delta` so it can render the reasoning in a collapsible
+    panel without contaminating the assistant's text bubble.
+    """
+    from api.agent.loop import (
+        ReasoningDelta, TextDelta, MessageEnd, run_turn,
+    )
+    from api.agent.providers.base import (
+        LLMReasoningDelta, LLMStreamEnd, LLMTextDelta, SyntheticTextBlock,
+    )
+    from api.agent.providers.anthropic_adapter import AnthropicProvider
+
+    # Minimal in-test provider that yields a controlled LLMEvent sequence.
+    # We extend AnthropicProvider (so format_* methods are wired) but
+    # override stream() to yield exactly what we want.
+    class _ReasoningProvider(AnthropicProvider):
+        name = "anthropic"
+
+        def has_api_key(self):
+            return True
+
+        async def stream(self, *, model, system_blocks, messages, tools, max_tokens):
+            yield LLMReasoningDelta(text="Pienso ")
+            yield LLMReasoningDelta(text="que esto...")
+            yield LLMTextDelta(text="Respuesta final.")
+            yield LLMStreamEnd(
+                stop_reason="end_turn",
+                usage={"input_tokens": 50, "output_tokens": 10,
+                       "cache_read_input_tokens": 0,
+                       "cache_creation_input_tokens": 0},
+                content=[SyntheticTextBlock(text="Respuesta final.")],
+            )
+
+    provider = _ReasoningProvider()
+
+    msgs = [{"role": "user", "content": "razona"}]
+    events = []
+    async for ev in run_turn(
+        client=provider, model="claude-sonnet-4-6", surface="dock",
+        messages=msgs, tenant_id=1,
+    ):
+        events.append(ev)
+
+    reasoning = [e for e in events if isinstance(e, ReasoningDelta)]
+    text = [e for e in events if isinstance(e, TextDelta)]
+    ends = [e for e in events if isinstance(e, MessageEnd)]
+
+    # Reasoning and text are distinct event streams.
+    assert "".join(r.text for r in reasoning) == "Pienso que esto..."
+    assert "".join(t.text for t in text) == "Respuesta final."
+    assert len(ends) == 1
+    # Reasoning text NEVER leaks into the assistant's text channel.
+    assert "Pienso" not in "".join(t.text for t in text)
+
+
+def test_streaming_serializes_reasoning_delta_as_sse_frame():
+    """sse_serialize converts ReasoningDelta LoopEvent → SSE frame with
+    `type: reasoning_delta`. The frontend's useAgentStream switch
+    handles this frame (Fase 3a frontend wiring)."""
+    import asyncio
+    from api.agent.loop import ReasoningDelta, MessageEnd
+    from api.agent.streaming import sse_serialize
+
+    async def _events():
+        yield ReasoningDelta(text="chain ")
+        yield ReasoningDelta(text="of thought")
+        yield MessageEnd(
+            usage={"input_tokens": 0, "output_tokens": 0,
+                   "cache_read_input_tokens": 0,
+                   "cache_creation_input_tokens": 0},
+            stop_reason="end_turn", cost_usd=0.0,
+        )
+
+    async def _drive():
+        frames = []
+        async for f in sse_serialize(_events(), keepalive_seconds=10.0):
+            frames.append(f)
+        return frames
+
+    frames = asyncio.run(_drive())
+    rendered = b"".join(frames).decode("utf-8")
+    # Two reasoning_delta frames + one message_end.
+    assert rendered.count('"type": "reasoning_delta"') == 2
+    assert '"text": "chain "' in rendered
+    assert '"text": "of thought"' in rendered
+    # AND no text_delta frame (reasoning is its own channel).
+    assert '"type": "text_delta"' not in rendered
+
+
 # ── Cost model ─────────────────────────────────────────────────────────
 
 

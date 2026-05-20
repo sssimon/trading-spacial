@@ -129,6 +129,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
                 key={i}
                 role={m.role}
                 text={m.text}
+                reasoning={m.reasoning}
                 toolChips={m.tool_chips}
                 proposals={m.proposals}
                 onConfirmProposal={confirmProposal}
@@ -173,6 +174,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
 interface DockMessageProps {
   role:       'user' | 'assistant';
   text:       string;
+  reasoning?: string;
   toolChips?: ToolChip[];
   proposals?: ProposalChip[];
   onConfirmProposal?: (proposal_id: string) => void;
@@ -180,7 +182,7 @@ interface DockMessageProps {
 }
 
 const DockMessage: React.FC<DockMessageProps> = ({
-  role, text, toolChips, proposals, onConfirmProposal, showTyping,
+  role, text, reasoning, toolChips, proposals, onConfirmProposal, showTyping,
 }) => {
   if (role === 'user') {
     return (
@@ -204,6 +206,14 @@ const DockMessage: React.FC<DockMessageProps> = ({
           <div className={`${styles.bubble} ${styles.bubbleAsst}`}>
             <DockText text={text} />
           </div>
+        )}
+        {reasoning && reasoning.length > 0 && (
+          <details className={styles.reasoning}>
+            <summary className={styles.reasoningSummary}>Razonamiento</summary>
+            <div className={styles.reasoningBody}>
+              <DockText text={reasoning} />
+            </div>
+          </details>
         )}
         {toolChips && toolChips.length > 0 && (
           <div className={styles.toolChipsRow}>

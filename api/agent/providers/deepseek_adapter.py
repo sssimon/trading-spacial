@@ -41,6 +41,7 @@ from typing import Any, AsyncIterator
 
 from api.agent.providers.base import (
     LLMEvent,
+    LLMReasoningDelta,
     LLMStreamEnd,
     LLMTextDelta,
     LLMToolUseStart,
@@ -67,7 +68,11 @@ log = logging.getLogger("api.agent.providers.deepseek")
 # Fase 3 adds deepseek-reasoner (R1).
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "deepseek-chat":     {"in": 0.27,  "out":  1.10},
-    # "deepseek-reasoner": {"in": 0.55,  "out":  2.19},  # Fase 3
+    # Fase 3 of the multi-provider epic: R1 reasoner. Reasoning tokens
+    # are billed as output (DS's contract — they count in the
+    # `completion_tokens` field of `usage`). Cost calc applies output
+    # pricing to (content + reasoning) tokens.
+    "deepseek-reasoner": {"in": 0.55,  "out":  2.19},
 }
 
 
@@ -267,6 +272,19 @@ class DeepSeekProvider:
                     if "content" in delta and delta["content"] is not None:
                         text_buf += delta["content"]
                         yield LLMTextDelta(text=delta["content"])
+
+                    # Fase 3 of the multi-provider epic: DeepSeek-R1
+                    # emits `reasoning_content` as a separate field on
+                    # the delta, streaming the chain-of-thought BEFORE
+                    # the final answer's `content`. Adapter yields
+                    # LLMReasoningDelta; loop forwards to a separate
+                    # SSE event type the frontend renders as a
+                    # collapsible panel. The reasoning text is NOT
+                    # included in text_buf (kept distinct from the
+                    # final assistant content).
+                    if ("reasoning_content" in delta
+                            and delta["reasoning_content"] is not None):
+                        yield LLMReasoningDelta(text=delta["reasoning_content"])
 
                     for tc in (delta.get("tool_calls") or []):
                         idx = int(tc.get("index", 0))

@@ -36,6 +36,11 @@ export interface ChatMsg {
   // Phase 3: signed proposal envelopes attached to this assistant
   // message. The dock renders an amber confirm button per chip.
   proposals?:  ProposalChip[];
+  // Fase 3a of the multi-provider epic: streaming chain-of-thought
+  // text from DeepSeek-R1. Kept distinct from `text` so the UI can
+  // render it in a collapsible panel that the user opts into. Default
+  // closed — most users want the answer, not the chain-of-thought.
+  reasoning?: string;
 }
 
 export interface UseAgentStreamOptions {
@@ -198,6 +203,25 @@ function applyEvent(
         const last = updated[updated.length - 1];
         if (last && last.role === 'assistant') {
           updated[updated.length - 1] = { ...last, text: last.text + ev.text };
+        }
+        return updated;
+      });
+      break;
+
+    case 'reasoning_delta':
+      // Fase 3a of the multi-provider epic: accumulate into the
+      // `reasoning` field on the same assistant message. NEVER appends
+      // to `text` — the two channels are kept distinct so the UI can
+      // render the reasoning in a collapsible panel without
+      // contaminating the assistant's text bubble.
+      setMsgs((cur) => {
+        const updated = [...cur];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant') {
+          updated[updated.length - 1] = {
+            ...last,
+            reasoning: (last.reasoning ?? '') + ev.text,
+          };
         }
         return updated;
       });

@@ -271,6 +271,34 @@
   50%      { opacity: 1; }
 }
 
+/* Fase 3a of multi-provider epic — DeepSeek-R1 reasoning panel.
+ * Collapsible <details> that the user opts into. Default closed so
+ * the assistant bubble stays the focal element. */
+.reasoning {
+  margin-top: 6px;
+  font-family: var(--nbc-font-mono);
+  font-size: 11px;
+  color: var(--nbc-fg-muted);
+  border-left: 2px solid var(--nbc-border-dim);
+  padding-left: 8px;
+}
+.reasoningSummary {
+  cursor: pointer;
+  user-select: none;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--nbc-fg-muted);
+  padding: 2px 0;
+}
+.reasoningSummary:hover {
+  color: var(--nbc-fg);
+}
+.reasoningBody {
+  padding: 4px 0 4px 4px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 /* Phase 3 of #400 — signed-proposal confirm button. Amber by default
  * (destructive side-effects deserve weight), transitions to bull on
  * success or bear on drift/expired/error. The row groups a summary

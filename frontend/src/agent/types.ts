@@ -24,6 +24,19 @@ export interface AgentTextDelta {
   text: string;
 }
 
+/**
+ * Fase 3a of the multi-provider epic — streaming chain-of-thought
+ * chunks emitted by DeepSeek-R1 (and any future reasoning model).
+ * Comes through as a separate event channel from `text_delta` so the
+ * frontend can render the reasoning in a collapsible panel without
+ * mixing it into the assistant's text bubble. Treat as user-visible
+ * (the operator that expands the panel sees the model's reasoning).
+ */
+export interface AgentReasoningDelta {
+  type: 'reasoning_delta';
+  text: string;
+}
+
 export interface AgentToolUseStart {
   type:  'tool_use_start';
   tool:  string;
@@ -86,6 +99,7 @@ export interface AgentProposalEvent {
 
 export type AgentStreamEvent =
   | AgentTextDelta
+  | AgentReasoningDelta
   | AgentToolUseStart
   | AgentToolUseResult
   | AgentProposalEvent

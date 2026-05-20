@@ -472,6 +472,7 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
             key={i}
             role={m.role}
             text={m.text}
+            reasoning={m.reasoning}
             toolChips={m.tool_chips}
             proposals={m.proposals}
             onConfirmProposal={confirmProposal}
@@ -525,6 +526,7 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
 interface CopilotMessageProps {
   role:               'user' | 'assistant';
   text:               string;
+  reasoning?:         string;
   verdict?:           Verdict;
   toolChips?:         ToolChip[];
   proposals?:         ProposalChip[];
@@ -532,7 +534,7 @@ interface CopilotMessageProps {
   showTyping?:        boolean;
 }
 const CopilotMessage: React.FC<CopilotMessageProps> = ({
-  role, text, verdict, toolChips, proposals, onConfirmProposal, showTyping,
+  role, text, reasoning, verdict, toolChips, proposals, onConfirmProposal, showTyping,
 }) => {
   if (role === 'user') {
     return (
@@ -562,6 +564,14 @@ const CopilotMessage: React.FC<CopilotMessageProps> = ({
           <div className={[styles.cpBubble, styles.cpBubbleAsst, verdictClass].filter(Boolean).join(' ')}>
             <FormattedText text={text} />
           </div>
+        )}
+        {reasoning && reasoning.length > 0 && (
+          <details className={styles.reasoning}>
+            <summary className={styles.reasoningSummary}>Razonamiento</summary>
+            <div className={styles.reasoningBody}>
+              <FormattedText text={reasoning} />
+            </div>
+          </details>
         )}
         {toolChips && toolChips.length > 0 && (
           <div className={styles.toolChipsRow}>

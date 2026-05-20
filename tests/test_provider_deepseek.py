@@ -523,6 +523,103 @@ async def test_deepseek_stream_non_200_status_raises(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_deepseek_stream_emits_reasoning_delta_then_text(monkeypatch):
+    """Fase 3a of multi-provider epic: deepseek-reasoner (R1) emits
+    `reasoning_content` deltas BEFORE the final answer's `content`.
+    Adapter must yield LLMReasoningDelta for each reasoning chunk +
+    LLMTextDelta for content, kept distinct.
+
+    The reasoning text is NOT included in LLMStreamEnd.content (which
+    carries the synthesized blocks for the assistant message). Only
+    the final `content` makes it back to the model on the next turn —
+    reasoning is a UI-side surface concern, not part of the
+    conversation context.
+    """
+    from api.agent.providers.deepseek_adapter import DeepSeekProvider
+    from api.agent.providers.base import (
+        LLMReasoningDelta, LLMStreamEnd, LLMTextDelta, SyntheticTextBlock,
+    )
+
+    lines = [
+        # R1 streams reasoning first
+        'data: {"choices":[{"delta":{"reasoning_content":"Veo "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"que el "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"WR20 está alto."}}]}',
+        # Then the final content
+        'data: {"choices":[{"delta":{"content":"Recomiendo "}}]}',
+        'data: {"choices":[{"delta":{"content":"mantener la posición."}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":80,"completion_tokens":200}}',
+        'data: [DONE]',
+    ]
+    _install_fake_httpx(monkeypatch, lines=lines)
+
+    p = DeepSeekProvider(api_key="sk-fake")
+    events = []
+    async for ev in p.stream(
+        model="deepseek-reasoner", system_blocks=[], messages=[],
+        tools=[], max_tokens=4096,
+    ):
+        events.append(ev)
+
+    reasoning = [e for e in events if isinstance(e, LLMReasoningDelta)]
+    text = [e for e in events if isinstance(e, LLMTextDelta)]
+    ends = [e for e in events if isinstance(e, LLMStreamEnd)]
+
+    assert "".join(r.text for r in reasoning) == "Veo que el WR20 está alto."
+    assert "".join(t.text for t in text) == "Recomiendo mantener la posición."
+
+    end = ends[0]
+    # Final content has only the answer, not the reasoning.
+    text_blocks = [b for b in end.content if isinstance(b, SyntheticTextBlock)]
+    assert len(text_blocks) == 1
+    assert text_blocks[0].text == "Recomiendo mantener la posición."
+    assert "Veo que" not in text_blocks[0].text
+
+
+@pytest.mark.anyio
+async def test_deepseek_stream_reasoning_event_ordering(monkeypatch):
+    """Reasoning chunks arrive interleaved with each other; content
+    can start before reasoning fully done (rare but possible). The
+    adapter yields events in the order they arrive — order verified
+    here so the frontend can rely on it for progressive rendering."""
+    from api.agent.providers.deepseek_adapter import DeepSeekProvider
+    from api.agent.providers.base import (
+        LLMReasoningDelta, LLMStreamEnd, LLMTextDelta,
+    )
+
+    lines = [
+        'data: {"choices":[{"delta":{"reasoning_content":"a "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"b "}}]}',
+        'data: {"choices":[{"delta":{"content":"final"}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"c"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+        'data: [DONE]',
+    ]
+    _install_fake_httpx(monkeypatch, lines=lines)
+
+    p = DeepSeekProvider(api_key="sk-fake")
+    types = []
+    async for ev in p.stream(
+        model="deepseek-reasoner", system_blocks=[], messages=[],
+        tools=[], max_tokens=4096,
+    ):
+        if isinstance(ev, LLMReasoningDelta):
+            types.append(("r", ev.text))
+        elif isinstance(ev, LLMTextDelta):
+            types.append(("t", ev.text))
+        elif isinstance(ev, LLMStreamEnd):
+            types.append(("end", None))
+
+    # Exact ordering preserved.
+    assert types == [
+        ("r", "a "), ("r", "b "),
+        ("t", "final"),
+        ("r", "c"),
+        ("end", None),
+    ]
+
+
+@pytest.mark.anyio
 async def test_deepseek_stream_sends_correct_wire_body(monkeypatch):
     """Sanity check on the request body the adapter sends to DS.
     Verifies: model echoed, messages prepended with system blocks,

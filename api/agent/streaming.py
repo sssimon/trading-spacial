@@ -7,9 +7,12 @@ with a `type` field that the frontend's `useAgentStream` hook switches on.
 Pre-reg §6.2. The event-type enum is closed:
 
     text_delta | tool_use_start | tool_use_result | message_end | error
-                                                                   keepalive
+    proposal | keepalive | reasoning_delta
 
 Phase 5 adds the `keepalive` heartbeat — see sse_serialize() docstring.
+Fase 3 of the multi-provider epic adds `reasoning_delta` — streamed
+chain-of-thought chunks from DeepSeek-R1 that the frontend renders in
+a collapsible panel.
 """
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ from api.agent.loop import (
     LoopEvent,
     MessageEnd,
     ProposalEvent,
+    ReasoningDelta,
     TextDelta,
     ToolUseResult,
     ToolUseStart,
@@ -102,6 +106,14 @@ async def sse_serialize(
         # dispatch on the same closed event type set.
         if isinstance(ev, TextDelta):
             yield _sse_frame("text_delta", {"text": ev.text})
+        elif isinstance(ev, ReasoningDelta):
+            # Fase 3 of the multi-provider epic: streaming chain-of-
+            # thought chunks from DeepSeek-R1. Frontend renders these
+            # in a collapsible panel separate from the assistant's
+            # final text bubble. SSE frame keeps the same `text` shape
+            # as text_delta so the hook's accumulation pattern is
+            # symmetric.
+            yield _sse_frame("reasoning_delta", {"text": ev.text})
         elif isinstance(ev, ToolUseStart):
             yield _sse_frame("tool_use_start", {"tool": ev.tool})
         elif isinstance(ev, ToolUseResult):

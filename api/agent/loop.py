@@ -44,6 +44,7 @@ from typing import Any, AsyncIterator, Optional
 
 from api.agent.prompts import build_system_blocks
 from api.agent.providers.base import (
+    LLMReasoningDelta,
     LLMStreamEnd,
     LLMTextDelta,
     LLMToolUseStart,
@@ -63,6 +64,20 @@ MAX_TURNS_PER_CONVERSATION = 30
 
 @dataclass(frozen=True)
 class TextDelta:
+    text: str
+
+
+@dataclass(frozen=True)
+class ReasoningDelta:
+    """Streaming chunk of the model's reasoning (chain-of-thought).
+    DeepSeek-R1 emits these; the frontend renders them in a collapsible
+    panel separate from the assistant's final text bubble. Reasoning
+    is OUTPUT of the model — should be treated as user-visible (the
+    operator that opens the panel sees the system's reasoning).
+
+    Fase 3 of the multi-provider epic. The text is NOT included in
+    text_delta events; the two streams are kept distinct.
+    """
     text: str
 
 
@@ -107,8 +122,8 @@ class ErrorEvent:
 
 
 LoopEvent = (
-    TextDelta | ToolUseStart | ToolUseResult | ProposalEvent
-    | MessageEnd | ErrorEvent
+    TextDelta | ReasoningDelta | ToolUseStart | ToolUseResult
+    | ProposalEvent | MessageEnd | ErrorEvent
 )
 
 
@@ -257,16 +272,17 @@ async def run_turn(
             ):
                 if isinstance(ev, LLMTextDelta):
                     yield TextDelta(text=ev.text)
+                elif isinstance(ev, LLMReasoningDelta):
+                    yield ReasoningDelta(text=ev.text)
                 elif isinstance(ev, LLMToolUseStart):
                     yield ToolUseStart(tool=ev.name)
                 elif isinstance(ev, LLMStreamEnd):
                     hop_usage = ev.usage
                     final_stop_reason = ev.stop_reason
                     final_content = ev.content
-                # Other LLMEvent types (LLMReasoningDelta, LLMToolUseEnd)
-                # are silently dropped in Phase 1. Phase 3 of the
-                # multi-provider epic wires LLMReasoningDelta to a new
-                # LoopEvent + SSE frame.
+                # LLMToolUseEnd is silently dropped — the loop reads
+                # tool_use blocks off LLMStreamEnd.content rather than
+                # per-event (Phase 1 design decision; preserved).
         except Exception as e:  # noqa: BLE001
             log.warning("agent loop upstream error: %s", e, exc_info=True)
             yield ErrorEvent(

@@ -51,10 +51,10 @@ def test_allowed_models_snapshot():
     deliberate. Removing one is even more so — it can break in-flight
     overrides.
 
-    Fase 2 of the multi-provider epic added `deepseek-chat`. The
-    defaults still point at Anthropic models; DS is opt-in via the
-    per-turn `model` override field on /agent/conversations/{id}/turn.
-    Fase 3 will add `deepseek-reasoner` (R1) and migrate defaults.
+    Fase 2 of the multi-provider epic added `deepseek-chat`.
+    Fase 3a adds `deepseek-reasoner` (R1) with reasoning_content
+    streaming. Defaults still point at Anthropic — Fase 3b migrates
+    them after parity validation.
     """
     from api.agent.models import ALLOWED_MODELS
 
@@ -63,6 +63,7 @@ def test_allowed_models_snapshot():
         "claude-haiku-4-5",
         "claude-opus-4-7",
         "deepseek-chat",
+        "deepseek-reasoner",
     })
 
 

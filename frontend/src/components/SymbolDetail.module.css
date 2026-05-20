@@ -785,6 +785,33 @@
    feels identical: amber by default, bull on ok, bear on drift/
    expired/error. CSS class names match useAgentStream/types.ts.
    ============================================================ */
+/* Fase 3a of multi-provider epic — DeepSeek-R1 reasoning panel.
+   Same shape as AgentDock.module.css's .reasoning rules. */
+.reasoning {
+  margin-top: 6px;
+  font-family: var(--nbc-font-mono);
+  font-size: 11px;
+  color: var(--nbc-fg-muted);
+  border-left: 2px solid var(--nbc-border-dim);
+  padding-left: 8px;
+}
+.reasoningSummary {
+  cursor: pointer;
+  user-select: none;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--nbc-fg-muted);
+  padding: 2px 0;
+}
+.reasoningSummary:hover {
+  color: var(--nbc-fg);
+}
+.reasoningBody {
+  padding: 4px 0 4px 4px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 .toolChipsRow {
   display: flex;
   flex-wrap: wrap;

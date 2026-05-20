@@ -61,10 +61,13 @@ ALLOWED_MODELS: frozenset[str] = frozenset({
     "claude-opus-4-7",
     # Fase 2 of the multi-provider epic: deepseek-chat (V3). Default
     # surface mappings still point at claude-* models — DeepSeek is
-    # opt-in via per-turn `model` override until Fase 3 migrates
+    # opt-in via per-turn `model` override until Fase 3b migrates
     # defaults after parity validation.
     "deepseek-chat",
-    # "deepseek-reasoner",  # Fase 3 adds R1 (reasoning_content event).
+    # Fase 3a of the multi-provider epic: deepseek-reasoner (R1).
+    # Emits `reasoning_content` stream chunks alongside `content`;
+    # the frontend renders the reasoning in a collapsible panel.
+    "deepseek-reasoner",
 })
 
 

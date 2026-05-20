@@ -124,6 +124,65 @@ describe('useAgentStream', () => {
     expect(asst.text).toBe('Tienes 1 posición.');
   });
 
+  it('accumulates reasoning_delta into reasoning channel, never into text', async () => {
+    // Fase 3a of multi-provider epic: DeepSeek-R1 emits reasoning_delta
+    // events streaming the chain-of-thought. The hook must:
+    //   1. Accumulate into msg.reasoning, NOT msg.text
+    //   2. Keep text streaming working in parallel (interleaved)
+    //   3. NEVER mix the two channels
+    stubFetchOnce(sseReadable([
+      { type: 'reasoning_delta', text: 'Veo que ' },
+      { type: 'reasoning_delta', text: 'el WR20 ' },
+      { type: 'text_delta', text: 'Recomiendo ' },
+      { type: 'reasoning_delta', text: 'está alto.' },
+      { type: 'text_delta', text: 'mantener.' },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 50, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn',
+        cost_usd: 0.0001,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    await act(async () => {
+      await result.current.sendTurn('razona');
+    });
+
+    const asst = result.current.msgs[1];
+    expect(asst.role).toBe('assistant');
+    // Text channel: only the final answer (no reasoning leaked in).
+    expect(asst.text).toBe('Recomiendo mantener.');
+    // Reasoning channel: full chain-of-thought, in arrival order.
+    expect(asst.reasoning).toBe('Veo que el WR20 está alto.');
+    // Cross-channel pollution check.
+    expect(asst.text).not.toContain('Veo');
+    expect(asst.reasoning).not.toContain('Recomiendo');
+  });
+
+  it('does not initialize reasoning when no reasoning_delta arrives', async () => {
+    // For non-reasoning models (Anthropic, deepseek-chat), the message
+    // never gets a reasoning field. The UI conditional `if (reasoning &&
+    // reasoning.length > 0)` keeps the panel hidden.
+    stubFetchOnce(sseReadable([
+      { type: 'text_delta', text: 'Hola mundo' },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn',
+        cost_usd: 0,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    await act(async () => {
+      await result.current.sendTurn('hi');
+    });
+
+    expect(result.current.msgs[1].text).toBe('Hola mundo');
+    expect(result.current.msgs[1].reasoning).toBeUndefined();
+  });
+
   it('treats keepalive frames as a no-op (Phase 5 heartbeat ignored)', async () => {
     // Two keepalive frames interleaved with text — the hook should
     // skip them silently and accumulate text as if they weren't there.
