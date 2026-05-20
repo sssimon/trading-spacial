@@ -42,12 +42,27 @@ from __future__ import annotations
 # The invariant check below + test_models_invariants in
 # tests/test_agent_models.py catches the first two; a snapshot test on
 # the tool subset catches drift in the third.
+# Fase 3b of the multi-provider epic: defaults migrated to DeepSeek.
+# Anthropic models stay in ALLOWED_MODELS as per-turn override targets.
+# Operator can flip back via the override field on /agent/conversations
+# /{id}/turn or by patching this dict in a follow-up if DS bake reveals
+# quality regression.
+#
+# Selection rationale:
+#   - dock / symbol_detail / historial: deepseek-chat (V3). Fast, cheap,
+#     conversational. Most turns are short Q&A or browse-the-history
+#     reads — no benefit from R1's chain-of-thought tax.
+#   - kill_switch / autotune: deepseek-reasoner (R1). These surfaces
+#     ask "should I do X to my portfolio?" — analytical, multi-step
+#     reasoning is the value. The collapsible reasoning panel lets the
+#     operator audit the model's chain-of-thought before confirming
+#     a proposal.
 SURFACE_MODEL_DEFAULTS: dict[str, str] = {
-    "dock":          "claude-sonnet-4-6",
-    "symbol_detail": "claude-haiku-4-5",
-    "kill_switch":   "claude-sonnet-4-6",
-    "autotune":      "claude-sonnet-4-6",
-    "historial":     "claude-haiku-4-5",
+    "dock":          "deepseek-chat",
+    "symbol_detail": "deepseek-chat",
+    "kill_switch":   "deepseek-reasoner",
+    "autotune":      "deepseek-reasoner",
+    "historial":     "deepseek-chat",
 }
 
 

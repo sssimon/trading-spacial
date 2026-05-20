@@ -568,9 +568,11 @@ const CopilotMessage: React.FC<CopilotMessageProps> = ({
         {reasoning && reasoning.length > 0 && (
           <details className={styles.reasoning}>
             <summary className={styles.reasoningSummary}>Razonamiento</summary>
-            <div className={styles.reasoningBody}>
-              <FormattedText text={reasoning} />
-            </div>
+            {/* PR #414 review pickup 3: render as PLAIN TEXT (no
+                markdown parsing). Reasoning is the model's chain-of-
+                thought, not formatted output for the user. Same
+                rationale as AgentDock — see comment there. */}
+            <div className={styles.reasoningBody}>{reasoning}</div>
           </details>
         )}
         {toolChips && toolChips.length > 0 && (

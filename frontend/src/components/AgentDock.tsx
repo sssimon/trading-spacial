@@ -210,9 +210,15 @@ const DockMessage: React.FC<DockMessageProps> = ({
         {reasoning && reasoning.length > 0 && (
           <details className={styles.reasoning}>
             <summary className={styles.reasoningSummary}>Razonamiento</summary>
-            <div className={styles.reasoningBody}>
-              <DockText text={reasoning} />
-            </div>
+            {/* PR #414 review pickup 3: reasoning is the model's
+                internal chain-of-thought, not formatted output for the
+                user. Render as PLAIN TEXT so literal ** marks (which
+                R1 uses for emphasis in its own prose) survive verbatim.
+                Using DockText/FormattedText here would interpret them
+                as bold and the operator loses fidelity of the
+                reasoning's structure. white-space: pre-wrap in the CSS
+                preserves newlines + indentation. */}
+            <div className={styles.reasoningBody}>{reasoning}</div>
           </details>
         )}
         {toolChips && toolChips.length > 0 && (

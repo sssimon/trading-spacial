@@ -49,28 +49,34 @@ def test_agent_status_enabled_when_api_key_set(client, monkeypatch):
     assert body == {"enabled": True, "reason": "ok"}
 
 
-# ── /agent/status: disabled when ANTHROPIC_API_KEY is missing ───────────
+# ── /agent/status: disabled when the default provider's API key is missing ─
+#
+# Fase 3b of the multi-provider epic: defaults migrated to DeepSeek,
+# so the §2.7 status check reads DEEPSEEK_API_KEY (the dock default's
+# provider). These tests delete DEEPSEEK_API_KEY instead of the
+# Anthropic one. If a future PR flips defaults back, update these.
 
 
-def test_agent_status_disabled_when_api_key_missing(client, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_agent_status_disabled_when_default_provider_key_missing(client, monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     resp = client.get("/agent/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"enabled": False, "reason": "agent_disabled"}
 
 
-def test_agent_status_disabled_when_api_key_empty(client, monkeypatch):
-    """Empty string is treated identically to missing — see config.py."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+def test_agent_status_disabled_when_default_provider_key_empty(client, monkeypatch):
+    """Empty string is treated identically to missing — see
+    DeepSeekProvider.has_api_key reads via os.environ.get(...).strip()."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     resp = client.get("/agent/status")
     assert resp.status_code == 200
     assert resp.json() == {"enabled": False, "reason": "agent_disabled"}
 
 
-def test_agent_status_disabled_when_api_key_whitespace(client, monkeypatch):
+def test_agent_status_disabled_when_default_provider_key_whitespace(client, monkeypatch):
     """Whitespace-only is treated as missing — operator typo guard."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "   ")
     resp = client.get("/agent/status")
     assert resp.status_code == 200
     assert resp.json() == {"enabled": False, "reason": "agent_disabled"}
@@ -119,8 +125,12 @@ def test_agent_status_body_never_leaks_env_var_names_or_paths(client, monkeypatc
 
 
 def test_agent_chat_503_body_no_longer_leaks(client, monkeypatch):
-    """The legacy /agent/chat endpoint also stops leaking — pre-reg §3.3."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    """The legacy /agent/chat endpoint also stops leaking — pre-reg §3.3.
+
+    Fase 3b of the multi-provider epic: default provider migrated to
+    DeepSeek, so we delete DEEPSEEK_API_KEY to trip the disabled path.
+    """
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     resp = client.post(
         "/agent/chat",
         json={"system": "test", "messages": [{"role": "user", "content": "hi"}]},

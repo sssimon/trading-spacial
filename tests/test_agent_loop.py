@@ -768,10 +768,17 @@ def test_endpoint_audits_each_completed_turn(authed_client):
         .usage(input_tokens=150, output_tokens=12, cache_read=120)
         .build()
     )
+    # Fase 3b of multi-provider epic: defaults migrated to DS, so we
+    # explicitly request claude-sonnet-4-6 via the per-turn override
+    # to match what the FakeAnthropicProvider (injected via fixture)
+    # can actually cost. Decouples the test from default migrations
+    # — the audit invariant tested here (one row per turn, correct
+    # tenant/surface/cost shape) is provider-agnostic.
     resp = client.post(
         "/agent/conversations/test-conv-audit-1/turn",
         json={
             "surface":  "kill_switch",
+            "model":    "claude-sonnet-4-6",
             "messages": [{"role": "user", "content": "estado"}],
         },
     )
@@ -841,8 +848,12 @@ def test_endpoint_audits_error_turns(authed_client):
 def test_endpoint_503_when_api_key_missing_via_direct_curl(authed_client, monkeypatch):
     """PR #404 review issue 1 (BLOCKER): FastAPI resolves Depends() BEFORE
     the handler body. Without the status guard inside get_anthropic_client,
-    a direct POST with ANTHROPIC_API_KEY missing would 500 with a
-    KeyError stack trace — re-leaking the env-var name that #381 closed.
+    a direct POST with the default provider's API key missing would 500
+    with a stack trace — re-leaking the env-var name that #381 closed.
+
+    Fase 3b of multi-provider epic: default migrated to DeepSeek, so the
+    test deletes DEEPSEEK_API_KEY (the default's key per §2.7) to trip
+    the disabled path.
 
     This test reverts the dependency_overrides on get_anthropic_client so
     the real resolver runs, then unsets the env var. Must 503 with the
@@ -853,7 +864,7 @@ def test_endpoint_503_when_api_key_missing_via_direct_curl(authed_client, monkey
     client, _fake = authed_client
     # Revert the test fake so the real resolver runs.
     btc_api.app.dependency_overrides.pop(get_anthropic_client, None)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     resp = client.post(
         "/agent/conversations/bypass-test/turn",
@@ -862,7 +873,7 @@ def test_endpoint_503_when_api_key_missing_via_direct_curl(authed_client, monkey
     assert resp.status_code == 503
     assert resp.json() == {"detail": "agent_disabled"}
     # And the body must not leak the env-var name on this path either.
-    for forbidden in ("ANTHROPIC_API_KEY", ".env", "restart"):
+    for forbidden in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", ".env", "restart"):
         assert forbidden not in resp.text, (
             f"/agent/conversations bypass-test leaked {forbidden!r}: {resp.text!r}"
         )

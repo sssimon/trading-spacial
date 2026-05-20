@@ -160,6 +160,52 @@ describe('useAgentStream', () => {
     expect(asst.reasoning).not.toContain('Recomiendo');
   });
 
+  it('accumulates reasoning across multi-hop turns into a single channel', async () => {
+    // PR #414 review pickup 2: a multi-hop turn with reasoning before
+    // each tool_use should accumulate ALL reasoning chunks into ONE
+    // msg.reasoning field (plain concat, no separator).
+    //
+    // If a future PR wants per-hop separation (msg.reasoning_per_hop:
+    // string[]), this test should fail and be updated deliberately.
+    // For now, the contract is "one flat string per assistant message".
+    stubFetchOnce(sseReadable([
+      // Hop 1 reasoning
+      { type: 'reasoning_delta', text: 'Primero ' },
+      { type: 'reasoning_delta', text: 'necesito ver las posiciones. ' },
+      { type: 'tool_use_start', tool: 'get_positions' },
+      { type: 'tool_use_result', tool: 'get_positions', status: 'ok' },
+      // Hop 2 reasoning (after tool result)
+      { type: 'reasoning_delta', text: 'Veo BTCUSDT en verde. ' },
+      { type: 'reasoning_delta', text: 'Recomiendo mantener.' },
+      { type: 'text_delta', text: 'Mantén tu posición de BTC.' },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 200, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn',
+        cost_usd: 0.0005,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+
+    await act(async () => {
+      await result.current.sendTurn('analiza');
+    });
+
+    const asst = result.current.msgs[1];
+    expect(asst.role).toBe('assistant');
+    // Text channel only has the final answer.
+    expect(asst.text).toBe('Mantén tu posición de BTC.');
+    // Reasoning channel: all chunks concatenated in arrival order,
+    // no separators between hops. Operator sees the full chain-of-
+    // thought as one continuous block.
+    expect(asst.reasoning).toBe(
+      'Primero necesito ver las posiciones. Veo BTCUSDT en verde. Recomiendo mantener.'
+    );
+    // Tool chip rendered (provider exercised the dispatch path).
+    expect(asst.tool_chips).toHaveLength(1);
+    expect(asst.tool_chips![0]).toEqual({ tool: 'get_positions', status: 'ok' });
+  });
+
   it('does not initialize reasoning when no reasoning_delta arrives', async () => {
     // For non-reasoning models (Anthropic, deepseek-chat), the message
     // never gets a reasoning field. The UI conditional `if (reasoning &&

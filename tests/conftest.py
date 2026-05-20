@@ -68,11 +68,19 @@ def _agent_enabled_in_tests(monkeypatch):
     the override in config.json. Without this fixture, every endpoint
     test that POSTs to /agent/* would 503 with reason=agent_disabled.
 
-    Tests that explicitly verify the disabled state
-    (test_endpoint_503_when_status_disabled, test_status_disabled_wins_
-    over_breaker, etc.) re-override load_config inside the test body —
-    pytest applies the last monkeypatch.setattr in scope, so those work
-    correctly on top of this fixture.
+    Fase 3b of the multi-provider epic migrated defaults to DeepSeek.
+    The §2.7 status check (api/agent/config._default_provider_has_key)
+    now reads DEEPSEEK_API_KEY (because the default surface model is
+    `deepseek-chat`). The autouse fixture sets BOTH provider API keys
+    so a test that does NOT explicitly delete either env var ends up
+    in the enabled state regardless of which provider serves the
+    default surface.
+
+    Tests that explicitly verify the disabled state (e.g.
+    test_endpoint_503_when_status_disabled,
+    test_status_disabled_wins_over_breaker) re-override load_config
+    inside the test body — pytest applies the last monkeypatch.setattr
+    in scope, so those work correctly on top of this fixture.
     """
     import api.agent.config as _agent_config
 
@@ -89,6 +97,12 @@ def _agent_enabled_in_tests(monkeypatch):
         return cfg
 
     monkeypatch.setattr(_agent_config, "load_config", _enabled_load_config)
+    # Make BOTH provider keys present so the §2.7 default-key check
+    # passes regardless of which surface's default is being tested.
+    # Individual tests that exercise the missing-key path delete the
+    # relevant var via monkeypatch.delenv in their own body.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-stub")
+    monkeypatch.setenv("DEEPSEEK_API_KEY",  "sk-ds-test-stub")
     yield
 
 

@@ -28,12 +28,16 @@ from typing import FrozenSet
 # Canonical mapping locked. If this matrix needs to change, do it
 # deliberately — DO NOT silently update both sides without a
 # corresponding commit message explaining why and what it costs.
+# Fase 3b of the multi-provider epic migrated the defaults to DeepSeek.
+# Anthropic models remain in ALLOWED_MODELS as override targets — the
+# operator can pick claude-* on a per-turn basis. Snapshot below
+# reflects the post-migration state.
 EXPECTED_SURFACE_MODELS: dict[str, str] = {
-    "dock":          "claude-sonnet-4-6",
-    "symbol_detail": "claude-haiku-4-5",
-    "kill_switch":   "claude-sonnet-4-6",
-    "autotune":      "claude-sonnet-4-6",
-    "historial":     "claude-haiku-4-5",
+    "dock":          "deepseek-chat",
+    "symbol_detail": "deepseek-chat",
+    "kill_switch":   "deepseek-reasoner",
+    "autotune":      "deepseek-reasoner",
+    "historial":     "deepseek-chat",
 }
 
 
