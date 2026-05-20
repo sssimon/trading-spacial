@@ -114,14 +114,18 @@ Si ya existe, agregá el bloque `agent` o flippá `enabled` a `true`.
 **No toques `global_daily_usd_cap`** — heredás el `5.0` del default,
 es lo que decidiste para la primera semana.
 
-### 1.2 Si tu setup no hot-reloadea config, restart `btc_api.py`
+### 1.2 NO necesitás restart de `btc_api.py`
 
-El runtime usa `load_config()` en cada request, así que el cambio del
-JSON se ve sin restart. Pero si por las dudas querés certeza:
+Verificado en código (PR #410 review): `api/agent/config.py:58`
+llama `load_config()` dentro de `get_agent_status()`, que se ejecuta
+en cada request. `api/config.py:load_config()` abre los archivos JSON
+en cada llamada — sin caching. El cambio en `config.json` toma efecto
+en el próximo request.
 
-```powershell
-# Mismo restart que en 0.4
-```
+El único caso que requiere restart es el del paso 0.4 (schema
+migration), porque eso necesita que `init_db()` corra. Una vez que
+las tablas `agent_*` existen, los toggles de `config.json` son
+hot-reload por diseño.
 
 ### 1.3 Verificá el flip
 

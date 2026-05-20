@@ -62,6 +62,7 @@ def _seed_error(con, *, hours_ago=1, reason="upstream", latency_ms=200):
 
 
 def test_query_cache_hit_rate_with_seeded_data(tmp_db):
+    import sqlite3
     import btc_api
     import scripts.agent_health_check as h
 
@@ -73,8 +74,8 @@ def test_query_cache_hit_rate_with_seeded_data(tmp_db):
     finally:
         con.close()
 
-    con = h._open() if False else __import__("sqlite3").connect(tmp_db)
-    con.row_factory = __import__("sqlite3").Row
+    con = sqlite3.connect(tmp_db)
+    con.row_factory = sqlite3.Row
     try:
         cutoff = h._cutoff_iso(timedelta(hours=24))
         rate, n = h.query_cache_hit_rate(con, cutoff)
@@ -118,8 +119,13 @@ def test_query_p95_latency_picks_high_percentile(tmp_db):
 
     con = btc_api.get_db()
     try:
-        # 10 rows with latencies 100..1000 step 100. p95 lands on the 10th
-        # row (offset = 10*95/100 - 1 = 8 → 9th-smallest = 900).
+        # 10 rows with latencies 100..1000 step 100. The OFFSET-based
+        # p95 query in agent_health_check resolves to:
+        #   offset = max(0, 10 * 95 // 100 - 1) = max(0, 9 - 1) = 8
+        #   ORDER BY latency_ms LIMIT 1 OFFSET 8  →  9th-smallest = 900
+        # Integers + deterministic ordering = no ambiguity. If SQLite
+        # ever shifts the OFFSET semantics, the assert below catches
+        # the drift instead of silently passing on the wrong value.
         for i in range(1, 11):
             _seed_assistant(con, latency_ms=i * 100)
         con.commit()
@@ -134,7 +140,7 @@ def test_query_p95_latency_picks_high_percentile(tmp_db):
     finally:
         con.close()
     assert n == 10
-    assert 800 <= p95 <= 1000  # rough p95 — sqlite OFFSET-based
+    assert p95 == 900
 
 
 def test_query_daily_spend_sums_correctly(tmp_db):
