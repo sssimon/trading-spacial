@@ -252,6 +252,11 @@ async def run_turn(
         "output_tokens":               0,
         "cache_read_input_tokens":     0,
         "cache_creation_input_tokens": 0,
+        # Fase 4 of the multi-provider epic: sum R1's reasoning_tokens
+        # across hops. Only DS-reasoner populates this; chat V3 +
+        # Anthropic leave it as 0. The audit row stores the sum so
+        # /agent/metrics can report a `reasoning_pct` per provider.
+        "reasoning_tokens":            0,
     }
     total_cost_usd = 0.0
 

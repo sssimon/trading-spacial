@@ -154,6 +154,23 @@ def query_p95_latency_ms(con: sqlite3.Connection, cutoff: str) -> tuple[int | No
     return int(dict(row)["latency_ms"]), n
 
 
+def query_daily_spend_by_provider(con: sqlite3.Connection,
+                                    cutoff: str) -> dict[str, float]:
+    """Fase 4 of the multi-provider epic: return spend breakdown by
+    provider. NULL provider buckets as 'unknown' (legacy rows pre-
+    backfill). Mirrors the /agent/metrics today.by_provider shape but
+    operates on the same window as query_daily_spend_usd."""
+    rows = con.execute(
+        "SELECT COALESCE(provider, 'unknown') AS provider, "
+        "       COALESCE(SUM(cost_usd), 0) AS total_usd "
+        "FROM agent_conversations "
+        "WHERE ts >= ? AND role = 'assistant' "
+        "GROUP BY COALESCE(provider, 'unknown')",
+        (cutoff,),
+    ).fetchall()
+    return {dict(r)["provider"]: float(dict(r)["total_usd"] or 0) for r in rows}
+
+
 def query_daily_spend_usd(con: sqlite3.Connection, cutoff: str) -> float:
     """Sum cost_usd of assistant rows in the window. Mirrors what
     api/agent/circuit_breaker.py reads."""
@@ -276,7 +293,8 @@ def _color(text: str, code: str) -> str:
 
 
 def _print_text_report(results: list[MetricResult], window: timedelta,
-                        top_errors: list[dict]) -> None:
+                        top_errors: list[dict],
+                        by_provider: dict[str, float] | None = None) -> None:
     print()
     print(_color("AGENT HEALTH CHECK", "1"))
     print(f"  window: last {int(window.total_seconds() // 3600)}h "
@@ -300,6 +318,11 @@ def _print_text_report(results: list[MetricResult], window: timedelta,
         print(f"  {tag}  {r.name.ljust(name_width)}  "
               f"value={value_str}  expected {cmp} {threshold_str}  "
               f"({r.detail})")
+    if by_provider:
+        print()
+        print("  Spend breakdown by provider:")
+        for prov in sorted(by_provider):
+            print(f"    - {prov:12s} ${by_provider[prov]:.4f}")
     if top_errors:
         print()
         print("  Top error reasons in window:")
@@ -318,12 +341,14 @@ def _print_text_report(results: list[MetricResult], window: timedelta,
 
 
 def _print_json_report(results: list[MetricResult], window: timedelta,
-                        top_errors: list[dict]) -> None:
+                        top_errors: list[dict],
+                        by_provider: dict[str, float] | None = None) -> None:
     out = {
         "window_seconds":     int(window.total_seconds()),
         "cutoff_iso":         _cutoff_iso(window),
         "metrics":            [r.to_dict() for r in results],
         "top_errors_in_window": top_errors,
+        "spend_by_provider":  by_provider or {},
         "all_ok":             all(r.ok for r in results),
     }
     print(json.dumps(out, indent=2, default=str))
@@ -350,6 +375,10 @@ def main() -> int:
         with _open() as con:
             results = _evaluate_metrics(con, window)
             top_errors = query_top_errors(con, _cutoff_iso(window))
+            # Fase 4 of the multi-provider epic: surface per-provider
+            # spend breakdown so the operator can tell DS vs Anthropic
+            # spend in the same report.
+            by_provider = query_daily_spend_by_provider(con, _cutoff_iso(window))
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -375,9 +404,9 @@ def main() -> int:
         return 2
 
     if args.json:
-        _print_json_report(results, window, top_errors)
+        _print_json_report(results, window, top_errors, by_provider)
     else:
-        _print_text_report(results, window, top_errors)
+        _print_text_report(results, window, top_errors, by_provider)
 
     return 0 if all(r.ok for r in results) else 1
 

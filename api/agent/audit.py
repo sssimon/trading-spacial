@@ -31,9 +31,11 @@ def record_turn(
     output_tokens: int = 0,
     cache_read_input_tokens: int = 0,
     cache_creation_input_tokens: int = 0,
+    reasoning_tokens: Optional[int] = None,  # Fase 4: DS-R1 only
     latency_ms: Optional[int] = None,
     cost_usd: Optional[float] = None,
-    content_summary: Optional[str] = None,  # redacted; never the raw text
+    provider: Optional[str] = None,          # Fase 4: 'anthropic' | 'deepseek' | ...
+    content_summary: Optional[str] = None,   # redacted; never the raw text
     refused: bool = False,
 ) -> None:
     """Persist one row to agent_conversations.
@@ -41,6 +43,15 @@ def record_turn(
     Failures here are logged but never raised — an audit miss is annoying;
     a 500 to the user is worse. The streaming response is already on
     the wire when this is called.
+
+    Fase 4 of the multi-provider epic added two columns:
+      - `provider`: which vendor served the turn ('anthropic' |
+        'deepseek' | ...). Resolved from the model id by the caller
+        (TurnAuditWrapper does this in __init__). NULL is allowed for
+        legacy rows; the backfill in db/schema.py covers them.
+      - `reasoning_tokens`: only DeepSeek-R1 populates this — pulled
+        from `usage.completion_tokens_details.reasoning_tokens` by the
+        DeepSeekProvider adapter. NULL or 0 elsewhere.
     """
     try:
         con = get_db()
@@ -48,17 +59,21 @@ def record_turn(
             con.execute(
                 """INSERT INTO agent_conversations
                    (tenant_id, surface, conversation_id, ts, role, model,
+                    provider,
                     input_tokens, output_tokens,
                     cache_read_input_tokens, cache_creation_input_tokens,
+                    reasoning_tokens,
                     latency_ms, cost_usd, content_json, refused)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tenant_id, surface, conversation_id,
                     datetime.now(timezone.utc).isoformat(),
                     role, model,
+                    provider,
                     int(input_tokens or 0), int(output_tokens or 0),
                     int(cache_read_input_tokens or 0),
                     int(cache_creation_input_tokens or 0),
+                    int(reasoning_tokens) if reasoning_tokens else None,
                     latency_ms,
                     cost_usd,
                     json.dumps(content_summary) if content_summary else None,
@@ -103,6 +118,12 @@ class TurnAuditWrapper:
         self._surface = surface
         self._conversation_id = conversation_id
         self._model = model
+        # Fase 4 of the multi-provider epic: derive the provider name
+        # from the model prefix once at construction. The audit row
+        # carries this so /agent/metrics can break down by provider.
+        # Falls back to None for unknown prefixes — the metrics endpoint
+        # treats those as a separate bucket.
+        self._provider = _provider_for_model(model)
         self._t_start = time.monotonic()
         # PR #405 + Phase 5 pickup: track terminal-event observation so a
         # client disconnect / asyncio cancellation can still record an
@@ -133,16 +154,21 @@ class TurnAuditWrapper:
 
         if isinstance(ev, MessageEnd):
             latency_ms = int((time.monotonic() - self._t_start) * 1000)
+            # Fase 4: reasoning_tokens is optional in usage — only
+            # DS-reasoner populates it. The audit row stores NULL when
+            # absent; metrics treat NULL as 0.
             record_turn(
                 tenant_id=self._tenant_id,
                 surface=self._surface,
                 conversation_id=self._conversation_id,
                 role="assistant",
                 model=self._model,
+                provider=self._provider,
                 input_tokens=ev.usage.get("input_tokens", 0),
                 output_tokens=ev.usage.get("output_tokens", 0),
                 cache_read_input_tokens=ev.usage.get("cache_read_input_tokens", 0),
                 cache_creation_input_tokens=ev.usage.get("cache_creation_input_tokens", 0),
+                reasoning_tokens=ev.usage.get("reasoning_tokens"),
                 latency_ms=latency_ms,
                 cost_usd=ev.cost_usd,
                 refused=False,
@@ -161,6 +187,7 @@ class TurnAuditWrapper:
                 conversation_id=self._conversation_id,
                 role="error",
                 model=self._model,
+                provider=self._provider,
                 latency_ms=latency_ms,
                 # We don't store the user_message verbatim (it's a fixed
                 # friendly string, not signal worth indexing); the reason
@@ -184,6 +211,7 @@ class TurnAuditWrapper:
                 conversation_id=self._conversation_id,
                 role="error",
                 model=self._model,
+                provider=self._provider,
                 latency_ms=latency_ms,
                 content_summary="cancelled",
                 refused=False,
@@ -194,6 +222,13 @@ class TurnAuditWrapper:
                 "TurnAuditWrapper._record_cancelled failed for tenant=%s conv=%s",
                 self._tenant_id, self._conversation_id, exc_info=True,
             )
+
+    @staticmethod
+    def _resolve_provider_static(model: str) -> Optional[str]:
+        # Static accessor so tests can verify the same logic without
+        # instantiating the wrapper. Mirrors the helper at module
+        # bottom; same fallback semantics (None on unknown).
+        return _provider_for_model(model)
 
     async def aclose(self) -> None:
         """Called by FastAPI's StreamingResponse when the client
@@ -207,3 +242,26 @@ class TurnAuditWrapper:
                 await inner_close()
             except Exception:  # noqa: BLE001
                 log.warning("inner loop aclose failed", exc_info=True)
+
+
+def _provider_for_model(model: str) -> Optional[str]:
+    """Fase 4 of the multi-provider epic: derive provider name from a
+    model id. Used by TurnAuditWrapper to populate
+    agent_conversations.provider so /agent/metrics can break down by
+    provider.
+
+    Returns None for unknown prefixes — metrics treat that as a
+    separate bucket so the operator notices the orphan rather than
+    silently bucketing it.
+
+    Mirrors PROVIDER_NAME_BY_PREFIX in api/agent/providers/registry.py.
+    Adding a new provider requires updating BOTH the registry and this
+    helper. We deliberately do NOT import the registry here (it pulls
+    in the anthropic SDK lazy-load chain) — that's a per-module
+    layering decision, not a typo.
+    """
+    if model.startswith("claude-"):
+        return "anthropic"
+    if model.startswith("deepseek-"):
+        return "deepseek"
+    return None

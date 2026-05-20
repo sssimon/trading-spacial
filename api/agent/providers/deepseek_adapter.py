@@ -230,6 +230,12 @@ class DeepSeekProvider:
         finish_reason: str | None = None
         prompt_tokens = 0
         completion_tokens = 0
+        # Fase 4 of the multi-provider epic: capture R1's reasoning
+        # token count when DS reports it. DS's `usage.completion_tokens`
+        # is the TOTAL (reasoning + content output); the breakdown lives
+        # in `usage.completion_tokens_details.reasoning_tokens` when DS
+        # exposes it. Stays 0 for deepseek-chat (no reasoning).
+        reasoning_tokens = 0
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=120.0)) as client:
             async with client.stream(
@@ -259,6 +265,15 @@ class DeepSeekProvider:
                     if usage:
                         prompt_tokens = int(usage.get("prompt_tokens") or 0)
                         completion_tokens = int(usage.get("completion_tokens") or 0)
+                        # Fase 4 of the multi-provider epic: R1's
+                        # reasoning token count lives under
+                        # completion_tokens_details.reasoning_tokens
+                        # in DS's response. Field is optional — chat
+                        # V3 doesn't emit it. Defensive: parse only if
+                        # present, fall back to 0.
+                        ctd = usage.get("completion_tokens_details") or {}
+                        if isinstance(ctd, dict):
+                            reasoning_tokens = int(ctd.get("reasoning_tokens") or 0)
 
                     choices = chunk.get("choices") or []
                     if not choices:
@@ -339,6 +354,9 @@ class DeepSeekProvider:
             # over-estimate, documented in spec §6.
             "cache_read_input_tokens":     0,
             "cache_creation_input_tokens": 0,
+            # Fase 4: optional R1 reasoning breakdown. The audit row
+            # picks this up via TurnAuditWrapper. Stays 0 for chat V3.
+            "reasoning_tokens":            reasoning_tokens,
         }
         yield LLMStreamEnd(
             stop_reason=stop_reason,

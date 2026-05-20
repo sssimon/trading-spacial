@@ -456,6 +456,12 @@ def get_agent_metrics():
             "error_count":      int,
             "refused_count":    int,
             "total_usd":        float,
+            # Fase 4 of multi-provider epic. by_provider breakdown so
+            # the operator can see DS vs Anthropic spend separately.
+            # Keys are 'anthropic' | 'deepseek' | other vendor names;
+            # NULL provider (legacy rows pre-backfill) bucket as 'unknown'.
+            "by_provider":      {provider_name: {turn_count, total_usd}},
+            "reasoning_tokens": int,   # R1 only; sum across the window
           },
           "top_tenants": [
             {"tenant_id": int, "turn_count": int, "usd_24h": float},
@@ -493,12 +499,35 @@ def get_agent_metrics():
             "  COUNT(*) AS turn_count, "
             "  SUM(CASE WHEN role = 'error' THEN 1 ELSE 0 END) AS error_count, "
             "  SUM(CASE WHEN refused = 1 THEN 1 ELSE 0 END) AS refused_count, "
-            "  COALESCE(SUM(cost_usd), 0) AS total_usd "
+            "  COALESCE(SUM(cost_usd), 0) AS total_usd, "
+            "  COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens "
             "FROM agent_conversations WHERE ts >= ?",
             (today_iso,),
         ).fetchone()
         today = dict(today_row) if today_row else {
-            "turn_count": 0, "error_count": 0, "refused_count": 0, "total_usd": 0,
+            "turn_count": 0, "error_count": 0, "refused_count": 0,
+            "total_usd": 0, "reasoning_tokens": 0,
+        }
+
+        # Fase 4: per-provider breakdown. GROUP BY provider, mapping
+        # NULL → 'unknown' so legacy pre-backfill rows are visible to
+        # the operator (they should be backfilled by the migration;
+        # if any persist as NULL post-migration, that's a signal).
+        by_provider_rows = con.execute(
+            "SELECT "
+            "  COALESCE(provider, 'unknown') AS provider, "
+            "  COUNT(*) AS turn_count, "
+            "  COALESCE(SUM(cost_usd), 0) AS total_usd "
+            "FROM agent_conversations WHERE ts >= ? "
+            "GROUP BY COALESCE(provider, 'unknown')",
+            (today_iso,),
+        ).fetchall()
+        by_provider = {
+            dict(r)["provider"]: {
+                "turn_count": int(dict(r)["turn_count"] or 0),
+                "total_usd":  float(dict(r)["total_usd"] or 0),
+            }
+            for r in by_provider_rows
         }
 
         top_rows = con.execute(
@@ -542,10 +571,12 @@ def get_agent_metrics():
     return {
         "breaker":             breaker_state,
         "today": {
-            "turn_count":    int(today.get("turn_count")    or 0),
-            "error_count":   int(today.get("error_count")   or 0),
-            "refused_count": int(today.get("refused_count") or 0),
-            "total_usd":     float(today.get("total_usd")   or 0),
+            "turn_count":       int(today.get("turn_count")       or 0),
+            "error_count":      int(today.get("error_count")      or 0),
+            "refused_count":    int(today.get("refused_count")    or 0),
+            "total_usd":        float(today.get("total_usd")      or 0),
+            "reasoning_tokens": int(today.get("reasoning_tokens") or 0),
+            "by_provider":      by_provider,
         },
         "top_tenants":         top_tenants,
         "error_breakdown_24h": error_breakdown_24h,

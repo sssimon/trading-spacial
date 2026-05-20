@@ -487,6 +487,50 @@ def _migrate_agent_audit() -> None:
         except sqlite3.OperationalError:
             pass  # column already exists
 
+        # Fase 4 of the multi-provider epic: agent_conversations gains
+        # `provider` + `reasoning_tokens` columns so /agent/metrics can
+        # report per-provider spend + R1 reasoning telemetry.
+        #   - provider: closed enum 'anthropic' | 'deepseek' | ... (the
+        #     vendor name from PROVIDER_NAME_BY_PREFIX). NULL for rows
+        #     pre-Fase-4 if backfill skipped them (it shouldn't — the
+        #     UPDATE below covers every known prefix).
+        #   - reasoning_tokens: only DS-reasoner populates this today
+        #     (DS's usage.completion_tokens_details.reasoning_tokens
+        #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
+        # Both ALTERs are idempotent (try/except on OperationalError).
+        # The backfill is also idempotent because it only touches rows
+        # WHERE provider IS NULL — running it twice is a no-op.
+        try:
+            con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
+            log.info("DB migration: added provider column to agent_conversations")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        try:
+            con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
+            log.info("DB migration: added reasoning_tokens column to agent_conversations")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+        # Backfill provider from model. Only touches rows where provider
+        # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
+        # uses model-prefix matching that mirrors PROVIDER_NAME_BY_PREFIX
+        # in api/agent/providers/registry.py; if a future provider adds
+        # a new prefix, mirror it HERE too (single source of truth would
+        # be ideal but importing the registry from db.schema introduces
+        # a circular at startup).
+        try:
+            con.execute(
+                "UPDATE agent_conversations SET provider = 'anthropic' "
+                "WHERE provider IS NULL AND model LIKE 'claude-%'"
+            )
+            con.execute(
+                "UPDATE agent_conversations SET provider = 'deepseek' "
+                "WHERE provider IS NULL AND model LIKE 'deepseek-%'"
+            )
+            log.info("DB migration: backfilled provider column from model prefix")
+        except sqlite3.OperationalError as e:
+            log.warning("DB migration: provider backfill failed: %s", e)
+
         con.commit()
         log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
     except Exception as e:  # noqa: BLE001

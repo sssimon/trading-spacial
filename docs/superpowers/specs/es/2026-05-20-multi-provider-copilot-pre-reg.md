@@ -395,7 +395,8 @@ Si PR 3a tiene bug post-merge, se revierte sin perder lo necesario para que PR 3
   - Reasoning UX verification: usuario abre AutoTune, expande el `<details>`, verifica que el panel muestra texto coherente.
   - Monitor 48h con el script actualizado.
   - **Nota explícita** sobre el cost over-estimate (§6 risks): comparar `today.total_usd` en `/agent/metrics` contra DeepSeek Console al final del bake; diferencia esperada (we don't model DS auto-cache discount).
-- `scripts/agent_health_check.py` lee `by_provider` breakdown — separa Anthropic spend de DS spend en el output.
+  - **Nota sobre rolling-cost discontinuity post-Fase-3b**: las queries `SUM(cost_usd)` de los 24h rolling totals en `/agent/metrics` mezclan rows con Anthropic pricing (pre-migration) + DS pricing (post-migration) durante las primeras 24h después del flip. Para comparación pre/post limpia, el operator debe filtrar por el `provider` column (introducido en Fase 4) o esperar 24+ horas hasta que el rolling window quede 100% post-flip. El script `agent_health_check.py` ya surface el breakdown por provider en el text + JSON output — el operator usa eso para distinguir.
+- `scripts/agent_health_check.py` lee `by_provider` breakdown — separa Anthropic spend de DS spend en el output (entregado en Fase 4).
 - `config.defaults.json` sigue con `agent.enabled=false` (operator opta in via config.json).
 
 **Decisión que NO se toma en este epic:** ¿desactivamos Anthropic completamente, o queda como override on-demand? Recomendación: dejarlo en `ALLOWED_MODELS`. Si DS bake no convence, flip vía override de `cfg.agent.surface_models` (campo nuevo opcional) sin code deploy.

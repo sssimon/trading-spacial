@@ -114,7 +114,14 @@ def test_metrics_requires_admin(viewer_client):
 
 
 def test_metrics_returns_documented_shape(admin_client):
-    """Empty DB → all-zero metrics with the documented shape."""
+    """Empty DB → all-zero metrics with the documented shape.
+
+    Fase 4 of the multi-provider epic extended `today` with
+    `reasoning_tokens` + `by_provider`. The shape lock below keeps
+    the contract stable; if a future PR adds a field, this test
+    fires deliberately so the reviewer notices the wire-format
+    change.
+    """
     resp = admin_client.get("/agent/metrics")
     assert resp.status_code == 200
     body = resp.json()
@@ -126,7 +133,12 @@ def test_metrics_returns_documented_shape(admin_client):
     assert body["breaker"]["reason"] == "ok"
     assert body["breaker"]["global_24h_usd"] == 0.0
     assert body["today"] == {
-        "turn_count": 0, "error_count": 0, "refused_count": 0, "total_usd": 0.0,
+        "turn_count":       0,
+        "error_count":      0,
+        "refused_count":    0,
+        "total_usd":        0.0,
+        "reasoning_tokens": 0,
+        "by_provider":      {},
     }
     assert body["top_tenants"] == []
     assert body["error_breakdown_24h"] == []
