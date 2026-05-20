@@ -382,16 +382,15 @@ def _execute_proposed_action(
     summary="Operator-facing copilot metrics (admin only)",
     dependencies=[Depends(require_role("admin"))],
 )
-def get_agent_metrics(
-    tenant_id: int = Depends(get_current_tenant_id),  # noqa: ARG001
-):
+def get_agent_metrics():
     """Return operator dashboard data for the copilot.
 
     Admin-only — role gate via require_role("admin"); a viewer-role
-    request returns 403. The tenant_id dep stays in the signature so
-    AuthMiddleware still resolves the user (otherwise the role check
-    would have nothing to read), but we don't actually USE the value —
-    this endpoint reports across all tenants, not per-tenant.
+    request returns 403. PR #408 review pickup: the previous version
+    had a Depends(get_current_tenant_id) in the signature "to ensure
+    AuthMiddleware resolves the user", but require_role already
+    resolves the User on its own — the extra dep was cargo cult, and
+    this endpoint reports across all tenants anyway.
 
     Shape (closed for the admin UI / debug panel):
 
@@ -402,6 +401,10 @@ def get_agent_metrics(
             "global_24h_usd":   float,
           },
           "today": {
+            # since_midnight_utc — distinct window from the *_24h fields
+            # below. At 23:00 UTC, `today` reports the last 23 hours
+            # while `*_24h` reports the rolling 24h. Both are intentional
+            # and the admin UI should label them as such.
             "turn_count":       int,
             "error_count":      int,
             "refused_count":    int,
@@ -409,11 +412,11 @@ def get_agent_metrics(
           },
           "top_tenants": [
             {"tenant_id": int, "turn_count": int, "usd_24h": float},
-            ...   # top 10 by spend in last 24h
+            ...   # top 10 by spend in last rolling 24h
           ],
           "error_breakdown_24h": [
             {"reason": str, "count": int},
-            ...   # closed-enum reasons surfaced as ErrorEvent
+            ...   # closed-enum reasons surfaced as ErrorEvent (24h rolling)
           ],
         }
 

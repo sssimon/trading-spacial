@@ -401,6 +401,74 @@ async def test_run_turn_upstream_429_emits_error_no_raise(tmp_db):
 # ── Cost model ─────────────────────────────────────────────────────────
 
 
+@pytest.mark.anyio
+async def test_message_end_cost_and_usage_sum_across_hops(tmp_db, monkeypatch):
+    """A multi-hop turn (model calls a tool → gets result → emits text)
+    triggers TWO Anthropic API calls. MessageEnd.cost_usd MUST be the
+    SUM of both hops' costs, not just the last hop's. Same for usage.
+
+    Without this invariant:
+      - quota counters undercharge by 30-60% on multi-hop turns,
+      - circuit breaker (which sums cost_usd over 24h) trips slower
+        than the actual spend warrants,
+      - operator metrics undercount turn cost.
+
+    PR #408 review fix.
+    """
+    from api.agent.loop import (
+        run_turn, MessageEnd, _estimate_cost_usd,
+    )
+    from api.agent.tools import handlers as h
+
+    def _stub_positions(*, tenant_id):
+        return {"positions": []}
+    monkeypatch.setitem(h.TOOL_HANDLERS, "get_positions", _stub_positions)
+
+    c = FakeAnthropicClient()
+    # Hop 1: tool_use(get_positions) with usage 100 in / 50 out.
+    c.queue_turn(
+        FakeTurnBuilder()
+        .tool_use("get_positions", {}, tool_use_id="toolu_1")
+        .stop_tool_use()
+        .usage(input_tokens=100, output_tokens=50)
+        .build()
+    )
+    # Hop 2: final text with usage 200 in / 100 out.
+    c.queue_turn(
+        FakeTurnBuilder()
+        .text("Listo, no tienes posiciones abiertas.")
+        .end_turn()
+        .usage(input_tokens=200, output_tokens=100)
+        .build()
+    )
+
+    msgs = [{"role": "user", "content": "qué posiciones tengo"}]
+    events = await _collect(run_turn(
+        client=c, model="claude-sonnet-4-6", surface="dock",
+        messages=msgs, tenant_id=1,
+    ))
+
+    ends = [e for e in events if isinstance(e, MessageEnd)]
+    assert len(ends) == 1
+    end = ends[0]
+
+    # Expected: usage is the per-field SUM across both hops.
+    assert end.usage["input_tokens"]  == 300   # 100 + 200
+    assert end.usage["output_tokens"] == 150   # 50  + 100
+
+    # Expected: cost is the SUM of per-hop costs (not just the last).
+    hop1 = _estimate_cost_usd("claude-sonnet-4-6",
+                               {"input_tokens": 100, "output_tokens": 50})
+    hop2 = _estimate_cost_usd("claude-sonnet-4-6",
+                               {"input_tokens": 200, "output_tokens": 100})
+    expected_total = hop1 + hop2
+    assert end.cost_usd == pytest.approx(expected_total)
+    # And explicitly NOT the last-hop-only undercharge that the bug
+    # produced — guards against a regression that silently flips back.
+    assert end.cost_usd != pytest.approx(hop2)
+    assert end.cost_usd > hop2  # accumulated value strictly larger
+
+
 def test_cost_estimation_matches_published_pricing():
     """The cost formula uses the published per-1M USD pricing for
     Sonnet 4.6 / Haiku 4.5 / Opus 4.7. If the cached pricing in

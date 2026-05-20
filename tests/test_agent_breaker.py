@@ -190,3 +190,49 @@ def test_current_global_spend_24h_sums_window(tmp_db):
     _seed_spend(99.0, hours_ago=30)  # outside window
     total = current_global_spend_24h()
     assert abs(total - 2.00) < 1e-9
+
+
+def test_breaker_spend_excludes_non_assistant_rows(tmp_db):
+    """PR #408 review pickup: the breaker's spend query filters to
+    role='assistant' so a future phase that writes cost_usd on other
+    role rows (e.g. 'partial' for cancellations) doesn't accidentally
+    contribute to the breaker. Today, error rows have cost_usd IS NULL
+    (which COALESCEs to 0), but we want the filter explicit before that
+    invariant ever changes."""
+    import btc_api
+    from datetime import datetime, timedelta, timezone
+    from api.agent.circuit_breaker import current_global_spend_24h
+
+    ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    con = btc_api.get_db()
+    try:
+        # An assistant row with $1.00 cost (counts).
+        con.execute(
+            "INSERT INTO agent_conversations "
+            "(tenant_id, surface, conversation_id, ts, role, model, "
+            " input_tokens, output_tokens, cache_read_input_tokens, "
+            " cache_creation_input_tokens, latency_ms, cost_usd) "
+            "VALUES (1, 'dock', 'c1', ?, 'assistant', 'claude-sonnet-4-6', "
+            "        100, 50, 0, 0, 1000, 1.00)",
+            (ts,),
+        )
+        # An error row WITH a non-NULL cost_usd of $99 — hypothetical
+        # future schema where cancelled turns carry a partial cost.
+        # Today's audit code writes cost_usd=NULL for errors, but the
+        # filter must hold even if that changes.
+        con.execute(
+            "INSERT INTO agent_conversations "
+            "(tenant_id, surface, conversation_id, ts, role, model, "
+            " input_tokens, output_tokens, cache_read_input_tokens, "
+            " cache_creation_input_tokens, latency_ms, cost_usd) "
+            "VALUES (1, 'dock', 'c2', ?, 'error', 'claude-sonnet-4-6', "
+            "        0, 0, 0, 0, 100, 99.00)",
+            (ts,),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    total = current_global_spend_24h()
+    # Only the assistant row counts; the error row's $99 is excluded.
+    assert abs(total - 1.00) < 1e-9

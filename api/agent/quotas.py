@@ -156,8 +156,15 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
             (tenant_id,),
         ).fetchone()
         if row is None:
+            # INSERT OR IGNORE handles the concurrent-first-turn race:
+            # if two parallel requests for the same brand-new tenant_id
+            # both see row=None, the second INSERT silently no-ops on
+            # the PRIMARY KEY violation instead of raising IntegrityError
+            # (which would surface as 500 to the user). PR #408 review
+            # pickup. The SELECT immediately below reads the row that
+            # actually landed regardless of who won the race.
             con.execute(
-                """INSERT INTO agent_quotas
+                """INSERT OR IGNORE INTO agent_quotas
                    (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
                     monthly_usd_used, monthly_window_start)
                    VALUES (?, 0, ?, ?, 0, ?)""",
@@ -235,16 +242,27 @@ def _apply_spend(tenant_id: int, cost_usd: float) -> None:
         if row is None:
             # Tenant's very first turn (paid path didn't read first —
             # rare, but possible if check_quota_pretrun fails open on
-            # a DB hiccup). Seed + charge in one go.
-            con.execute(
-                """INSERT INTO agent_quotas
+            # a DB hiccup). Seed + charge in one go. INSERT OR IGNORE
+            # protects against the parallel-first-charge race the same
+            # way _read_or_seed_row does (PR #408 review pickup).
+            cur = con.execute(
+                """INSERT OR IGNORE INTO agent_quotas
                    (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
                     monthly_usd_used, monthly_window_start)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (tenant_id, cost_usd, DEFAULT_DAILY_USD_CAP, today, cost_usd, month),
             )
             con.commit()
-            return
+            # cur.rowcount tells us which branch fired: 1 = we inserted
+            # (charge already booked, done), 0 = a parallel writer beat
+            # us so we re-read and fall through to the UPDATE path to
+            # apply OUR cost on top of theirs.
+            if cur.rowcount == 1:
+                return
+            row = con.execute(
+                "SELECT * FROM agent_quotas WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
 
         d = dict(row)
         daily   = (0 if d["daily_window_start"]   != today else d["daily_usd_used"])   + cost_usd

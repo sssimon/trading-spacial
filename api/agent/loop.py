@@ -241,6 +241,20 @@ async def run_turn(
     tools = _build_anthropic_tools(surface)
     hops = 0
 
+    # PR #408 review fix: accumulate usage + cost across all hops of the
+    # turn. Anthropic bills per API call — a multi-hop turn fires N+1
+    # calls (N tool_use intermediate + 1 final text). The original
+    # implementation emitted only the final hop's cost in MessageEnd,
+    # undercharging the tenant quota by 30-60% on turns with multiple
+    # tool calls. Accumulating here keeps quota + breaker honest.
+    total_usage = {
+        "input_tokens":                0,
+        "output_tokens":               0,
+        "cache_read_input_tokens":     0,
+        "cache_creation_input_tokens": 0,
+    }
+    total_cost_usd = 0.0
+
     while True:
         # Open a fresh stream for each "model turn" in the agentic loop.
         try:
@@ -271,18 +285,24 @@ async def run_turn(
             )
             return
 
-        usage_dict = {
+        hop_usage = {
             "input_tokens":                getattr(final.usage, "input_tokens", 0) or 0,
             "output_tokens":               getattr(final.usage, "output_tokens", 0) or 0,
             "cache_read_input_tokens":     getattr(final.usage, "cache_read_input_tokens", 0) or 0,
             "cache_creation_input_tokens": getattr(final.usage, "cache_creation_input_tokens", 0) or 0,
         }
+        # Accumulate this hop's usage + cost into the per-turn totals.
+        # MessageEnd (below, on the final hop) emits the sum so audit /
+        # quota / breaker see the true cost — not just the last call.
+        for k in total_usage:
+            total_usage[k] += hop_usage[k]
+        total_cost_usd += _estimate_cost_usd(model, hop_usage)
 
         if final.stop_reason != "tool_use":
             yield MessageEnd(
-                usage=usage_dict,
+                usage=total_usage,
                 stop_reason=final.stop_reason,
-                cost_usd=_estimate_cost_usd(model, usage_dict),
+                cost_usd=total_cost_usd,
             )
             return
 

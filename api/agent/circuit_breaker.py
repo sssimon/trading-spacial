@@ -90,9 +90,17 @@ def is_breaker_tripped(cfg: Optional[dict] = None) -> bool:
 
 
 def _global_spend_last_24h() -> float:
-    """Sum agent_conversations.cost_usd over the rolling 24h window.
-    Indexed by ts; SQLite handles this cheaply for the volumes we
-    expect (< 10K rows/day at full saturation)."""
+    """Sum agent_conversations.cost_usd over the rolling 24h window for
+    assistant rows only.
+
+    The role filter is defensive (PR #408 review pickup): today error
+    rows have cost_usd IS NULL (COALESCE turns that into 0), so the
+    constraint is a no-op against current data. But if a future phase
+    starts charging on a different role (e.g. partial-cost rows for
+    cancellations), the breaker would incorrectly attribute that spend.
+    Pinning the filter now keeps the breaker reading only what it
+    intends to read.
+    """
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=24)).isoformat()
     con = get_db()
@@ -100,7 +108,7 @@ def _global_spend_last_24h() -> float:
         row = con.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS total "
             "FROM agent_conversations "
-            "WHERE ts >= ?",
+            "WHERE ts >= ? AND role = 'assistant'",
             (cutoff,),
         ).fetchone()
     finally:
