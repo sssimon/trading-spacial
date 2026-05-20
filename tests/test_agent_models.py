@@ -49,13 +49,20 @@ def test_surface_model_defaults_snapshot():
 def test_allowed_models_snapshot():
     """Closed allowlist of accepted model IDs. Adding a new model is
     deliberate. Removing one is even more so — it can break in-flight
-    overrides."""
+    overrides.
+
+    Fase 2 of the multi-provider epic added `deepseek-chat`. The
+    defaults still point at Anthropic models; DS is opt-in via the
+    per-turn `model` override field on /agent/conversations/{id}/turn.
+    Fase 3 will add `deepseek-reasoner` (R1) and migrate defaults.
+    """
     from api.agent.models import ALLOWED_MODELS
 
     assert ALLOWED_MODELS == frozenset({
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
         "claude-opus-4-7",
+        "deepseek-chat",
     })
 
 

@@ -23,10 +23,15 @@ from api.agent.providers.base import (
     LLMTextDelta,
     LLMToolUseEnd,
     LLMToolUseStart,
+    SyntheticTextBlock,
+    SyntheticToolUseBlock,
 )
 from api.agent.providers.registry import (
     PROVIDER_BY_PREFIX,
+    PROVIDER_NAME_BY_PREFIX,
     UnknownProviderError,
+    get_provider_class_for_model,
+    get_provider_class_for_name,
     get_provider_for_model,
 )
 
@@ -39,6 +44,11 @@ __all__ = [
     "LLMToolUseEnd",
     "LLMToolUseStart",
     "PROVIDER_BY_PREFIX",
+    "PROVIDER_NAME_BY_PREFIX",
+    "SyntheticTextBlock",
+    "SyntheticToolUseBlock",
     "UnknownProviderError",
+    "get_provider_class_for_model",
+    "get_provider_class_for_name",
     "get_provider_for_model",
 ]

@@ -59,6 +59,12 @@ ALLOWED_MODELS: frozenset[str] = frozenset({
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
     "claude-opus-4-7",
+    # Fase 2 of the multi-provider epic: deepseek-chat (V3). Default
+    # surface mappings still point at claude-* models — DeepSeek is
+    # opt-in via per-turn `model` override until Fase 3 migrates
+    # defaults after parity validation.
+    "deepseek-chat",
+    # "deepseek-reasoner",  # Fase 3 adds R1 (reasoning_content event).
 })
 
 

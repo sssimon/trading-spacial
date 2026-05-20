@@ -42,10 +42,12 @@ def get_agent_status(cfg: Optional[dict] = None) -> AgentStatus:
 
     Precedence (any disabling source wins):
       1. cfg["agent"]["enabled"] is explicitly False  → agent_disabled
-      2. ANTHROPIC_API_KEY missing or empty            → treated identically
-         (we deliberately collapse "key missing" into the same reason as
-         "operator disabled" so the wire format never leaks the existence
-         of an env var named ANTHROPIC_API_KEY)
+      2. Default model's provider has no API key       → agent_disabled
+         (§2.7 of the multi-provider epic: we check the key of the
+         provider that serves the default surface model — NOT "any
+         key set". If the default is deepseek-chat and only
+         ANTHROPIC_API_KEY is set, status returns disabled BEFORE
+         the first turn fails inside the adapter.)
       3. Global circuit breaker tripped (explicit cfg.agent.breaker_open
          OR automatic 24h global spend cap exceeded) → breaker_open
       4. Otherwise                                     → enabled
@@ -54,14 +56,21 @@ def get_agent_status(cfg: Optional[dict] = None) -> AgentStatus:
     agent_disabled — the frontend can render different UX ("system
     temporarily halted" vs "feature off") and the operator-facing
     metrics page can tell the two states apart.
+
+    Wire-format invariant (pre-reg §13.5): the response never leaks
+    env-var names. "Key missing" and "operator disabled" collapse
+    into agent_disabled.
     """
     cfg = cfg if cfg is not None else load_config()
     agent_cfg = cfg.get("agent") or {}
     if agent_cfg.get("enabled") is False:
         return AgentStatus(enabled=False, reason=_REASON_DISABLED)
 
-    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-    if not api_key:
+    # §2.7: check the API key of the default model's provider, not
+    # ANTHROPIC_API_KEY directly. The default surface is "dock";
+    # whichever provider serves dock today determines the key we
+    # need.
+    if not _default_provider_has_key():
         return AgentStatus(enabled=False, reason=_REASON_DISABLED)
 
     # Local import to avoid the circular: circuit_breaker reads cfg via
@@ -73,3 +82,27 @@ def get_agent_status(cfg: Optional[dict] = None) -> AgentStatus:
         return AgentStatus(enabled=False, reason=_REASON_BREAKER_OPEN)
 
     return AgentStatus(enabled=True, reason=_REASON_OK)
+
+
+def _default_provider_has_key() -> bool:
+    """True if the provider that serves the default surface ("dock") has
+    its API key configured. Decoupled from the status function so the
+    import chain is testable in isolation.
+
+    Returns False on any resolution error (unknown provider, SDK import
+    failure, etc) — collapses every failure mode into the same
+    agent_disabled closed-enum reason.
+    """
+    try:
+        from api.agent.models import default_model_for_surface
+        from api.agent.providers.registry import (
+            UnknownProviderError, get_provider_class_for_model,
+        )
+        default_model = default_model_for_surface("dock")
+        provider_cls = get_provider_class_for_model(default_model)
+        # Construct a no-key instance. has_api_key() reads from the
+        # right env var for the provider's vendor.
+        return provider_cls().has_api_key()
+    except Exception:  # noqa: BLE001
+        log.warning("_default_provider_has_key resolution failed", exc_info=True)
+        return False

@@ -126,17 +126,34 @@ def collect_grounding_from_tool_results(
     seen_symbols:      set[str] = set()
 
     for msg in messages:
-        if msg.get("role") != "user":
+        # Two message shapes to handle (Fase 2 of multi-provider epic):
+        #
+        # Anthropic shape:
+        #   {"role": "user",
+        #    "content": [{"type": "tool_result", "tool_use_id": ..., "content": ...}, ...]}
+        #
+        # DeepSeek (OpenAI) shape:
+        #   {"role": "tool", "tool_call_id": ..., "content": "..."}
+        role = msg.get("role")
+        haystacks: list = []  # list of (raw_content) to scan
+
+        if role == "user":
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if (isinstance(block, dict)
+                            and block.get("type") == "tool_result"):
+                        haystacks.append(block.get("content"))
+        elif role == "tool":
+            # DeepSeek-shape: content is a string carrying the JSON of
+            # the tool result directly (no nested block list).
+            haystacks.append(msg.get("content"))
+        else:
             continue
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict) or block.get("type") != "tool_result":
-                continue
-            raw = block.get("content")
-            # Anthropic tool_result content can be a string OR a list of
-            # text blocks. We coerce both shapes to a single haystack.
+
+        for raw in haystacks:
+            # Both Anthropic and DS may have string OR list-of-text-blocks
+            # content. Coerce both shapes to a single haystack string.
             if isinstance(raw, list):
                 hay = " ".join(
                     (b.get("text") or "") for b in raw if isinstance(b, dict)

@@ -182,13 +182,49 @@ class AnthropicProvider:
             content=list(final.content),
         )
 
-    # ── Re-send shape ───────────────────────────────────────────────
+    # ── Re-send shape (Anthropic wire) ──────────────────────────────
 
+    def to_assistant_message(self, stream_end) -> dict:
+        """Anthropic shape: one assistant message whose `content` is a
+        list of typed blocks. The SDK returns typed objects; we coerce
+        to {type, text} / {type, id, name, input} dicts that the API
+        accepts when echoed back on the next turn."""
+        content = []
+        for b in stream_end.content:
+            if b.type == "text":
+                content.append({"type": "text", "text": b.text or ""})
+            elif b.type == "tool_use":
+                content.append({
+                    "type":  "tool_use",
+                    "id":    b.id,
+                    "name":  b.name,
+                    "input": b.input or {},
+                })
+        return {"role": "assistant", "content": content}
+
+    def to_tool_result_messages(
+        self, tool_uses_with_results: list[tuple],
+    ) -> list[dict]:
+        """Anthropic: ONE user message with a list of tool_result blocks.
+        Splitting tool_results across messages is a wire-format error
+        per pre-reg §6.1 of epic #400."""
+        blocks = []
+        for tu, content, is_error in tool_uses_with_results:
+            blocks.append({
+                "type":          "tool_result",
+                "tool_use_id":   tu.id,
+                "content":       content,
+                "is_error":      is_error,
+            })
+        return [{"role": "user", "content": blocks}]
+
+    # Backward-compat shim — kept for one PR to avoid churning test
+    # call sites that imported this helper directly. To be deleted in
+    # Fase 3 of the multi-provider epic.
     def blocks_to_api_shape(self, blocks: list) -> list[dict]:
-        """Coerce the SDK's typed content blocks back to the dict form
-        the API accepts in the next request's `messages` array.
-
-        Mirrors the pre-refactor `_blocks_to_api_shape` in loop.py."""
+        """Deprecated: use to_assistant_message instead. Returns just
+        the `content` portion (the list of blocks) for callers that
+        wrap it in their own message dict."""
         out = []
         for b in blocks:
             if b.type == "text":

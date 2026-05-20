@@ -42,11 +42,69 @@ def _anthropic_factory() -> Any:
     return AnthropicProvider(client=build_anthropic_client())
 
 
+def _deepseek_factory() -> Any:
+    """Lazy: construct DeepSeekProvider. DS uses raw httpx (no SDK to
+    import), so the factory only needs DEEPSEEK_API_KEY at construction
+    time. Tests inject FakeDeepSeekProvider via dependency_overrides
+    and never hit this path."""
+    from api.agent.providers.deepseek_adapter import (
+        DeepSeekProvider, build_deepseek_client_kwargs,
+    )
+    return DeepSeekProvider(**build_deepseek_client_kwargs())
+
+
 PROVIDER_BY_PREFIX: dict[str, Any] = {
-    "claude": _anthropic_factory,
-    # Phase 2 of the multi-provider epic adds:
-    # "deepseek": _deepseek_factory,
+    "claude":   _anthropic_factory,
+    "deepseek": _deepseek_factory,
 }
+
+
+# Prefix → canonical provider name. Necessary because the prefix is a
+# property of the model ID series (claude-*, deepseek-*) while the name
+# is a property of the vendor (anthropic, deepseek). For DeepSeek these
+# happen to coincide; for Anthropic they don't. Single source of truth
+# for both directions of the mapping.
+PROVIDER_NAME_BY_PREFIX: dict[str, str] = {
+    "claude":   "anthropic",
+    "deepseek": "deepseek",
+}
+
+
+# Mapping from provider name → adapter class, for callers that need
+# to call non-stream methods (format_system_blocks, format_tools,
+# estimate_cost) WITHOUT constructing an SDK client. Phase 2 of the
+# multi-provider epic + PR #412 review pickup 1: cleaner than the
+# previous if/elif by provider_name in loop.py.
+def get_provider_class_for_name(provider_name: str):
+    """Return the adapter CLASS (not an instance) for cheap operations
+    like tool formatting and cost calculation. Caller is responsible
+    for constructing an instance (cheap — no SDK required for these
+    methods)."""
+    if provider_name == "anthropic":
+        from api.agent.providers.anthropic_adapter import AnthropicProvider
+        return AnthropicProvider
+    if provider_name == "deepseek":
+        from api.agent.providers.deepseek_adapter import DeepSeekProvider
+        return DeepSeekProvider
+    raise UnknownProviderError(
+        f"no provider class registered for name {provider_name!r}"
+    )
+
+
+def get_provider_class_for_model(model: str):
+    """Convenience: resolve a model id to its adapter CLASS in one step.
+
+    Use this for cost calculation, tool formatting — anything that
+    needs the provider's logic but NOT a live SDK connection. The
+    caller can construct an instance cheaply (no API key validation,
+    no SDK import for the connection layer).
+    """
+    for prefix, name in PROVIDER_NAME_BY_PREFIX.items():
+        if model.startswith(f"{prefix}-"):
+            return get_provider_class_for_name(name)
+    raise UnknownProviderError(
+        f"no provider class for model {model!r}"
+    )
 
 
 # ── Resolver ─────────────────────────────────────────────────────────

@@ -119,10 +119,10 @@ LoopEvent = (
 def _cached_formatted_tools(surface: str, provider_name: str) -> tuple[dict, ...]:
     """Cache the formatted tools array keyed on (surface, provider name).
 
-    Phase 1 of the multi-provider epic: this replaces the previous
-    `_build_anthropic_tools(surface)` cache which assumed only one
-    provider. Now keyed on (surface, provider_name) because different
-    providers emit different wire shapes from the same ToolSpec.
+    Fase 2 of the multi-provider epic + PR #412 review pickup 1:
+    dispatches via the registry's get_provider_class_for_name helper
+    instead of hardcoded if/elif. Adding a new provider only needs an
+    entry in the registry — this function doesn't change.
 
     `maxsize=16` covers 5 surfaces × up to 3 providers + headroom.
 
@@ -130,19 +130,12 @@ def _cached_formatted_tools(surface: str, provider_name: str) -> tuple[dict, ...
     dicts remain mutable; callers MUST treat as read-only — mutating
     any nested schema corrupts the cache for every subsequent request.
     """
-    from api.agent.providers.anthropic_adapter import AnthropicProvider
-    specs = tools_for_surface(surface)
-    if provider_name == "anthropic":
-        # Construct a no-client adapter just for formatting. format_tools
-        # doesn't need the SDK; this avoids pulling in anthropic just to
-        # serialize a JSON schema.
-        return tuple(AnthropicProvider().format_tools(specs))
-    # Phase 2 of the multi-provider epic adds:
-    # if provider_name == "deepseek":
-    #     return tuple(DeepSeekProvider().format_tools(specs))
-    raise ValueError(
-        f"unknown provider name for tool formatting: {provider_name!r}"
-    )
+    from api.agent.providers.registry import get_provider_class_for_name
+    provider_cls = get_provider_class_for_name(provider_name)
+    # Construct a no-client/no-key adapter instance just for formatting.
+    # format_tools doesn't need the SDK or API key — pure Pydantic →
+    # JSON schema serialization.
+    return tuple(provider_cls().format_tools(tools_for_surface(surface)))
 
 
 # Backward-compat shim: a couple of older tests imported
@@ -169,14 +162,22 @@ def _estimate_cost_usd(model: str, usage: dict) -> float:
     """Compute the USD cost for one hop's `usage`. Dispatches to the
     provider that owns the model via the registry.
 
-    Returns 0.0 if no provider claims the model (silent fallback —
-    matches pre-refactor behavior for unknown model ids).
+    Fase 2 of the multi-provider epic + PR #412 review pickup 1:
+    uses get_provider_class_for_model to resolve the adapter class
+    without constructing an SDK client. Returns 0.0 if no provider
+    claims the model (silent fallback — matches pre-refactor behavior
+    for unknown model ids; an unknown model in the hot path means a
+    config mistake, but we don't want to crash cost calculation
+    over it).
     """
-    from api.agent.providers.anthropic_adapter import AnthropicProvider
-    if model.startswith("claude-"):
-        return AnthropicProvider().estimate_cost(model, usage)
-    # Phase 2 adds: if model.startswith("deepseek-"): ...
-    return 0.0
+    from api.agent.providers.registry import (
+        UnknownProviderError, get_provider_class_for_model,
+    )
+    try:
+        cls = get_provider_class_for_model(model)
+    except UnknownProviderError:
+        return 0.0
+    return cls().estimate_cost(model, usage)
 
 
 # ── Loop ────────────────────────────────────────────────────────────────
@@ -304,17 +305,26 @@ async def run_turn(
             return
 
         # Append the assistant message ONCE (carries all tool_use blocks).
-        # See pre-reg §6.1 — splitting per tool_use is a wire-format error.
-        messages.append({
-            "role": "assistant",
-            "content": provider.blocks_to_api_shape(final_content),
-        })
+        # Anthropic: one message with content=[blocks]. DeepSeek: one
+        # message with content=str + tool_calls=[]. Provider knows.
+        # See pre-reg §6.1 — for Anthropic, splitting tool_use across
+        # messages is a wire-format error.
+        # Reconstruct a stream_end-like with .content for the helper.
+        from api.agent.providers.base import LLMStreamEnd as _LLMStreamEnd
+        _se = _LLMStreamEnd(
+            stop_reason=final_stop_reason,
+            usage=hop_usage,
+            content=final_content,
+        )
+        messages.append(provider.to_assistant_message(_se))
 
-        # Collect tool_results for ALL tool_use blocks in this turn into
-        # ONE user message. The API rejects a turn that splits
-        # tool_results across multiple user messages.
+        # Collect tool_results for ALL tool_use blocks in this turn.
+        # The shape of "what gets appended" diverges per provider:
+        # Anthropic → 1 user message with all tool_result blocks;
+        # DeepSeek → N tool messages, one per tool_call. The provider's
+        # to_tool_result_messages handles that translation.
         tool_uses = [b for b in final_content if b.type == "tool_use"]
-        tool_results = []
+        tool_uses_with_results: list[tuple] = []
         for tu in tool_uses:
             result_json = dispatch_tool(
                 tu.name or "", tu.input or {},
@@ -360,13 +370,8 @@ async def run_turn(
                 model_visible = {k: v for k, v in parsed.items() if k != "_proposal"}
                 content_for_model = json.dumps(model_visible, default=str)
 
-            tool_results.append({
-                "type":          "tool_result",
-                "tool_use_id":   tu.id,
-                "content":       content_for_model,
-                "is_error":      is_error,
-            })
-        messages.append({"role": "user", "content": tool_results})
+            tool_uses_with_results.append((tu, content_for_model, is_error))
+        messages.extend(provider.to_tool_result_messages(tool_uses_with_results))
 
         # Loop back: send the tool_results to the model.
 

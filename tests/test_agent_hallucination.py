@@ -148,6 +148,48 @@ def test_grounding_scan_handles_anthropic_tool_result_block_list_form():
     assert 5 in g["position_ids"]
 
 
+def test_grounding_scan_handles_deepseek_role_tool_messages():
+    """Fase 2 of multi-provider epic: DeepSeek puts tool results in
+    `{"role": "tool", "tool_call_id": ..., "content": "..."}` messages,
+    NOT in user messages with tool_result blocks. The hallucination
+    guard's grounding scan must surface IDs from both shapes."""
+    from api.agent.safety import collect_grounding_from_tool_results
+    # Mixed transcript — initial user, assistant with tool_calls, then
+    # DS-shape tool result, then assistant final text.
+    messages = [
+        {"role": "user", "content": "qué tengo"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "call_1", "type": "function",
+                          "function": {"name": "get_positions",
+                                        "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "call_1",
+         "content": '{"positions": [{"id": 88, "symbol": "ETHUSDT"}]}'},
+    ]
+    g = collect_grounding_from_tool_results(messages)
+    assert 88 in g["position_ids"]
+    assert "ETH" in g["symbols"]
+
+
+def test_grounding_scan_mixed_provider_shapes_in_one_history():
+    """Defensive — if a transcript ever combined Anthropic and DS shapes
+    (e.g. mid-conversation provider switch, never happens today but
+    locks the invariant), both still contribute to grounding."""
+    from api.agent.safety import collect_grounding_from_tool_results
+    messages = [
+        {"role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": "toolu_1",
+            "content": '{"positions": [{"id": 10, "symbol": "BTCUSDT"}]}',
+        }]},
+        {"role": "tool", "tool_call_id": "call_2",
+         "content": '{"positions": [{"id": 20, "symbol": "ADAUSDT"}]}'},
+    ]
+    g = collect_grounding_from_tool_results(messages)
+    assert 10 in g["position_ids"]
+    assert 20 in g["position_ids"]
+    assert "BTC" in g["symbols"]
+    assert "ADA" in g["symbols"]
+
+
 # ── Public API: assert_text_grounded ─────────────────────────────
 
 

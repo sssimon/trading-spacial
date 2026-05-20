@@ -393,6 +393,14 @@ class FakeAnthropicProvider:
     def blocks_to_api_shape(self, blocks: list) -> list[dict]:
         return self._real_adapter.blocks_to_api_shape(blocks)
 
+    def to_assistant_message(self, stream_end) -> dict:
+        return self._real_adapter.to_assistant_message(stream_end)
+
+    def to_tool_result_messages(
+        self, tool_uses_with_results: list[tuple],
+    ) -> list[dict]:
+        return self._real_adapter.to_tool_result_messages(tool_uses_with_results)
+
     def estimate_cost(self, model: str, usage: dict) -> float:
         return self._real_adapter.estimate_cost(model, usage)
 
@@ -453,6 +461,161 @@ class FakeAnthropicProvider:
 # The two names refer to the same class; new tests should use the
 # *Provider name to make the LLM-abstraction explicit.
 FakeAnthropicClient = FakeAnthropicProvider
+
+
+# ── FakeDeepSeekProvider (Fase 2 of the multi-provider epic) ────────
+
+
+class FakeDeepSeekProvider:
+    """Test double for DeepSeekProvider. Reuses the FakeTurnBuilder DX
+    (queue_turn / queue_error / .calls list) so tests describe one
+    model turn in the same vocabulary regardless of provider.
+
+    The fake's stream() translates the builder's Anthropic-shape events
+    to LLMEvents — identical translation logic to FakeAnthropicProvider.
+    Where the providers diverge is in:
+      - format_system_blocks (single concatenated block vs 4 cache_control'd)
+      - format_tools (OpenAI function shape vs Anthropic input_schema)
+      - to_assistant_message (content string + tool_calls vs blocks list)
+      - to_tool_result_messages (N role=tool messages vs 1 user with blocks)
+      - estimate_cost (DS pricing)
+
+    All those delegations route to the REAL DeepSeekProvider via
+    self._real_adapter (same pattern as FakeAnthropicProvider). Tests
+    that exercise the wire shape get byte-identical output to what
+    production would send.
+
+    The REAL DeepSeek SSE parsing logic (httpx + tool_calls accumulation)
+    is NOT exercised through this fake — that's tested directly against
+    DeepSeekProvider with a synthetic httpx mock in
+    tests/test_provider_deepseek.py (Fase 2).
+    """
+
+    name = "deepseek"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._queued: list[FakeStream] = []
+        # Construct a no-key adapter for wire-shape methods. has_api_key
+        # is env-driven, so this works as long as DEEPSEEK_API_KEY is
+        # set in the test env (most tests don't need it because they
+        # bypass the registry and inject this fake directly).
+        from api.agent.providers.deepseek_adapter import DeepSeekProvider
+        self._real_adapter = DeepSeekProvider()
+
+    # ── Test queueing API (mirrors FakeAnthropicProvider) ──────────
+
+    def queue_turn(self, built: tuple[list, "FakeFinalMessage"]) -> None:
+        events, final = built
+        self._queued.append(FakeStream(events=events, final=final))
+
+    def queue_error(self, exc: Exception, *, mid_stream: bool = False) -> None:
+        if mid_stream:
+            events, final = (
+                FakeTurnBuilder()
+                .text("partial chunk").text(" before drop")
+                .end_turn()
+                .build()
+            )
+            self._queued.append(FakeStream(
+                events=events, final=final, raise_mid_stream=exc,
+            ))
+        else:
+            self._queued.append(FakeStream(
+                events=[],
+                final=FakeFinalMessage(),
+                raise_on_enter=exc,
+            ))
+
+    def _next_stream(self) -> FakeStream:
+        if not self._queued:
+            raise RuntimeError(
+                "FakeDeepSeekProvider: no queued turns. The loop opened "
+                "more streams than the test queued — likely a runaway "
+                "tool-use cycle. Inspect self.calls to see what was sent."
+            )
+        return self._queued.pop(0)
+
+    # ── LLMProvider protocol ──────────────────────────────────────
+
+    def supports_model(self, model: str) -> bool:
+        return model.startswith("deepseek-")
+
+    def has_api_key(self) -> bool:
+        return True
+
+    def format_system_blocks(self, blocks: list[str]) -> list[dict]:
+        return self._real_adapter.format_system_blocks(blocks)
+
+    def format_tools(self, specs: tuple) -> list[dict]:
+        return self._real_adapter.format_tools(specs)
+
+    def to_assistant_message(self, stream_end) -> dict:
+        return self._real_adapter.to_assistant_message(stream_end)
+
+    def to_tool_result_messages(
+        self, tool_uses_with_results: list[tuple],
+    ) -> list[dict]:
+        return self._real_adapter.to_tool_result_messages(tool_uses_with_results)
+
+    def estimate_cost(self, model: str, usage: dict) -> float:
+        return self._real_adapter.estimate_cost(model, usage)
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        system_blocks: list[dict],
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int,
+    ):
+        """Translate the builder's Anthropic-shape events to LLMEvents.
+        Identical translation as FakeAnthropicProvider — the fakes
+        agree on the internal LLMEvent contract; only the WIRE shapes
+        differ, and those are exercised by the format_* / to_* methods.
+
+        The final block list yielded in LLMStreamEnd.content carries
+        the builder's typed objects (FakeContentBlock with .type/.text/
+        .id/.name/.input attributes). The loop reads attributes
+        generically, so this works without DS-specific synthesis.
+        """
+        from api.agent.providers.base import (
+            LLMStreamEnd, LLMTextDelta, LLMToolUseStart,
+        )
+
+        self.calls.append({
+            "model":         model,
+            "system_blocks": system_blocks,
+            "messages":      messages,
+            "tools":         tools,
+            "max_tokens":    max_tokens,
+        })
+        fake_stream = self._next_stream()
+        async with fake_stream as s:
+            async for ev in s:
+                if ev.type == "content_block_start":
+                    cb = ev.content_block
+                    if cb is not None and cb.type == "tool_use":
+                        yield LLMToolUseStart(
+                            id=cb.id or "", name=cb.name or "",
+                        )
+                elif ev.type == "content_block_delta":
+                    d = ev.delta
+                    if d is not None and d.type == "text_delta" and d.text:
+                        yield LLMTextDelta(text=d.text)
+            final = await s.get_final_message()
+        usage_dict = {
+            "input_tokens":                getattr(final.usage, "input_tokens", 0) or 0,
+            "output_tokens":               getattr(final.usage, "output_tokens", 0) or 0,
+            "cache_read_input_tokens":     0,  # DS doesn't report cache stats
+            "cache_creation_input_tokens": 0,
+        }
+        yield LLMStreamEnd(
+            stop_reason=final.stop_reason,
+            usage=usage_dict,
+            content=list(final.content),
+        )
 
 
 # Cheap self-test at import — failures here surface as ImportError at

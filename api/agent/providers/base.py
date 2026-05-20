@@ -24,6 +24,33 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol
 
 
+# ── Synthetic content blocks ─────────────────────────────────────────
+
+
+# Adapters that don't get typed objects from their SDK (e.g. DeepSeek,
+# which is OpenAI-shape JSON) synthesize block instances of these
+# dataclasses and put them in LLMStreamEnd.content. The loop reads
+# `.type` and dispatches generically; `to_assistant_message` knows how
+# to serialize them back out to its wire shape. The Anthropic adapter
+# uses the SDK's TextBlock/ToolUseBlock instances directly — those
+# happen to expose the same attribute names, so the loop's reads
+# work either way.
+
+
+@dataclass(frozen=True)
+class SyntheticTextBlock:
+    text: str
+    type: str = "text"
+
+
+@dataclass(frozen=True)
+class SyntheticToolUseBlock:
+    id: str
+    name: str
+    input: dict
+    type: str = "tool_use"
+
+
 # ── LLMEvent closed enum ─────────────────────────────────────────────
 
 
@@ -148,15 +175,40 @@ class LLMProvider(Protocol):
         """
         ...
 
-    def blocks_to_api_shape(self, blocks: list) -> list[dict]:
-        """Convert the provider's content blocks (as returned in
-        LLMStreamEnd.content) back into the dict shape that goes into
-        the next request's `messages` array.
+    def to_assistant_message(self, stream_end: "LLMStreamEnd") -> dict:
+        """Build the full assistant message dict to append to the
+        conversation history for the next hop.
 
-        Anthropic's SDK gives us typed objects (TextBlock, ToolUseBlock)
-        that the API doesn't accept when echoed back — they need to be
-        coerced to {"type": "...", ...} dicts. DeepSeek/OpenAI already
-        returns dict-shaped content, so this is a no-op there."""
+        Anthropic shape:
+            {"role": "assistant",
+             "content": [{"type": "text", "text": "..."},
+                         {"type": "tool_use", "id": "...", "name": "...", "input": {...}}]}
+
+        DeepSeek shape:
+            {"role": "assistant",
+             "content": "<all text concatenated>",
+             "tool_calls": [{"id": "...", "type": "function",
+                             "function": {"name": "...", "arguments": "<json string>"}}]}
+
+        The loop appends the return value directly to `messages` —
+        provider owns the full shape.
+        """
+        ...
+
+    def to_tool_result_messages(
+        self, tool_uses_with_results: list[tuple],
+    ) -> list[dict]:
+        """Build the message(s) to append after dispatching tools.
+
+        `tool_uses_with_results` is a list of `(tool_use_block, content_string,
+        is_error)` tuples — one per dispatched tool in the hop.
+
+        Anthropic returns ONE user message with a list of tool_result
+        content blocks (the API rejects splitting across messages).
+
+        DeepSeek (OpenAI-shape) returns N messages with `role="tool"`,
+        one per tool_call, each with the tool_call_id reference.
+        """
         ...
 
     def estimate_cost(self, model: str, usage: dict) -> float:
