@@ -1,8 +1,14 @@
-# Crypto Trading Scanner — Ultimate Macro & Order Flow V6.0
+# trading-spacial
 
 [![CI](https://github.com/sssimon/trading-spacial/actions/workflows/ci.yml/badge.svg)](https://github.com/sssimon/trading-spacial/actions/workflows/ci.yml)
 
-Automated signal system for the top 20 crypto pairs by market cap. Uses multi-timeframe technical analysis (4H macro context → 1H signal → 5M entry trigger) to generate scored entry alerts delivered to Telegram.
+> A research-grade laboratory for evaluating systematic crypto-trading strategies, with a working signal scanner + dashboard on top.
+
+The surface is a Bitcoin / altcoin signal scanner: multi-timeframe technical analysis (4H macro → 1H signal → 5M entry), scored signals delivered to Telegram per-user, React dashboard with position tracking and an in-app LLM copilot.
+
+The substance is the methodology underneath: pre-registered hypotheses, a locked holdout dataset with two-layer access guards, explicit structural-fix ledger (bug fixes vs. modeling decisions), and honest closure of failed hypotheses. **See [`METHODOLOGY.md`](METHODOLOGY.md)** for what makes this different from the 50,000 other crypto bots on GitHub.
+
+**Status (2026-05-22):** the LRC strategy class has been re-baselined post-PR #223 and returned `EDGE_WEAK`. The only confirmed edge is operator-discretion exit timing (Direction A Q2). Two structurally distinct strategy directions have been explored and closed: (1) regime-allocation pivot (epic [#338](https://github.com/sssimon/trading-spacial/issues/338)) closed 2026-05-15 with verdict `PHASE_3_INSUFFICIENT_DATA`, and (2) trend-pullback (R3) closed earlier with FAIL verdict. Current active work is operator-tooling (multi-tenant production [#253](https://github.com/sssimon/trading-spacial/issues/253), per-user copilot history [#428](https://github.com/sssimon/trading-spacial/issues/428), onboarding wizard [#427](https://github.com/sssimon/trading-spacial/issues/427)). Do not trade this system live.
 
 ---
 
