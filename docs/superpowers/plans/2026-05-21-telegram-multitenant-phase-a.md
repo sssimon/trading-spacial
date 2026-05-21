@@ -1,5 +1,7 @@
 # Telegram Multi-Tenant Phase A — Backend Wiring Implementation Plan
 
+> ⚠️ **SUPERSEDED 2026-05-21** by [`2026-05-21-telegram-per-user-config.md`](2026-05-21-telegram-per-user-config.md). Operator redirect mid-execution invirtió el modelo (bot per-user, config UI-driven). Spec asociado en `specs/es/2026-05-21-telegram-per-user-config-pre-reg.md`. Este plan queda como artefacto histórico.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Plan has no code changes — solo operational steps con checkpoints de verificación. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Samuel recibe señales del scanner en su chat personal de Telegram, vía la ruta per-user (`dispatch_signal_to_users`), no por broadcast global. Funciona hoy con `tenant_id=1`; deja la arquitectura lista para usuarios futuros (cada uno con su propio chat_id en `user_preferences`).

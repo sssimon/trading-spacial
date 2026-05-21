@@ -1,8 +1,10 @@
 # Telegram multi-tenant — Phase A (backend wiring) — pre-reg
 
+> ⚠️ **SUPERSEDED 2026-05-21** by [`2026-05-21-telegram-per-user-config-pre-reg.md`](2026-05-21-telegram-per-user-config-pre-reg.md). Durante la ejecución de este spec, el operator pidió "configurable como openclaw" — modelo where each user has their own bot, each manages own config, fully UI-driven (no admin SSH/.env work). Ese cambio fundamental invierte la arquitectura: token deja de ser global, pasa a per-user en `user_preferences.notify_channels`. Spec nuevo lo refleja. Este queda como artefacto histórico.
+
 **Fecha:** 2026-05-21
 **Operator:** Samuel (en nombre de Simon)
-**Estado:** pre-reg pre-ejecución
+**Estado:** SUPERSEDED — ver banner arriba
 **Estimación:** ~30 min wall-clock
 
 ## Contexto
