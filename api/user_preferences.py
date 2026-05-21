@@ -39,38 +39,6 @@ class PreferencesPutBody(BaseModel):
     )
 
 
-@router.get("", summary="Get preferences for current tenant (defaults if unset)")
-def get_preferences(tenant_id: int = Depends(get_current_tenant_id)):
-    row = db_get_user_preferences(tenant_id)
-    if row is None:
-        # Return sensible defaults — per pre-reg §3.2
-        return {
-            "tenant_id": tenant_id,
-            "symbol_filter": None,
-            "min_score": _DEFAULT_MIN_SCORE,
-            "notify_channels": None,
-        }
-    return row
-
-
-@router.put(
-    "",
-    summary="Upsert preferences for current tenant",
-    dependencies=[Depends(verify_api_key)],
-)
-def put_preferences(
-    body: PreferencesPutBody,
-    tenant_id: int = Depends(get_current_tenant_id),
-):
-    row = db_upsert_user_preferences(
-        tenant_id,
-        symbol_filter=body.symbol_filter,
-        min_score=body.min_score,
-        notify_channels=body.notify_channels,
-    )
-    return {"ok": True, "preferences": row}
-
-
 def _mask_token(token: str) -> str:
     """Mask a Telegram bot token, preserving first 10 + last 4 chars.
 
@@ -89,3 +57,58 @@ def _mask_token(token: str) -> str:
     if not token or len(token) < 10:
         return ""
     return f"{token[:10]}****{token[-4:]}"
+
+
+@router.get("", summary="Get preferences for current tenant (defaults if unset)")
+def get_preferences(tenant_id: int = Depends(get_current_tenant_id)):
+    row = db_get_user_preferences(tenant_id)
+    if row is None:
+        # Return sensible defaults — per pre-reg §3.2
+        return {
+            "tenant_id": tenant_id,
+            "symbol_filter": None,
+            "min_score": _DEFAULT_MIN_SCORE,
+            "notify_channels": None,
+        }
+    # Mask telegram_bot_token in the response to reduce XSS blast radius.
+    # See spec §Security note.
+    nc = row.get("notify_channels") or None
+    if nc and nc.get("telegram_bot_token"):
+        nc = {**nc, "telegram_bot_token": _mask_token(nc["telegram_bot_token"])}
+        row = {**row, "notify_channels": nc}
+    return row
+
+
+@router.put(
+    "",
+    summary="Upsert preferences for current tenant",
+    dependencies=[Depends(verify_api_key)],
+)
+def put_preferences(
+    body: PreferencesPutBody,
+    tenant_id: int = Depends(get_current_tenant_id),
+):
+    # If the submitted telegram_bot_token contains the mask marker '****',
+    # the user did NOT retype it — preserve the existing DB value. This
+    # supports the UX pattern "pre-fill masked value, only update if user
+    # types something new". See spec §Security note.
+    notify_channels = body.notify_channels
+    if notify_channels and "****" in (notify_channels.get("telegram_bot_token") or ""):
+        existing = db_get_user_preferences(tenant_id)
+        existing_token = (
+            (existing or {}).get("notify_channels") or {}
+        ).get("telegram_bot_token", "")
+        notify_channels = {**notify_channels, "telegram_bot_token": existing_token}
+
+    row = db_upsert_user_preferences(
+        tenant_id,
+        symbol_filter=body.symbol_filter,
+        min_score=body.min_score,
+        notify_channels=notify_channels,
+    )
+    # Re-fetch + mask before returning (consistency with GET).
+    fresh = db_get_user_preferences(tenant_id)
+    if fresh and fresh.get("notify_channels", {}).get("telegram_bot_token"):
+        nc = fresh["notify_channels"]
+        fresh = {**fresh, "notify_channels": {**nc, "telegram_bot_token": _mask_token(nc["telegram_bot_token"])}}
+    return {"ok": True, "preferences": fresh}
