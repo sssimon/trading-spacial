@@ -79,7 +79,7 @@ Any number in this repo — backtest P&L, Sharpe ratio, win rate, drawdown — n
 |---|---|---|---|---|
 | [#223](https://github.com/sssimon/trading-spacial/pull/223) / #224 | 2026-04-25 | **Bug fix** | Sign error in `_close_position` that double-counted PnL on certain exit paths | Pre-fix numbers were inflated; not a "calibration improvement" |
 | [#296](https://github.com/sssimon/trading-spacial/pull/296)+#297+#298+#299 | 2026-05-03 | **Triple Barrier structural fix** | Time-limit barrier, participation cap, per-symbol overrides honored in live + backtest paths | Closed the legacy `atr_*` kwargs bypass for the live path |
-| [#309](https://github.com/sssimon/trading-spacial/pull/309) | 2026-05-11 | **Modeling decision** | Symmetric K=10 per-trade overshoot cap. Bounds `\|pnl_usd\| ≤ K × risk_amount` | Realistic; bounds the catastrophic-bar mechanism without enforcing pooled-portfolio capital management |
+| [#309](https://github.com/sssimon/trading-spacial/pull/309) | 2026-05-11 | **Modeling decision** | Symmetric K=10 per-trade overshoot cap. Bounds `&#124;pnl_usd&#124; ≤ K × risk_amount` | Realistic; bounds the catastrophic-bar mechanism without enforcing pooled-portfolio capital management |
 | [#313](https://github.com/sssimon/trading-spacial/pull/313) | 2026-05-11 | **Bug fix** | Post-bankruptcy ghost trades. Symbol halts at `0.1 × INITIAL_CAPITAL` floor | Closed the silent-continued-fictional-trading sub-gap; metrics dict now carries `bankruptcy_count` |
 | [#329](https://github.com/sssimon/trading-spacial/pull/329) | 2026-05-12 | **Phase 2 R1 outcome** | SIGNAL_EXIT branch kept flag-gated False on live — mechanism engaged in backtest, profitability absent | Honest closure of a hypothesis that failed its pre-registered gate |
 
