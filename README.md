@@ -364,58 +364,70 @@ python -m pytest tests/test_api.py -v
 
 ## Troubleshooting
 
-### El scanner no genera señales
-1. Verificar conexion a Binance: `curl -s https://api.binance.com/api/v3/ping`
-2. Revisar logs: `tail -f logs/btc_api.log`
-3. Verificar que `config.json` existe y tiene formato valido
-4. Forzar scan manual: `curl -X POST http://localhost:8000/scan`
-5. Revisar el endpoint de salud: `curl http://localhost:8000/health`
+### Scanner generates no signals
+1. Verify Binance connectivity: `curl -s https://api.binance.com/api/v3/ping`
+2. Check the API log: `tail -f logs/btc_api.log`
+3. Confirm `config.json` exists and is valid JSON
+4. Force a manual scan: `curl -X POST http://localhost:8000/scan`
+5. Hit the health endpoint: `curl http://localhost:8000/health`
 
-### Telegram no envia mensajes
-1. Verificar `telegram_bot_token` y `telegram_chat_id` en `config.json`
-2. Probar envio: `curl http://localhost:8000/webhook/test`
-3. Verificar que `signal_filters.min_score` no es demasiado alto (default: 4)
-4. Revisar logs para errores de Telegram: `grep -i telegram logs/btc_api.log`
-5. Si usa proxy: verificar formato `socks5://127.0.0.1:1080`
+### Telegram is silent
+1. Confirm `telegram_bot_token` and `telegram_chat_id` are set — note: since [#421](https://github.com/sssimon/trading-spacial/pull/421) these are **per-user** in `user_preferences`, not in `config.json`. Configure via the dashboard → avatar → Conexiones.
+2. Test delivery: dashboard → Conexiones → "Probar envío" button, or `curl http://localhost:8000/webhook/test`
+3. Check `signal_filters.min_score` isn't too restrictive (default: 4)
+4. Search the API log for Telegram errors: `grep -i telegram logs/btc_api.log`
+5. If using a proxy: confirm format `socks5://127.0.0.1:1080`
 
-### El dashboard no carga datos
-1. Verificar que `btc_api.py` esta corriendo: `curl http://localhost:8000/status`
-2. Si usa Docker: verificar que el container esta activo: `docker ps`
-3. Verificar proxy en nginx: `curl http://localhost:3000/api/status`
-4. Revisar la consola del navegador para errores CORS
+### Dashboard shows no data
+1. Confirm `btc_api.py` is running: `curl http://localhost:8000/status`
+2. If running under Docker: `docker ps`
+3. Verify the nginx / Caddy proxy: `curl http://localhost:3000/api/status`
+4. Check the browser console for CORS errors
 
-### Errores de base de datos
-1. Verificar que `signals.db` existe y no esta corrupto
-2. Si esta corrupto, restaurar desde backup: `cp backups/signals_YYYYMMDD.db signals.db`
-3. Para recrear la DB: eliminar `signals.db` y reiniciar `btc_api.py`
+### Database errors
+1. Confirm `signals.db` exists and isn't corrupt
+2. To restore from backup: `cp backups/signals_YYYYMMDD.db signals.db`
+3. To recreate from scratch: delete `signals.db` and restart `btc_api.py`
 
-### El watchdog no inicia (Windows)
-1. Verificar que Python esta en PATH: `python --version`
-2. Ejecutar como administrador: `powershell -ExecutionPolicy Bypass -File scripts/INSTALAR_AUTOSTART.ps1`
-3. Verificar tarea en Task Scheduler: buscar "BTCScannerWatchdog"
-4. Revisar logs: `type logs\watchdog.log`
+### Watchdog won't start (Windows local dev only)
+1. Check Python is on PATH: `python --version`
+2. Run the installer as administrator: `powershell -ExecutionPolicy Bypass -File scripts/INSTALAR_AUTOSTART.ps1`
+3. Verify the scheduled task exists: open Task Scheduler, look for `BTCScannerWatchdog`
+4. Check the log: `type logs\watchdog.log`
+
+> **Production note:** `watchdog.py` is Windows-only and is *not* what supervises production. Production runs on Linux EC2 (`trading.sdar.dev`) where supervision is via systemd. The systemd unit files are not yet checked into the repo — tracked in the audit punch list. If you're deploying to a Linux server, do not rely on `watchdog.py`.
 
 ## Deployment Checklist
 
-- [ ] Crear `config.json` con credenciales (copiar template del README)
-- [ ] Configurar `telegram_bot_token` y `telegram_chat_id`
-- [ ] Opcional: configurar `api_key` para proteger endpoints sensibles
-- [ ] Verificar conectividad a Binance: `curl https://api.binance.com/api/v3/ping`
-- [ ] Instalar dependencias: `pip install -r requirements.txt`
-- [ ] Iniciar API: `python btc_api.py`
-- [ ] Verificar salud: `curl http://localhost:8000/health`
-- [ ] Probar Telegram: `curl http://localhost:8000/webhook/test`
-- [ ] Iniciar frontend: `cd frontend && npm install && npm run dev`
-- [ ] Verificar dashboard en `http://localhost:5173`
-- [ ] Para produccion: `docker compose up --build`
-- [ ] Configurar autostart (Windows): ejecutar `scripts/INSTALAR_AUTOSTART.ps1`
-- [ ] Verificar logs se generan en `logs/`
+- [ ] Create `config.json` with credentials (copy template from this README)
+- [ ] Configure system-level Telegram only if you want a fallback channel — otherwise each user configures their own via the dashboard (since #421)
+- [ ] Optional: set `api_key` to protect sensitive endpoints
+- [ ] Verify Binance connectivity: `curl https://api.binance.com/api/v3/ping`
+- [ ] Install dependencies: `pip install -r requirements.txt`
+- [ ] Start the API: `python btc_api.py`
+- [ ] Health check: `curl http://localhost:8000/health`
+- [ ] Test legacy Telegram (if configured): `curl http://localhost:8000/webhook/test`
+- [ ] Start the frontend: `cd frontend && npm install && npm run dev`
+- [ ] Open the dashboard: `http://localhost:5173`
+- [ ] For production: see `infra/` + GitHub Actions deploy workflow (`.github/workflows/deploy.yml`)
+- [ ] Configure autostart:
+  - **Windows local dev:** `scripts/INSTALAR_AUTOSTART.ps1`
+  - **Linux production:** systemd unit (see ops docs — not yet in repo)
+- [ ] Confirm logs are landing in `logs/`
+- [ ] Confirm `data/regime_cache.json` populates after the first daily-bar fetch
 
 ---
 
 ## Notes
 
-- `config.json` is git-ignored — contains sensitive credentials
-- `watchdog.py` is Windows-only (uses `tasklist`, `taskkill`, `wmic`)
-- Symbols list is dynamically fetched from CoinGecko every hour with fallback to a hardcoded top-20 list
-- Binance Futures API is the primary data source; Bybit is the fallback
+- `config.json` is git-ignored — contains credentials. Use the template in this README to bootstrap.
+- `watchdog.py` is Windows-only (uses `tasklist`, `taskkill`, `wmic`). Linux production is supervised by systemd; the unit files are not yet in the repo (tracked).
+- The curated symbol list is **static** (10 coins) since epic #135 — see Signal Logic section above.
+- Binance Futures is the primary data source; Bybit is the fallback.
+- The locked holdout dataset at `data/holdout/` is read-only and guard-protected. See [`METHODOLOGY.md`](METHODOLOGY.md) § Holdout dataset isolation before writing any new code that touches it.
+
+## Research methodology
+
+This isn't just a trading scanner. The methodology underneath — pre-registration, holdout isolation, structural-fix ledger, honest closure of failed hypotheses — is what makes this repo different from the generic crypto-bot landscape.
+
+→ **Read [`METHODOLOGY.md`](METHODOLOGY.md)**, then [`docs/README.md`](docs/README.md) for the full spec index.
