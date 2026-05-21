@@ -119,3 +119,55 @@ def put_preferences(
         masked_nc = {**nc, "telegram_bot_token": _mask_token(nc["telegram_bot_token"])}
         row = {**row, "notify_channels": masked_nc}
     return {"ok": True, "preferences": row}
+
+
+@router.post(
+    "/test",
+    summary="Send a test message to current tenant's Telegram",
+    dependencies=[Depends(verify_api_key)],
+)
+def post_preferences_test(tenant_id: int = Depends(get_current_tenant_id)):
+    """Verifica end-to-end que las credenciales de Telegram del usuario
+    funcionan, mandando un mensaje 'ping' a su bot.
+
+    Bypassa notify() y dispatch_signal_to_users a propósito (spec §Backend
+    Option 2):
+      - Evita dedup edge-cases (signal event_type tiene dedup_window=0 hoy,
+        pero el bypass blinda contra cambios futuros del default).
+      - Evita side-effect en NotificationBell: cada test press NO crea una
+        row en notifications_sent.
+      - No aplica filtros del usuario (symbol_filter / min_score) — esos
+        aplican a signals reales, no a "verificá tu config".
+
+    Trade-off: NO ejercita el dispatcher per-user. Aceptable porque el
+    dispatcher tiene cobertura propia (tests/test_multi_tenant_b4_signal_
+    routing.py).
+    """
+    from api.config import load_config
+    from db.user_preferences import db_get_user_preferences as _db_get
+    from notifier.channels.telegram import TelegramChannel
+
+    prefs = _db_get(tenant_id) or {}
+    notify_channels = prefs.get("notify_channels") or {}
+    base_cfg = load_config()
+    user_cfg = {**base_cfg, **notify_channels}
+
+    token = (user_cfg.get("telegram_bot_token") or "").strip()
+    chat_id = (user_cfg.get("telegram_chat_id") or "").strip()
+    if not token or not chat_id:
+        return {"ok": False, "receipts": [], "reason": "no_telegram_configured"}
+
+    channel = TelegramChannel(user_cfg)
+    receipt = channel.send(
+        "*Crypto Scanner — prueba de conexión*\n"
+        "Si ves este mensaje, tu bot y chat están bien configurados. ✅"
+    )
+    return {
+        "ok": receipt.status == "ok",
+        "receipts": [{
+            "channel": receipt.channel,
+            "status": receipt.status,
+            "error": receipt.error,
+        }],
+        "reason": None,
+    }

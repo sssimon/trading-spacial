@@ -140,3 +140,112 @@ def test_put_replaces_token_when_value_unmasked(seeded_user_with_telegram):
     resp_token = r.json()["preferences"]["notify_channels"]["telegram_bot_token"]
     assert _MASK_MARKER in resp_token
     assert "NEWXYZabcDEF" not in resp_token
+
+
+# ── POST /api/preferences/test ──────────────────────────────────────
+
+
+def test_test_endpoint_no_channels_returns_no_telegram_configured(tmp_path, monkeypatch):
+    """User without notify_channels → {ok: false, reason: 'no_telegram_configured'}."""
+    import btc_api
+    from fastapi.testclient import TestClient
+    from db.auth_schema import init_auth_db
+    from db.schema import init_db
+    from db.connection import get_db
+
+    db_path = str(tmp_path / "test_prefs_no_channels.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    init_db()
+    init_auth_db()
+    # No user row needed: conftest auth bypass uses synthetic User(id=0).
+
+    client = TestClient(btc_api.app)
+    r = client.post("/preferences/test")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"ok": False, "receipts": [], "reason": "no_telegram_configured"}
+
+
+def test_test_endpoint_only_token_returns_no_telegram_configured(seeded_user_with_telegram, monkeypatch):
+    """Token set but chat_id missing → still no_telegram_configured."""
+    from db.user_preferences import db_upsert_user_preferences
+    # Overwrite the fixture's prefs to remove chat_id
+    db_upsert_user_preferences(0, notify_channels={"telegram_bot_token": "xxx:yyy"})
+
+    client = seeded_user_with_telegram
+    r = client.post("/preferences/test")
+    assert r.json()["reason"] == "no_telegram_configured"
+
+
+def test_test_endpoint_with_telegram_routes_correctly(seeded_user_with_telegram, monkeypatch):
+    """Happy path: token + chat_id set → TelegramChannel.send called with user_cfg.
+    Mock requests.post to avoid hitting real Telegram API."""
+    sent_payloads = []
+    class _FakeResp:
+        ok = True
+        status_code = 200
+        text = "ok"
+    def _fake_post(url, json=None, **kw):
+        sent_payloads.append({"url": url, "body": json})
+        return _FakeResp()
+
+    import requests
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    client = seeded_user_with_telegram
+    r = client.post("/preferences/test")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["receipts"] == [{"channel": "telegram", "status": "ok", "error": None}]
+    assert body["reason"] is None
+    # Sent payload uses the USER's bot token + chat_id from notify_channels overlay
+    assert len(sent_payloads) == 1
+    assert "123456789:ABCdefGHIjklMNOpqrsTUVwxyz_aBcDeFgH12" in sent_payloads[0]["url"]
+    assert sent_payloads[0]["body"]["chat_id"] == "987654321"
+
+
+def test_test_endpoint_two_calls_within_window_both_succeed(seeded_user_with_telegram, monkeypatch):
+    """Defense against future dedup window changes: 2 calls in quick succession
+    BOTH return ok=true. Bypass of notify() guarantees this regardless of any
+    future tightening of signal-type dedup defaults."""
+    class _FakeResp:
+        ok = True
+        status_code = 200
+        text = "ok"
+    def _fake_post(url, **kw):
+        return _FakeResp()
+    import requests
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    client = seeded_user_with_telegram
+    r1 = client.post("/preferences/test")
+    r2 = client.post("/preferences/test")
+    assert r1.json()["ok"] is True
+    assert r2.json()["ok"] is True
+
+
+def test_test_endpoint_does_not_write_to_notifications_sent(seeded_user_with_telegram, monkeypatch):
+    """Bypass of notify() means no row written to notifications_sent
+    (avoids polluting NotificationBell with test pings)."""
+    class _FakeResp:
+        ok = True
+        status_code = 200
+        text = "ok"
+    def _fake_post(url, **kw):
+        return _FakeResp()
+    import requests
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    from db.connection import get_db
+    con = get_db()
+    before = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
+    con.close()
+
+    client = seeded_user_with_telegram
+    client.post("/preferences/test")
+
+    con = get_db()
+    after = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
+    con.close()
+    assert before == after, "POST /test should NOT write to notifications_sent"
