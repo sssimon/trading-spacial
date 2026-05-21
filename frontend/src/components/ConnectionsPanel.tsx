@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import styles from './ConnectionsPanel.module.css';
 import type { NotifyChannels } from '../types';
-import { getPreferences } from '../api';
+import { getPreferences, putPreferences } from '../api';
 
 interface ConnectionsPanelProps {
   open:    boolean;
@@ -32,6 +32,22 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
       })
       .finally(() => setLoading(false));
   }, [open]);
+
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await putPreferences({
+        notify_channels: {
+          telegram_bot_token: botToken,
+          telegram_chat_id:   chatId,
+        },
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -74,6 +90,15 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
                 placeholder="123456789"
                 disabled={loading}
               />
+            </div>
+            <div className={styles.actions}>
+              <button
+                className={`${styles.btn} ${styles.btnPrimary}`}
+                onClick={handleSave}
+                disabled={saving || loading}
+              >
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
             </div>
           </section>
         </div>
