@@ -119,25 +119,21 @@ Full classification of the backtest-vs-live distinction: [`2026-05-01-operationa
 
 ## Where the research is going
 
-The LRC strategy class (4H macro → 1H signal → 5M entry, ATR-based SL/TP) is mature but produced `EDGE_WEAK` in the post-#223 re-baselining. The active research direction is:
+The honest state, as of 2026-05-22: no validated systematic strategy. Three iterations have been closed with documented failure modes, and the project's center of gravity has shifted to **operator-tooling + multi-tenant production**.
 
-**Regime-allocation strategy class** (epic [#338](https://github.com/sssimon/trading-spacial/issues/338), pre-reg [`2026-05-13-epic-regime-allocation-strategy-pivot.md`](docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md))
+**Closed strategy research:**
 
-Structurally distinct alternative: equal-weight Donchian ensemble (9 lookbacks: 5/10/20/30/60/90/150/250/360 days), daily updates at 23:00 UTC close, vol-targeting sizing (30% annualized portfolio vol target replaces R-multiple), bidirectional rotational SHORT, 2× leverage cap, signal-based exits (no SL/TP/TL).
+1. **LRC strategy class** (4H macro → 1H signal → 5M entry, ATR-based SL/TP) — mature codepath, but produced `EDGE_WEAK` in the post-#223 re-baselining (Direction A, PR [#357](https://github.com/sssimon/trading-spacial/pull/357)). Only confirmed edge: Q2 operator-discretion exit timing.
+2. **Regime-allocation strategy class** (epic [#338](https://github.com/sssimon/trading-spacial/issues/338), pre-reg [`2026-05-13-epic-regime-allocation-strategy-pivot.md`](docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md)) — equal-weight Donchian ensemble (9 lookbacks: 5/10/20/30/60/90/150/250/360 days), daily updates at 23:00 UTC, vol-targeting sizing replacing R-multiple, bidirectional rotational SHORT, 2× leverage cap, signal-based exits. **Epic closed 2026-05-15 with verdict `PHASE_3_INSUFFICIENT_DATA`** — not enough independent observations in the post-2017 universe to discriminate. Phase 1 (architecture + flag-gated implementation) shipped; Phases 2-6 deferred behind the insufficient-data verdict.
+3. **Direction A re-baselining** (PR [#357](https://github.com/sssimon/trading-spacial/pull/357)) — multi-direction test of post-#223 mechanisms. Verdict `EDGE_WEAK`. Only Q2 (operator-discretion exit timing) survived.
 
-Status as of 2026-05-22:
-- **Phase 1** (architecture + flag-gated implementation): shipped 2026-05-13
-- **Phase 2** (pre-Phase 3 sanity checks on synthetic data): pre-reg complete
-- **Phase 3** (real-data evaluation): returned `PHASE_3_INSUFFICIENT_DATA` — not enough independent observations in the post-2017 universe to discriminate
-- **Phase 4-6**: pending Phase 3 resolution
+**Active work (operator-tooling, not strategy research):**
 
-**Multi-tenant production** (epic [#253](https://github.com/sssimon/trading-spacial/issues/253), closed 2026-05-16)
+- **Multi-tenant production** — Epic [#253](https://github.com/sssimon/trading-spacial/issues/253). All B.1–B.8 sub-tasks shipped in `080a74e`; B.8 production migration completed 2026-05-16 (3,306 signal_outcomes + 410 notifications stamped `tenant_id=1`, zero downtime). The umbrella ticket stays open as a tracking anchor for follow-up isolation work. Per-user data isolation (`tenant_id` foreign keys), IDOR-safe API, per-user Telegram dispatcher, per-user dashboard state.
+- **Per-user copilot history** — Epic [#428](https://github.com/sssimon/trading-spacial/issues/428), open. Persist + retrieve past LLM-copilot chats per tenant. Research lens: capture the operator-LLM dialogue at the moment of a discretionary decision, so we can later evaluate which operator decisions correlated with positive outcomes.
+- **First-login onboarding wizard** — Epic [#427](https://github.com/sssimon/trading-spacial/issues/427), open. Guided multi-step (capital, preferences, Telegram) for invitees (papá Simón id=2, María id=3).
 
-Per-user data isolation (`tenant_id` foreign keys), IDOR-safe API, per-user Telegram dispatcher, per-user dashboard state. The methodology question now extends to: *whose operator-discretion edge are we measuring?* Each invitee (papá Simón id=2, María id=3) becomes their own operator-discretion data point.
-
-**Per-user copilot history** (epic [#428](https://github.com/sssimon/trading-spacial/issues/428), open)
-
-Persist + retrieve past LLM-copilot chats per tenant. Research lens: capture the operator-LLM dialogue at the moment of a discretionary decision, so we can later evaluate which operator decisions correlated with positive outcomes.
+**The methodology question now**: *whose operator-discretion edge are we measuring?* Each invitee becomes their own data point. The system's value proposition has shifted from "find the alpha" to "instrument operator decisions and study them over time".
 
 ## How to evaluate any claim in this repo
 
