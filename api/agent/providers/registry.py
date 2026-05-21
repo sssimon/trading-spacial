@@ -18,6 +18,7 @@ Invariants enforced in CI by tests/test_provider_registry.py:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 log = logging.getLogger("api.agent.providers.registry")
@@ -35,7 +36,16 @@ def _anthropic_factory() -> Any:
     """Lazy: construct AnthropicProvider with a real SDK client. The
     SDK import happens inside build_anthropic_client; tests that don't
     have the anthropic package installed never hit this path because
-    they inject a FakeAnthropicProvider via dependency_overrides."""
+    they inject a FakeAnthropicProvider via dependency_overrides.
+
+    Deploys that omit ANTHROPIC_API_KEY (DS-only setup per multi-provider
+    runbook §0.2) raise UnknownProviderError here so the router maps to
+    400 model_not_allowed instead of leaking KeyError/ImportError 500s.
+    """
+    if not (os.environ.get("ANTHROPIC_API_KEY") or "").strip():
+        raise UnknownProviderError(
+            "ANTHROPIC_API_KEY not configured — claude-* models unavailable"
+        )
     from api.agent.providers.anthropic_adapter import (
         AnthropicProvider, build_anthropic_client,
     )
@@ -46,7 +56,18 @@ def _deepseek_factory() -> Any:
     """Lazy: construct DeepSeekProvider. DS uses raw httpx (no SDK to
     import), so the factory only needs DEEPSEEK_API_KEY at construction
     time. Tests inject FakeDeepSeekProvider via dependency_overrides
-    and never hit this path."""
+    and never hit this path.
+
+    Same env-var guard as the Anthropic factory: missing key surfaces
+    as 400 model_not_allowed via the router. /agent/status normally
+    short-circuits to agent_disabled before reaching this path when
+    DS is the default provider, but the guard is defensive against
+    surface defaults rotating in the future.
+    """
+    if not (os.environ.get("DEEPSEEK_API_KEY") or "").strip():
+        raise UnknownProviderError(
+            "DEEPSEEK_API_KEY not configured — deepseek-* models unavailable"
+        )
     from api.agent.providers.deepseek_adapter import (
         DeepSeekProvider, build_deepseek_client_kwargs,
     )

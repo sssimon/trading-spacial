@@ -75,6 +75,37 @@ def test_unknown_model_id_raises_unknown_provider_error():
         get_provider_for_model("totally-fake-model")
 
 
+def test_anthropic_factory_raises_unknown_provider_when_key_missing(monkeypatch):
+    """Deploys that don't set ANTHROPIC_API_KEY (DS-only setup per
+    runbook §0.2) must surface as 400 model_not_allowed on claude-*
+    overrides — NOT 500 KeyError from os.environ[...] in the SDK
+    client constructor. Symmetric to DS path.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from api.agent.providers.registry import (
+        PROVIDER_BY_PREFIX, UnknownProviderError,
+    )
+
+    with pytest.raises(UnknownProviderError):
+        PROVIDER_BY_PREFIX["claude"]()
+
+
+def test_deepseek_factory_raises_unknown_provider_when_key_missing(monkeypatch):
+    """Symmetric defensive coverage: DEEPSEEK_API_KEY missing must
+    raise UnknownProviderError, not propagate the ValueError that
+    DeepSeekProvider._ensure_api_key throws at construction.
+    Normally /agent/status short-circuits to agent_disabled before
+    reaching this path, but the factory must still fail safe.
+    """
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    from api.agent.providers.registry import (
+        PROVIDER_BY_PREFIX, UnknownProviderError,
+    )
+
+    with pytest.raises(UnknownProviderError):
+        PROVIDER_BY_PREFIX["deepseek"]()
+
+
 def test_get_provider_for_model_for_claude_resolves(monkeypatch):
     """For a real claude model id, the registry calls the Anthropic
     factory. We can't easily test against the real SDK in a test
