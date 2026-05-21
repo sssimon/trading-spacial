@@ -11,6 +11,8 @@ If you're new to the project and want to understand what it's actually about:
 
 ## Canonical specs by topic
 
+> Specs are written in Spanish (language of operator thinking) — see "Convention notes" below. The dates in filenames are the pre-registration commit dates.
+
 ### Project framing + methodology
 - [`specs/es/2026-04-30-a1-holdout-dataset-provenance.md`](superpowers/specs/es/2026-04-30-a1-holdout-dataset-provenance.md) — holdout dataset provenance
 - [`specs/es/2026-05-01-operational-model-manual-gating.md`](superpowers/specs/es/2026-05-01-operational-model-manual-gating.md) — why this isn't auto-trading

@@ -131,7 +131,7 @@ The honest state, as of 2026-05-22: no validated systematic strategy. Three iter
 
 - **Multi-tenant production** — Epic [#253](https://github.com/sssimon/trading-spacial/issues/253). All B.1–B.8 sub-tasks shipped in `080a74e`; B.8 production migration completed 2026-05-16 (3,306 signal_outcomes + 410 notifications stamped `tenant_id=1`, zero downtime). The umbrella ticket stays open as a tracking anchor for follow-up isolation work. Per-user data isolation (`tenant_id` foreign keys), IDOR-safe API, per-user Telegram dispatcher, per-user dashboard state.
 - **Per-user copilot history** — Epic [#428](https://github.com/sssimon/trading-spacial/issues/428), open. Persist + retrieve past LLM-copilot chats per tenant. Research lens: capture the operator-LLM dialogue at the moment of a discretionary decision, so we can later evaluate which operator decisions correlated with positive outcomes.
-- **First-login onboarding wizard** — Epic [#427](https://github.com/sssimon/trading-spacial/issues/427), open. Guided multi-step (capital, preferences, Telegram) for invitees (papá Simón id=2, María id=3).
+- **First-login onboarding wizard** — Epic [#427](https://github.com/sssimon/trading-spacial/issues/427), open. Guided multi-step (capital, preferences, Telegram) for invited operators.
 
 **The methodology question now**: *whose operator-discretion edge are we measuring?* Each invitee becomes their own data point. The system's value proposition has shifted from "find the alpha" to "instrument operator decisions and study them over time".
 

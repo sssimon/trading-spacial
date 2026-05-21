@@ -19,7 +19,7 @@ Binance API (Bybit fallback)
   └─ btc_scanner.py      — fetch OHLCV, compute indicators (LRC, RSI, BB, SMA, ATR, ADX),
      |                     score signals (0–9), gate by regime detector
      ├─ strategy/         — modular indicators, regime detection, sizing, vol-targeting
-     ├─ strategies/       — ⚠️ legacy ADX-based router (kept for back-compat; see CLAUDE.md)
+     ├─ strategies/       — ⚠️ legacy ADX-based router (kept until consolidation; see strategies/router.py)
      └─ backtest.py       — simulator with K-cap overshoot bound + bankruptcy halt
             ↓
   └─ btc_api.py            — FastAPI server (port 8000), SQLite storage, scanner thread
