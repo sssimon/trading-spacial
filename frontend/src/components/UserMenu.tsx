@@ -11,6 +11,8 @@ interface UserMenuProps {
   user:    AuthUser;
   onClose: () => void;
   onLogout: () => void;
+  onConnectionsOpen?: () => void;
+  telegramConfigured?: boolean;
 }
 
 interface MenuItem {
@@ -22,13 +24,22 @@ interface MenuItem {
   onClick?: () => void;
 }
 
-const UserMenu: React.FC<UserMenuProps> = ({ open, user, onClose, onLogout }) => {
+const UserMenu: React.FC<UserMenuProps> = ({
+  open, user, onClose, onLogout,
+  onConnectionsOpen, telegramConfigured = false,
+}) => {
   if (!open) return null;
 
   const items: MenuItem[] = [
     { icon: '◧', label: 'Mi cuenta', hint: 'email · contraseña · 2FA' },
     { icon: '✦', label: 'Capital y riesgo', hint: 'gestión de balance' },
-    { icon: '◐', label: 'Conexiones', hint: 'Telegram · Webhook', badge: '1' },
+    {
+      icon: '◐',
+      label: 'Conexiones',
+      hint: 'Telegram · Webhook',
+      badge: telegramConfigured ? undefined : '1',
+      onClick: () => { onConnectionsOpen?.(); onClose(); },
+    },
     { icon: '⌨', label: 'Atajos de teclado', kbd: '?' },
     { icon: '❑', label: 'Documentación' },
   ];
