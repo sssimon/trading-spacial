@@ -35,6 +35,7 @@ import {
   closePosition,
   updatePosition,
   getHealthDashboard,
+  getPreferences,
 } from './api';
 import type {
   SymbolStatus,
@@ -65,6 +66,7 @@ import StatusBar from './components/StatusBar';
 import SymbolsGrid from './components/SymbolsGrid';
 import SignalsTable from './components/SignalsTable';
 import ConfigPanel from './components/ConfigPanel';
+import ConnectionsPanel from './components/ConnectionsPanel';
 import PositionsView, { type PortfolioSummary } from './components/PositionsView';
 import OpenPositionModal from './components/OpenPositionModal';
 import AutoTuneView from './components/AutoTuneView';
@@ -89,7 +91,7 @@ import appStyles from './App.module.css';
 
 const REFRESH_INTERVAL_MS = 30_000;
 
-type OverlayKind = 'notifs' | 'settings' | 'user' | null;
+type OverlayKind = 'notifs' | 'settings' | 'user' | 'connections' | null;
 
 const App: React.FC = () => {
   const { user, logout } = useAuth();
@@ -121,6 +123,7 @@ const App: React.FC = () => {
   const [selectedSymbol, setSelectedSymbol] = useState<SymbolStatus | null>(null);
   const [openOverlay,    setOpenOverlay]    = useState<OverlayKind>(null);
   const [unreadCount,    setUnreadCount]    = useState<number>(0);
+  const [telegramConfigured, setTelegramConfigured] = useState(false);
 
   // Signal to open as position (passed from SignalsTable)
   const [signalForPos, setSignalForPos] = useState<Signal | null>(null);
@@ -194,6 +197,16 @@ const App: React.FC = () => {
     const id = setInterval(fetchAll, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [fetchAll]);
+
+  // Hydrate telegramConfigured badge on initial load + after ConnectionsPanel closes.
+  useEffect(() => {
+    if (openOverlay !== 'connections') {
+      getPreferences().then((p) => {
+        const tok = (p.notify_channels as { telegram_bot_token?: string } | null)?.telegram_bot_token;
+        setTelegramConfigured(Boolean(tok));
+      }).catch(() => {});  // silent: badge stays in default state on error
+    }
+  }, [openOverlay]);
 
   // ── derived state ──────────────────────────────────────
   const lastRefreshTs = lastRefresh ? lastRefresh.getTime() : null;
@@ -720,6 +733,10 @@ const App: React.FC = () => {
         open={openOverlay === 'settings'}
         onClose={() => setOpenOverlay(null)}
       />
+      <ConnectionsPanel
+        open={openOverlay === 'connections'}
+        onClose={() => setOpenOverlay(null)}
+      />
       {user && (
         <UserMenu
           open={openOverlay === 'user'}
@@ -729,6 +746,8 @@ const App: React.FC = () => {
             setOpenOverlay(null);
             handleLogout();
           }}
+          onConnectionsOpen={() => setOpenOverlay('connections')}
+          telegramConfigured={telegramConfigured}
         />
       )}
 
