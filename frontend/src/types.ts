@@ -456,3 +456,24 @@ export interface PreferencesPutPayload {
   min_score?: number;
   notify_channels?: Record<string, unknown> | null;
 }
+
+// ---- Telegram per-user config (spec 2026-05-21) ----
+
+export interface NotifyChannels {
+  telegram_bot_token?: string;   // masked from server: '<10chars>****<4chars>'
+  telegram_chat_id?:   string;
+}
+
+export interface TestDeliveryReceipt {
+  channel: string;
+  status:  'ok' | 'failed' | 'rate_limited';
+  error:   string | null;
+}
+
+export type TestDeliveryReason = 'no_telegram_configured' | null;
+
+export interface TestDeliveryResponse {
+  ok:       boolean;
+  receipts: TestDeliveryReceipt[];
+  reason:   TestDeliveryReason;
+}

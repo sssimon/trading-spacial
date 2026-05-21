@@ -30,6 +30,7 @@ import type {
   UserPreferences,
   PreferencesPutPayload,
   AgentStatus,
+  TestDeliveryResponse,
 } from './types';
 
 const BASE_URL = '/api';
@@ -420,4 +421,8 @@ export async function putPreferences(
     method: 'PUT',
     body: JSON.stringify(payload),
   });
+}
+
+export async function testPreferencesDelivery(): Promise<TestDeliveryResponse> {
+  return request<TestDeliveryResponse>('/preferences/test', { method: 'POST' });
 }
