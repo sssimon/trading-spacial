@@ -38,7 +38,12 @@ const UserMenu: React.FC<UserMenuProps> = ({
       label: 'Conexiones',
       hint: 'Telegram · Webhook',
       badge: telegramConfigured ? undefined : '1',
-      onClick: () => { onConnectionsOpen?.(); onClose(); },
+      // Only call onConnectionsOpen — the parent's setOpenOverlay('connections')
+      // is the same setter as onClose's setOpenOverlay(null), so calling both
+      // would race (last call wins → null → panel never opens). The menu closes
+      // naturally because UserMenu's `open={openOverlay === 'user'}` flips false
+      // once the overlay is 'connections'.
+      onClick: () => { onConnectionsOpen?.(); },
     },
     { icon: '⌨', label: 'Atajos de teclado', kbd: '?' },
     { icon: '❑', label: 'Documentación' },
