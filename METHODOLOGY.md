@@ -137,8 +137,42 @@ The honest state, as of 2026-05-22: no validated systematic strategy. Three iter
 
 ## How to evaluate any claim in this repo
 
-(TBD — Task 5)
+Default skepticism stance for any number, chart, or claim you find in this repo:
+
+1. **Find the pre-reg.** If a result has no pre-registration document under `docs/superpowers/specs/es/`, treat it as exploratory analysis, not as evidence. Exploratory analysis informs hypothesis generation; it does not test hypotheses.
+
+2. **Check the date against #223/#224/#309/#313.** Pre-2026-04-25 numbers are pre-PnL-sign-fix. Pre-2026-05-11 numbers are pre-K-cap and pre-bankruptcy-halt. Each of these inflected results materially. The structural-fixes table above is the canonical reference.
+
+3. **Read the `pending_steps` or open issues.** Active gates that bar further claims are tracked as open GitHub issues labeled `methodology/*`. If `#322` (A.4-3 holdout execution) is open, no claim about holdout performance is valid yet.
+
+4. **Look for the `clamped_trade_count` and `bankruptcy_count`.** Any backtest report should surface both. If a result is good but `bankruptcy_count > 0` or `clamped_trade_count > 5%` of trades on any symbol, the result is reporting cap-bounded behavior, not strategy edge.
+
+5. **Sister variables.** When a finding is reported, ask: what parallel paths or related parameters might exhibit the same pattern? An honest analysis acknowledges them in the same writeup.
+
+6. **Operator discretion is real.** Numbers from the live system include operator-discretion exit timing. Numbers from backtest do not. The two are not comparable without explicit translation.
 
 ## References
 
-(TBD — Task 5)
+**Canonical specs** (all under `docs/superpowers/specs/es/`):
+- [`2026-04-30-a1-holdout-dataset-provenance.md`](docs/superpowers/specs/es/2026-04-30-a1-holdout-dataset-provenance.md) — holdout provenance + lock parameters
+- [`2026-05-11-a4-hallazgo-inflexion-metodologica.md`](docs/superpowers/specs/es/2026-05-11-a4-hallazgo-inflexion-metodologica.md) — inflection point that triggered the regime-allocation pivot
+- [`2026-05-13-epic-regime-allocation-strategy-pivot.md`](docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md) — regime-allocation strategy pivot (closed 2026-05-15 with PHASE_3_INSUFFICIENT_DATA verdict)
+- [`2026-05-01-operational-model-manual-gating.md`](docs/superpowers/specs/es/2026-05-01-operational-model-manual-gating.md) — why exclusions E2–E5 are manual-check by design
+- [`2026-05-11-strategy-structural-audit.md`](docs/superpowers/specs/es/2026-05-11-strategy-structural-audit.md) — comprehensive audit of strategy components
+- [`2026-05-16-multi-tenant-threat-model.md`](docs/superpowers/specs/es/2026-05-16-multi-tenant-threat-model.md) — per-tenant isolation guarantees
+- [`2026-05-03-asunciones-tecnicas-pre-holdout.md`](docs/superpowers/specs/es/2026-05-03-asunciones-tecnicas-pre-holdout.md) — assumptions audit pre-holdout-evaluation
+
+**Research notes** (`docs/superpowers/research/`):
+- [`2026-05-02-structural-fix-parameter-study.md`](docs/superpowers/research/2026-05-02-structural-fix-parameter-study.md) — K-cap parameter study
+- [`2026-04-30-exit-logic-benchmark-crypto.md`](docs/superpowers/research/2026-04-30-exit-logic-benchmark-crypto.md) — exit logic benchmark
+
+**Academic anchors cited in `costs_calibration.json`:**
+- Almgren-Chriss (2001), "Optimal execution of portfolio transactions"
+- Donier-Bonart (2015), "A Million Metaorder Analysis of Market Impact on the Bitcoin"
+- Tóth et al (2011), "Anomalous price impact and the critical nature of liquidity in financial markets"
+
+**External method references:**
+- Pre-registration practice from clinical trials methodology (e.g. ClinicalTrials.gov)
+- Holdout-set discipline from machine-learning competition norms (Kaggle private leaderboards)
+
+**Navigation:** the full index of specs, plans, and research is at [`docs/README.md`](docs/README.md).
