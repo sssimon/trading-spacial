@@ -72,8 +72,12 @@ For the why behind these bounds, see [`METHODOLOGY.md`](METHODOLOGY.md) § Struc
 |-------|------|
 | Backend | Python 3.12, FastAPI, SQLite |
 | Frontend | React 18, TypeScript, Vite, lightweight-charts |
-| Alerts | Telegram (per-user bot, via notifier/dispatch_per_user.py) |
-| Infrastructure | Docker, Windows Task Scheduler |
+| LLM copilot | Anthropic Claude + DeepSeek (multi-provider, epic #400) |
+| Alerts | Telegram (per-user, configured by each operator via dashboard) |
+| Auth | JWT, per-user setup, password reset by shell only |
+| Data sources | Binance Futures (primary), Bybit (fallback), CoinGecko (symbol metadata), Alternative.me (Fear & Greed) |
+| Production | Linux EC2 (`trading.sdar.dev`), Caddy reverse proxy, GitHub Actions deploy |
+| Local dev | Windows or Linux/macOS, Docker for frontend + n8n |
 
 ---
 
@@ -290,25 +294,58 @@ python -m pytest tests/test_api.py -v
 
 ## Project Structure
 
-```
-├── btc_api.py              # FastAPI server (port 8000)
-├── btc_scanner.py          # Signal engine (indicators + scoring)
-├── btc_report.py           # Standalone HTML market report generator
-├── trading_webhook.py      # Webhook receiver → Telegram (port 9000)
-├── watchdog.py             # Process supervisor (Windows)
-├── docker-compose.yml      # Frontend + n8n containers
-├── requirements_scanner.txt
-├── frontend/               # React 18 dashboard
-│   └── src/
-│       ├── components/     # SymbolsGrid, SignalsTable, PositionsPanel, ...
-│       ├── api.ts          # Typed fetch wrapper
-│       └── types.ts        # TypeScript interfaces
-├── tests/
-│   ├── test_scanner.py
-│   └── test_api.py
-├── scripts/                # Windows automation (PS1 + BAT)
-├── Backtesting_BTCUSDT/    # Backtesting results and charts (V6)
-└── data/                   # Position sizing calculator, trade tracker
+```text
+├── README.md                  # You are here
+├── METHODOLOGY.md             # The moat: pre-registration, holdout guards, structural fixes
+├── CLAUDE.md                  # Current-state truth (architecture, configs, known limitations)
+├── docs/                      # Specs, plans, research notes — see docs/README.md
+│   ├── README.md              # Documentation index
+│   └── superpowers/
+│       ├── specs/es/          # ~40 pre-registration documents
+│       ├── plans/             # ~35 implementation plans (active + archive/)
+│       └── research/          # Research notes (K-cap study, exit benchmarks)
+│
+│  # — Entry points —
+├── btc_api.py                 # FastAPI server (port 8000), scanner thread
+├── btc_scanner.py             # Signal engine: indicators, scoring, regime detection
+├── btc_report.py              # Standalone HTML market report generator
+├── trading_webhook.py         # Webhook receiver → Telegram (legacy path, port 9000)
+├── watchdog.py                # Process supervisor — ⚠️ Windows-only; Linux prod
+│                              #   supervises via systemd (not yet in repo, tracked
+│                              #   in audit follow-ups)
+│
+│  # — Modular code —
+├── api/                       # REST endpoints split by domain
+├── auth/                      # JWT auth + setup paths
+├── db/                        # SQLite schema + migrations + capital
+├── notifier/                  # Per-user signal dispatch (multi-tenant)
+├── strategy/                  # Indicators, regime, sizing, kill-switch, vol-targeting
+├── strategies/                # ⚠️ Legacy ADX router — being consolidated (tracked)
+├── scanner/                   # HTTP helpers
+├── cli/                       # CLI commands
+├── tools/                     # Operator scripts
+│
+│  # — Backtest + tuning —
+├── backtest.py                # Simulator (post-#309 K-cap + #313 bankruptcy halt)
+├── backtest_costs.py          # Cost model v2 (sqrt-participation + funding)
+├── auto_tune.py               # Parameter sweep harness
+├── grid_search_tf.py          # Timeframe grid search
+├── optimize_new_tokens.py     # New-token evaluation
+│
+│  # — Frontend + infra —
+├── frontend/                  # React 18 + Vite + TypeScript dashboard
+│   └── src/                   # Components, hooks, types, copilot dock
+├── infra/                     # Deploy configs (Caddy, GitHub Actions)
+├── scripts/                   # Windows automation (PS1 + BAT) + Linux setup
+│
+│  # — Tests + data —
+├── tests/                     # pytest (api, scanner, backtest, multi-tenant, holdout)
+├── data/                      # Operational data
+│   ├── holdout/               # 🔒 Locked holdout dataset — data/holdout/ (read-only, guard-protected)
+│   ├── regime_cache.json
+│   ├── symbols_status.json
+│   └── signals_history.csv
+└── logs/                      # Runtime logs (signals, webhook, watchdog)
 ```
 
 ---
