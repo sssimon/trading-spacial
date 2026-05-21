@@ -69,3 +69,23 @@ def put_preferences(
         notify_channels=body.notify_channels,
     )
     return {"ok": True, "preferences": row}
+
+
+def _mask_token(token: str) -> str:
+    """Mask a Telegram bot token, preserving first 10 + last 4 chars.
+
+    Real Telegram tokens have shape `<bot_id>:<35-char-secret>` (~46 chars
+    total). Output: first 10 chars + "****" + last 4 chars.
+
+    Defensive: `len < 10` returns "" instead of partial mask. Real tokens
+    are never shorter than 10 chars; this guard only fires for garbage
+    (empty, corrupt, manually-truncated). Returning "" makes the masked
+    field indistinguishable from "not configured" in those cases — accept-
+    able because the path is not reachable in prod with valid creds.
+
+    Spec ref: docs/superpowers/specs/es/2026-05-21-telegram-per-user-
+    config-pre-reg.md §Security note.
+    """
+    if not token or len(token) < 10:
+        return ""
+    return f"{token[:10]}****{token[-4:]}"
