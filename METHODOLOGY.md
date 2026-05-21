@@ -89,15 +89,55 @@ Full reasoning: PR #316 inflection-point spec §A.2 + [`2026-05-02-structural-fi
 
 ## Cost model v2 — why naive `slippage = participation × spread` is wrong
 
-(TBD — Task 4)
+The original backtest cost model was `slippage_bps = base + linear × participation`. PR #341 replaced it with a sqrt-participation formulation grounded in market-microstructure literature:
+
+```
+slippage_bps = base_bps + size_factor × sqrt(notional / liquidity_per_min)
+```
+
+Capped at `EXTREME_PARTICIPATION_CAP_BPS = 500` (5%) per fill.
+
+**Anchor parity preserved**: at 0.1% participation, v2 and v1 produce identical total slippage per tier — calibration invariant tested in `test_backtest_costs_v2.py::TestAnchorParity`.
+
+**Funding-rate accounting** (new in v2): per-tier conservative bps per 8h funding interval (`major=1.0`, `mid=2.0`, `small=5.0` in `costs_calibration.json`). Floor semantics: 7h pays 0, 8h pays 1, 24h pays 3. Conservative mode = always positive cost regardless of direction (worst-case for the strategy).
+
+**Forensic motivation**: the DOGE `-$30K` single-trade case from audit H8 (#323) is mitigated >1000× under v2. v1 produced an unbounded ~$19.8M per-fill cost on the catastrophically thin bar; v2 caps at $1,050. The new vol-targeting strategy class (regime-allocation epic) prevents the catastrophic $21K notional from being placed in the first place.
+
+**Calibration sources** are cited inline in `costs_calibration.json`: Almgren-Chriss (2001), Donier-Bonart (2015), Tóth et al (2011).
 
 ## Operational model — signals are not trades
 
-(TBD — Task 4)
+This repo generates signals automatically; it does not place trades automatically.
+
+The scanner emits a scored signal (0–9) on the curated 10-symbol basket every 300 seconds. The dashboard shows the signal. Telegram (per-user, since [#421](https://github.com/sssimon/trading-spacial/pull/421)) pushes a notification. **A human decides whether to enter, and at what size**.
+
+Exclusions E2–E5 in `btc_scanner.py:305-335` are *manual-check by design* — the scanner does not gate on them because in backtest there is no operator to ask. In live, the operator decides whether to override.
+
+This is not a defect waiting to be automated. The only confirmed edge from the post-inflection re-baselining (Direction A, PR [#357](https://github.com/sssimon/trading-spacial/pull/357)) was **Q2: operator-discretion exit timing**. Removing the human and full-automating would *destroy* the edge that the project has actually validated.
+
+Full classification of the backtest-vs-live distinction: [`2026-05-01-operational-model-manual-gating.md`](docs/superpowers/specs/es/2026-05-01-operational-model-manual-gating.md).
 
 ## Where the research is going
 
-(TBD — Task 4)
+The LRC strategy class (4H macro → 1H signal → 5M entry, ATR-based SL/TP) is mature but produced `EDGE_WEAK` in the post-#223 re-baselining. The active research direction is:
+
+**Regime-allocation strategy class** (epic [#338](https://github.com/sssimon/trading-spacial/issues/338), pre-reg [`2026-05-13-epic-regime-allocation-strategy-pivot.md`](docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md))
+
+Structurally distinct alternative: equal-weight Donchian ensemble (9 lookbacks: 5/10/20/30/60/90/150/250/360 days), daily updates at 23:00 UTC close, vol-targeting sizing (30% annualized portfolio vol target replaces R-multiple), bidirectional rotational SHORT, 2× leverage cap, signal-based exits (no SL/TP/TL).
+
+Status as of 2026-05-22:
+- **Phase 1** (architecture + flag-gated implementation): shipped 2026-05-13
+- **Phase 2** (pre-Phase 3 sanity checks on synthetic data): pre-reg complete
+- **Phase 3** (real-data evaluation): returned `PHASE_3_INSUFFICIENT_DATA` — not enough independent observations in the post-2017 universe to discriminate
+- **Phase 4-6**: pending Phase 3 resolution
+
+**Multi-tenant production** (epic [#253](https://github.com/sssimon/trading-spacial/issues/253), closed 2026-05-16)
+
+Per-user data isolation (`tenant_id` foreign keys), IDOR-safe API, per-user Telegram dispatcher, per-user dashboard state. The methodology question now extends to: *whose operator-discretion edge are we measuring?* Each invitee (papá Simón id=2, María id=3) becomes their own operator-discretion data point.
+
+**Per-user copilot history** (epic [#428](https://github.com/sssimon/trading-spacial/issues/428), open)
+
+Persist + retrieve past LLM-copilot chats per tenant. Research lens: capture the operator-LLM dialogue at the moment of a discretionary decision, so we can later evaluate which operator decisions correlated with positive outcomes.
 
 ## How to evaluate any claim in this repo
 
