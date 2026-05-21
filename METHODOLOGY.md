@@ -63,11 +63,29 @@ Full provenance: [`2026-04-30-a1-holdout-dataset-provenance.md`](docs/superpower
 
 ## How to read the backtest numbers
 
-(TBD — Task 3)
+Any number in this repo — backtest P&L, Sharpe ratio, win rate, drawdown — needs to be read against three questions:
+
+1. **Pre or post #223/#224?** PR #223 fixed a sign error in `_close_position` that inflated historical results. Numbers from specs dated before 2026-04-25 (notably [`2026-04-17-formula-ganadora-resultados-finales.md`](docs/superpowers/specs/es/2026-04-17-formula-ganadora-resultados-finales.md) and [`2026-04-18-documento-completo-sistema-trading.md`](docs/superpowers/specs/es/2026-04-18-documento-completo-sistema-trading.md)) are **pre-fix and known-inflated**. Do not cite them as baseline.
+
+2. **K-cap binding?** PR #309 added a symmetric `K=10` per-trade overshoot cap. Without it, single trades on thin bars could amplify into `170× initial_capital` losses (the PENDLE case during A.4-1.5 sweep). With it, any trade where `clamped_trade_count > 0` reflects cap-bounded behavior on those bars, not strategy edge. The metrics dict surfaces `clamped_trade_count` per symbol — if it accounts for `>5%` of trades, the headline number is measuring the cap, not the strategy.
+
+3. **Bankruptcy halt fired?** PR #313 added per-symbol bankruptcy halt: when simulated equity drops below `0.1 × INITIAL_CAPITAL`, the symbol emits a `BANKRUPT` exit and stops opening new positions for the simulation. Pre-#313, the simulator continued issuing fictional zero-risk trades after bankruptcy, which silently inflated `sum(net_pnl)` for any config that drove a symbol broke. The A.4-1.5 sweep had to operator-override the regime config because `no_detector` "won" only via post-bankruptcy ghost trades on JUPUSDT. Always check `bankruptcy_count` in the metrics dict.
+
+**Recommended framing in narrative**: previous backtests reflected simulator bugs (#223, #313) and modeling decisions (#309), not pure strategy behavior. The bug fixes recovered real numbers; the modeling cap (K=10) is a calibration with its own uncertainty band — don't conflate the two.
 
 ## Structural fixes shipped (and what they say about prior numbers)
 
-(TBD — Task 3)
+| PR | Date | Type | What it fixed | Effect on prior numbers |
+|---|---|---|---|---|
+| [#223](https://github.com/sssimon/trading-spacial/pull/223) / #224 | 2026-04-25 | **Bug fix** | Sign error in `_close_position` that double-counted PnL on certain exit paths | Pre-fix numbers were inflated; not a "calibration improvement" |
+| [#296](https://github.com/sssimon/trading-spacial/pull/296)+#297+#298+#299 | 2026-05-03 | **Triple Barrier structural fix** | Time-limit barrier, participation cap, per-symbol overrides honored in live + backtest paths | Closed the legacy `atr_*` kwargs bypass for the live path |
+| [#309](https://github.com/sssimon/trading-spacial/pull/309) | 2026-05-11 | **Modeling decision** | Symmetric K=10 per-trade overshoot cap. Bounds `\|pnl_usd\| ≤ K × risk_amount` | Realistic; bounds the catastrophic-bar mechanism without enforcing pooled-portfolio capital management |
+| [#313](https://github.com/sssimon/trading-spacial/pull/313) | 2026-05-11 | **Bug fix** | Post-bankruptcy ghost trades. Symbol halts at `0.1 × INITIAL_CAPITAL` floor | Closed the silent-continued-fictional-trading sub-gap; metrics dict now carries `bankruptcy_count` |
+| [#329](https://github.com/sssimon/trading-spacial/pull/329) | 2026-05-12 | **Phase 2 R1 outcome** | SIGNAL_EXIT branch kept flag-gated False on live — mechanism engaged in backtest, profitability absent | Honest closure of a hypothesis that failed its pre-registered gate |
+
+**The framing matters**: #223, #224, #313 are bugs. The simulator was wrong; fixing it recovers real numbers. #309 is a modeling decision with its own uncertainty band (`K=10` chosen as conservative threshold, not empirically tuned). Don't conflate "we fixed bugs" with "we made the simulator more realistic" — the former is methodologically stronger.
+
+Full reasoning: PR #316 inflection-point spec §A.2 + [`2026-05-02-structural-fix-parameter-study.md`](docs/superpowers/research/2026-05-02-structural-fix-parameter-study.md).
 
 ## Cost model v2 — why naive `slippage = participation × spread` is wrong
 
