@@ -6,8 +6,8 @@
 
 import React, { useEffect, useState } from 'react';
 import styles from './ConnectionsPanel.module.css';
-import type { NotifyChannels } from '../types';
-import { getPreferences, putPreferences } from '../api';
+import type { NotifyChannels, TestDeliveryResponse } from '../types';
+import { getPreferences, putPreferences, testPreferencesDelivery } from '../api';
 
 interface ConnectionsPanelProps {
   open:    boolean;
@@ -29,11 +29,16 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
         setBotToken(nc.telegram_bot_token ?? '');
         setChatId(nc.telegram_chat_id ?? '');
         setTokenIsMasked((nc.telegram_bot_token ?? '').includes('****'));
+        setDirty(false);
+        setTestResult(null);
       })
       .finally(() => setLoading(false));
   }, [open]);
 
-  const [saving, setSaving] = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [dirty,      setDirty]      = useState(false);
+  const [testResult, setTestResult] = useState<TestDeliveryResponse | null>(null);
+  const [testing,    setTesting]    = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -44,6 +49,33 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
           telegram_chat_id:   chatId,
         },
       });
+      setDirty(false);
+      setTestResult(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await testPreferencesDelivery();
+      setTestResult(res);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setSaving(true);
+    try {
+      await putPreferences({ notify_channels: null });
+      setBotToken('');
+      setChatId('');
+      setTokenIsMasked(false);
+      setTestResult(null);
+      setDirty(false);
     } finally {
       setSaving(false);
     }
@@ -69,7 +101,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
                 className={styles.input}
                 type="password"
                 value={botToken}
-                onChange={(e) => { setBotToken(e.target.value); setTokenIsMasked(false); }}
+                onChange={(e) => { setBotToken(e.target.value); setTokenIsMasked(false); setDirty(true); }}
                 placeholder="123456789:ABCdef..."
                 disabled={loading}
               />
@@ -86,7 +118,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
                 className={styles.input}
                 type="text"
                 value={chatId}
-                onChange={(e) => setChatId(e.target.value)}
+                onChange={(e) => { setChatId(e.target.value); setDirty(true); }}
                 placeholder="123456789"
                 disabled={loading}
               />
@@ -95,11 +127,38 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
               <button
                 className={`${styles.btn} ${styles.btnPrimary}`}
                 onClick={handleSave}
-                disabled={saving || loading}
+                disabled={saving || loading || !dirty}
               >
                 {saving ? 'Guardando...' : 'Guardar'}
               </button>
+              <button
+                className={styles.btn}
+                onClick={handleTest}
+                disabled={testing || saving || dirty}
+              >
+                {testing ? 'Enviando...' : 'Probar envío'}
+              </button>
+              <button
+                className={styles.btn}
+                onClick={handleDelete}
+                disabled={saving}
+              >
+                Eliminar credenciales
+              </button>
             </div>
+            {testResult && (
+              <div className={styles.testResult}>
+                {testResult.ok && (
+                  <span className={styles.testOk}>✓ Mensaje enviado a tu Telegram.</span>
+                )}
+                {!testResult.ok && testResult.reason === 'no_telegram_configured' && (
+                  <span className={styles.testErr}>Configurá tu token y chat ID primero, después Guardar y volvé a probar.</span>
+                )}
+                {!testResult.ok && testResult.reason === null && testResult.receipts[0] && (
+                  <span className={styles.testErr}>✗ {testResult.receipts[0].error}</span>
+                )}
+              </div>
+            )}
           </section>
         </div>
       </aside>

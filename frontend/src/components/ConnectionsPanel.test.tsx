@@ -82,4 +82,95 @@ describe('ConnectionsPanel', () => {
       });
     });
   });
+
+  it('"Probar envío" disabled when there are unsaved changes', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4,
+      notify_channels: { telegram_bot_token: '123:****abcd', telegram_chat_id: '987' },
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    await screen.findByLabelText(/bot token/i);
+
+    const probarBtn = screen.getByRole('button', { name: /probar env/i });
+    expect(probarBtn).not.toBeDisabled();  // initially clean
+
+    await userEvent.type(screen.getByLabelText(/chat id/i), '5');
+    expect(probarBtn).toBeDisabled();  // dirty
+  });
+
+  it('"Probar envío" shows ok on success', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4,
+      notify_channels: { telegram_bot_token: 'x:y', telegram_chat_id: 'z' },
+    });
+    vi.spyOn(api, 'testPreferencesDelivery').mockResolvedValue({
+      ok: true,
+      receipts: [{ channel: 'telegram', status: 'ok', error: null }],
+      reason: null,
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    await screen.findByLabelText(/bot token/i);
+    await userEvent.click(screen.getByRole('button', { name: /probar env/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/enviado/i)).toBeInTheDocument();
+    });
+  });
+
+  it('"Probar envío" shows error on failure', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4,
+      notify_channels: { telegram_bot_token: 'x:y', telegram_chat_id: 'z' },
+    });
+    vi.spyOn(api, 'testPreferencesDelivery').mockResolvedValue({
+      ok: false,
+      receipts: [{ channel: 'telegram', status: 'failed', error: 'HTTP 401: Unauthorized' }],
+      reason: null,
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    await screen.findByLabelText(/bot token/i);
+    await userEvent.click(screen.getByRole('button', { name: /probar env/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unauthorized/)).toBeInTheDocument();
+    });
+  });
+
+  it('"Probar envío" shows no_telegram_configured hint', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4, notify_channels: null,
+    });
+    vi.spyOn(api, 'testPreferencesDelivery').mockResolvedValue({
+      ok: false, receipts: [], reason: 'no_telegram_configured',
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    await screen.findByLabelText(/bot token/i);
+    await userEvent.click(screen.getByRole('button', { name: /probar env/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/configur.*token.*chat/i)).toBeInTheDocument();
+    });
+  });
+
+  it('"Eliminar credenciales" sends notify_channels: null', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4,
+      notify_channels: { telegram_bot_token: 'x:y', telegram_chat_id: 'z' },
+    });
+    const updateSpy = vi.spyOn(api, 'putPreferences').mockResolvedValue({
+      ok: true, preferences: { tenant_id: 1, symbol_filter: null, min_score: 4, notify_channels: null },
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    await screen.findByLabelText(/bot token/i);
+    await userEvent.click(screen.getByRole('button', { name: /eliminar credenciales/i }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith({ notify_channels: null });
+    });
+  });
 });
