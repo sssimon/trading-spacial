@@ -14,33 +14,55 @@ The substance is the methodology underneath: pre-registered hypotheses, a locked
 
 ## Architecture
 
-```
+```text
 Binance API (Bybit fallback)
-  └─ btc_scanner.py     — fetch OHLCV, calculate indicators, score signals
-       └─ btc_api.py    — FastAPI server, SQLite storage, notification filters
-            └─ trading_webhook.py  →  Telegram (via OpenClaw CLI)
-               n8n workflow        →  Telegram (alternative)
+  └─ btc_scanner.py      — fetch OHLCV, compute indicators (LRC, RSI, BB, SMA, ATR, ADX),
+     |                     score signals (0–9), gate by regime detector
+     ├─ strategy/         — modular indicators, regime detection, sizing, vol-targeting
+     ├─ strategies/       — ⚠️ legacy ADX-based router (kept for back-compat; see CLAUDE.md)
+     └─ backtest.py       — simulator with K-cap overshoot bound + bankruptcy halt
+            ↓
+  └─ btc_api.py            — FastAPI server (port 8000), SQLite storage, scanner thread
+     ├─ api/                 — REST endpoints (signals, positions, prefs, agent)
+     ├─ auth/                — JWT auth, per-user setup, password reset by shell only
+     ├─ db/                  — SQLite schema + migrations + capital tracker
+     └─ notifier/            — per-user signal dispatch (multi-tenant since epic #253)
+            ↓
+  └─ Telegram (per-user)   — each operator configures their own bot + chat_id
+                              via dashboard → UserMenu → Conexiones (since #421)
 
-frontend/               — React 18 dashboard (Vite + TypeScript)
-watchdog.py             — Windows process supervisor (keeps API alive)
+frontend/                    — React 18 dashboard (Vite + TypeScript)
+                              symbols grid, signals table, positions, copilot dock
+infra/                       — deploy configs (Caddy, GitHub Actions)
 ```
 
 ### Signal Logic
 
 | Timeframe | Role | Indicators |
-|-----------|------|-----------|
+|-----------|------|------------|
 | 4H | Macro context | SMA100, trend direction |
 | 1H | Main signal | LRC (100-bar), RSI, Bollinger Bands |
 | 5M | Entry trigger | Reversal candle confirmation |
 
-**Entry zone:** price within 25% of the lower Linear Regression Channel band (`LRC% ≤ 25`)
+**Entry zone:** `LRC_LONG_MAX = 25%` (long), `LRC_SHORT_MIN = 75%` (short, gated by `regime=BEAR`).
 
-**Score tiers:**
+**Score tiers (operator-chosen partition, stable from inception):**
 - `0–1` → 50% position size
 - `2–3` → standard size
 - `≥ 4` → premium signal (+50% size)
 
-**Default TP/SL:** 4% take profit / 2% stop loss
+**Risk per trade:** fixed 1% of capital. Per-symbol volatility adaptation is handled by tuned `atr_sl_mult / tp / be` values in `config.json["symbol_overrides"]` (epic #121). Do not add multiplicative scalers on top.
+
+**Regime detection** (`detect_regime`, once daily, cached in `data/regime_cache.json`):
+Composite score = 40% price (SMA50/200, 30d momentum) + 30% Fear & Greed + 30% Binance Futures funding rate. Score >60 = BULL/LONG, <40 = BEAR/SHORT-enabled, 40–60 = NEUTRAL/LONG-only.
+
+**Structural bounds (post-#223 simulator):**
+- **K-cap (#309)**: `abs(pnl_usd) ≤ 10 × risk_amount` per trade. Bounds the catastrophic-bar mechanism.
+- **Bankruptcy halt (#313)**: symbol stops new entries when equity drops below `0.1 × INITIAL_CAPITAL`. Existing positions close naturally.
+
+For the why behind these bounds, see [`METHODOLOGY.md`](METHODOLOGY.md) § Structural fixes shipped.
+
+**Curated symbols (static, 10):** BTC, ETH, ADA, AVAX, DOGE, UNI, XLM, PENDLE, JUP, RUNE. Static since epic #135 confirmed via 768+ backtest combinations that the 13 removed tokens (BNB, SOL, XRP, DOT, MATIC, LINK, LTC, ATOM, NEAR, FIL, APT, OP, ARB) are not profitable with this strategy regardless of parameters.
 
 ---
 
@@ -50,7 +72,7 @@ watchdog.py             — Windows process supervisor (keeps API alive)
 |-------|------|
 | Backend | Python 3.12, FastAPI, SQLite |
 | Frontend | React 18, TypeScript, Vite, lightweight-charts |
-| Alerts | Telegram (via n8n or OpenClaw CLI) |
+| Alerts | Telegram (per-user bot, via notifier/dispatch_per_user.py) |
 | Infrastructure | Docker, Windows Task Scheduler |
 
 ---
