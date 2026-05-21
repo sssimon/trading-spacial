@@ -55,40 +55,76 @@ Después de este spec implementado:
 **`api/user_preferences.py`** — agregar endpoint `POST /preferences/test`:
 
 ```python
-@router.post("/test", summary="Send a synthetic SignalEvent to current tenant's channels")
+@router.post(
+    "/test",
+    summary="Send a test message to current tenant's Telegram",
+    dependencies=[Depends(verify_api_key)],
+)
 def post_preferences_test(tenant_id: int = Depends(get_current_tenant_id)):
-    """Dispara un SignalEvent placeholder por el path per-user del dispatcher
-    para que el usuario verifique end-to-end que sus credenciales funcionan.
+    """Verifica end-to-end que las credenciales de Telegram del usuario
+    funcionan, mandando un mensaje "ping" a su bot.
 
-    Reuses dispatch_signal_to_users so la verificación cubre exactamente la
-    misma ruta que un signal real (notify_channels overlay → TelegramChannel
-    → Telegram API).
+    Bypassa `notify()` y `dispatch_signal_to_users` a propósito (ver §Notas):
+    construye un `TelegramChannel` directamente con el cfg-con-overlay del
+    usuario y llama `.send()`. Eso evita:
+      - dedup collisions si en el futuro alguien cambia el default window
+        de event_type=signal (hoy es 0, pero defensive design).
+      - side-effect en NotificationBell: cada test press NO crea una row
+        en notifications_sent (no usa notify(), no llama record_delivery).
+      - filter false-negatives: el endpoint NO debería ser bloqueado por
+        symbol_filter / min_score del usuario — esos aplican a signals
+        reales, no a "verificá tu config".
+
+    Trade-off: NO ejercita el dispatcher per-user. Aceptable porque el
+    dispatcher está bien testeado (tests/test_notifier_dispatch_per_user.py)
+    y lo que el usuario quiere verificar es "¿llega un mensaje a mi bot
+    cuando lo configuro?", no "¿el dispatcher me rutea correcto?".
     """
     from api.config import load_config
-    from notifier.events import SignalEvent
-    from notifier.dispatch_per_user import dispatch_signal_to_users
+    from db.user_preferences import db_get_user_preferences
+    from notifier.channels.telegram import TelegramChannel
 
-    event = SignalEvent(
-        symbol="TEST", score=9, direction="LONG",
-        entry=0.0, sl=0.0, tp=0.0,
-        lrc_pct=None, health_state="NORMAL",
-    )
+    prefs = db_get_user_preferences(tenant_id) or {}
+    notify_channels = prefs.get("notify_channels") or {}
     base_cfg = load_config()
-    receipts = dispatch_signal_to_users(event, base_cfg)
-    user_receipts = receipts.get(tenant_id, [])
+    user_cfg = {**base_cfg, **notify_channels}
+
+    token = (user_cfg.get("telegram_bot_token") or "").strip()
+    chat_id = (user_cfg.get("telegram_chat_id") or "").strip()
+    if not token or not chat_id:
+        return {
+            "ok": False,
+            "receipts": [],
+            "reason": "no_telegram_configured",
+        }
+
+    channel = TelegramChannel(user_cfg)
+    receipt = channel.send(
+        "*Crypto Scanner — prueba de conexión*\n"
+        "Si ves este mensaje, tu bot y chat están bien configurados. ✅"
+    )
     return {
-        "ok": any(r.status == "ok" for r in user_receipts),
-        "receipts": [
-            {"channel": r.channel, "status": r.status, "error": r.error}
-            for r in user_receipts
-        ],
+        "ok": receipt.status == "ok",
+        "receipts": [{
+            "channel": receipt.channel,
+            "status": receipt.status,
+            "error": receipt.error,
+        }],
+        "reason": None,
     }
 ```
 
-Tres notas sobre este endpoint:
-- **Filtros aplican**: `dispatch_signal_to_users` aplica `symbol_filter` + `min_score` del usuario. Usamos `symbol="TEST"` + `score=9` para que pasen filtros razonables (score=9 ≥ cualquier min_score; symbol_filter=null acepta todo, lista explícita debería incluir "TEST" o el usuario verá receipts=[] aunque sus creds estén bien). Esto es un trade-off: forzar `score=9` bypassa el filtro real del usuario, pero verifica el path técnico. Documentado en el response para que el usuario sepa qué se ejercitó.
-- **Dedup**: usar `symbol="TEST"` evita colisionar con dedup keys de signals reales. Cada test es independiente.
-- **No-op si el usuario no tiene notify_channels**: receipts será `[]` (no canales configurados). Response: `{"ok": false, "receipts": []}`. UI muestra "Configurá token + chat_id antes de probar".
+**Decisión de diseño documentada** (Option 2 del review 2026-05-21): bypassar `notify()` y `dispatch_signal_to_users` es deliberado. Las alternativas consideradas:
+
+| Opción | Pros | Cons |
+|---|---|---|
+| 1. Nuevo `SignalTestEvent` con dedupe_key random | Ejercita dispatcher real | Requiere new dataclass + 2 entries en mappings + filtro en NotificationBell para no mostrar tests |
+| **2. Bypass notify, llamar TelegramChannel direct** ✅ | Simple, sin side-effects, sin dedup edge-cases | No ejercita dispatcher (aceptable — dispatcher cubierto por otros tests) |
+| 3. Override dedupe_key por-call | Invasivo, cambia API pública de notify() | Rechazada |
+
+**Auth**: `dependencies=[Depends(verify_api_key)]` por consistencia con el PUT existente (`api/user_preferences.py:60`). Hoy `api_key` está vacío en config → open access via JWT only (mismo behavior que PUT). Si en el futuro alguien setea el api_key, ambos endpoints se gatean.
+
+**No-op si el usuario no tiene credenciales seteadas**: response `{ok: false, receipts: [], reason: "no_telegram_configured"}`. La UI usa el `reason` field para mostrar un mensaje claro ("Configurá tu token y chat_id primero").
 
 #### Frontend (2 archivos nuevos + 4 modificaciones)
 
@@ -97,10 +133,11 @@ Tres notas sobre este endpoint:
 **Crear: `frontend/src/components/ConnectionsPanel.tsx`** — slide-out panel inspirado en `ConfigPanel.tsx` (mismo patrón: slide-out from right + backdrop blur). Una sola sección activa por ahora: "Telegram". Estructura preparada para futuras (Webhook, Discord, etc).
 
 Sección "Telegram":
-- Input `telegram_bot_token`: type=password, placeholder hint "123456789:ABCdef...", botón "ojo" para revelar/ocultar.
+- Input `telegram_bot_token`: type=password, placeholder hint "123456789:ABCdef...", botón "ojo" para revelar/ocultar. Pre-fill con masked value desde GET; al typear nuevo value reemplaza, sin tipear preserva (detection vía `****`).
 - Input `telegram_chat_id`: type=text, placeholder "123456789".
-- Botón "Guardar" → llama `updateUserPreferences({notify_channels: {telegram_bot_token, telegram_chat_id}})`.
+- Botón "Guardar" → llama `updateUserPreferences({notify_channels: {telegram_bot_token, telegram_chat_id}})`. Skip token en el body si el value sigue siendo masked (no se modificó).
 - Botón "Probar envío" (deshabilitado mientras dirty unsaved): llama nuevo wrapper `testPreferencesDelivery()` → POST /preferences/test. Muestra resultado inline (✓ enviado / ✗ error con detail).
+- Botón "Eliminar credenciales" (review fix): llama `updateUserPreferences({notify_channels: null})`. Limpia los inputs + muestra confirmación inline ("Credenciales eliminadas"). Use case principal: rotation de tokens, o usuario que quiere parar de recibir signals sin perder su user account.
 - Instrucciones colapsables: "¿Cómo creo mi bot?" con steps de BotFather + getUpdates.
 
 **Crear: `frontend/src/components/ConnectionsPanel.module.css`** — estilos consistentes con `ConfigPanel.module.css`.
@@ -117,7 +154,7 @@ export async function testPreferencesDelivery(): Promise<TestDeliveryResponse> {
 ```
 + type `TestDeliveryResponse` en `types.ts`.
 
-**Bonus opcional (no blocker)**: el badge "1" del menú item actualmente es hardcoded en `UserMenu.tsx`. Podría wire-arse a "número de conexiones no configuradas" (1 si telegram_bot_token vacío, 0 si seteado). Out of scope para esta iteración — leave hardcoded.
+**Badge "1" condicional** (review fix): el badge actual `'1'` está hardcoded en `UserMenu.tsx:31`. Wire-arlo a "número de conexiones no configuradas": si `notify_channels.telegram_bot_token` está seteado, badge desaparece (undefined); si no, badge='1'. Implementation: 3 líneas — leer prefs desde el contexto del UserMenu (props desde App.tsx) y pasar conditional al item.
 
 ### Data flow end-to-end
 
@@ -163,7 +200,34 @@ Ambos como **string** (TelegramChannel hace `.strip()` — int causaría crash, 
 - Si se invitan operadores no-trusted (post-Epic B #253), revisitar: encrypt-at-rest con clave en .env, o stash en separate `secrets` table con column-level encryption.
 - Documentado como **deferred** en este spec. NO se implementa en esta iteración.
 
-UI-side: el campo `telegram_bot_token` es `<input type="password">`, no se loggea en el browser, ni se envía al `/agent/conversations` audit. El response del GET /preferences sí lo devuelve plain (necesario para pre-fill al editar). Acceptable por threat model.
+UI-side: el campo `telegram_bot_token` es `<input type="password">`, no se loggea en el browser, ni se envía al `/agent/conversations` audit.
+
+**Token masking en el GET response** (review fix): el endpoint `GET /api/preferences` enmascara el `telegram_bot_token` antes de devolverlo. Shape:
+
+```python
+def _mask_token(token: str) -> str:
+    """123456789:ABCdef...wxyz → 123456789:****wxyz (preserva últimos 4 chars)"""
+    if not token or len(token) < 10:
+        return ""  # vacío o demasiado corto para enmascarar significativamente
+    return f"{token[:10]}****{token[-4:]}"
+```
+
+El frontend muestra el masked value como pre-fill con label "Token guardado · pegá uno nuevo para reemplazar". Si el usuario NO modifica el campo (value sigue conteniendo `****`), el PUT detecta esto y preserva el valor existente (no sobrescribe con el masked). Si el usuario pega un token nuevo (sin `****`), reemplaza.
+
+Esto reduce el blast radius de un XSS/script-injection ~90% sin tocar schema. Documentado como mitigación cheap. Encryption-at-rest sigue deferred per arriba.
+
+**Threat asymmetry** (matiz al framing inicial): un bot token comprometido permite postear como ese bot a todos los chats que lo añadieron (hoy solo Samuel). Un JWT secret comprometido controla toda la auth de la app. JWT es estrictamente peor, pero la asimetría no es perfecta — son riesgos del mismo orden de magnitud. La mitigación de masking arriba reduce uno de los dos.
+
+## Rate-limit decision (review note)
+
+Telegram Bot API tiene un rate limit de ~1 msg/sec por chat. El path real de signals tiene rate-limit via `notifier.ratelimit.bucket_for("telegram")` (token bucket por canal). Pero el endpoint POST /preferences/test bypassa `notify()` (ver Option 2 arriba) y por ende también el rate-limit del notifier.
+
+**Decisión**: NO agregar rate-limit explícito al /test en esta iteración. Justificación:
+- El usuario es operator-trust (sesión JWT autenticada, no usuario público).
+- Click loco de "Probar envío" en peor caso satura SU PROPIO chat de Telegram — Telegram devuelve 429, el receipt mostrará el error, no afecta a otros usuarios.
+- Si en algún momento esto se vuelve un problema operativo (logs llenos de 429s), agregar un in-memory cooldown trivial (~10s per tenant_id) es 5 líneas. Frame as deferred.
+
+Documentado para que el reviewer del próximo Phase no se sorprenda.
 
 ## Failure modes
 
@@ -182,28 +246,41 @@ UI-side: el campo `telegram_bot_token` es `<input type="password">`, no se logge
 Reversible 100%:
 - Si el feature rompe algo en prod: revert los commits de backend + frontend. Schema sin cambios (sigue siendo `notify_channels: dict[str, Any]`), el shape extendido se ignora gracefully por TelegramChannel cuando ambos campos no están.
 - Si el operator decide volver al modelo admin-side global: descartar este spec y volver al [`2026-05-21-telegram-multitenant-phase-a-pre-reg.md`](2026-05-21-telegram-multitenant-phase-a-pre-reg.md) original.
-- Si solo se quiere desactivar feature flag (en caso de bug grave): no hay feature flag explícito porque el shape extendido es backward-compatible. Hard-rollback es revert.
+- **Feature flag opcional** (review polish, no implementado por defecto): si se quisiera kill-switch sin redeploy, agregar `cfg.features.telegram_per_user` (read-time, default `true`) y gate el endpoint POST /preferences/test + esconder el menu item "Conexiones" cuando false. ~5 líneas de code. Decisión: no implementar porque el feature es backward-compatible y bajo riesgo; revert via PR es suficiente. Si después de shipping aparece un bug que no se puede contener con revert (ej: persistencia corrupta), agregar el flag entonces.
 
 ## Test plan / acceptance gates
 
 ### Unit tests (backend)
 
-- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_no_channels_returns_empty_receipts` — usuario sin `notify_channels` → `{ok: false, receipts: []}`.
-- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_with_telegram_routes_correctly` — usuario con `{telegram_bot_token, telegram_chat_id}` → llama `dispatch_signal_to_users` con `SignalEvent("TEST", score=9, ...)`, receipts incluye un row con `channel="telegram"`. (Telegram API mockeada para evitar I/O real).
-- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_only_returns_current_tenant_receipts` — con 2 usuarios activos en DB, el response solo incluye receipts del JWT-actual tenant_id (no del otro).
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_no_channels_returns_no_telegram_configured` — usuario sin `notify_channels` → `{ok: false, receipts: [], reason: "no_telegram_configured"}`.
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_token_only_returns_no_telegram_configured` — usuario con token pero sin chat_id → mismo `reason: "no_telegram_configured"`.
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_with_telegram_routes_correctly` — usuario con `{telegram_bot_token, telegram_chat_id}` → llama `TelegramChannel.send` con cfg-con-overlay, receipt status=ok. (Telegram API mockeada).
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_two_calls_within_window_both_succeed` — 2 calls consecutivos del mismo tenant retornan ambos ok: true. Verifica que el bypass de `notify()` evita la dedup collision potencial (defensive design — hoy `signal` event_type tiene dedup_window=0 pero el bypass blinda contra cambios futuros).
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_does_not_write_to_notifications_sent` — pre-condition: count rows en `notifications_sent`. Llamar /test. Post-condition: count idéntico. Confirma que el bypass de `notify()` evita el side-effect en NotificationBell.
+- [ ] `tests/test_api_user_preferences.py::test_test_endpoint_isolated_per_tenant` — con 2 usuarios en DB (cada uno con su token+chat_id distinto), tenant_A llamando /test solo recibe receipt del envío a SU bot, no del de tenant_B.
+- [ ] `tests/test_api_user_preferences.py::test_get_preferences_masks_token` — GET con token en DB → response.notify_channels.telegram_bot_token tiene shape `"<10chars>****<4chars>"`, no plain.
+- [ ] `tests/test_api_user_preferences.py::test_put_preferences_preserves_masked_token` — PUT con `notify_channels.telegram_bot_token` que contiene `****` → DB queda con el token original, no se sobrescribe.
+- [ ] `tests/test_api_user_preferences.py::test_put_preferences_replaces_when_token_unmasked` — PUT con token nuevo plain (sin `****`) → DB queda con el nuevo.
 
 ### Unit tests (frontend, vitest)
 
-- [ ] `ConnectionsPanel.test.tsx::renders_form_with_current_values` — mock GET /preferences con notify_channels populado, verifica que los inputs muestran los valores.
-- [ ] `ConnectionsPanel.test.tsx::save_calls_put_with_correct_body` — type en inputs + click Save, verifica que `updateUserPreferences` recibe el body esperado.
+- [ ] `ConnectionsPanel.test.tsx::renders_form_with_masked_token` — mock GET /preferences con notify_channels populado (token masked), verifica que el input muestra el masked value + label "Token guardado · ...".
+- [ ] `ConnectionsPanel.test.tsx::save_preserves_token_when_unchanged` — type chat_id pero NO token (queda masked), click Save → updateUserPreferences body solo incluye chat_id + masked token. Backend skip-detection se ejercita server-side, frontend solo manda lo que el usuario tipeó.
+- [ ] `ConnectionsPanel.test.tsx::save_replaces_token_when_user_pastes_new` — type token nuevo plain + save → body con token plain.
 - [ ] `ConnectionsPanel.test.tsx::test_button_disabled_when_dirty` — type sin save → "Probar envío" debe estar disabled.
 - [ ] `ConnectionsPanel.test.tsx::test_button_shows_ok_on_success` — mock POST /preferences/test con `{ok: true}`, verifica UI muestra "✓ enviado".
 - [ ] `ConnectionsPanel.test.tsx::test_button_shows_error_on_failure` — mock con `{ok: false, receipts: [{error: "HTTP 401..."}]}`, verifica error mostrado.
+- [ ] `ConnectionsPanel.test.tsx::test_button_shows_no_telegram_reason` — mock con `{ok: false, receipts: [], reason: "no_telegram_configured"}`, verifica UI muestra "Configurá tu token y chat_id primero".
+- [ ] `ConnectionsPanel.test.tsx::delete_clears_db_row` — click "Eliminar credenciales" → confirma `updateUserPreferences({notify_channels: null})` called.
+- [ ] `UserMenu.test.tsx::badge_visible_when_telegram_unconfigured` — render con prefs.notify_channels === null → badge '1' visible.
+- [ ] `UserMenu.test.tsx::badge_hidden_when_telegram_configured` — render con prefs.notify_channels.telegram_bot_token set → badge undefined/hidden.
 
 ### Integration (manual + Playwright e2e)
 
-- [ ] **Manual (Samuel)**: Crear bot en BotFather, conseguir chat_id, abrir avatar ▾ → Conexiones → pegar credenciales → Guardar → Probar envío, confirmar que llega mensaje "TEST" en Telegram. **Este es el gate principal del feature** — sin esto el spec no se considera shipped.
-- [ ] **Playwright e2e (yo)**: Abrir el dashboard, click avatar ▾, click "Conexiones", type creds fake, save, verificar DB tiene `notify_channels` con ambos campos, verificar que GET /preferences los devuelve.
+- [ ] **Manual (Samuel) — gate principal**: Crear bot en BotFather, conseguir chat_id, abrir avatar ▾ → Conexiones → pegar credenciales → Guardar → Probar envío, confirmar que llega mensaje "*Crypto Scanner — prueba de conexión*..." en Telegram. **Sin esto el spec no se considera shipped.**
+- [ ] **Manual (Samuel) — sub-gate NotificationBell**: después de 3 presses consecutivos de "Probar envío" (todos exitosos), el NotificationBell del header sigue mostrando 0 entries nuevas — verifica que el bypass de `notify()` evita el side-effect que llenaría el bell con "TEST" duplicates.
+- [ ] **Manual (Samuel) — sub-gate rapid-fire**: 5 presses rápidos de "Probar envío" — todos retornan ok=true. Verifica que no hay dedup collision aunque el dispatcher per-user lo tendría (defensive design del Option 2).
+- [ ] **Playwright e2e (yo)**: Abrir el dashboard, click avatar ▾, click "Conexiones", type creds fake, save, verificar DB tiene `notify_channels` con ambos campos, verificar que GET /preferences los devuelve masked, click "Eliminar credenciales", verificar DB `notify_channels=null`.
 
 ## Estimación
 
