@@ -389,6 +389,7 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
   const AGENT_ENABLED = agentEnabled;
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Phase 3 rewire: replace the legacy one-shot chatAgent + frontend
   // system prompt with the streaming hook. The server owns the prompt
@@ -424,6 +425,13 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [msgs, loading]);
+
+  // Keep the input focused once a turn finishes (loading: true → false).
+  // Without this, the user had to click back into the input after every
+  // assistant response because the browser blurred the disabled field.
+  useEffect(() => {
+    if (!loading) inputRef.current?.focus();
+  }, [loading]);
 
   const send = async (text: string) => {
     const t = text.trim();
@@ -498,11 +506,11 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
           <form className={styles.cpInputRow} onSubmit={submitInput}>
             <span className={styles.cpInputPrompt}>&gt;</span>
             <input
+              ref={inputRef}
               className={styles.cpInput}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={loading ? 'pensando…' : 'pregunta lo que quieras sobre este par'}
-              disabled={loading}
               autoFocus
             />
             <button

@@ -47,6 +47,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const { msgs, loading, sendTurn, confirmProposal } = useAgentStream({ surface: SURFACE_DOCK });
   // Synthetic welcome bubble before the first real turn so the dock
@@ -82,6 +83,14 @@ const AgentDock: React.FC<AgentDockProps> = ({
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [msgs, loading]);
+
+  // Keep the input focused while the dock is open and idle. Without this,
+  // ending a turn (loading: true → false) leaves the user without focus
+  // because the browser blurred the input when it became disabled and
+  // doesn't restore focus when it's re-enabled.
+  useEffect(() => {
+    if (open && !loading) inputRef.current?.focus();
+  }, [open, loading]);
 
   const submit = async (text: string) => {
     const t = text.trim();
@@ -154,11 +163,11 @@ const AgentDock: React.FC<AgentDockProps> = ({
           <form className={styles.inputRow} onSubmit={(e) => { e.preventDefault(); void submit(input); }}>
             <span className={styles.prompt}>&gt;</span>
             <input
+              ref={inputRef}
               className={styles.input}
               placeholder={loading ? 'pensando…' : 'pregúntame algo sobre el mercado, tus posiciones, un par…'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
               autoFocus
             />
             <button className={styles.send} type="submit" disabled={loading || !input.trim()}>↵</button>
