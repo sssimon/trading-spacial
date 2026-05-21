@@ -25,6 +25,13 @@ log = logging.getLogger("api.user_preferences")
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
 
+# Marker used to redact the secret portion of a telegram_bot_token in API
+# responses. The `put_preferences` handler also uses this marker to detect
+# "user submitted the masked value verbatim (didn't retype)" → preserve
+# existing DB token rather than overwrite. Both call sites MUST use this
+# constant — string drift would silently break preserve-detection.
+_MASK_MARKER = "****"
+
 # Default min_score matches schema default + current global default in code.
 _DEFAULT_MIN_SCORE = 4
 
@@ -56,7 +63,7 @@ def _mask_token(token: str) -> str:
     """
     if not token or len(token) < 10:
         return ""
-    return f"{token[:10]}****{token[-4:]}"
+    return f"{token[:10]}{_MASK_MARKER}{token[-4:]}"
 
 
 @router.get("", summary="Get preferences for current tenant (defaults if unset)")
@@ -93,7 +100,7 @@ def put_preferences(
     # supports the UX pattern "pre-fill masked value, only update if user
     # types something new". See spec §Security note.
     notify_channels = body.notify_channels
-    if notify_channels and "****" in (notify_channels.get("telegram_bot_token") or ""):
+    if notify_channels and _MASK_MARKER in (notify_channels.get("telegram_bot_token") or ""):
         existing = db_get_user_preferences(tenant_id)
         existing_token = (
             (existing or {}).get("notify_channels") or {}
@@ -106,9 +113,9 @@ def put_preferences(
         min_score=body.min_score,
         notify_channels=notify_channels,
     )
-    # Re-fetch + mask before returning (consistency with GET).
-    fresh = db_get_user_preferences(tenant_id)
-    if fresh and fresh.get("notify_channels", {}).get("telegram_bot_token"):
-        nc = fresh["notify_channels"]
-        fresh = {**fresh, "notify_channels": {**nc, "telegram_bot_token": _mask_token(nc["telegram_bot_token"])}}
-    return {"ok": True, "preferences": fresh}
+    # Mask the bot_token in the response for consistency with GET.
+    if row and (row.get("notify_channels") or {}).get("telegram_bot_token"):
+        nc = row["notify_channels"]
+        masked_nc = {**nc, "telegram_bot_token": _mask_token(nc["telegram_bot_token"])}
+        row = {**row, "notify_channels": masked_nc}
+    return {"ok": True, "preferences": row}

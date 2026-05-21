@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from api.user_preferences import _MASK_MARKER
+
 
 # ── _mask_token helper ──────────────────────────────────────────────
 
@@ -113,6 +115,11 @@ def test_put_preserves_token_when_value_contains_mask_marker(seeded_user_with_te
     assert nc["telegram_bot_token"] == "123456789:ABCdefGHIjklMNOpqrsTUVwxyz_aBcDeFgH12"
     assert nc["telegram_chat_id"] == "111222333"
 
+    # Response body should also have masked token (consistency with GET).
+    resp_token = r.json()["preferences"]["notify_channels"]["telegram_bot_token"]
+    assert _MASK_MARKER in resp_token
+    assert "ABCdefGHI" not in resp_token  # secret portion must not leak in response
+
 
 def test_put_replaces_token_when_value_unmasked(seeded_user_with_telegram):
     """If user submits a plain token (no ****), DB updates to the new value."""
@@ -128,3 +135,8 @@ def test_put_replaces_token_when_value_unmasked(seeded_user_with_telegram):
     from db.user_preferences import db_get_user_preferences
     row = db_get_user_preferences(0)
     assert row["notify_channels"]["telegram_bot_token"] == "111111111:NEWXYZabcDEFghiJKLmnoPQRstuVWXyzABCDE"
+
+    # Response body should reflect the new token, masked.
+    resp_token = r.json()["preferences"]["notify_channels"]["telegram_bot_token"]
+    assert _MASK_MARKER in resp_token
+    assert "NEWXYZabcDEF" not in resp_token
