@@ -168,7 +168,7 @@ export async function testPreferencesDelivery(): Promise<TestDeliveryResponse> {
 8. Backend `db_upsert_user_preferences` persiste a `user_preferences.notify_channels_json`.
 9. Usuario click "Probar envío".
 10. `testPreferencesDelivery()` → `POST /api/preferences/test`.
-11. Backend: `dispatch_signal_to_users(SignalEvent("TEST", score=9, ...), base_cfg)` → para `tenant_id=current`, overlay carga `telegram_bot_token` + `telegram_chat_id` del JSON, `TelegramChannel.send()` postea a la Bot API.
+11. Backend: lookup `db_get_user_preferences(tenant_id) → prefs.notify_channels`, overlay sobre `load_config()` → if `token` + `chat_id` ambos presentes, `TelegramChannel(user_cfg).send("*Crypto Scanner — prueba de conexión*…")`; else return `{ok: false, receipts: [], reason: "no_telegram_configured"}`.
 12. Response: `{ok: true/false, receipts: [{channel, status, error}]}`.
 13. UI muestra resultado.
 
@@ -206,9 +206,18 @@ UI-side: el campo `telegram_bot_token` es `<input type="password">`, no se logge
 
 ```python
 def _mask_token(token: str) -> str:
-    """123456789:ABCdef...wxyz → 123456789:****wxyz (preserva últimos 4 chars)"""
+    """123456789:ABCdef...wxyz → 123456789:****wxyz (preserva últimos 4 chars).
+
+    Nota defensiva: tokens reales de Telegram tienen ~46 chars
+    (<bot_id>:<35-char-secret>), así que `len < 10` solo se dispara
+    para inputs basura (vacío, corrupto). Devolver "" en ese caso
+    significa que el frontend va a pre-fillear vacío, indistinguible
+    de "sin configurar" — aceptable porque en prod este path no se
+    debería disparar. No agregar tests específicos para bordes
+    `len ∈ {1..9}`, no son escenarios reales.
+    """
     if not token or len(token) < 10:
-        return ""  # vacío o demasiado corto para enmascarar significativamente
+        return ""
     return f"{token[:10]}****{token[-4:]}"
 ```
 
@@ -233,8 +242,7 @@ Documentado para que el reviewer del próximo Phase no se sorprenda.
 
 | # | Síntoma observable | Causa probable | Recovery |
 |---|---|---|---|
-| F1 | "Probar envío" responde `{ok: false, receipts: []}` | Usuario no tiene `notify_channels` seteado (null) | Llenar campos + Guardar primero |
-| F2 | "Probar envío" responde con receipt status `failed`, error `"telegram not configured (missing token or chat_id)"` | Uno de los 2 campos vacío después del save | Re-verificar ambos campos, save again |
+| F1 | "Probar envío" responde `{ok: false, receipts: [], reason: "no_telegram_configured"}` | Uno o ambos campos vacíos en DB (notify_channels null, o token sin chat_id, o viceversa) | Llenar token + chat_id en el panel, Save, retry. Early-return del endpoint atrapa esto antes de llamar a TelegramChannel — el error "telegram not configured" del channel no llega a aparecer por este path. |
 | F3 | Receipt error `"HTTP 401: Unauthorized"` | Token mal copiado (typo, espacio extra) o bot deleted en BotFather | Re-issue token vía `/token` en BotFather, paste de nuevo |
 | F4 | Receipt error `"HTTP 400: Bad Request: chat not found"` | chat_id mal escrito O usuario nunca hizo `/start` del bot (Telegram requiere "permiso explícito") | Mandar `/start` en Telegram, re-verificar chat_id en getUpdates, paste de nuevo |
 | F5 | Receipt error `"HTTP 403: Forbidden: bot was blocked by the user"` | Usuario bloqueó el bot en Telegram | Desbloquear el bot, re-test |
