@@ -70,7 +70,13 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
   const handleDelete = async () => {
     setSaving(true);
     try {
-      await putPreferences({ notify_channels: null });
+      // Backend PUT /preferences treats notify_channels=null as "preserve
+      // existing" (PATCH-like semantics, see db/user_preferences.py:67-69).
+      // To CLEAR the credentials we must send an empty object — DB updates
+      // the JSON column to "{}", which dispatch_per_user reads as no
+      // overlay (notify_channels or {} → {}). Safe with global telegram_*
+      // values absent from config.json.
+      await putPreferences({ notify_channels: {} });
       setBotToken('');
       setChatId('');
       setTokenIsMasked(false);

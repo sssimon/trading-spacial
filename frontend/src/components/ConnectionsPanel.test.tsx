@@ -170,7 +170,8 @@ describe('ConnectionsPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /eliminar credenciales/i }));
 
     await waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith({ notify_channels: null });
+      // Backend PATCH semantics: null means "preserve". Must send {} to clear.
+      expect(updateSpy).toHaveBeenCalledWith({ notify_channels: {} });
     });
   });
 });
