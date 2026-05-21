@@ -243,7 +243,8 @@ def test_test_endpoint_does_not_write_to_notifications_sent(seeded_user_with_tel
     con.close()
 
     client = seeded_user_with_telegram
-    client.post("/preferences/test")
+    r = client.post("/preferences/test")
+    assert r.status_code == 200  # ensures the endpoint actually ran (regression guard)
 
     con = get_db()
     after = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]

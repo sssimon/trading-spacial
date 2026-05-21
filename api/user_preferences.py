@@ -143,21 +143,24 @@ def post_preferences_test(tenant_id: int = Depends(get_current_tenant_id)):
     dispatcher tiene cobertura propia (tests/test_multi_tenant_b4_signal_
     routing.py).
     """
-    from api.config import load_config
-    from db.user_preferences import db_get_user_preferences as _db_get
-    from notifier.channels.telegram import TelegramChannel
+    from notifier.channels.telegram import TelegramChannel  # noqa: PLC0415
 
-    prefs = _db_get(tenant_id) or {}
+    prefs = db_get_user_preferences(tenant_id) or {}
     notify_channels = prefs.get("notify_channels") or {}
-    base_cfg = load_config()
-    user_cfg = {**base_cfg, **notify_channels}
 
-    token = (user_cfg.get("telegram_bot_token") or "").strip()
-    chat_id = (user_cfg.get("telegram_chat_id") or "").strip()
+    token = (notify_channels.get("telegram_bot_token") or "").strip()
+    chat_id = (notify_channels.get("telegram_chat_id") or "").strip()
     if not token or not chat_id:
         return {"ok": False, "receipts": [], "reason": "no_telegram_configured"}
 
-    channel = TelegramChannel(user_cfg)
+    # Build a MINIMAL cfg with only the user's own credentials — no fall-through
+    # to base_cfg's system-level telegram_chat_id (which would silently route to
+    # the operator's chat). Spec §Backend: "this endpoint verifies the user's own
+    # setup; system defaults should never satisfy the pre-flight guard."
+    channel = TelegramChannel({
+        "telegram_bot_token": token,
+        "telegram_chat_id": chat_id,
+    })
     receipt = channel.send(
         "*Crypto Scanner — prueba de conexión*\n"
         "Si ves este mensaje, tu bot y chat están bien configurados. ✅"
