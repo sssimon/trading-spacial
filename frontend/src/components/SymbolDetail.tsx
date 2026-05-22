@@ -609,11 +609,13 @@ const CopilotMessage: React.FC<CopilotMessageProps> = ({
             expired:   'Expirado',
             drift:     'Estado cambió — re-pregunta',
             error:     'Falló — re-pregunta',
+            stale:     'Propuesta ya no activa',
           };
           const stateClass =
             p.state === 'in_flight' ? styles.toolConfirmInFlight :
             p.state === 'ok'        ? styles.toolConfirmOk :
-            (p.state === 'expired' || p.state === 'drift' || p.state === 'error')
+            (p.state === 'expired' || p.state === 'drift' ||
+             p.state === 'error' || p.state === 'stale')
                                     ? styles.toolConfirmError :
             '';
           const isInteractive = p.state === 'pending';

@@ -14,10 +14,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './AgentDock.module.css';
+import historyStyles from './AgentHistorySidebar.module.css';
 import type { SymbolStatus, Position, MacroState } from '../types';
 import { useAgentStream } from '../agent/useAgentStream';
 import { SURFACE_DOCK } from '../agent/surfaces';
 import type { ProposalChip, ToolChip } from '../agent/types';
+import AgentHistorySidebar from './AgentHistorySidebar';
 
 interface AgentDockProps {
   open:           boolean;
@@ -46,6 +48,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
   initialPrompt, unreadHint,
 }) => {
   const [input, setInput] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -126,7 +129,15 @@ const AgentDock: React.FC<AgentDockProps> = ({
                 </div>
               </div>
             </div>
-            <button className={styles.close} onClick={onClose} aria-label="Cerrar">×</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className={historyStyles.openButton}
+                onClick={() => setHistoryOpen(true)}
+                aria-label="Abrir historial"
+              >Historial</button>
+              <button className={styles.close} onClick={onClose} aria-label="Cerrar">×</button>
+            </div>
           </header>
 
           <div className={styles.scroll} ref={scrollRef}>
@@ -174,6 +185,14 @@ const AgentDock: React.FC<AgentDockProps> = ({
           </form>
         </aside>
       )}
+
+      {/* H.4 sidebar — slides in on top of the dock. H.5 will wire
+          onSelectConversation through useAgentStream to rehydrate the
+          transcript; for H.4 it just closes the sidebar (no-op load). */}
+      <AgentHistorySidebar
+        open={open && historyOpen}
+        onClose={() => setHistoryOpen(false)}
+      />
     </>
   );
 };
@@ -278,11 +297,17 @@ const ProposalConfirm: React.FC<ProposalConfirmProps> = ({ proposal, onConfirm }
     expired:   'Expirado',
     drift:     'Estado cambió — re-pregunta',
     error:     'Falló — re-pregunta',
+    // #428 H.3: rehydrated chip without a valid signed_payload. UX is
+    // identical to expired — not actionable, button disabled — but the
+    // copy distinguishes "TTL passed" from "you saw this in a previous
+    // session and the signed_payload wasn't persisted".
+    stale:     'Propuesta ya no activa',
   };
   const stateClass =
     proposal.state === 'in_flight' ? styles.toolConfirmInFlight :
     proposal.state === 'ok'        ? styles.toolConfirmOk :
-    (proposal.state === 'expired' || proposal.state === 'drift' || proposal.state === 'error')
+    (proposal.state === 'expired' || proposal.state === 'drift' ||
+     proposal.state === 'error' || proposal.state === 'stale')
                                    ? styles.toolConfirmError :
     '';
   const isInteractive = proposal.state === 'pending';

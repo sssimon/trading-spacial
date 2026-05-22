@@ -13,6 +13,8 @@
 import type {
   AgentStreamEvent,
   AgentTurnRequest,
+  ConversationDetailResponse,
+  ConversationListResponse,
 } from './types';
 
 const BASE_URL = '/api';
@@ -189,4 +191,71 @@ export async function confirmAgentProposal(args: {
   if (resp.status === 409 || detail === 'state_drift') bucket = 'state_drift';
   else if (resp.status === 410 || detail === 'expired') bucket = 'expired';
   return { ok: false, result: bucket, http_status: resp.status };
+}
+
+// ── Epic #428 H.3 — conversation history client ─────────────────────
+
+async function _historyFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  const method = (init?.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    headers['X-CSRF-Token'] = readCsrfCookie();
+    if (init?.body && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+  const resp = await fetch(`${BASE_URL}${path}`, {
+    method,
+    credentials: 'include',
+    headers,
+    ...init,
+  });
+  if (!resp.ok) {
+    throw new AgentStreamError(resp.status, `http_${resp.status}`);
+  }
+  return (await resp.json()) as T;
+}
+
+export interface ListConversationsArgs {
+  limit?:   number;
+  offset?:  number;
+  surface?: string;
+  q?:       string;
+}
+
+export async function listConversations(
+  args: ListConversationsArgs = {},
+): Promise<ConversationListResponse> {
+  const params = new URLSearchParams();
+  if (args.limit  !== undefined) params.set('limit',  String(args.limit));
+  if (args.offset !== undefined) params.set('offset', String(args.offset));
+  if (args.surface) params.set('surface', args.surface);
+  if (args.q && args.q.trim()) params.set('q', args.q.trim());
+  const qs = params.toString();
+  const path = `/agent/conversations${qs ? `?${qs}` : ''}`;
+  return _historyFetch<ConversationListResponse>(path);
+}
+
+export async function getConversationMessages(
+  conversation_id: string,
+): Promise<ConversationDetailResponse> {
+  const path = `/agent/conversations/${encodeURIComponent(conversation_id)}/messages`;
+  return _historyFetch<ConversationDetailResponse>(path);
+}
+
+export async function deleteConversation(
+  conversation_id: string,
+): Promise<{ ok: boolean }> {
+  const path = `/agent/conversations/${encodeURIComponent(conversation_id)}`;
+  return _historyFetch<{ ok: boolean }>(path, { method: 'DELETE' });
+}
+
+export async function togglePinConversation(
+  conversation_id: string,
+): Promise<{ ok: boolean; pinned: boolean }> {
+  const path = `/agent/conversations/${encodeURIComponent(conversation_id)}/pin`;
+  return _historyFetch<{ ok: boolean; pinned: boolean }>(path, { method: 'POST' });
 }

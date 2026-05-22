@@ -19,6 +19,64 @@ export interface ToolChip {
   status: 'pending' | 'ok' | 'error';
 }
 
+// ── Epic #428 history rehydration types ───────────────────────────────
+//
+// These mirror the pydantic models in api/agent/history.py. The H.3
+// REST endpoints return them; the sidebar (H.4) lists them; the
+// rehydration hook (H.5) replays them into the dock transcript.
+
+export interface ConversationSummary {
+  conversation_id: string;
+  title:           string | null;
+  surface:         string;
+  first_ts:        string;
+  last_ts:         string;
+  message_count:   number;
+  pinned:          boolean;
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummary[];
+  total:         number;
+  limit:         number;
+  offset:        number;
+}
+
+/**
+ * Proposal record on the REST rehydration response. Distinct from
+ * ProposalChip below: this shape has NO `signed_payload` (the HMAC
+ * was never persisted past minutes) and the `state` enum uses
+ * 'stale' for "rehydrated, never confirmed, TTL not yet passed" —
+ * see api/agent/history.py::ProposalRecord docstring + PR #434
+ * review issue #6. The rehydration hook converts this to ProposalChip
+ * before pushing into the transcript.
+ */
+export interface ProposalRecord {
+  proposal_id: string;
+  action:      string;
+  args:        Record<string, unknown>;
+  expires_at:  string;
+  summary:     string;
+  state:       'stale' | 'ok' | 'expired' | 'error' | 'conflict';
+}
+
+export interface MessageRecord {
+  role:       'user' | 'assistant';
+  ts:         string;
+  content:    string;
+  reasoning?: string | null;
+  tool_chips: ToolChip[];
+  proposals:  ProposalRecord[];
+}
+
+export interface ConversationDetailResponse {
+  conversation_id: string;
+  title:           string | null;
+  surface:         string;
+  pinned:          boolean;
+  messages:        MessageRecord[];
+}
+
 export interface AgentTextDelta {
   type: 'text_delta';
   text: string;
@@ -115,12 +173,13 @@ export type AgentStreamEvent =
  * sees the outcome without a toast.
  */
 export type ProposalState =
-  | 'pending'
-  | 'in_flight'
-  | 'ok'
-  | 'expired'
-  | 'drift'
-  | 'error';
+  | 'pending'    // live SSE: actionable, signed_payload is hot
+  | 'in_flight'  // confirm POST in progress
+  | 'ok'         // confirmed
+  | 'expired'    // TTL passed without confirm
+  | 'drift'      // confirmed but server state had changed
+  | 'error'      // confirm failed
+  | 'stale';     // #428 H.3 REST rehydration: never-confirmed, TTL not yet up, but signed_payload is gone — not actionable
 
 export interface ProposalChip {
   proposal_id:    string;
