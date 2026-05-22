@@ -3,8 +3,8 @@
   "symbol": "{{ symbol }}",
   "score": {{ score }},
   "direction": "{{ direction }}",
-  "entry": {{ "%.2f"|format(entry) }},
-  "sl": {{ "%.2f"|format(sl) }},
-  "tp": {{ "%.2f"|format(tp) }},
+  "entry": {{ entry|tojson }},
+  "sl": {{ sl|tojson }},
+  "tp": {{ tp|tojson }},
   "health_state": "{{ health_state }}"
 }

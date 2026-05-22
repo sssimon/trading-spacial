@@ -1,7 +1,7 @@
 Position closed: {{ symbol }} ({{ direction }})
 
 Exit reason: {{ exit_reason }}
-Entry: {{ "%.2f"|format(entry_price) }}
-Exit:  {{ "%.2f"|format(exit_price) }}
+Entry: {{ entry_price|fmt_price }}
+Exit:  {{ exit_price|fmt_price }}
 
 P&L: {{ "%+.2f"|format(pnl_usd) }} USD ({{ "%+.2f"|format(pnl_pct) }}%)

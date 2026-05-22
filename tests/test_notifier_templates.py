@@ -105,6 +105,6 @@ def test_signal_telegram_no_prefix_for_normal():
     expected = (
         "*Signal* `BTCUSDT`\n"
         "Score: *6* (LONG)\n"
-        "Entry: `50000.00` | SL: `49000.00` | TP: `55000.00`"
+        "Entry: `50,000.00` | SL: `49,000.00` | TP: `55,000.00`"
     )
     assert msg == expected, f"parity broken: {msg!r}"

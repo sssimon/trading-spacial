@@ -3,8 +3,8 @@
   "symbol": "{{ symbol }}",
   "direction": "{{ direction }}",
   "exit_reason": "{{ exit_reason }}",
-  "entry_price": {{ "%.2f"|format(entry_price) }},
-  "exit_price": {{ "%.2f"|format(exit_price) }},
+  "entry_price": {{ entry_price|tojson }},
+  "exit_price": {{ exit_price|tojson }},
   "pnl_usd": {{ "%.2f"|format(pnl_usd) }},
   "pnl_pct": {{ "%.2f"|format(pnl_pct) }}
 }

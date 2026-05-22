@@ -324,7 +324,13 @@ def scan(symbol: str = None):
             "estado": f"🛑 {symbol} PAUSED por kill switch (#138) — reactivar manualmente",
             "señal_activa": False,
             "direction": None,
-            "price": round(float(price), 2),
+            # PR #438 follow-up: NO 2-decimal rounding on crypto prices.
+            # For sub-dollar tokens, round(x, 2) silently collapses to
+            # $0.00; for larger tokens it strips sub-cent SL/TP precision
+            # that's the difference between a real entry and a missed one.
+            # Use 8 decimals (satoshi-grade) which covers every crypto
+            # tick size and stays within float64 precision.
+            "price": round(float(price), 8),
             "health_state": "PAUSED",
         })
         return rep
@@ -523,7 +529,7 @@ def scan(symbol: str = None):
     if _so is False:
         # Symbol disabled — no signal
         rep.update({"estado": f"⛔ {symbol} deshabilitado en config", "señal_activa": False,
-                    "direction": None, "price": round(price, 2)})
+                    "direction": None, "price": round(price, 8)})
         return rep
     resolved = resolve_direction_params(_sym_overrides, symbol, direction)
     if resolved is None:
@@ -534,7 +540,7 @@ def scan(symbol: str = None):
             "señal_activa": False,
             "direction": direction,
             "direction_disabled": True,
-            "price": round(price, 2),
+            "price": round(price, 8),
         })
         return rep
     _sl_m = resolved["atr_sl_mult"]
@@ -550,11 +556,11 @@ def scan(symbol: str = None):
     tp_dist    = atr_val * _tp_m
 
     if direction == "SHORT":
-        sl_price   = round(price + sl_dist, 2)   # SL arriba para SHORT
-        tp_price   = round(price - tp_dist, 2)   # TP abajo para SHORT
+        sl_price   = round(price + sl_dist, 8)   # SL arriba para SHORT
+        tp_price   = round(price - tp_dist, 8)   # TP abajo para SHORT
     else:
-        sl_price   = round(price - sl_dist, 2)   # SL abajo para LONG
-        tp_price   = round(price + tp_dist, 2)   # TP arriba para LONG
+        sl_price   = round(price - sl_dist, 8)   # SL abajo para LONG
+        tp_price   = round(price + tp_dist, 8)   # TP arriba para LONG
 
     sl_pct_val = round(sl_dist / price * 100, 2)
     tp_pct_val = round(tp_dist / price * 100, 2)
@@ -707,7 +713,7 @@ def scan(symbol: str = None):
         "regime":         regime_data.get("regime"),
         "regime_score":   regime_data.get("score"),
         "regime_details": regime_data.get("details"),
-        "price":          round(price, 2),
+        "price":          round(price, 8),
         "lrc_1h": {
             "pct":   lrc_pct,
             "upper": lrc_up,

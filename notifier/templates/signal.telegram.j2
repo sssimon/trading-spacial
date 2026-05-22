@@ -3,4 +3,4 @@
 {% endif -%}
 *Signal* `{{ symbol }}`
 Score: *{{ score }}* ({{ direction }})
-Entry: `{{ "%.2f"|format(entry) }}` | SL: `{{ "%.2f"|format(sl) }}` | TP: `{{ "%.2f"|format(tp) }}`
+Entry: `{{ entry|fmt_price }}` | SL: `{{ sl|fmt_price }}` | TP: `{{ tp|fmt_price }}`

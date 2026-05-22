@@ -20,6 +20,7 @@ import requests as req_lib
 
 from db.connection import get_db
 from notifier import notify, SignalEvent
+from notifier._templates import fmt_price
 
 log = logging.getLogger("api.telegram")
 
@@ -59,7 +60,7 @@ def build_telegram_message(rep: dict) -> str:
         "",
         f"`{estado}`",
         "",
-        f"*Precio:* `${price:,.2f}`",
+        f"*Precio:* `${fmt_price(price)}`",
         f"*LRC 1H:* `{lrc.get('pct')}%`  _(zona <= 25% = LONG)_",
         f"*Score:* `{score}/9`  _{slabel}_",
         f"*Macro 4H:* `{'Alcista' if macro.get('price_above') else 'Adversa'}`  _(Precio vs SMA100)_",

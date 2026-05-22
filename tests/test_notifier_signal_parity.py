@@ -32,6 +32,6 @@ def test_signal_template_stable_for_fixed_input():
     expected = (
         "*Signal* `BTCUSDT`\n"
         "Score: *6* (LONG)\n"
-        "Entry: `50000.00` | SL: `49000.00` | TP: `55000.00`"
+        "Entry: `50,000.00` | SL: `49,000.00` | TP: `55,000.00`"
     )
     assert got == expected, f"template drift detected:\nexpected:\n{expected!r}\ngot:\n{got!r}"
