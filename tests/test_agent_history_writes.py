@@ -373,11 +373,15 @@ class TestFailQuiet:
 
 
 class TestTenantIsolation:
-    def test_two_tenants_dont_see_each_other(self, tmp_db):
-        """Both tenants write to the same conversation_id (worst-case
-        malicious): the rows segregate by tenant_id. Meta is a single
-        row (PK on conversation_id) but the test verifies the read
-        path's WHERE clause can isolate by tenant_id."""
+    """Cross-tenant write protection. agent_conversation_meta has the
+    conversation_id as sole PK, so a malicious tenant with a leaked UUID
+    could collide on INSERT. record_history MUST refuse the write rather
+    than mutate the victim's meta row or persist orphan agent_messages
+    rows. PR #433 review issue #1."""
+
+    def test_distinct_conversation_ids_segregate_by_tenant(self, tmp_db):
+        """Sanity baseline: two tenants writing different conversation_ids
+        each end up with their own meta row + messages."""
         from api.agent.audit import record_history
 
         record_history(
@@ -401,6 +405,82 @@ class TestTenantIsolation:
         con.close()
         assert t1_count == 2
         assert t2_count == 2
+
+    def test_cross_tenant_write_attempt_is_refused(self, tmp_db, caplog):
+        """Attacker scenario: tenant B writes to a conversation_id that
+        already belongs to tenant A.
+
+        Expected outcome:
+          - Victim's (A's) meta row is BYTE-IDENTICAL after the attack
+            (same last_ts, same message_count, same expires_at).
+          - Zero orphan agent_messages rows tagged with B's tenant_id
+            on A's conversation.
+          - Operator-facing warning logged so the attempt is visible
+            in webhook.log / cloudwatch.
+        """
+        import logging
+
+        from api.agent.audit import record_history
+
+        # Tenant 1 (victim) creates the conversation
+        record_history(
+            tenant_id=1, surface="dock", conversation_id="conv-shared",
+            user_message="mensaje de la victima",
+            assistant_text="respuesta original",
+            assistant_reasoning=None, tool_chips=[], proposals=[],
+        )
+        victim_meta_before = _fetch_meta(tmp_db, "conv-shared")
+        victim_msg_count_before = len(_fetch_messages(tmp_db, "conv-shared"))
+
+        # Tenant 2 (attacker) hits the same conversation_id
+        with caplog.at_level(logging.WARNING, logger="api.agent.audit"):
+            record_history(
+                tenant_id=2, surface="dock", conversation_id="conv-shared",
+                user_message="intento del atacante",
+                assistant_text="respuesta del atacante",
+                assistant_reasoning=None, tool_chips=[], proposals=[],
+            )
+
+        # 1) Victim's meta row untouched
+        victim_meta_after = _fetch_meta(tmp_db, "conv-shared")
+        assert victim_meta_after == victim_meta_before, (
+            "victim's meta row was mutated by cross-tenant write"
+        )
+
+        # 2) Zero orphan agent_messages rows under conv-shared with
+        #    attacker's tenant_id
+        con = sqlite3.connect(tmp_db)
+        orphan_count = con.execute(
+            "SELECT COUNT(*) FROM agent_messages "
+            "WHERE conversation_id = 'conv-shared' AND tenant_id = 2"
+        ).fetchone()[0]
+        con.close()
+        assert orphan_count == 0, "orphan messages persisted under victim's conversation"
+
+        # 3) Victim's message rows still there, untouched
+        assert len(_fetch_messages(tmp_db, "conv-shared")) == victim_msg_count_before
+
+        # 4) Operator-facing log warning emitted
+        assert any(
+            "refusing cross-tenant write" in r.message
+            for r in caplog.records
+        ), "no warning logged for the cross-tenant attempt"
+
+    def test_first_write_to_a_new_conversation_id_succeeds(self, tmp_db):
+        """Negative control: the cross-tenant guard must NOT block the
+        first-ever write to a new conversation_id (no prior meta row =
+        no ownership conflict)."""
+        from api.agent.audit import record_history
+
+        record_history(
+            tenant_id=5, surface="dock", conversation_id="conv-fresh",
+            user_message="primera vez", assistant_text="ok",
+            assistant_reasoning=None, tool_chips=[], proposals=[],
+        )
+        meta = _fetch_meta(tmp_db, "conv-fresh")
+        assert meta is not None
+        assert meta["tenant_id"] == 5
+        assert len(_fetch_messages(tmp_db, "conv-fresh")) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +718,72 @@ async def test_wrapper_no_user_message_still_persists_assistant(tmp_db):
     meta = _fetch_meta(tmp_db, "conv-W7")
     assert meta["message_count"] == 1
     assert meta["title"] is None
+
+
+@pytest.mark.anyio
+async def test_wrapper_tool_only_turn_persists_empty_content(tmp_db):
+    """A turn that does no text generation (model only emits tool_use,
+    waiting for the tool result before answering) still gets a row in
+    agent_messages with content=''. Schema allows it; rehydrated UI
+    will show the chips + empty bubble — accurate to what the user saw.
+    PR #433 review issue #5a."""
+    from api.agent.audit import TurnAuditWrapper
+    from api.agent.loop import (
+        MessageEnd, ToolUseResult, ToolUseStart,
+    )
+
+    events = [
+        ToolUseStart(tool="get_positions"),
+        ToolUseResult(tool="get_positions", status="ok"),
+        # No TextDelta — the model only did a tool use, the loop ended
+        # without a follow-up text generation.
+        MessageEnd(usage={}, stop_reason="tool_use", cost_usd=0.0),
+    ]
+    wrapped = TurnAuditWrapper(
+        _events_async_gen(events),
+        tenant_id=1, surface="dock", conversation_id="conv-W9",
+        model="claude-sonnet-4-6",
+        user_message_text="mostra posiciones",
+    )
+    await _drain(wrapped)
+
+    rows = _fetch_messages(tmp_db, "conv-W9")
+    assert len(rows) == 2
+    assistant = next(r for r in rows if r["role"] == "assistant")
+    assert assistant["content"] == ""  # empty, not NULL
+    # Chips still persisted
+    chips = json.loads(assistant["tool_chips_json"])
+    assert chips == [{"tool": "get_positions", "status": "ok"}]
+
+
+@pytest.mark.anyio
+async def test_wrapper_error_event_without_user_message(tmp_db):
+    """Defensive path: ErrorEvent fires before any user message text was
+    extractable (e.g. router constructed wrapper with user_message_text
+    =None on a turn that errored upstream of normal flow). Assistant
+    row + meta still persist; user row is skipped; message_count = 1.
+    PR #433 review issue #5b."""
+    from api.agent.audit import TurnAuditWrapper
+    from api.agent.loop import ErrorEvent
+
+    events = [
+        ErrorEvent(reason="upstream", user_message="Hubo un problema."),
+    ]
+    wrapped = TurnAuditWrapper(
+        _events_async_gen(events),
+        tenant_id=1, surface="dock", conversation_id="conv-W10",
+        model="claude-sonnet-4-6",
+        user_message_text=None,
+    )
+    await _drain(wrapped)
+
+    rows = _fetch_messages(tmp_db, "conv-W10")
+    assert len(rows) == 1
+    assert rows[0]["role"] == "assistant"
+    assert rows[0]["content"] == "Hubo un problema."
+    meta = _fetch_meta(tmp_db, "conv-W10")
+    assert meta["message_count"] == 1
+    assert meta["title"] is None  # no user message → no title derived
 
 
 @pytest.mark.anyio

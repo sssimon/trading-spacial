@@ -197,6 +197,39 @@ def record_history(
 
         con = get_db()
         try:
+            # Cross-tenant guard (PR #433 review fix). The H.1 schema
+            # makes conversation_id the sole PK on agent_conversation_meta,
+            # so two tenants writing the same conversation_id collide.
+            # Without this check, an attacker who learned a victim's
+            # UUID could mutate the victim's meta row via the UPSERT
+            # (bumping last_ts / message_count / expires_at) and
+            # leave orphan agent_messages rows tagged with their own
+            # tenant_id. UUID guessability is low, but UUIDs leak
+            # through logs / screenshots / sharing — defense in depth.
+            #
+            # Two layers:
+            #   1. This SELECT short-circuits the common case (sequential
+            #      writes). Abort fail-quiet — same discipline as the
+            #      outer try/except — and log so an operator can spot
+            #      attempts in webhook.log.
+            #   2. The DO UPDATE below carries an additional WHERE clause
+            #      that makes it a silent no-op if the meta row ends up
+            #      owned by a different tenant (covers the race where
+            #      the SELECT saw nothing because the victim's INSERT
+            #      hadn't committed yet under WAL).
+            existing = con.execute(
+                "SELECT tenant_id FROM agent_conversation_meta "
+                "WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            if existing is not None and existing[0] != tenant_id:
+                log.warning(
+                    "record_history: refusing cross-tenant write — "
+                    "conversation_id=%s owned by tenant=%s, attempted by "
+                    "tenant=%s", conversation_id, existing[0], tenant_id,
+                )
+                return
+
             if user_message:
                 con.execute(
                     """INSERT INTO agent_messages
@@ -230,7 +263,8 @@ def record_history(
                    ON CONFLICT(conversation_id) DO UPDATE SET
                        last_ts = excluded.last_ts,
                        message_count = message_count + excluded.message_count,
-                       expires_at = excluded.expires_at""",
+                       expires_at = excluded.expires_at
+                   WHERE agent_conversation_meta.tenant_id = excluded.tenant_id""",
                 (
                     conversation_id, tenant_id, _derive_title(user_message),
                     surface, now_iso, now_iso, rows_inserted, expires_at,
