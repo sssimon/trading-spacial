@@ -9,7 +9,7 @@
 // Pre-reg: docs/superpowers/specs/es/2026-05-22-conversation-history-pre-reg.md
 // ============================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import {
   deleteConversation,
@@ -75,10 +75,16 @@ const AgentHistorySidebar: React.FC<AgentHistorySidebarProps> = ({
     onClose();
   };
 
+  // Per-item snapshot + functional setState so concurrent rapid clicks
+  // on different items don't clobber each other. PR #435 review issue
+  // #1: a list-wide `before = items` snapshot would have the third
+  // click's catch restore items A + B (already-successful deletes)
+  // alongside item C (the failure). Snapshotting only the target item
+  // avoids that.
   const handlePin = async (id: string) => {
-    // Optimistic toggle so the row reorders before the request
-    // returns. Revert on error.
-    const before = items;
+    const target = items.find((c) => c.conversation_id === id);
+    if (!target) return;
+    const prevPinned = target.pinned;
     setItems((cur) => cur.map((c) =>
       c.conversation_id === id ? { ...c, pinned: !c.pinned } : c,
     ));
@@ -88,17 +94,26 @@ const AgentHistorySidebar: React.FC<AgentHistorySidebarProps> = ({
         c.conversation_id === id ? { ...c, pinned: res.pinned } : c,
       ));
     } catch {
-      setItems(before);
+      setItems((cur) => cur.map((c) =>
+        c.conversation_id === id ? { ...c, pinned: prevPinned } : c,
+      ));
     }
   };
 
   const handleDelete = async (id: string) => {
-    const before = items;
+    const idx = items.findIndex((c) => c.conversation_id === id);
+    if (idx < 0) return;
+    const removed = items[idx];
     setItems((cur) => cur.filter((c) => c.conversation_id !== id));
     try {
       await deleteConversation(id);
     } catch {
-      setItems(before);
+      setItems((cur) => {
+        if (cur.some((c) => c.conversation_id === id)) return cur;
+        const next = [...cur];
+        next.splice(Math.min(idx, next.length), 0, removed);
+        return next;
+      });
     }
   };
 
@@ -149,6 +164,7 @@ const AgentHistorySidebar: React.FC<AgentHistorySidebarProps> = ({
             <ConversationItem
               key={c.conversation_id}
               item={c}
+              selectable={!!onSelectConversation}
               onSelect={() => handleSelect(c.conversation_id)}
               onPin={() => handlePin(c.conversation_id)}
               onDelete={() => handleDelete(c.conversation_id)}
@@ -161,42 +177,60 @@ const AgentHistorySidebar: React.FC<AgentHistorySidebarProps> = ({
 };
 
 interface ConversationItemProps {
-  item:    ConversationSummary;
-  onSelect: () => void;
-  onPin:    () => void;
-  onDelete: () => void;
+  item:       ConversationSummary;
+  onSelect:   () => void;
+  onPin:      () => void;
+  onDelete:   () => void;
+  selectable: boolean;
 }
 
 const ConversationItem: React.FC<ConversationItemProps> = ({
-  item, onSelect, onPin, onDelete,
+  item, onSelect, onPin, onDelete, selectable,
 }) => {
-  const timeAgo = useMemo(() => _relativeTime(item.last_ts), [item.last_ts]);
+  // _relativeTime is intentionally NOT memoized (PR #435 review
+  // issue #2): it reads Date.now() internally, so memoizing on
+  // last_ts alone would freeze "hace 5 min" forever as wall-clock
+  // advances. Function is a few subtractions + branches — cheaper
+  // than the memo bookkeeping.
+  const timeAgo = _relativeTime(item.last_ts);
   const klass = item.pinned
     ? `${styles.item} ${styles.itemPinned}`
     : styles.item;
 
+  const bodyContent = (
+    <>
+      <div
+        className={item.title ? styles.itemTitle : `${styles.itemTitle} ${styles.itemTitleEmpty}`}
+        title={item.title ?? item.conversation_id}
+      >
+        {item.title ?? 'Sin título'}
+      </div>
+      <div className={styles.itemMeta}>
+        <span className={styles.surfaceChip}>{item.surface}</span>
+        <span>{timeAgo}</span>
+        <span>· {item.message_count} msj</span>
+      </div>
+    </>
+  );
+
   return (
     <div role="listitem" className={klass}>
-      <button
-        type="button"
-        className={styles.itemBody}
-        onClick={onSelect}
-        aria-label={`Abrir conversación ${item.title ?? item.conversation_id}`}
-        style={{ background: 'none', border: 'none', color: 'inherit',
-                 textAlign: 'left', font: 'inherit', cursor: 'pointer' }}
-      >
-        <div
-          className={item.title ? styles.itemTitle : `${styles.itemTitle} ${styles.itemTitleEmpty}`}
-          title={item.title ?? item.conversation_id}
-        >
-          {item.title ?? 'Sin título'}
-        </div>
-        <div className={styles.itemMeta}>
-          <span className={styles.surfaceChip}>{item.surface}</span>
-          <span>{timeAgo}</span>
-          <span>· {item.message_count} msj</span>
-        </div>
-      </button>
+      {selectable ? (
+        <button
+          type="button"
+          className={styles.itemBody}
+          onClick={onSelect}
+          aria-label={`Abrir conversación ${item.title ?? item.conversation_id}`}
+          style={{ background: 'none', border: 'none', color: 'inherit',
+                   textAlign: 'left', font: 'inherit', cursor: 'pointer' }}
+        >{bodyContent}</button>
+      ) : (
+        // PR #435 review issue #6: until H.5 wires the rehydration,
+        // the parent passes no onSelectConversation. Rendering the
+        // body as a plain div avoids the "I clicked but nothing
+        // happened" UX while still letting pin/delete work.
+        <div className={styles.itemBody}>{bodyContent}</div>
+      )}
       <div className={styles.itemActions}>
         <button
           type="button"

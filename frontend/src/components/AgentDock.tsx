@@ -14,7 +14,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './AgentDock.module.css';
-import historyStyles from './AgentHistorySidebar.module.css';
 import type { SymbolStatus, Position, MacroState } from '../types';
 import { useAgentStream } from '../agent/useAgentStream';
 import { SURFACE_DOCK } from '../agent/surfaces';
@@ -132,7 +131,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
                 type="button"
-                className={historyStyles.openButton}
+                className={styles.historyOpen}
                 onClick={() => setHistoryOpen(true)}
                 aria-label="Abrir historial"
               >Historial</button>

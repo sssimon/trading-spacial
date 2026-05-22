@@ -442,3 +442,19 @@
   }
   .fabGlyph { font-size: 18px; }
 }
+
+/* H.4 history sidebar trigger — lives in the dock header. */
+.historyOpen {
+  background: none;
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  color: rgba(232, 237, 243, 0.85);
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  font-family: inherit;
+}
+.historyOpen:hover {
+  border-color: var(--bull, #6ad7ff);
+  color: var(--bull, #6ad7ff);
+}

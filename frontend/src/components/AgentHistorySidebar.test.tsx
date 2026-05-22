@@ -99,6 +99,26 @@ describe('AgentHistorySidebar', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('item body is non-clickable when onSelectConversation is undefined', async () => {
+    // PR #435 review issue #6: until H.5 wires rehydration, the parent
+    // (AgentDock) does NOT pass onSelectConversation. The item body
+    // should render as a plain div so the user doesn't get the
+    // "I clicked but nothing happened" experience.
+    vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [_conv({ conversation_id: 'nope', title: 'sin handler' })],
+      total: 1, limit: 20, offset: 0,
+    });
+    render(<AgentHistorySidebar open={true} onClose={() => {}} />);
+    await screen.findByText('sin handler');
+    // Should NOT find a button with the "Abrir conversación" label.
+    expect(
+      screen.queryByRole('button', { name: /abrir conversaci.n/i }),
+    ).toBeNull();
+    // Pin + delete buttons still present
+    expect(screen.getByRole('button', { name: /^fijar$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^borrar$/i })).toBeInTheDocument();
+  });
+
   it('clicking pin toggles + calls API', async () => {
     vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
       conversations: [_conv({ conversation_id: 'pin-c', pinned: false })],
@@ -150,6 +170,101 @@ describe('AgentHistorySidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('survivor')).toBeInTheDocument();
     });
+  });
+
+  it('pin failure reverts the optimistic toggle (#435 issue #1)', async () => {
+    vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [_conv({ conversation_id: 'pin-fail', pinned: false })],
+      total: 1, limit: 20, offset: 0,
+    });
+    vi.spyOn(agentClient, 'togglePinConversation').mockRejectedValue(
+      new Error('network'),
+    );
+
+    render(<AgentHistorySidebar open={true} onClose={() => {}} />);
+    const pinBtn = await screen.findByRole('button', { name: /^fijar$/i });
+    await userEvent.click(pinBtn);
+    // After the rejection settles, the chip should be back to "Fijar"
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^fijar$/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /desfijar/i })).toBeNull();
+  });
+
+  it('pressing Escape closes the sidebar', async () => {
+    vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [], total: 0, limit: 20, offset: 0,
+    });
+    const onClose = vi.fn();
+    render(<AgentHistorySidebar open={true} onClose={onClose} />);
+    await screen.findByLabelText(/buscar/i);
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('clicking the backdrop closes the sidebar', async () => {
+    vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [], total: 0, limit: 20, offset: 0,
+    });
+    const onClose = vi.fn();
+    const { container } = render(
+      <AgentHistorySidebar open={true} onClose={onClose} />,
+    );
+    await screen.findByLabelText(/buscar/i);
+    // backdrop is the aria-hidden div with the backdrop class
+    const backdrop = container.querySelector('[aria-hidden="true"]');
+    expect(backdrop).not.toBeNull();
+    await userEvent.click(backdrop!);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('preserves the API ordering (pinned first then last_ts DESC)', async () => {
+    // The H.3 endpoint guarantees this ordering; the component must
+    // render rows in the order the API returned.
+    vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [
+        _conv({ conversation_id: 'pin-old', title: 'fijada antigua',
+                pinned: true, last_ts: '2026-05-20T08:00:00Z' }),
+        _conv({ conversation_id: 'fresh', title: 'reciente sin fijar',
+                pinned: false, last_ts: '2026-05-22T09:00:00Z' }),
+        _conv({ conversation_id: 'older', title: 'vieja sin fijar',
+                pinned: false, last_ts: '2026-05-21T09:00:00Z' }),
+      ],
+      total: 3, limit: 20, offset: 0,
+    });
+    render(<AgentHistorySidebar open={true} onClose={() => {}} />);
+    await screen.findByText('fijada antigua');
+    const titles = ['fijada antigua', 'reciente sin fijar', 'vieja sin fijar']
+      .map((t) => screen.getByText(t));
+    // Render order matches API order: pin first, then by last_ts DESC
+    expect(titles[0].compareDocumentPosition(titles[1])
+           & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(titles[1].compareDocumentPosition(titles[2])
+           & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('clearing the search input re-fires the list call without q', async () => {
+    const listSpy = vi.spyOn(agentClient, 'listConversations').mockResolvedValue({
+      conversations: [], total: 0, limit: 20, offset: 0,
+    });
+    render(<AgentHistorySidebar open={true} onClose={() => {}} />);
+    const searchInput = await screen.findByLabelText(/buscar/i);
+
+    await userEvent.type(searchInput, 'X');
+    await waitFor(
+      () => expect(listSpy.mock.calls.some(([a]) => a?.q === 'X')).toBe(true),
+      { timeout: 1000 },
+    );
+
+    await userEvent.clear(searchInput);
+    // After clearing, the most recent call should NOT carry q
+    await waitFor(
+      () => {
+        const last = listSpy.mock.calls[listSpy.mock.calls.length - 1];
+        expect(last?.[0]?.q).toBeUndefined();
+      },
+      { timeout: 1000 },
+    );
   });
 
   it('search input passes q to listConversations (debounced)', async () => {
