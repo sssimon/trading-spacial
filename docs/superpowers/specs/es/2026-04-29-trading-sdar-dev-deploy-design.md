@@ -396,6 +396,10 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/var/www/trading
+# Defense-in-depth: arms the lifespan gate that refuses to boot if pytest
+# leaked into the runtime (auth bypass triple-guard would otherwise open
+# without a JWT). See btc_api.py:lifespan + auth/middleware.py:_bypass_role_or_none.
+Environment=RUN_AS_SERVICE=1
 EnvironmentFile=/var/www/trading/.env
 ExecStart=/var/www/trading/.venv/bin/uvicorn btc_api:app --host 127.0.0.1 --port 8100
 Restart=on-failure

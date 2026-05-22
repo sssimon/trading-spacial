@@ -218,6 +218,26 @@ def _bootstrap_first_user() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Defense-in-depth (2026-05-22, post-#436 smoke). The auth middleware's
+    # bypass already requires `'pytest' in sys.modules` as a third guard
+    # alongside two env vars (auth/middleware.py:_bypass_role_or_none). This
+    # extra gate refuses to boot the service entirely if pytest somehow
+    # leaked into the prod runtime — a supply-chain accident, an
+    # accidentally-pinned dev dep, a console mistake. Both signals must
+    # coincide to crash:
+    #   - RUN_AS_SERVICE=1 (set by `__main__` for `python btc_api.py` and
+    #     by the systemd unit's Environment= for the prod uvicorn launch),
+    #     NOT set by pytest test runs.
+    #   - 'pytest' in sys.modules.
+    # The TestClient `with` block in tests/test_setup.py exercises lifespan
+    # under pytest, so the env-var gate is what keeps that test green.
+    if os.getenv("RUN_AS_SERVICE") == "1" and "pytest" in sys.modules:
+        raise RuntimeError(
+            "pytest leaked into the production service runtime — "
+            "AUTH_TEST_BYPASS_* would silently open the auth middleware. "
+            "Refusing to start.",
+        )
+
     # Auth (2026-04-29): fail fast if AUTH_JWT_SECRET is not configured. We
     # call _jwt_secret() once here so a misconfigured deploy crashes at boot
     # rather than on the first /auth/login request.
@@ -590,4 +610,12 @@ def test_webhook():
 
 if __name__ == "__main__":
     import uvicorn
+
+    # Signal to the lifespan gate that this is a real service launch, not a
+    # test collection. The systemd unit sets the same env var for the
+    # `uvicorn btc_api:app` prod path. Use setdefault so an explicit
+    # override (e.g. a future operator who needs the gate disarmed for a
+    # specific debug session) takes precedence.
+    os.environ.setdefault("RUN_AS_SERVICE", "1")
+
     uvicorn.run("btc_api:app", host=API_HOST, port=API_PORT, reload=False)
