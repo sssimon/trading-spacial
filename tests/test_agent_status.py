@@ -128,7 +128,12 @@ def test_legacy_agent_chat_endpoint_is_removed(client):
     """Pre-reg §3.3 line 601: the legacy POST /agent/chat endpoint was
     eliminated after epic #400 Phase 2B (SSE streaming via
     /agent/conversations/{id}/turn). This test pins the removal so it
-    can't silently come back via a stray import or copy-paste."""
+    can't silently come back via a stray import or copy-paste.
+
+    Defense-in-depth: also verify the 404 body itself doesn't leak any
+    forbidden strings. FastAPI's default 404 body is {"detail":"Not Found"}
+    (safe), but a future stray app.exception_handler(404) that echoes the
+    URL or env state would regress #381 even with the route removed."""
     resp = client.post(
         "/agent/chat",
         json={"system": "test", "messages": [{"role": "user", "content": "hi"}]},
@@ -137,6 +142,12 @@ def test_legacy_agent_chat_endpoint_is_removed(client):
         f"POST /agent/chat returned {resp.status_code} ({resp.text!r}). "
         f"The legacy endpoint must stay removed — see #381."
     )
+    body_text = resp.text
+    for forbidden in _FORBIDDEN_LEAK_STRINGS:
+        assert forbidden not in body_text, (
+            f"/agent/chat 404 leaked forbidden string {forbidden!r}. "
+            f"Body: {body_text!r}"
+        )
 
 
 # ── Closed-enum invariant ───────────────────────────────────────────────
