@@ -598,7 +598,7 @@ Después de cada turno, parsear el texto del assistant y extraer position_ids, t
 **Entregables:**
 
 - `api/agent/__init__.py`, `api/agent/router.py`, `api/agent/config.py`.
-- Eliminar `POST /agent/chat` inline de `btc_api.py:400-464`.
+- ✅ Eliminado `POST /agent/chat` inline de `btc_api.py` (cierra #381; PR follow-up post-Fase-2B una vez que ningún surface lo consume).
 - `GET /agent/status` con body sin leak.
 - Frontend: `getAgentStatus()` en `api.ts`; `App.tsx` poll cada 30s; oculta Dock cuando `enabled:false`.
 - `requirements.txt`: `anthropic>=0.40`.

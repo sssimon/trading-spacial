@@ -127,24 +127,6 @@ export async function getTicker(): Promise<TickerResponse> {
   return request<TickerResponse>('/ticker');
 }
 
-// POST /agent/chat — copilot proxy to Anthropic (Claude Haiku)
-export interface AgentMessage {
-  role:    'user' | 'assistant';
-  content: string;
-}
-export interface AgentChatResponse {
-  text: string;
-}
-export async function chatAgent(payload: {
-  system:   string;
-  messages: AgentMessage[];
-}): Promise<AgentChatResponse> {
-  return request<AgentChatResponse>('/agent/chat', {
-    method: 'POST',
-    body:   JSON.stringify(payload),
-  });
-}
-
 // GET /macro — macro "weather" (regime + F&G + funding + BTC 24h)
 export interface MacroResponse {
   regime:           'BULL' | 'BEAR' | 'NEUTRAL' | null;

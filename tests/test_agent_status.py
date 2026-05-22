@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 
 
-# Strings that must NEVER appear in the response body of /agent/status,
-# /agent/chat 503, or any other agent-related public surface. Lifted
-# verbatim from pre-reg §11.7.
+# Strings that must NEVER appear in the response body of /agent/status
+# or any other agent-related public surface. Lifted verbatim from
+# pre-reg §11.7.
 _FORBIDDEN_LEAK_STRINGS = (
     "ANTHROPIC_API_KEY",
     ".env",
@@ -124,46 +124,19 @@ def test_agent_status_body_never_leaks_env_var_names_or_paths(client, monkeypatc
             )
 
 
-def test_agent_chat_503_body_no_longer_leaks(client, monkeypatch):
-    """The legacy /agent/chat endpoint also stops leaking — pre-reg §3.3.
-
-    Fase 3b of the multi-provider epic: default provider migrated to
-    DeepSeek, so we delete DEEPSEEK_API_KEY to trip the disabled path.
-    """
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+def test_legacy_agent_chat_endpoint_is_removed(client):
+    """Pre-reg §3.3 line 601: the legacy POST /agent/chat endpoint was
+    eliminated after epic #400 Phase 2B (SSE streaming via
+    /agent/conversations/{id}/turn). This test pins the removal so it
+    can't silently come back via a stray import or copy-paste."""
     resp = client.post(
         "/agent/chat",
         json={"system": "test", "messages": [{"role": "user", "content": "hi"}]},
     )
-    assert resp.status_code == 503
-    body_text = resp.text
-    for forbidden in _FORBIDDEN_LEAK_STRINGS:
-        assert forbidden not in body_text, (
-            f"/agent/chat 503 leaked forbidden string {forbidden!r}. "
-            f"Body: {body_text!r}"
-        )
-    # And it carries the closed-enum reason instead of the prose leak.
-    assert resp.json() == {"detail": "agent_disabled"}
-
-
-def test_agent_chat_503_when_cfg_disabled_even_with_api_key(client, monkeypatch):
-    """Closes the cfg-vs-env consistency gap flagged in PR #402 review:
-    if the operator sets cfg.agent.enabled=False but leaves the env var
-    populated, /agent/chat must 503 (same way /agent/status does) instead
-    of silently letting the request through to Anthropic.
-    """
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-but-real-looking")
-    import api.agent.config as agent_cfg
-    monkeypatch.setattr(
-        agent_cfg, "load_config",
-        lambda: {"agent": {"enabled": False}},
+    assert resp.status_code == 404, (
+        f"POST /agent/chat returned {resp.status_code} ({resp.text!r}). "
+        f"The legacy endpoint must stay removed — see #381."
     )
-    resp = client.post(
-        "/agent/chat",
-        json={"system": "test", "messages": [{"role": "user", "content": "hi"}]},
-    )
-    assert resp.status_code == 503
-    assert resp.json() == {"detail": "agent_disabled"}
 
 
 # ── Closed-enum invariant ───────────────────────────────────────────────

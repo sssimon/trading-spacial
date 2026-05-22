@@ -4,8 +4,8 @@
 // Mounted at App level so the conversation persists across tab
 // changes (Mercado → Posiciones → Kill-switch → back to Mercado).
 //
-// Phase 2B of epic #400 — rewired from the legacy /agent/chat (one
-// shot, frontend-built system prompt, marker-parsed pseudo-tools)
+// Phase 2B of epic #400 — rewired from the legacy one-shot chat
+// endpoint (frontend-built system prompt, marker-parsed pseudo-tools)
 // to the proper SSE streaming endpoint POST /agent/conversations/{id}/turn
 // with a server-side system prompt and typed tool_use events. The
 // `<<<TOOL:...>>>` marker protocol is dead — its UX (inline action

@@ -13,7 +13,7 @@
 //       <<<TOOL:setup>>>    → <SetupCard/>
 //       <<<TOOL:position>>> → <PositionCard/>
 //       <<<TOOL:history>>>  → <HistoryCard/>
-//   - Agent backend: POST /agent/chat (proxies to Anthropic Haiku 4.5)
+//   - Agent backend: SSE via useAgentStream → POST /agent/conversations/{id}/turn
 //   - Feature flag: server-driven via GET /agent/status (epic #400, Phase 0).
 //     App.tsx owns the polling (useAgentEnabled) and passes the resolved
 //     boolean down as `agentEnabled`. When false, the input row is hidden
@@ -391,7 +391,7 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Phase 3 rewire: replace the legacy one-shot chatAgent + frontend
+  // Phase 3 rewire: replaced the legacy one-shot chat call + frontend
   // system prompt with the streaming hook. The server owns the prompt
   // (api/agent/prompts/system.py + surfaces.py), the tool schema, and
   // the audit. The model never sees a frontend-built system prompt.
