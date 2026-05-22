@@ -146,11 +146,17 @@ Structurally distinct alternative strategy class to the LRC architecture. Mutual
     "require_macro_ok": false,
     "notify_setup": false
   },
+  "security": {
+    "webhook_allow_private_ips": true
+  },
   "proxy": ""
 }
 ```
 
 Proxy format when needed: `socks5://127.0.0.1:1080`
+
+### `security.webhook_allow_private_ips` (#127)
+SSRF guard for `webhook_url` (and `notifier.channels.webhook.endpoints`). Default `false` — rejects loopback, RFC1918, link-local, multicast, unspecified, reserved. The localhost-n8n setup shown above (`http://localhost:5678/...`) requires `webhook_allow_private_ips: true`, because `localhost` resolves to `127.0.0.1` which is loopback. Even with the flag on, link-local (`169.254.169.254` / AWS EC2 IMDS) is ALWAYS blocked — the flag relaxes local-network trust, not cloud-metadata exposure. POST /config can carry both fields in one request (`{"webhook_url":"http://localhost:5678/...","security":{"webhook_allow_private_ips":true}}`).
 
 ## Logs & Data
 - `logs/signals_log.txt` — human-readable signal entries/exits

@@ -194,8 +194,11 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
     # SSRF guard #127: re-validate before each push (defense in depth +
     # TOCTOU mitigation against out-of-band edits to config.json and DNS
     # rebinding after the POST /config validation).
+    allow_private = bool(
+        cfg.get("security", {}).get("webhook_allow_private_ips", False)
+    )
     try:
-        url = validate_outbound_url(url)
+        url = validate_outbound_url(url, allow_private=allow_private)
     except ValueError as e:
         log.warning("Webhook push abortado: '%s' rechazado por SSRF guard — %s", url, e)
         con = get_db()

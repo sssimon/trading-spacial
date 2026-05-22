@@ -518,8 +518,11 @@ def test_webhook():
         # SSRF guard #127: re-validate before the test request. Same rationale
         # as push_webhook — out-of-band edits to config.json bypass the
         # POST /config validator.
+        allow_private = bool(
+            cfg.get("security", {}).get("webhook_allow_private_ips", False)
+        )
         try:
-            url = validate_outbound_url(url)
+            url = validate_outbound_url(url, allow_private=allow_private)
         except ValueError as e:
             results["webhook_n8n"] = {
                 "ok": False,

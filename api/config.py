@@ -17,7 +17,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
 from api.deps import verify_api_key
 from api.security.url_validation import validate_outbound_url
@@ -91,6 +91,13 @@ def load_config() -> dict:
             "pause_months_consecutive":  3,
             "auto_recovery_enabled":     True,
         },
+        # #127: opt-in flag for operators running trusted internal webhooks
+        # (e.g. n8n on localhost or a private k8s service). Default false =
+        # block loopback + RFC1918 + link-local. True allows loopback + RFC1918
+        # but STILL blocks link-local (169.254.169.254 IMDS).
+        "security": {
+            "webhook_allow_private_ips": False,
+        },
     }
 
     cfg = hardcoded
@@ -147,6 +154,14 @@ class SignalFiltersUpdate(BaseModel):
     notify_setup: Optional[bool] = None
 
 
+class SecurityUpdate(BaseModel):
+    # When True, validate_outbound_url permits loopback + RFC1918 for
+    # webhook_url. Always-blocked: link-local (IMDS), multicast, unspecified,
+    # reserved. See api/security/url_validation.py and #127 for the full
+    # threat model.
+    webhook_allow_private_ips: Optional[bool] = None
+
+
 class ConfigUpdate(BaseModel):
     webhook_url: Optional[str] = None
     telegram_chat_id: Optional[str] = None
@@ -155,19 +170,32 @@ class ConfigUpdate(BaseModel):
     num_symbols: Optional[int] = Field(None, ge=1, le=50)
     proxy: Optional[str] = None
     signal_filters: Optional[SignalFiltersUpdate] = None
+    security: Optional[SecurityUpdate] = None
     api_key: Optional[str] = None
     auto_approve_tune: Optional[bool] = None
 
-    @field_validator("webhook_url")
-    @classmethod
-    def _validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+    @model_validator(mode="after")
+    def _validate_webhook_url(self) -> "ConfigUpdate":
         # Clearing the webhook (empty string / None) is always allowed.
-        if v is None or v.strip() == "":
-            return v
+        if self.webhook_url is None or self.webhook_url.strip() == "":
+            return self
+        # Effective `allow_private`: prefer the value the operator is sending
+        # in this same request; otherwise read what's already persisted.
+        # This lets POST /config carry both fields in one shot.
+        if (self.security is not None
+                and self.security.webhook_allow_private_ips is not None):
+            allow = self.security.webhook_allow_private_ips
+        else:
+            allow = (load_config()
+                     .get("security", {})
+                     .get("webhook_allow_private_ips", False))
         try:
-            return validate_outbound_url(v)
+            self.webhook_url = validate_outbound_url(
+                self.webhook_url, allow_private=allow
+            )
         except ValueError as e:
             raise ValueError(f"webhook_url rechazado: {e}") from e
+        return self
 
 
 def save_config(updates: dict) -> dict:
@@ -183,6 +211,11 @@ def save_config(updates: dict) -> dict:
         ks = cfg.get("kill_switch", {}).copy()
         ks.update(updates.pop("kill_switch"))
         cfg["kill_switch"] = ks
+    # security se fusiona, no reemplaza
+    if "security" in updates:
+        sec = cfg.get("security", {}).copy()
+        sec.update(updates.pop("security"))
+        cfg["security"] = sec
     cfg.update(updates)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -208,10 +241,14 @@ def get_config():
 def update_config(body: ConfigUpdate):
     # Convert Pydantic model to dict, excluding unset fields
     updates = body.model_dump(exclude_unset=True)
-    # Convert nested Pydantic model to dict
+    # Convert nested Pydantic models to dict, dropping None entries
     if "signal_filters" in updates and updates["signal_filters"] is not None:
         updates["signal_filters"] = {
             k: v for k, v in updates["signal_filters"].items() if v is not None
+        }
+    if "security" in updates and updates["security"] is not None:
+        updates["security"] = {
+            k: v for k, v in updates["security"].items() if v is not None
         }
     try:
         updated = save_config(updates)

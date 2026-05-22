@@ -214,7 +214,89 @@ def test_post_config_accepts_public_url(config_client, monkeypatch):
     assert on_disk["webhook_url"] == "https://hooks.example.com/services/abc"
 
 
-# ─── Group 8: integration — push_webhook with poisoned cfg never dials ─────
+# ─── Group 8: opt-in permissive mode (`allow_private=True`) ────────────────
+# Operators with trusted internal webhooks (n8n on localhost, internal k8s
+# service) can set `cfg.security.webhook_allow_private_ips=true`. The flag
+# loosens local-network trust but NEVER unlocks IMDS.
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1/",
+    "http://10.0.0.1/",
+    "http://172.16.5.4/",
+    "http://192.168.1.1/",
+    "http://[::1]/",
+    "http://[fc00::1]/",
+])
+def test_allow_private_permits_loopback_and_rfc1918(url):
+    assert validate_outbound_url(url, allow_private=True) == url
+
+
+def test_allow_private_still_blocks_imds():
+    """Load-bearing: opt-in mode MUST still block 169.254.169.254."""
+    with pytest.raises(ValueError, match="link-local"):
+        validate_outbound_url(
+            "http://169.254.169.254/latest/meta-data/",
+            allow_private=True,
+        )
+
+
+def test_allow_private_still_blocks_zero():
+    with pytest.raises(ValueError, match="unspecified"):
+        validate_outbound_url("http://0.0.0.0/", allow_private=True)
+
+
+def test_allow_private_still_blocks_non_http():
+    with pytest.raises(ValueError, match="scheme"):
+        validate_outbound_url("file:///etc/passwd", allow_private=True)
+
+
+def test_allow_private_via_dns_localhost(monkeypatch):
+    """A hostname resolving to 127.0.0.1 is permitted under allow_private."""
+    def fake_getaddrinfo(host, port, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    assert validate_outbound_url(
+        "http://localhost/", allow_private=True
+    ) == "http://localhost/"
+
+
+def test_post_config_with_flag_accepts_localhost(config_client, monkeypatch):
+    """Operator can flip the flag + set a private webhook in one POST."""
+    def fake_getaddrinfo(host, port, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    client, cfg_path = config_client
+    r = client.post(
+        "/config",
+        json={
+            "webhook_url": "http://localhost:5678/webhook/n8n",
+            "security": {"webhook_allow_private_ips": True},
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert r.status_code == 200, r.text
+    on_disk = json.loads(cfg_path.read_text())
+    assert on_disk["webhook_url"] == "http://localhost:5678/webhook/n8n"
+    assert on_disk["security"]["webhook_allow_private_ips"] is True
+
+
+def test_post_config_with_flag_still_rejects_imds(config_client):
+    """Flag does NOT unlock IMDS — POST /config still 422s."""
+    client, _ = config_client
+    r = client.post(
+        "/config",
+        json={
+            "webhook_url": "http://169.254.169.254/latest/meta-data/",
+            "security": {"webhook_allow_private_ips": True},
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert r.status_code == 422
+
+
+# ─── Group 9: integration — push_webhook with poisoned cfg never dials ─────
 
 
 def test_push_webhook_with_poisoned_cfg_skips_request(monkeypatch, tmp_path):
@@ -263,3 +345,104 @@ def test_push_webhook_with_poisoned_cfg_skips_request(monkeypatch, tmp_path):
     assert rows[0][0] == 999     # scan_id
     assert rows[0][1] == 0       # status
     assert rows[0][2] == 0       # ok
+
+
+# ─── Group 10: block-path for the other two outbound sites ─────────────────
+
+
+def test_webhook_channel_skips_imds_and_continues():
+    """WebhookChannel.send: an IMDS endpoint is skipped; safe ones still fire."""
+    from notifier.channels.webhook import WebhookChannel
+
+    cfg = {
+        "notifier": {
+            "channels": {
+                "webhook": {
+                    "enabled": True,
+                    "endpoints": [
+                        {"url": "http://169.254.169.254/imds"},
+                        {"url": "http://8.8.8.8/ok"},
+                    ],
+                },
+            },
+        },
+        # No security section → default strict.
+    }
+    channel = WebhookChannel(cfg)
+    ok = MagicMock()
+    ok.ok = True
+    ok.status_code = 200
+
+    with patch("notifier.channels.webhook.requests.post", return_value=ok) as mock_post:
+        receipt = channel.send('{}', event_type="signal")
+
+    # Overall ok=ok because the safe endpoint succeeded; first endpoint's
+    # rejection is recorded in the error string.
+    assert receipt.status == "ok"
+    assert "169.254.169.254" in receipt.error
+    assert "SSRF guard" in receipt.error
+    # ONLY the safe endpoint was actually dialed.
+    assert mock_post.call_count == 1
+    assert mock_post.call_args[0][0] == "http://8.8.8.8/ok"
+
+
+def test_webhook_channel_allow_private_still_blocks_imds():
+    """Even with allow_private=true at app level, the channel must block IMDS."""
+    from notifier.channels.webhook import WebhookChannel
+
+    cfg = {
+        "security": {"webhook_allow_private_ips": True},
+        "notifier": {
+            "channels": {
+                "webhook": {
+                    "enabled": True,
+                    "endpoints": [{"url": "http://169.254.169.254/imds"}],
+                },
+            },
+        },
+    }
+    channel = WebhookChannel(cfg)
+
+    with patch("notifier.channels.webhook.requests.post") as mock_post:
+        receipt = channel.send('{}', event_type="signal")
+
+    assert receipt.status == "failed"
+    assert "link-local" in receipt.error
+    assert not mock_post.called
+
+
+def test_webhook_test_endpoint_blocks_poisoned_url(monkeypatch, tmp_path):
+    """/webhook/test with poisoned config returns ok=False without dialing."""
+    from fastapi.testclient import TestClient
+
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({
+        "api_key": "test-key",
+        "webhook_url": "http://169.254.169.254/imds",
+        "telegram_chat_id": "test-chat",
+        "telegram_bot_token": "",
+    }))
+
+    import api.config as _ac
+    monkeypatch.setattr(_ac, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"), raising=False)
+    monkeypatch.setattr(_ac, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"), raising=False)
+
+    import btc_api
+    monkeypatch.setattr(btc_api, "CONFIG_FILE", str(cfg_path), raising=False)
+    monkeypatch.setattr(btc_api, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"), raising=False)
+    monkeypatch.setattr(btc_api, "SECRETS_FILE", str(tmp_path / "_no_secrets.json"), raising=False)
+
+    from btc_api import app
+    client = TestClient(app)
+
+    with patch("btc_api.req_lib.post") as mock_post:
+        r = client.get("/webhook/test", headers={"X-API-Key": "test-key"})
+
+    assert r.status_code == 200
+    data = r.json()
+    # The IMDS attempt must be blocked + surfaced in the response.
+    assert data["webhook_n8n"]["ok"] is False
+    assert "SSRF guard" in data["webhook_n8n"]["error"]
+    # And the validator must have short-circuited BEFORE the HTTP call.
+    assert not mock_post.called

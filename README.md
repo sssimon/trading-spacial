@@ -256,11 +256,16 @@ Copy and fill in `config.json` (excluded from git — never commit tokens):
     "require_macro_ok": false,
     "notify_setup": false
   },
+  "security": {
+    "webhook_allow_private_ips": true
+  },
   "proxy": ""
 }
 ```
 
 Proxy format (if needed): `socks5://127.0.0.1:1080`
+
+**Note on `security.webhook_allow_private_ips`** (#127): default is `false` — the SSRF guard blocks loopback / RFC1918 / link-local webhook URLs. The localhost-n8n example above requires the flag set to `true`. Even with the flag enabled, link-local (e.g. `http://169.254.169.254/` AWS EC2 metadata endpoint) is always blocked.
 
 ---
 
