@@ -206,9 +206,11 @@ class TestGetMessages:
         assert assistant["reasoning"] == "<think>razonamiento</think>"
         assert assistant["tool_chips"] == [{"tool": "get_positions", "status": "ok"}]
 
-    def test_proposal_state_pending_when_never_confirmed(self, client):
+    def test_proposal_state_stale_when_never_confirmed(self, client):
         """No matching row in agent_side_effects + future expires_at →
-        state is 'pending'."""
+        state is 'stale' (REST rehydration never has a valid
+        signed_payload, so the chip can't be confirmed). PR #434
+        review issue #6."""
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
             0, "conv-P1", "cerra mi BTC",
@@ -223,7 +225,7 @@ class TestGetMessages:
         )
         resp = client.get("/agent/conversations/conv-P1/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
-        assert assistant["proposals"][0]["state"] == "pending"
+        assert assistant["proposals"][0]["state"] == "stale"
         # signed_payload never present in the response
         assert "signed_payload" not in assistant["proposals"][0]
 
@@ -242,6 +244,164 @@ class TestGetMessages:
         resp = client.get("/agent/conversations/conv-P2/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
         assert assistant["proposals"][0]["state"] == "expired"
+
+    def test_proposal_state_error_from_agent_side_effects(self, client):
+        """Verify error result from agent_side_effects propagates."""
+        from db.connection import get_db
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        _seed(
+            0, "conv-Perr", "cerra",
+            proposals=[{
+                "proposal_id": "prop-perr",
+                "action":      "close_position",
+                "args":        {"position_id": 10},
+                "expires_at":  future,
+                "summary":     "Cerrar #10",
+            }],
+        )
+        con = get_db()
+        con.execute(
+            """INSERT INTO agent_side_effects
+               (tenant_id, conversation_id, ts, action, args_json,
+                idempotency_key, result, http_status, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (0, "conv-Perr", "2026-05-22T10:00:00Z", "close_position",
+             "{}", "prop-perr", "error", 500, future),
+        )
+        con.commit()
+        con.close()
+
+        resp = client.get("/agent/conversations/conv-Perr/messages")
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        assert assistant["proposals"][0]["state"] == "error"
+
+    def test_proposal_state_conflict_from_agent_side_effects(self, client):
+        """conflict result (proposal_id collision) propagates."""
+        from db.connection import get_db
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        _seed(
+            0, "conv-Pconf", "cerra",
+            proposals=[{
+                "proposal_id": "prop-pconf",
+                "action":      "close_position",
+                "args":        {"position_id": 11},
+                "expires_at":  future,
+                "summary":     "Cerrar #11",
+            }],
+        )
+        con = get_db()
+        con.execute(
+            """INSERT INTO agent_side_effects
+               (tenant_id, conversation_id, ts, action, args_json,
+                idempotency_key, result, http_status, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (0, "conv-Pconf", "2026-05-22T10:00:00Z", "close_position",
+             "{}", "prop-pconf", "conflict", 409, future),
+        )
+        con.commit()
+        con.close()
+
+        resp = client.get("/agent/conversations/conv-Pconf/messages")
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        assert assistant["proposals"][0]["state"] == "conflict"
+
+    def test_proposal_state_lookup_is_tenant_scoped(self, client):
+        """PR #434 review issue #1: even though idempotency_key is
+        globally UNIQUE on agent_side_effects, the state derivation
+        joins on tenant_id too. If another tenant's confirm shares a
+        proposal_id by accident, the current tenant doesn't see that
+        result — defense in depth.
+
+        Simulate: tenant 999 has a side_effect row for 'prop-shared'
+        marked 'ok'. Tenant 0 (TestClient) has a message with the
+        same proposal_id but no side_effect of their own. The state
+        derivation MUST return 'stale' (no row found for this tenant)
+        — NOT 'ok' (which would leak the other tenant's outcome).
+        """
+        from db.connection import get_db
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        _seed(
+            0, "conv-Pscope", "x",
+            proposals=[{
+                "proposal_id": "prop-shared",
+                "action":      "close_position",
+                "args":        {"position_id": 999},
+                "expires_at":  future,
+                "summary":     "Cerrar #999",
+            }],
+        )
+        # Other tenant confirmed something with the same key — IRL
+        # this won't happen because the UNIQUE constraint blocks it,
+        # but the test verifies our SELECT wouldn't return it anyway.
+        con = get_db()
+        con.execute(
+            "DELETE FROM agent_side_effects WHERE idempotency_key = ?",
+            ("prop-shared",),
+        )
+        con.execute(
+            """INSERT INTO agent_side_effects
+               (tenant_id, conversation_id, ts, action, args_json,
+                idempotency_key, result, http_status, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (999, "other-conv", "2026-05-22T10:00:00Z", "close_position",
+             "{}", "prop-shared", "ok", 200, future),
+        )
+        con.commit()
+        con.close()
+
+        resp = client.get("/agent/conversations/conv-Pscope/messages")
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        # Must be 'stale' (this tenant never confirmed), NOT 'ok'
+        # (which would have leaked the other tenant's outcome).
+        assert assistant["proposals"][0]["state"] == "stale"
+
+    def test_malformed_tool_chips_json_falls_back_gracefully(self, client, caplog):
+        """A corrupted blob (DB bit-rot, schema drift, future bug)
+        must not 500 the whole transcript. Log warning + degrade to
+        empty chips. PR #434 review issue #2."""
+        import logging
+        from db.connection import get_db
+        _seed(0, "conv-Mal", "hola", assistant_text="ok")
+        # Corrupt the assistant row's tool_chips_json directly
+        con = get_db()
+        con.execute(
+            "UPDATE agent_messages SET tool_chips_json = ? "
+            "WHERE conversation_id = ? AND role = 'assistant'",
+            ("{NOT VALID JSON", "conv-Mal"),
+        )
+        con.commit()
+        con.close()
+
+        with caplog.at_level(logging.WARNING, logger="api.agent.history"):
+            resp = client.get("/agent/conversations/conv-Mal/messages")
+        assert resp.status_code == 200
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        assert assistant["tool_chips"] == []  # graceful empty list
+        assert any(
+            "malformed tool_chips_json" in r.message for r in caplog.records
+        )
+
+    def test_malformed_proposals_json_falls_back_gracefully(self, client, caplog):
+        import logging
+        from db.connection import get_db
+        _seed(0, "conv-MalP", "hola", assistant_text="ok")
+        con = get_db()
+        con.execute(
+            "UPDATE agent_messages SET proposals_json = ? "
+            "WHERE conversation_id = ? AND role = 'assistant'",
+            ("not json at all", "conv-MalP"),
+        )
+        con.commit()
+        con.close()
+
+        with caplog.at_level(logging.WARNING, logger="api.agent.history"):
+            resp = client.get("/agent/conversations/conv-MalP/messages")
+        assert resp.status_code == 200
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        assert assistant["proposals"] == []
+        assert any(
+            "malformed proposals_json" in r.message for r in caplog.records
+        )
 
     def test_proposal_state_ok_from_agent_side_effects(self, client):
         """If the user confirmed the proposal, agent_side_effects has the
@@ -285,8 +445,9 @@ class TestGetMessages:
         resp = client.get("/agent/conversations/conv-expired/messages")
         assert resp.status_code == 404
 
-    def test_404_for_invalid_conversation_id_chars(self, client):
-        """Path pattern blocks special chars."""
+    def test_422_for_invalid_conversation_id_chars(self, client):
+        """Path pattern blocks special chars (FastAPI validation
+        returns 422, not 404, when the Path regex doesn't match)."""
         resp = client.get("/agent/conversations/has space/messages")
         assert resp.status_code == 422
 

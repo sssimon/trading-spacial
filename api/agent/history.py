@@ -58,13 +58,22 @@ class ProposalRecord(BaseModel):
     """Rehydrated proposal shape. `signed_payload` is intentionally
     absent — the HMAC TTL is minutes and the token is never persisted.
     `state` is derived at read time from agent_side_effects (where the
-    confirm lives) or from expires_at (if never confirmed)."""
+    confirm lives) or from expires_at (if never confirmed).
+
+    Why no 'pending' value here even though the live SSE wire emits it
+    (see frontend/src/agent/types.ts ProposalChip.state): a REST
+    rehydration NEVER has a valid signed_payload — by the time the
+    user re-opens a conversation, the HMAC's minute-scale TTL has
+    long passed. A chip that was 'pending' at write-time but never
+    confirmed lands here as 'stale': the frontend renders it without
+    a confirm button. PR #434 review issue #6.
+    """
     proposal_id: str
     action:      str
     args:        dict[str, Any]
     expires_at:  str
     summary:     str
-    state:       Literal["pending", "ok", "expired", "error", "conflict"]
+    state:       Literal["stale", "ok", "expired", "error", "conflict"]
 
 
 class MessageRecord(BaseModel):
@@ -97,25 +106,75 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _safe_load_chips(blob: Optional[str], conversation_id: str,
+                      ts: str) -> list[ToolChipRecord]:
+    """Decode `tool_chips_json` into validated chip records.
+
+    Fail-graceful (PR #434 review issue #2): on JSONDecodeError or a
+    pydantic ValidationError, log a warning and return an empty list.
+    The user sees a message bubble without chips rather than a 500
+    blanking the whole transcript.
+    """
+    if not blob:
+        return []
+    try:
+        raw = json.loads(blob)
+        return [ToolChipRecord(**c) for c in raw]
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "history: malformed tool_chips_json for conversation=%s ts=%s — "
+            "skipping chips for this message",
+            conversation_id, ts,
+        )
+        return []
+
+
+def _safe_load_proposals(blob: Optional[str], conversation_id: str,
+                          ts: str) -> list[dict[str, Any]]:
+    """Decode `proposals_json` into raw dicts (state derivation happens
+    in the caller). Same fail-graceful contract as _safe_load_chips."""
+    if not blob:
+        return []
+    try:
+        return json.loads(blob)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "history: malformed proposals_json for conversation=%s ts=%s — "
+            "skipping proposals for this message",
+            conversation_id, ts,
+        )
+        return []
+
+
 def _derive_proposal_state(con: sqlite3.Connection, proposal_id: str,
-                            original_expires_at: str) -> str:
+                            original_expires_at: str, tenant_id: int) -> str:
     """Reconstruct the proposal's terminal state at read time.
 
     Three cases:
       1. A row exists in `agent_side_effects` keyed by `idempotency_key`
-         = proposal_id → the user confirmed it at some point. Return
-         the recorded `result` (ok / expired / conflict / error).
-      2. No side-effect row, original `expires_at` is in the past →
-         the proposal expired naturally without confirmation. Return
-         'expired'.
-      3. No side-effect row, expires_at still in the future → still
-         actionable in principle, but the rehydrated UI WON'T have a
-         valid `signed_payload` (we never persist it). Return 'pending'
-         and let the frontend render it as a non-actionable chip.
+         = proposal_id AND tenant_id = the caller → the user confirmed
+         it at some point. Return the recorded `result` (ok / expired
+         / conflict / error).
+      2. No matching side-effect row, original `expires_at` is in the
+         past → the proposal expired naturally without confirmation.
+         Return 'expired'.
+      3. No matching side-effect row, expires_at still in the future
+         → the proposal was emitted in a prior turn but never
+         confirmed. Return 'stale' — the rehydrated UI WON'T have a
+         valid `signed_payload` (we never persist it), so the chip
+         shows as non-actionable.
+
+    PR #434 review issue #1: tenant_id scopes the side-effects lookup
+    even though idempotency_key is globally UNIQUE. Defense in depth
+    against any future path where a tenant could influence what goes
+    into their own proposals_json (today the propose_handlers
+    server-generate the ids, so this can't be exploited, but cheap to
+    close the theoretical vector).
     """
     row = con.execute(
-        "SELECT result FROM agent_side_effects WHERE idempotency_key = ?",
-        (proposal_id,),
+        "SELECT result FROM agent_side_effects "
+        "WHERE idempotency_key = ? AND tenant_id = ?",
+        (proposal_id, tenant_id),
     ).fetchone()
     if row is not None:
         result = row[0] or "error"
@@ -127,7 +186,7 @@ def _derive_proposal_state(con: sqlite3.Connection, proposal_id: str,
             return "expired"
     except (TypeError, ValueError):
         pass
-    return "pending"
+    return "stale"
 
 
 # ── GET /agent/conversations ───────────────────────────────────────────
@@ -142,7 +201,12 @@ def list_conversations(
     tenant_id: int = Depends(get_current_tenant_id),
     limit:  int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    surface: Optional[Literal["dock", "symbol_detail", "brief", "kill_switch", "autotune", "historial"]] = Query(default=None),
+    # Surface enum mirrors api/agent/router.py::_AgentTurnRequest.surface
+    # (the writer's contract). Dropping 'brief' from the filter — the
+    # pre-reg listed it but it was never wired in the writer, so a
+    # ?surface=brief filter would always return zero rows. PR #434
+    # review issue #3.
+    surface: Optional[Literal["dock", "symbol_detail", "kill_switch", "autotune", "historial"]] = Query(default=None),
     q:       Optional[str] = Query(default=None, max_length=200),
 ):
     """Sidebar list. Pinned first, then last_ts DESC. Hides expired
@@ -283,13 +347,23 @@ def get_messages(
 
         messages: list[MessageRecord] = []
         for r in rows:
-            chips_raw = json.loads(r["tool_chips_json"]) if r["tool_chips_json"] else []
-            chips = [ToolChipRecord(**c) for c in chips_raw]
-
-            proposals_raw = json.loads(r["proposals_json"]) if r["proposals_json"] else []
+            # Fail-graceful on corrupted JSON blobs (DB bit-rot, a buggy
+            # past writer, or future schema drift). PR #434 review
+            # issue #2: a JSONDecodeError on one row should not kill
+            # the entire transcript. Log + degrade to empty chips/
+            # proposals; the user sees the messages with missing chips
+            # rather than a 500.
+            chips = _safe_load_chips(
+                r["tool_chips_json"], conversation_id, r["ts"],
+            )
+            proposals_raw = _safe_load_proposals(
+                r["proposals_json"], conversation_id, r["ts"],
+            )
             proposals: list[ProposalRecord] = []
             for p in proposals_raw:
-                state = _derive_proposal_state(con, p["proposal_id"], p["expires_at"])
+                state = _derive_proposal_state(
+                    con, p["proposal_id"], p["expires_at"], tenant_id,
+                )
                 proposals.append(ProposalRecord(
                     proposal_id=p["proposal_id"],
                     action=p["action"],
@@ -401,9 +475,14 @@ def toggle_pin(
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="conversation_not_found")
         con.commit()
+        # SELECT scoped by tenant_id for consistency with the rest of
+        # the file's tenant-scoped reads (PR #434 review issue #5).
+        # The preceding UPDATE already confirmed ownership; this is
+        # belt-and-suspenders style only.
         new_state = con.execute(
-            "SELECT pinned FROM agent_conversation_meta WHERE conversation_id = ?",
-            (conversation_id,),
+            "SELECT pinned FROM agent_conversation_meta "
+            "WHERE conversation_id = ? AND tenant_id = ?",
+            (conversation_id, tenant_id),
         ).fetchone()
         return PinResponse(ok=True, pinned=bool(new_state["pinned"]))
     finally:
