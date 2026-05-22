@@ -155,9 +155,9 @@
     "riesgo_usd": 10.0,
     "sl_mode": "atr",
     "sl_pct": "0.44%",
-    "sl_precio": 76259.83,
+    "sl_precio": 76259.83071429,
     "tp_pct": "1.77%",
-    "tp_precio": 77950.68,
+    "tp_precio": 77950.67714286,
     "valor_pos": 980.0
   },
   "symbol": "BTCUSDT",
