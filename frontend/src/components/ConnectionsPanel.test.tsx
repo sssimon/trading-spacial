@@ -156,6 +156,19 @@ describe('ConnectionsPanel', () => {
     });
   });
 
+  it('disables browser autofill on credential inputs (#425)', async () => {
+    vi.spyOn(api, 'getPreferences').mockResolvedValue({
+      tenant_id: 1, symbol_filter: null, min_score: 4, notify_channels: null,
+    });
+
+    render(<ConnectionsPanel open={true} onClose={() => {}} />);
+    const tokenInput = await screen.findByLabelText(/bot token/i);
+    const chatInput  = screen.getByLabelText(/chat id/i);
+
+    expect(tokenInput).toHaveAttribute('autocomplete', 'new-password');
+    expect(chatInput).toHaveAttribute('autocomplete', 'off');
+  });
+
   it('"Eliminar credenciales" sends notify_channels: null', async () => {
     vi.spyOn(api, 'getPreferences').mockResolvedValue({
       tenant_id: 1, symbol_filter: null, min_score: 4,

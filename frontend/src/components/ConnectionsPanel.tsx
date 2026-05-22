@@ -106,6 +106,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
                 id="bot-token"
                 className={styles.input}
                 type="password"
+                autoComplete="new-password"
                 value={botToken}
                 onChange={(e) => { setBotToken(e.target.value); setTokenIsMasked(false); setDirty(true); }}
                 placeholder="123456789:ABCdef..."
@@ -123,6 +124,7 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({ open, onClose }) =>
                 id="chat-id"
                 className={styles.input}
                 type="text"
+                autoComplete="off"
                 value={chatId}
                 onChange={(e) => { setChatId(e.target.value); setDirty(true); }}
                 placeholder="123456789"
