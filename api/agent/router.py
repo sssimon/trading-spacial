@@ -195,6 +195,16 @@ async def post_agent_turn(
         {"role": m.role, "content": m.content} for m in body.messages
     ]
 
+    # Epic #428 H.2: extract the latest user message for history persist.
+    # Frontend always sends `messages[-1]` as the new user turn, but we
+    # scan from the end defensively — a malformed transcript without a
+    # trailing user message produces None and the wrapper skips the
+    # user-side row insert (assistant row + meta upsert still go).
+    user_message_text: Optional[str] = next(
+        (m.content for m in reversed(body.messages) if m.role == "user"),
+        None,
+    )
+
     loop_events = run_turn(
         client=client,
         model=model,
@@ -209,6 +219,7 @@ async def post_agent_turn(
         surface=body.surface,
         conversation_id=conversation_id,
         model=model,
+        user_message_text=user_message_text,
     )
     sse_bytes = sse_serialize(audited)
 
