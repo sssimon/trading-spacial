@@ -177,9 +177,10 @@ export type ProposalState =
   | 'in_flight'  // confirm POST in progress
   | 'ok'         // confirmed
   | 'expired'    // TTL passed without confirm
-  | 'drift'      // confirmed but server state had changed
+  | 'drift'      // live confirm: server state moved between propose + confirm
   | 'error'      // confirm failed
-  | 'stale';     // #428 H.3 REST rehydration: never-confirmed, TTL not yet up, but signed_payload is gone — not actionable
+  | 'stale'      // #428 H.3 REST rehydration: never-confirmed, TTL not yet up, but signed_payload is gone — not actionable
+  | 'conflict';  // REST rehydration: agent_side_effects recorded a conflict (idempotency collision) at the original confirm — read-only terminal state
 
 export interface ProposalChip {
   proposal_id:    string;

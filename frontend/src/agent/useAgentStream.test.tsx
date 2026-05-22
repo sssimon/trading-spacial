@@ -637,4 +637,162 @@ describe('useAgentStream', () => {
       await firstPromise!;
     });
   });
+
+  // ── H.5: loadConversation hydration ────────────────────────────────
+
+  function stubHistoryJson(body: object, status = 200) {
+    // @ts-expect-error — overriding global for the test
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+
+  it('loadConversation replaces msgs with the hydrated transcript', async () => {
+    stubHistoryJson({
+      conversation_id: 'conv-hydrate',
+      title:           'past chat',
+      surface:         'dock',
+      pinned:          false,
+      messages: [
+        { role: 'user',      ts: '2026-05-22T08:00:00Z', content: 'hola',
+          reasoning: null, tool_chips: [], proposals: [] },
+        { role: 'assistant', ts: '2026-05-22T08:00:01Z', content: 'qué tal',
+          reasoning: '<think>razonamiento</think>',
+          tool_chips: [{ tool: 'get_positions', status: 'ok' }],
+          proposals: [] },
+      ],
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => {
+      await result.current.loadConversation('conv-hydrate');
+    });
+
+    expect(result.current.msgs).toHaveLength(2);
+    expect(result.current.msgs[0]).toMatchObject({ role: 'user', text: 'hola' });
+    expect(result.current.msgs[1]).toMatchObject({
+      role:      'assistant',
+      text:      'qué tal',
+      reasoning: '<think>razonamiento</think>',
+    });
+    expect(result.current.msgs[1].tool_chips).toEqual([
+      { tool: 'get_positions', status: 'ok' },
+    ]);
+  });
+
+  it('loadConversation aligns conversation_id so the next sendTurn continues it', async () => {
+    // Hydrate first
+    stubHistoryJson({
+      conversation_id: 'continue-me',
+      title: 'old chat', surface: 'dock', pinned: false,
+      messages: [
+        { role: 'user',      ts: '2026-05-22T08:00:00Z', content: 'q1',
+          reasoning: null, tool_chips: [], proposals: [] },
+        { role: 'assistant', ts: '2026-05-22T08:00:01Z', content: 'a1',
+          reasoning: null, tool_chips: [], proposals: [] },
+      ],
+    });
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => {
+      await result.current.loadConversation('continue-me');
+    });
+
+    // Now stub the streaming POST and capture the URL the hook hits.
+    const fetchSpy = vi.fn().mockResolvedValueOnce(
+      new Response(
+        sseReadable([
+          { type: 'text_delta', text: 'ok' },
+          {
+            type: 'message_end',
+            usage: { input_tokens: 0, output_tokens: 0,
+                     cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+            stop_reason: 'end_turn', cost_usd: 0,
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    );
+    // @ts-expect-error — overriding global for the test
+    global.fetch = fetchSpy;
+
+    await act(async () => {
+      await result.current.sendTurn('q2');
+    });
+
+    // The streaming POST URL must reference the hydrated conversation_id,
+    // NOT a fresh UUID — the continuation invariant.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/agent/conversations/continue-me/turn');
+  });
+
+  it('loadConversation maps stale ProposalRecord to ProposalChip without signed_payload', async () => {
+    stubHistoryJson({
+      conversation_id: 'conv-with-proposal',
+      title: 't', surface: 'dock', pinned: false,
+      messages: [
+        { role: 'user', ts: '2026-05-22T08:00:00Z', content: 'cerra btc',
+          reasoning: null, tool_chips: [], proposals: [] },
+        { role: 'assistant', ts: '2026-05-22T08:00:01Z',
+          content: 'propongo cerrar',
+          reasoning: null, tool_chips: [], proposals: [
+            { proposal_id: 'prop-x',
+              action: 'close_position',
+              args: { position_id: 42 },
+              expires_at: '2026-08-22T08:00:00Z',
+              summary: 'Cerrar #42',
+              state: 'stale' },
+          ] },
+      ],
+    });
+
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => {
+      await result.current.loadConversation('conv-with-proposal');
+    });
+
+    const assistant = result.current.msgs[1];
+    expect(assistant.proposals).toHaveLength(1);
+    const chip = assistant.proposals![0];
+    expect(chip.state).toBe('stale');
+    expect(chip.proposal_id).toBe('prop-x');
+    // signed_payload is intentionally empty (REST never persists it);
+    // the dock disables the confirm button for any non-'pending' state.
+    expect(chip.signed_payload).toBe('');
+    expect(chip.action).toBe('close_position');
+    expect(chip.summary).toBe('Cerrar #42');
+  });
+
+  it('loadConversation failure leaves the existing transcript intact', async () => {
+    // Seed the hook with a turn so msgs is non-empty.
+    stubFetchOnce(sseReadable([
+      { type: 'text_delta', text: 'pre-existing' },
+      {
+        type: 'message_end',
+        usage: { input_tokens: 1, output_tokens: 1,
+                 cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        stop_reason: 'end_turn', cost_usd: 0,
+      },
+    ]));
+    const { result } = renderHook(() => useAgentStream({ surface: 'dock' }));
+    await act(async () => { await result.current.sendTurn('hola'); });
+    const before = result.current.msgs;
+
+    // Now stub a failed history load.
+    // @ts-expect-error — overriding global for the test
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response('{"detail":"boom"}', {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await act(async () => {
+      await result.current.loadConversation('bad-conv');
+    });
+
+    // Transcript untouched on failure (best-effort hydration).
+    expect(result.current.msgs).toEqual(before);
+  });
 });

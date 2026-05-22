@@ -14,15 +14,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AgentStreamError,
   confirmAgentProposal,
+  getConversationMessages,
   newConversationId,
   streamAgentTurn,
 } from './client';
 import type {
   AgentApiMessage,
   AgentContextHints,
+  AgentProposalEvent,
   AgentStreamEvent,
   AgentSurface,
+  MessageRecord,
   ProposalChip,
+  ProposalRecord,
   ProposalState,
   ToolChip,
 } from './types';
@@ -53,6 +57,11 @@ export interface UseAgentStreamReturn {
   sendTurn:          (text: string, hints?: AgentContextHints) => Promise<void>;
   resetConversation: () => void;
   confirmProposal:   (proposal_id: string) => Promise<void>;
+  /** H.5 rehydration: pull a past conversation from the REST history
+   *  endpoint, replace the local transcript with its messages, and
+   *  point conversationIdRef at the loaded id so the next sendTurn
+   *  continues the conversation instead of starting a new one. */
+  loadConversation:  (conversation_id: string) => Promise<void>;
 }
 
 /**
@@ -167,7 +176,57 @@ export function useAgentStream(opts: UseAgentStreamOptions): UseAgentStreamRetur
     }
   }, []);
 
-  return { msgs, loading, sendTurn, resetConversation, confirmProposal };
+  const loadConversation = useCallback(async (conversation_id: string) => {
+    // Best-effort hydration. A network or parse failure logs to the
+    // console and leaves the dock in whatever state it was — calling
+    // resetConversation on failure would be more disruptive than a
+    // silent no-op (the user can re-click the row).
+    try {
+      const detail = await getConversationMessages(conversation_id);
+      const hydrated: ChatMsg[] = detail.messages.map(_recordToChatMsg);
+      conversationIdRef.current = conversation_id;
+      setMsgs(hydrated);
+      msgsRef.current = hydrated;
+    } catch (err) {
+      if (typeof console !== 'undefined') {
+        console.warn('loadConversation failed', conversation_id, err);
+      }
+    }
+  }, []);
+
+  return { msgs, loading, sendTurn, resetConversation, confirmProposal, loadConversation };
+}
+
+// ── REST → transcript shape ─────────────────────────────────────────────
+
+function _recordToChatMsg(rec: MessageRecord): ChatMsg {
+  return {
+    role:       rec.role,
+    text:       rec.content,
+    reasoning:  rec.reasoning ?? undefined,
+    tool_chips: rec.tool_chips ?? [],
+    proposals:  (rec.proposals ?? []).map(_proposalRecordToChip),
+  };
+}
+
+function _proposalRecordToChip(p: ProposalRecord): ProposalChip {
+  // The REST shape doesn't carry signed_payload (HMAC TTL minutes vs
+  // 90-day retention — it'd be storing an expired credential). The
+  // confirm button is disabled for every state except 'pending', and
+  // REST rehydration never returns 'pending' (it returns 'stale' for
+  // the never-confirmed-not-yet-expired case — pre-reg D.6 + #434
+  // review issue #6). So signed_payload is unreachable from the UI
+  // and we put an empty string. If a future code path tries to use
+  // it, the HMAC verify on the backend will reject — defense in depth.
+  return {
+    proposal_id:    p.proposal_id,
+    signed_payload: '',
+    action:         p.action as AgentProposalEvent['action'],
+    args:           p.args,
+    expires_at:     p.expires_at,
+    summary:        p.summary,
+    state:          p.state,
+  };
 }
 
 /**
