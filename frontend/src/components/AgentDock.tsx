@@ -51,7 +51,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { msgs, loading, sendTurn, confirmProposal, loadConversation } =
+  const { msgs, loading, hydrating, sendTurn, confirmProposal, loadConversation } =
     useAgentStream({ surface: SURFACE_DOCK });
   // Synthetic welcome bubble before the first real turn so the dock
   // isn't an empty void on open. Lives outside the stream hook because
@@ -134,6 +134,7 @@ const AgentDock: React.FC<AgentDockProps> = ({
                 type="button"
                 className={styles.historyOpen}
                 onClick={() => setHistoryOpen(true)}
+                disabled={loading || hydrating}
                 aria-label="Abrir historial"
               >Historial</button>
               <button className={styles.close} onClick={onClose} aria-label="Cerrar">×</button>
@@ -176,12 +177,21 @@ const AgentDock: React.FC<AgentDockProps> = ({
             <input
               ref={inputRef}
               className={styles.input}
-              placeholder={loading ? 'pensando…' : 'pregúntame algo sobre el mercado, tus posiciones, un par…'}
+              placeholder={
+                hydrating ? 'cargando historial…' :
+                loading   ? 'pensando…' :
+                            'pregúntame algo sobre el mercado, tus posiciones, un par…'
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              disabled={hydrating}
               autoFocus
             />
-            <button className={styles.send} type="submit" disabled={loading || !input.trim()}>↵</button>
+            <button
+              className={styles.send}
+              type="submit"
+              disabled={loading || hydrating || !input.trim()}
+            >↵</button>
           </form>
         </aside>
       )}
