@@ -488,7 +488,7 @@ class TestAPIEndpoints:
         import api.config as _ac
         cfg_path = str(tmp_path / "config_wh.json")
         with open(cfg_path, "w") as f:
-            json.dump({"webhook_url": "http://localhost:9999/wh"}, f)
+            json.dump({"webhook_url": "http://8.8.8.8:9999/wh"}, f)
         monkeypatch.setattr(btc_api, "CONFIG_FILE", cfg_path)
         monkeypatch.setattr(_ac, "CONFIG_FILE", cfg_path)
         monkeypatch.setattr(_ac, "DEFAULTS_FILE", str(tmp_path / "_no_defaults.json"))
@@ -523,7 +523,7 @@ class TestPushWebhook:
 
     def test_con_url_llama_post(self, sample_report):
         import btc_api
-        cfg = {"webhook_url": "http://localhost:9000/webhook", "webhook_secret": ""}
+        cfg = {"webhook_url": "http://8.8.8.8/webhook", "webhook_secret": ""}
         with patch("btc_api.req_lib.post") as mock_post:
             mock_post.return_value = MagicMock(ok=True, status_code=200)
             btc_api.push_webhook(sample_report, 1, cfg)
@@ -531,7 +531,7 @@ class TestPushWebhook:
 
     def test_payload_contiene_telegram_message(self, sample_report):
         import btc_api
-        cfg = {"webhook_url": "http://localhost:9000/webhook", "webhook_secret": ""}
+        cfg = {"webhook_url": "http://8.8.8.8/webhook", "webhook_secret": ""}
         captured = {}
         def fake_post(url, json=None, headers=None, timeout=None):
             captured["payload"] = json
@@ -545,7 +545,7 @@ class TestPushWebhook:
 
     def test_con_secret_agrega_header(self, sample_report):
         import btc_api
-        cfg = {"webhook_url": "http://localhost:9000/webhook",
+        cfg = {"webhook_url": "http://8.8.8.8/webhook",
                "webhook_secret": "mi-secreto-123"}
         captured_headers = {}
         def fake_post(url, json=None, headers=None, timeout=None):
@@ -561,7 +561,7 @@ class TestPushWebhook:
     def test_error_de_red_no_lanza_excepcion(self, sample_report):
         """Un error de red no debe propagarse; solo loguear."""
         import btc_api
-        cfg = {"webhook_url": "http://localhost:9000/webhook", "webhook_secret": ""}
+        cfg = {"webhook_url": "http://8.8.8.8/webhook", "webhook_secret": ""}
         with patch("btc_api.req_lib.post", side_effect=ConnectionError("sin red")):
             # No debe lanzar excepción
             btc_api.push_webhook(sample_report, 1, cfg)
@@ -569,7 +569,7 @@ class TestPushWebhook:
     def test_guarda_resultado_en_db(self, sample_report):
         import btc_api
         btc_api.save_scan(sample_report)
-        cfg = {"webhook_url": "http://localhost:9000/webhook", "webhook_secret": ""}
+        cfg = {"webhook_url": "http://8.8.8.8/webhook", "webhook_secret": ""}
         with patch("btc_api.req_lib.post") as mock_post:
             mock_post.return_value = MagicMock(ok=True, status_code=200)
             btc_api.push_webhook(sample_report, 1, cfg)

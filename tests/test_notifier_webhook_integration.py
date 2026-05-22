@@ -17,7 +17,10 @@ def tmp_db_and_reset(tmp_path, monkeypatch):
     yield db_path
 
 
-def _cfg_with_webhook(url="http://n8n.local/hook", types=None, telegram_enabled=False):
+def _cfg_with_webhook(url="http://8.8.8.8/n8n-hook", types=None, telegram_enabled=False):
+    # NOTE: 8.8.8.8 is a globally-routable IP literal so the SSRF guard
+    # (#127) lets it past validation into the mocked HTTP call. test.local
+    # / n8n.local would not resolve in CI and get rejected pre-mock.
     cfg = {
         "notifier": {
             "enabled": True,

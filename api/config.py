@@ -17,9 +17,10 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import verify_api_key
+from api.security.url_validation import validate_outbound_url
 from auth.dependencies import require_role
 
 log = logging.getLogger("api.config")
@@ -156,6 +157,17 @@ class ConfigUpdate(BaseModel):
     signal_filters: Optional[SignalFiltersUpdate] = None
     api_key: Optional[str] = None
     auto_approve_tune: Optional[bool] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        # Clearing the webhook (empty string / None) is always allowed.
+        if v is None or v.strip() == "":
+            return v
+        try:
+            return validate_outbound_url(v)
+        except ValueError as e:
+            raise ValueError(f"webhook_url rechazado: {e}") from e
 
 
 def save_config(updates: dict) -> dict:

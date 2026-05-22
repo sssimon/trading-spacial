@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 import requests as req_lib
 
+from api.security.url_validation import validate_outbound_url
 from db.connection import get_db
 from notifier import notify, SignalEvent
 from notifier._templates import fmt_price
@@ -188,6 +189,22 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
     url = cfg.get("webhook_url", "").strip()
     if not url:
         log.debug("Webhook no configurado — saltando")
+        return
+
+    # SSRF guard #127: re-validate before each push (defense in depth +
+    # TOCTOU mitigation against out-of-band edits to config.json and DNS
+    # rebinding after the POST /config validation).
+    try:
+        url = validate_outbound_url(url)
+    except ValueError as e:
+        log.warning("Webhook push abortado: '%s' rechazado por SSRF guard — %s", url, e)
+        con = get_db()
+        con.execute(
+            "INSERT INTO webhooks_sent (scan_id, ts, url, status, ok) VALUES (?,?,?,?,?)",
+            (scan_id, datetime.now(timezone.utc).isoformat(), url, 0, 0)
+        )
+        con.commit()
+        con.close()
         return
 
     msg     = build_telegram_message(rep)

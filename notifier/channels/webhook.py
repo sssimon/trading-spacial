@@ -29,6 +29,7 @@ from typing import Any
 
 import requests
 
+from api.security.url_validation import validate_outbound_url
 from notifier.channels.base import Channel, DeliveryReceipt
 
 
@@ -70,6 +71,15 @@ class WebhookChannel(Channel):
             url = ep.get("url", "").strip()
             if not url:
                 errors.append("endpoint has empty url")
+                continue
+            # SSRF guard #127: any operator-configurable webhook URL is a potential
+            # SSRF sink. Validate before each send (defense in depth + TOCTOU).
+            try:
+                url = validate_outbound_url(url)
+            except ValueError as e:
+                err_msg = f"{url}: rechazado por SSRF guard — {e}"
+                log.warning("Endpoint bloqueado: %s", err_msg)
+                errors.append(err_msg)
                 continue
             ok, err = self._post_with_retry(url, message, max_retries=max_retries)
             if ok:

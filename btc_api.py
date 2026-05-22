@@ -83,6 +83,7 @@ from api.signals import router as signals_router
 # push_telegram_direct: called as btc_api.push_telegram_direct in test_health_shim_integration.py (lines 50, 70)
 # push_webhook: called as btc_api.push_webhook in test_api.py (lines 521–575)
 from api.telegram import build_telegram_message, push_telegram_direct, push_webhook  # noqa: F401
+from api.security.url_validation import validate_outbound_url
 from api.tune import router as tune_router
 from api.agent.router import router as agent_router
 from api.agent.history import router as agent_history_router
@@ -514,17 +515,29 @@ def test_webhook():
         results["telegram_directo"] = {"ok": False, "error": "telegram_bot_token no configurado"}
     url = cfg.get("webhook_url", "").strip()
     if url:
-        payload = {"event": "test", "message": "Crypto Scanner conectado — todo OK",
-                   "telegram_message": f"*Scanner Conectado*\n`todo OK`\n_{ts}_",
-                   "chat_id": chat_id, "ts": ts}
-        headers = {"Content-Type": "application/json"}
-        if cfg.get("webhook_secret"):
-            headers["X-Scanner-Secret"] = cfg["webhook_secret"]
+        # SSRF guard #127: re-validate before the test request. Same rationale
+        # as push_webhook — out-of-band edits to config.json bypass the
+        # POST /config validator.
         try:
-            r = req_lib.post(url, json=payload, headers=headers, timeout=10)
-            results["webhook_n8n"] = {"ok": r.ok, "status_code": r.status_code, "url": url}
-        except Exception as e:
-            results["webhook_n8n"] = {"ok": False, "error": str(e), "url": url}
+            url = validate_outbound_url(url)
+        except ValueError as e:
+            results["webhook_n8n"] = {
+                "ok": False,
+                "error": f"webhook_url rechazado por SSRF guard: {e}",
+                "url": url,
+            }
+        else:
+            payload = {"event": "test", "message": "Crypto Scanner conectado — todo OK",
+                       "telegram_message": f"*Scanner Conectado*\n`todo OK`\n_{ts}_",
+                       "chat_id": chat_id, "ts": ts}
+            headers = {"Content-Type": "application/json"}
+            if cfg.get("webhook_secret"):
+                headers["X-Scanner-Secret"] = cfg["webhook_secret"]
+            try:
+                r = req_lib.post(url, json=payload, headers=headers, timeout=10)
+                results["webhook_n8n"] = {"ok": r.ok, "status_code": r.status_code, "url": url}
+            except Exception as e:
+                results["webhook_n8n"] = {"ok": False, "error": str(e), "url": url}
     else:
         results["webhook_n8n"] = {"ok": False, "error": "webhook_url no configurado"}
     overall_ok = results.get("telegram_directo", {}).get("ok", False) or \

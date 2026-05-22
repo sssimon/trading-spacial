@@ -1,4 +1,10 @@
-"""WebhookChannel tests — POST JSON to configured endpoints."""
+"""WebhookChannel tests — POST JSON to configured endpoints.
+
+NOTE on test URLs: these tests mock requests.post, so the URL is never
+actually dialed. URLs use 8.8.8.8 (public, globally routable) so the
+SSRF guard added in #127 (notifier/channels/webhook.py) lets them past
+the validation step and into the mocked HTTP call.
+"""
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -29,7 +35,7 @@ def test_webhook_disabled_by_default():
 def test_webhook_no_matching_endpoint():
     """An endpoint with types=['signal'] does NOT receive health events."""
     from notifier.channels.webhook import WebhookChannel
-    cfg = _cfg([{"url": "http://x", "types": ["signal"]}])
+    cfg = _cfg([{"url": "http://8.8.8.8/x", "types": ["signal"]}])
     channel = WebhookChannel(cfg)
     receipt = channel.send('{"ok": true}', event_type="health")
     assert receipt.status == "failed"
@@ -39,7 +45,7 @@ def test_webhook_no_matching_endpoint():
 def test_webhook_success_posts_json():
     """Single endpoint, event type matches → POST is made once with correct body."""
     from notifier.channels.webhook import WebhookChannel
-    cfg = _cfg([{"url": "http://n8n.local/hook", "types": ["signal"]}])
+    cfg = _cfg([{"url": "http://8.8.8.8/n8n-hook", "types": ["signal"]}])
     channel = WebhookChannel(cfg)
 
     ok = MagicMock()
@@ -52,7 +58,7 @@ def test_webhook_success_posts_json():
     assert receipt.status == "ok"
     assert mock_post.call_count == 1
     call = mock_post.call_args
-    assert call.args[0] == "http://n8n.local/hook"
+    assert call.args[0] == "http://8.8.8.8/n8n-hook"
     assert call.kwargs["data"] == '{"symbol":"BTC"}'
     assert call.kwargs["headers"]["Content-Type"] == "application/json"
 
@@ -60,7 +66,7 @@ def test_webhook_success_posts_json():
 def test_webhook_endpoint_without_types_receives_all():
     """An endpoint without 'types' filter accepts every event_type."""
     from notifier.channels.webhook import WebhookChannel
-    cfg = _cfg([{"url": "http://catchall"}])  # no 'types' key
+    cfg = _cfg([{"url": "http://8.8.8.8/catchall"}])  # no 'types' key
     channel = WebhookChannel(cfg)
 
     ok = MagicMock()
@@ -74,7 +80,7 @@ def test_webhook_endpoint_without_types_receives_all():
 def test_webhook_4xx_fail_fast():
     """401/400/403 etc. are permanent — no retry."""
     from notifier.channels.webhook import WebhookChannel
-    cfg = _cfg([{"url": "http://bad"}])
+    cfg = _cfg([{"url": "http://8.8.8.8/bad-server"}])
     channel = WebhookChannel(cfg)
 
     fail = MagicMock()
@@ -93,7 +99,7 @@ def test_webhook_4xx_fail_fast():
 
 def test_webhook_5xx_retries_with_backoff():
     from notifier.channels.webhook import WebhookChannel
-    cfg = _cfg([{"url": "http://flaky"}])
+    cfg = _cfg([{"url": "http://8.8.8.8/flaky"}])
     channel = WebhookChannel(cfg)
 
     fail = MagicMock()
@@ -119,8 +125,8 @@ def test_webhook_multiple_endpoints_partial_success():
     """If one endpoint succeeds and another fails, overall status is ok + error recorded."""
     from notifier.channels.webhook import WebhookChannel
     cfg = _cfg([
-        {"url": "http://good"},
-        {"url": "http://bad"},
+        {"url": "http://8.8.8.8/good"},
+        {"url": "http://8.8.8.8/bad"},
     ])
     channel = WebhookChannel(cfg)
 
@@ -131,4 +137,4 @@ def test_webhook_multiple_endpoints_partial_success():
                 side_effect=[ok, bad]):
         receipt = channel.send('{}', event_type="signal")
     assert receipt.status == "ok"
-    assert "http://bad" in receipt.error
+    assert "http://8.8.8.8/bad" in receipt.error

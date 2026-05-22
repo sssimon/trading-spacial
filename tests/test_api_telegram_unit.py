@@ -11,7 +11,11 @@ def cfg():
     return {
         "telegram_bot_token": "test-token",
         "telegram_chat_id": "test-chat",
-        "webhook_url": "http://test.local/hook",
+        # SSRF guard (#127) rejects test.local because DNS doesn't resolve it
+        # in CI. 8.8.8.8 is a globally-routable IP literal so the validator
+        # short-circuits without a DNS lookup. This test mocks req_lib.post,
+        # so we never actually dial Google DNS.
+        "webhook_url": "http://8.8.8.8/hook",
         "webhook_secret": "test-secret",
         "proxy": "",
     }
