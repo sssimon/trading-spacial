@@ -45,6 +45,15 @@ def _resolve_db_file() -> str:
         return DB_FILE
 
 
+def _dict_row_factory(cursor: sqlite3.Cursor, row: tuple) -> "_DictRow":
+    """Module-level row factory that delegates to _DictRow.
+
+    Required by _open_configured_connection so both the legacy get_db() path
+    and the new transaction() path share the same row class without duplication.
+    """
+    return _DictRow(cursor, row)
+
+
 class _DictRow(tuple):
     """Row factory that behaves as a plain tuple (supports == comparison) while
     also supporting dict-style access via row["column"] and row.get("column").
@@ -83,6 +92,21 @@ def get_db() -> sqlite3.Connection:
     return con
 
 
+def _open_configured_connection() -> sqlite3.Connection:
+    """Open a configured sqlite3.Connection.
+
+    PRIVATE. Use db.transaction.transaction() for all data access.
+
+    isolation_level=None disables Python's implicit transaction management
+    so transaction() can drive BEGIN/COMMIT/ROLLBACK explicitly.
+    """
+    db_file = _resolve_db_file()
+    con = sqlite3.connect(db_file, isolation_level=None)
+    con.row_factory = _DictRow
+    con.execute("PRAGMA busy_timeout = 5000")
+    return con
+
+
 def backup_db() -> None:
     """Create a timestamped backup of signals.db using sqlite3 online backup.
     Keeps last _BACKUP_MAX_FILES backups. Uses sqlite3.Connection.backup() for
@@ -108,3 +132,16 @@ def backup_db() -> None:
             log.info(f"DB backup removed: {old}")
     except Exception as e:
         log.warning(f"DB backup failed: {e}")
+
+
+# Re-export init_db so test code that imports from db.connection can find it.
+# The canonical implementation lives in db.schema to keep schema DDL separate.
+# This avoids a circular import by using a lazy import inside the function.
+def init_db() -> None:
+    """Initialize the database. Delegates to db.schema.init_db().
+
+    Re-exported here so callers can use `from db.connection import init_db`
+    without needing to know the canonical location.
+    """
+    from db.schema import init_db as _init_db  # noqa: PLC0415
+    _init_db()
