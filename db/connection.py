@@ -1,18 +1,18 @@
-"""DB connection layer — SQLite handle factory + row factory + backup.
+"""DB connection layer — row factory + backup + private connection opener.
 
 Extracted from btc_api.py:798-857 in PR0 of the api+db domain refactor (2026-04-27).
 
 Design:
-- get_db() returns a fresh sqlite3.Connection per call (no singleton).
-  This is critical for thread safety: scanner_loop and FastAPI request
-  handlers share the same DB file but each opens its own connection.
 - _DictRow is a tuple subclass that supports both indexed access (row[0])
   AND dict-style access (row["column"]). It exists because health
   persistence tests rely on tuple equality while route code wants
   dict-style. sqlite3.Row doesn't support equality the way we need.
+- _open_configured_connection() is private; all data access goes through
+  db.transaction.transaction().
 - backup_db uses sqlite3.Connection.backup() (online backup API) for a
   consistent snapshot even while the DB is actively being written to in
   WAL mode. Keeps the most recent _BACKUP_MAX_FILES files in _BACKUP_DIR.
+  Both connections close cleanly even if .backup() raises (Serrano F-08).
 """
 from __future__ import annotations
 
@@ -69,20 +69,6 @@ class _DictRow(tuple):
         return self._mapping.keys()
 
 
-def get_db() -> sqlite3.Connection:
-    """Open a fresh DB connection with the dict-row factory.
-
-    Sub-fix (2026-04-29): set busy_timeout=5000ms to prevent immediate
-    "database is locked" errors under contention. Was 0 (default),
-    reproducible during the 2026-04-29 audit. WAL mode plus this 5s window
-    lets multi-thread routes + scanner thread serialise writes.
-    """
-    con = sqlite3.connect(_resolve_db_file())
-    con.row_factory = _DictRow
-    con.execute("PRAGMA busy_timeout = 5000")
-    return con
-
-
 def _open_configured_connection() -> sqlite3.Connection:
     """Open a configured sqlite3.Connection.
 
@@ -102,7 +88,9 @@ def backup_db() -> None:
     """Create a timestamped backup of signals.db using sqlite3 online backup.
     Keeps last _BACKUP_MAX_FILES backups. Uses sqlite3.Connection.backup() for
     a consistent snapshot even while the database is actively being written to
-    (WAL mode)."""
+    (WAL mode). Both connections close cleanly even if .backup() raises
+    (resolves Serrano F-08)."""
+    from contextlib import closing
     db_file = _resolve_db_file()
     if not os.path.exists(db_file):
         return
@@ -110,11 +98,9 @@ def backup_db() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(_BACKUP_DIR, f"signals_{timestamp}.db")
     try:
-        src = sqlite3.connect(db_file)
-        dst = sqlite3.connect(backup_path)
-        src.backup(dst)
-        dst.close()
-        src.close()
+        with closing(sqlite3.connect(db_file)) as src:
+            with closing(sqlite3.connect(backup_path)) as dst:
+                src.backup(dst)
         log.info(f"DB backup: {backup_path}")
         # Cleanup old backups
         backups = sorted(glob.glob(os.path.join(_BACKUP_DIR, "signals_*.db")))
