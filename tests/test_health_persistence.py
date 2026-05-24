@@ -16,14 +16,11 @@ def tmp_db(tmp_path, monkeypatch):
 def test_schema_has_symbol_health_tables(tmp_db):
     """init_db() must create the two health tables."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name IN ('symbol_health', 'symbol_health_events')"
         ).fetchall()
-    finally:
-        conn.close()
     names = {r[0] for r in rows}
     assert "symbol_health" in names
     assert "symbol_health_events" in names
@@ -32,11 +29,8 @@ def test_schema_has_symbol_health_tables(tmp_db):
 def test_symbol_health_columns(tmp_db):
     """symbol_health must have the specified columns."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = conn.execute("PRAGMA table_info(symbol_health)").fetchall()
-    finally:
-        conn.close()
     col_names = {c[1] for c in cols}
     for required in ("symbol", "state", "state_since",
                       "last_evaluated_at", "last_metrics_json", "manual_override"):
@@ -46,11 +40,8 @@ def test_symbol_health_columns(tmp_db):
 def test_symbol_health_events_columns(tmp_db):
     """symbol_health_events must have the specified columns."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = conn.execute("PRAGMA table_info(symbol_health_events)").fetchall()
-    finally:
-        conn.close()
     col_names = {c[1] for c in cols}
     for required in ("id", "symbol", "from_state", "to_state",
                       "trigger_reason", "metrics_json", "ts"):
@@ -83,6 +74,7 @@ def test_kill_switch_config_partial_override_preserves_defaults(tmp_path, monkey
 
 
 from datetime import datetime, timezone
+from db.transaction import transaction
 
 
 def test_apply_transition_writes_row_and_event(tmp_db):
@@ -95,8 +87,7 @@ def test_apply_transition_writes_row_and_event(tmp_db):
     }
     apply_transition("BTCUSDT", new_state="ALERT", reason="wr_below_threshold",
                      metrics=metrics, from_state="NORMAL")
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             "SELECT state, state_since, manual_override FROM symbol_health WHERE symbol=?",
             ("BTCUSDT",),
@@ -106,8 +97,6 @@ def test_apply_transition_writes_row_and_event(tmp_db):
                WHERE symbol=? ORDER BY ts DESC LIMIT 1""",
             ("BTCUSDT",),
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "ALERT"
     assert row[2] == 0  # manual_override default 0
     assert event == ("NORMAL", "ALERT", "wr_below_threshold")
@@ -139,13 +128,10 @@ def test_apply_transition_same_state_is_idempotent(tmp_db):
     apply_transition("BTC", new_state="ALERT", reason="wr_below_threshold",
                       metrics=metrics, from_state="NORMAL")
     _record_evaluation("BTC", metrics, new_state="ALERT")  # idempotent no-op transition
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         event_count = conn.execute(
             "SELECT COUNT(*) FROM symbol_health_events WHERE symbol='BTC'"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert event_count == 1  # initial transition, not a second event
 
 
@@ -167,13 +153,10 @@ def test_apply_transition_preserves_state_since_on_same_state(tmp_db):
 
     apply_transition("XLM", new_state="ALERT", reason="wr_below_threshold",
                       metrics=metrics, from_state="NORMAL")
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         original_since = conn.execute(
             "SELECT state_since FROM symbol_health WHERE symbol='XLM'"
         ).fetchone()[0]
-    finally:
-        conn.close()
 
     # Tiny delay so a clobber would produce a later timestamp
     time.sleep(0.01)
@@ -182,13 +165,10 @@ def test_apply_transition_preserves_state_since_on_same_state(tmp_db):
     apply_transition("XLM", new_state="ALERT", reason="wr_below_threshold",
                       metrics=metrics, from_state="NORMAL")
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         later_since = conn.execute(
             "SELECT state_since FROM symbol_health WHERE symbol='XLM'"
         ).fetchone()[0]
-    finally:
-        conn.close()
 
     assert later_since == original_since, (
         f"state_since was clobbered: {original_since!r} → {later_since!r}")
@@ -204,8 +184,7 @@ def test_reactivate_sets_manual_override(tmp_db):
                       metrics=metrics, from_state="REDUCED")
     reactivate_symbol("DOGE", reason="backtest_validated")
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             "SELECT state, manual_override FROM symbol_health WHERE symbol='DOGE'"
         ).fetchone()
@@ -213,8 +192,6 @@ def test_reactivate_sets_manual_override(tmp_db):
             "SELECT trigger_reason FROM symbol_health_events WHERE symbol='DOGE' "
             "ORDER BY ts DESC LIMIT 1"
         ).fetchone()
-    finally:
-        conn.close()
     assert row == ("PROBATION", 0)
     assert last_event[0] == "reactivated_backtest_validated"
 
@@ -278,11 +255,8 @@ def test_compute_rolling_metrics_from_trades_win_rate_last_20():
 def test_init_db_adds_probation_columns(tmp_db):
     """init_db must add probation_trades_remaining/started_at/paused_days_at_entry."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(symbol_health)").fetchall()}
-    finally:
-        conn.close()
     assert "probation_trades_remaining" in cols
     assert "probation_started_at" in cols
     assert "paused_days_at_entry" in cols
@@ -297,11 +271,8 @@ def test_init_db_migration_idempotent(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
     btc_api.init_db()  # second call must be a no-op
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(symbol_health)").fetchall()}
-    finally:
-        conn.close()
     assert {"probation_trades_remaining", "probation_started_at", "paused_days_at_entry"} <= cols
 
 
@@ -316,8 +287,7 @@ def test_apply_transition_clears_probation_columns_on_exit(tmp_db):
                "win_rate_10_trades": 0.6}
 
     # Seed PROBATION row with non-NULL probation columns
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -325,22 +295,16 @@ def test_apply_transition_clears_probation_columns_on_exit(tmp_db):
                VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     # Transition out of PROBATION
     apply_transition("BTC", new_state="NORMAL", reason="probation_complete",
                      metrics=metrics, from_state="PROBATION")
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             """SELECT state, probation_trades_remaining, probation_started_at,
                       paused_days_at_entry FROM symbol_health WHERE symbol='BTC'"""
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "NORMAL"
     assert row[1] is None
     assert row[2] is None

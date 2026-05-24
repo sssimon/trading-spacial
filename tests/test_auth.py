@@ -33,12 +33,11 @@ from auth.password import hash_password
 
 def _create_user_directly(client, email, password, role="viewer"):
     """Use the DB directly (not /auth/register — it doesn't exist)."""
-    from db.connection import get_db
+    from db.transaction import transaction
 
     pwd_hash = hash_password(password)
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             """
             INSERT INTO users
@@ -47,10 +46,7 @@ def _create_user_directly(client, email, password, role="viewer"):
             """,
             (email.lower(), pwd_hash, role, now, now),
         )
-        con.commit()
         return int(cur.lastrowid)
-    finally:
-        con.close()
 
 
 def _login(client, email, password):
@@ -221,16 +217,13 @@ def test_refresh_with_valid_token_rotates_and_revokes_old(unauthed_client):
 
     # Old refresh hash should be revoked in DB
     from auth.tokens import _hash_refresh
-    from db.connection import get_db
+    from db.transaction import transaction
 
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?",
             (_hash_refresh(old_refresh),),
         ).fetchone()
-    finally:
-        con.close()
     assert row and row["revoked_at"] is not None
 
 
@@ -252,16 +245,13 @@ def test_refresh_token_reuse_revokes_family(unauthed_client):
 
     # The valid second_refresh should ALSO have been revoked (family kill).
     from auth.tokens import _hash_refresh
-    from db.connection import get_db
+    from db.transaction import transaction
 
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?",
             (_hash_refresh(second_refresh),),
         ).fetchone()
-    finally:
-        con.close()
     assert row and row["revoked_at"] is not None, (
         "family revocation should have killed the live refresh too"
     )
@@ -336,16 +326,13 @@ def test_logout_revokes_refresh(unauthed_client):
 
     # Refresh hash should be revoked
     from auth.tokens import _hash_refresh
-    from db.connection import get_db
+    from db.transaction import transaction
 
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?",
             (_hash_refresh(refresh),),
         ).fetchone()
-    finally:
-        con.close()
     assert row and row["revoked_at"] is not None
 
 
@@ -404,16 +391,13 @@ def test_audit_event_for_failed_login(unauthed_client):
     _create_user_directly(unauthed_client, "ivan@example.com", "long_pass_phrase_i", role="viewer")
     _login(unauthed_client, "ivan@example.com", "wrong_password_long")
 
-    from db.connection import get_db
+    from db.transaction import transaction
 
-    con = get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT event_type, success, metadata_json FROM auth_events "
             "ORDER BY id DESC LIMIT 5"
         ).fetchall()
-    finally:
-        con.close()
     assert any(
         r["event_type"] == "login_failed" and r["success"] == 0 for r in rows
     ), f"expected login_failed event in {[dict(r) for r in rows]}"
@@ -431,17 +415,17 @@ def test_audit_failure_does_not_break_login(unauthed_client, monkeypatch, capsys
     """The auth.audit module is failure-tolerant — even if the DB INSERT
     raises, log_auth_event must NOT propagate the error.
 
-    We simulate this by patching get_db inside auth.audit so its connection
+    We simulate this by patching transaction inside auth.audit so its connection
     blows up. Login still has to return 200 and the error must surface on
     stderr (so an operator can later notice the audit gap).
     """
     _create_user_directly(unauthed_client, "jane@example.com", "long_pass_phrase_j", role="viewer")
 
-    def _broken_get_db():
+    def _broken_transaction():
         raise RuntimeError("simulated audit DB failure")
 
     import auth.audit as audit_mod
-    monkeypatch.setattr(audit_mod, "get_db", _broken_get_db)
+    monkeypatch.setattr(audit_mod, "transaction", _broken_transaction)
 
     resp = _login(unauthed_client, "jane@example.com", "long_pass_phrase_j")
     assert resp.status_code == 200, (

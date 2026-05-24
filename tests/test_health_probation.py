@@ -1,5 +1,6 @@
 """B5 PROBATION tier — pure functions + state machine + DB lifecycle (#187 #199)."""
 import pytest
+from db.transaction import transaction
 
 
 # ── compute_probation_trades_remaining ──────────────────────────────────────
@@ -60,31 +61,24 @@ def _seed_paused(symbol, days_ago):
     from datetime import datetime, timezone, timedelta
     import btc_api
     state_since = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json)
                VALUES (?, 'PAUSED', ?, ?, '{}')""",
             (symbol, state_since, state_since),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def _read_health_row(symbol):
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             """SELECT state, probation_trades_remaining, probation_started_at,
                       paused_days_at_entry, manual_override
                FROM symbol_health WHERE symbol=?""",
             (symbol,),
         ).fetchone()
-    finally:
-        conn.close()
     return row
 
 
@@ -157,8 +151,7 @@ def test_decrement_probation_counter_decreases_value(tmp_db):
     """_decrement_probation_counter drops trades_remaining by 1."""
     import btc_api
     from health import _decrement_probation_counter
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -166,9 +159,6 @@ def test_decrement_probation_counter_decreases_value(tmp_db):
                VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     _decrement_probation_counter("BTC")
     row = _read_health_row("BTC")
     assert row[1] == 12
@@ -178,16 +168,12 @@ def test_decrement_probation_counter_noop_when_not_probation(tmp_db):
     """When state is NOT PROBATION, decrement is a no-op (no row mutation)."""
     import btc_api
     from health import _decrement_probation_counter
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health (symbol, state, state_since, last_evaluated_at, last_metrics_json)
                VALUES ('BTC', 'NORMAL', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}')"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     _decrement_probation_counter("BTC")  # must not raise, must not change anything
     row = _read_health_row("BTC")
     assert row[0] == "NORMAL"
@@ -198,8 +184,7 @@ def test_decrement_probation_counter_floors_at_zero(tmp_db):
     """When counter is 0, decrement does not go negative."""
     import btc_api
     from health import _decrement_probation_counter
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -207,9 +192,6 @@ def test_decrement_probation_counter_floors_at_zero(tmp_db):
                VALUES ('BTC', 'PROBATION', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}', 0, '2026-04-01T00:00:00+00:00', 15)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     _decrement_probation_counter("BTC")
     row = _read_health_row("BTC")
     assert row[1] == 0
@@ -222,8 +204,7 @@ def test_trigger_health_evaluation_decrements_then_evaluates(tmp_db):
 
     # Seed PROBATION with counter=1 — after decrement, counter=0 → evaluate_state sees
     # 0 and returns NORMAL with reason="probation_complete".
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -240,9 +221,6 @@ def test_trigger_health_evaluation_decrements_then_evaluates(tmp_db):
                    VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {
         "enabled": True, "min_trades_for_eval": 20,
@@ -260,8 +238,7 @@ def test_daily_cron_eval_does_not_decrement_probation(tmp_db):
     """evaluate_and_record (daily cron path) does NOT decrement probation counter."""
     import btc_api
     from health import evaluate_and_record
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -278,9 +255,6 @@ def test_daily_cron_eval_does_not_decrement_probation(tmp_db):
                    VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-05-{1+i%28:02d}T12:00:00+00:00", f"2026-05-{1+i%28:02d}T13:00:00+00:00"),
             )
-        conn.commit()
-    finally:
-        conn.close()
     cfg = {"kill_switch": {
         "enabled": True, "min_trades_for_eval": 20,
         "alert_win_rate_threshold": 0.15, "reduce_size_factor": 0.5,

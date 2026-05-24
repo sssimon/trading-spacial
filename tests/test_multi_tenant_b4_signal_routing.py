@@ -32,28 +32,26 @@ def seeded_db(tmp_path, monkeypatch):
 
     from db.auth_schema import init_auth_db
     from db.schema import init_db
-    from db.connection import get_db
+    from db.transaction import transaction
     init_db()
     init_auth_db()
     # Note: notifier.dedupe is DB-backed (queries notifications_sent table),
     # so a fresh tmp_path DB per test gives us clean dedupe state automatically.
 
-    con = get_db()
-    # Two active users + one inactive
-    con.execute(
-        "INSERT INTO users (id, email, password_hash, role, is_active, "
-        "created_at, password_changed_at) VALUES "
-        "(1, 'a@example.com', 'h', 'admin', 1, "
-        "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
-    )
-    con.execute(
-        "INSERT INTO users (id, email, password_hash, role, is_active, "
-        "created_at, password_changed_at) VALUES "
-        "(2, 'b@example.com', 'h', 'viewer', 1, "
-        "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        # Two active users + one inactive
+        con.execute(
+            "INSERT INTO users (id, email, password_hash, role, is_active, "
+            "created_at, password_changed_at) VALUES "
+            "(1, 'a@example.com', 'h', 'admin', 1, "
+            "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
+        )
+        con.execute(
+            "INSERT INTO users (id, email, password_hash, role, is_active, "
+            "created_at, password_changed_at) VALUES "
+            "(2, 'b@example.com', 'h', 'viewer', 1, "
+            "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
+        )
     yield db_path
 
 
@@ -98,14 +96,12 @@ class TestDispatchPerUser:
         assert set(out.keys()) == {2}
 
     def test_inactive_user_skipped(self, seeded_db):
-        from db.connection import get_db
+        from db.transaction import transaction
         from notifier.dispatch_per_user import dispatch_signal_to_users
 
         # Deactivate user 1
-        con = get_db()
-        con.execute("UPDATE users SET is_active = 0 WHERE id = 1")
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute("UPDATE users SET is_active = 0 WHERE id = 1")
 
         out = dispatch_signal_to_users(_make_signal("BTCUSDT", 9), _base_cfg())
         assert 1 not in out
@@ -165,18 +161,15 @@ class TestDispatchPerUser:
 
     def test_record_delivery_has_tenant_id(self, seeded_db):
         from notifier.dispatch_per_user import dispatch_signal_to_users
-        from db.connection import get_db
+        from db.transaction import transaction
 
         dispatch_signal_to_users(_make_signal("BTCUSDT", 9), _base_cfg())
 
-        con = get_db()
-        try:
+        with transaction() as con:
             rows = con.execute(
                 "SELECT tenant_id, event_type FROM notifications_sent "
                 "ORDER BY tenant_id"
             ).fetchall()
-        finally:
-            con.close()
         tenant_ids = sorted(r["tenant_id"] for r in rows)
         assert tenant_ids == [1, 2]
         assert all(r["event_type"] == "signal" for r in rows)
@@ -184,21 +177,18 @@ class TestDispatchPerUser:
     def test_legacy_notify_call_unchanged(self, seeded_db):
         """notify(HealthEvent…) without tenant_id → NULL tenant_id row, no key prefix."""
         from notifier import notify, HealthEvent
-        from db.connection import get_db
+        from db.transaction import transaction
 
         notify(
             HealthEvent(symbol="BTCUSDT", from_state="NORMAL",
                         to_state="ALERT", reason="test"),
             cfg=_base_cfg(),
         )
-        con = get_db()
-        try:
+        with transaction() as con:
             row = con.execute(
                 "SELECT tenant_id, event_key FROM notifications_sent "
                 "WHERE event_type = 'health'"
             ).fetchone()
-        finally:
-            con.close()
         assert row is not None
         assert row["tenant_id"] is None  # NULL = broadcast
         assert "tenant:" not in row["event_key"]  # bare key, no prefix

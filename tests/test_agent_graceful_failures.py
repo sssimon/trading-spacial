@@ -25,6 +25,7 @@ import json
 import pytest
 
 from tests._fakes import FakeAnthropicClient, FakeTurnBuilder
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -192,14 +193,11 @@ def test_audit_wrapper_aclose_mid_stream_records_cancelled(tmp_db):
     seen = asyncio.run(_drive())
     assert len(seen) == 2  # consumed two events before aclose
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT role, content_json FROM agent_conversations "
             "WHERE conversation_id = 'conv-mid-cancel'",
         ).fetchone()
-    finally:
-        con.close()
     assert row is not None
     d = dict(row)
     assert d["role"] == "error"
@@ -239,13 +237,10 @@ def test_audit_wrapper_aclose_after_normal_end_is_no_op(tmp_db):
 
     asyncio.run(_drive())
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT role FROM agent_conversations "
             "WHERE conversation_id = 'conv-late-aclose'",
         ).fetchall()
-    finally:
-        con.close()
     assert len(rows) == 1
     assert dict(rows[0])["role"] == "assistant"

@@ -27,6 +27,7 @@ import tempfile
 from typing import Any, Callable
 
 from fastapi.testclient import TestClient
+from db.transaction import transaction
 
 
 def _seed_minimal(con) -> None:
@@ -434,10 +435,8 @@ def main() -> None:
         from db.schema import init_db  # noqa: PLC0415
         init_db()
 
-        from db.connection import get_db  # noqa: PLC0415
-        con = get_db()
-        _seed_minimal(con)
-        con.close()
+        with transaction() as con:
+            _seed_minimal(con)
 
         from btc_api import app  # noqa: PLC0415
         client = TestClient(app)

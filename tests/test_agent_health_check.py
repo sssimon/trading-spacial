@@ -17,6 +17,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -66,13 +67,9 @@ def test_query_cache_hit_rate_with_seeded_data(tmp_db):
     import btc_api
     import scripts.agent_health_check as h
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _seed_assistant(con, input_tokens=100, cache_read=900)
         _seed_assistant(con, input_tokens=200, cache_read=800)
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -92,13 +89,9 @@ def test_query_error_rate_with_mix(tmp_db):
     import scripts.agent_health_check as h
     import sqlite3
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _seed_assistant(con); _seed_assistant(con); _seed_assistant(con)
         _seed_error(con)  # 1 of 4 is error
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -117,8 +110,7 @@ def test_query_p95_latency_picks_high_percentile(tmp_db):
     import scripts.agent_health_check as h
     import sqlite3
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         # 10 rows with latencies 100..1000 step 100. The OFFSET-based
         # p95 query in agent_health_check resolves to:
         #   offset = max(0, 10 * 95 // 100 - 1) = max(0, 9 - 1) = 8
@@ -128,9 +120,6 @@ def test_query_p95_latency_picks_high_percentile(tmp_db):
         # the drift instead of silently passing on the wrong value.
         for i in range(1, 11):
             _seed_assistant(con, latency_ms=i * 100)
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -148,15 +137,11 @@ def test_query_daily_spend_sums_correctly(tmp_db):
     import scripts.agent_health_check as h
     import sqlite3
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _seed_assistant(con, cost_usd=0.10)
         _seed_assistant(con, cost_usd=0.25)
         _seed_assistant(con, cost_usd=0.15)
         _seed_error(con)  # errors don't carry cost; excluded by role filter
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -176,16 +161,12 @@ def test_evaluate_metrics_marks_breach_when_error_rate_high(tmp_db):
     import scripts.agent_health_check as h
     import sqlite3
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         # 10 assistant rows + 5 error rows → error_rate = 5/15 = 33%
         for _ in range(10):
             _seed_assistant(con)
         for _ in range(5):
             _seed_error(con)
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -207,13 +188,9 @@ def test_evaluate_metrics_waives_cache_during_warmup(tmp_db):
     import scripts.agent_health_check as h
     import sqlite3
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         # Single turn with 0% cache hit — would normally fail.
         _seed_assistant(con, input_tokens=1000, cache_read=0)
-        con.commit()
-    finally:
-        con.close()
 
     con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
@@ -233,14 +210,10 @@ def test_evaluate_metrics_waives_cache_during_warmup(tmp_db):
 def test_cli_returns_exit_0_when_all_ok(tmp_db, monkeypatch):
     """Run the script as a subprocess. Exit 0 + no breach markers."""
     import btc_api
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         for _ in range(6):  # 6 rows to clear the warmup waiver threshold
             _seed_assistant(con, input_tokens=100, cache_read=900,
                              latency_ms=500, cost_usd=0.01)
-        con.commit()
-    finally:
-        con.close()
 
     monkeypatch.setattr(
         "scripts.agent_health_check._db_path", lambda: tmp_db,
@@ -256,15 +229,11 @@ def test_cli_returns_exit_0_when_all_ok(tmp_db, monkeypatch):
 def test_cli_returns_exit_1_when_breach(tmp_db, monkeypatch):
     """Seed enough errors to exceed the 5% threshold → exit 1."""
     import btc_api
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         for _ in range(10):
             _seed_assistant(con)
         for _ in range(10):
             _seed_error(con)  # error_rate = 50%
-        con.commit()
-    finally:
-        con.close()
 
     monkeypatch.setattr(
         "scripts.agent_health_check._db_path", lambda: tmp_db,

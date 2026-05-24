@@ -31,6 +31,7 @@ import json
 import pytest
 
 from tests._fakes import FakeAnthropicClient, FakeTurnBuilder
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -832,8 +833,7 @@ def test_endpoint_audits_each_completed_turn(authed_client):
     # wrapper runs the persistence step.
     _ = resp.text
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT tenant_id, surface, conversation_id, role, model, "
             "input_tokens, output_tokens, cache_read_input_tokens, "
@@ -841,8 +841,6 @@ def test_endpoint_audits_each_completed_turn(authed_client):
             "FROM agent_conversations WHERE conversation_id = ?",
             ("test-conv-audit-1",),
         ).fetchall()
-    finally:
-        con.close()
     assert len(rows) == 1
     row = dict(rows[0])
     assert row["tenant_id"] == 1
@@ -873,15 +871,12 @@ def test_endpoint_audits_error_turns(authed_client):
     assert resp.status_code == 200
     _ = resp.text
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT role, content_json, refused FROM agent_conversations "
             "WHERE conversation_id = ?",
             ("test-conv-audit-err",),
         ).fetchall()
-    finally:
-        con.close()
     assert len(rows) == 1
     row = dict(rows[0])
     assert row["role"] == "error"
@@ -1070,14 +1065,11 @@ def test_endpoint_audits_isolated_per_tenant(authed_client, monkeypatch):
     assert resp.status_code == 200
     _ = resp.text
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT tenant_id, conversation_id, input_tokens "
             "FROM agent_conversations ORDER BY id ASC"
         ).fetchall()
-    finally:
-        con.close()
     assert len(rows) == 2
     assert dict(rows[0])["tenant_id"] == 1
     assert dict(rows[0])["conversation_id"] == "iso-conv"

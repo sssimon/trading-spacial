@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -54,11 +55,8 @@ def test_transition_to_alert_fires_notify(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _seed_for_alert(conn)
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         state = evaluate_and_record("BTC", CFG, now=NOW)
@@ -78,11 +76,8 @@ def test_alert_no_renotify_when_state_unchanged(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _seed_for_alert(conn)
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         evaluate_and_record("BTC", CFG, now=NOW)
@@ -96,12 +91,9 @@ def test_transition_to_reduced_fires_notify(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(25):
             _insert_closed(conn, "DOGE", -100.0, (NOW - timedelta(days=25 - i)).isoformat())
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         state = evaluate_and_record("DOGE", CFG, now=NOW)
@@ -118,12 +110,9 @@ def test_reduced_no_renotify_when_state_unchanged(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(25):
             _insert_closed(conn, "DOGE", -100.0, (NOW - timedelta(days=25 - i)).isoformat())
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         evaluate_and_record("DOGE", CFG, now=NOW)

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -45,16 +46,13 @@ def test_transition_to_paused_fires_notify(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # 3 full prior months negative + enough trades → PAUSED
         _insert_closed(conn, "JUP", -100.0, "2026-05-10T12:00:00+00:00")
         _insert_closed(conn, "JUP", -100.0, "2026-04-15T12:00:00+00:00")
         _insert_closed(conn, "JUP", -100.0, "2026-03-20T12:00:00+00:00")
         for i in range(22):
             _insert_closed(conn, "JUP", -10.0, (NOW - timedelta(days=40 + i)).isoformat())
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         state = evaluate_and_record("JUP", CFG, now=NOW)
@@ -71,15 +69,12 @@ def test_paused_no_renotify_when_state_unchanged(tmp_db):
     from health import evaluate_and_record
     import btc_api
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _insert_closed(conn, "JUP", -100.0, "2026-05-10T12:00:00+00:00")
         _insert_closed(conn, "JUP", -100.0, "2026-04-15T12:00:00+00:00")
         _insert_closed(conn, "JUP", -100.0, "2026-03-20T12:00:00+00:00")
         for i in range(22):
             _insert_closed(conn, "JUP", -10.0, (NOW - timedelta(days=40 + i)).isoformat())
-    finally:
-        conn.close()
 
     with patch("health.notify") as mock_notify:
         evaluate_and_record("JUP", CFG, now=NOW)

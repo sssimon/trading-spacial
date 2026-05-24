@@ -124,7 +124,7 @@ class TestGetMessagesIDOR:
 
 class TestDeleteIDOR:
     def test_404_when_deleting_other_tenants_conversation(self, client):
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(OTHER_USER_ID, "victim-id", "secret")
 
         resp = client.delete(
@@ -134,12 +134,11 @@ class TestDeleteIDOR:
         assert resp.status_code == 404
 
         # Victim's row untouched (expires_at still in the future)
-        con = get_db()
-        row = con.execute(
-            "SELECT expires_at, tenant_id FROM agent_conversation_meta "
-            "WHERE conversation_id = 'victim-id'"
-        ).fetchone()
-        con.close()
+        with transaction() as con:
+            row = con.execute(
+                "SELECT expires_at, tenant_id FROM agent_conversation_meta "
+                "WHERE conversation_id = 'victim-id'"
+            ).fetchone()
         from datetime import datetime, timezone
         assert datetime.fromisoformat(row[0]) > datetime.now(timezone.utc)
         assert row[1] == OTHER_USER_ID
@@ -148,7 +147,7 @@ class TestDeleteIDOR:
         """Even with the IDOR-blocked DELETE returning 404, the attacker
         could in theory have soft-deleted the victim's agent_messages
         rows. Verify they're untouched."""
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(OTHER_USER_ID, "victim-id", "secret")
 
         client.delete(
@@ -156,13 +155,12 @@ class TestDeleteIDOR:
             headers={"X-API-Key": "test-key"},
         )
 
-        con = get_db()
-        rows = con.execute(
-            "SELECT COUNT(*) FROM agent_messages "
-            "WHERE conversation_id = 'victim-id' AND tenant_id = ?",
-            (OTHER_USER_ID,),
-        ).fetchone()
-        con.close()
+        with transaction() as con:
+            rows = con.execute(
+                "SELECT COUNT(*) FROM agent_messages "
+                "WHERE conversation_id = 'victim-id' AND tenant_id = ?",
+                (OTHER_USER_ID,),
+            ).fetchone()
         assert rows[0] == 2  # user + assistant both still present
 
 
@@ -181,7 +179,7 @@ class TestPinIDOR:
         assert resp.status_code == 404
 
     def test_pin_does_not_mutate_other_tenants_row(self, client):
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(OTHER_USER_ID, "victim-id", "secret")
 
         client.post(
@@ -189,12 +187,11 @@ class TestPinIDOR:
             headers={"X-API-Key": "test-key"},
         )
 
-        con = get_db()
-        row = con.execute(
-            "SELECT pinned FROM agent_conversation_meta "
-            "WHERE conversation_id = 'victim-id'"
-        ).fetchone()
-        con.close()
+        with transaction() as con:
+            row = con.execute(
+                "SELECT pinned FROM agent_conversation_meta "
+                "WHERE conversation_id = 'victim-id'"
+            ).fetchone()
         assert row[0] == 0  # untouched
 
 
@@ -244,22 +241,20 @@ class TestSameConversationIdAcrossTenants:
     """
 
     def test_messages_get_filters_by_tenant_id_even_with_orphans(self, client):
-        from db.connection import get_db
+        from db.transaction import transaction
         # Victim creates the conversation legitimately
         _seed(OTHER_USER_ID, "shared-id", "secreto de la victima")
 
         # Simulate pre-fix orphan rows: attacker's tenant_id=0 rows
         # exist under the same conversation_id.
-        con = get_db()
-        con.execute(
-            """INSERT INTO agent_messages
-               (tenant_id, conversation_id, ts, role, content, expires_at)
-               VALUES (?, ?, ?, 'user', ?, ?)""",
-            (0, "shared-id", "2026-05-22T08:00:00Z",
-             "attacker injected", "2099-01-01T00:00:00Z"),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_messages
+                   (tenant_id, conversation_id, ts, role, content, expires_at)
+                   VALUES (?, ?, ?, 'user', ?, ?)""",
+                (0, "shared-id", "2026-05-22T08:00:00Z",
+                 "attacker injected", "2099-01-01T00:00:00Z"),
+            )
 
         # Attacker (id=0) probing the conversation: meta row is owned by
         # OTHER_USER_ID, so the 404 fires before any message read can
@@ -272,18 +267,16 @@ class TestSameConversationIdAcrossTenants:
         under the same conversation_id. Attacker's GET /conversations
         must NOT return the conversation even if their orphan messages
         match a q-filter."""
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(OTHER_USER_ID, "shared-id", "asunto victima")
-        con = get_db()
-        con.execute(
-            """INSERT INTO agent_messages
-               (tenant_id, conversation_id, ts, role, content, expires_at)
-               VALUES (?, ?, ?, 'user', ?, ?)""",
-            (0, "shared-id", "2026-05-22T08:00:00Z",
-             "match-this-keyword", "2099-01-01T00:00:00Z"),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_messages
+                   (tenant_id, conversation_id, ts, role, content, expires_at)
+                   VALUES (?, ?, ?, 'user', ?, ?)""",
+                (0, "shared-id", "2026-05-22T08:00:00Z",
+                 "match-this-keyword", "2099-01-01T00:00:00Z"),
+            )
 
         body = client.get("/agent/conversations?q=match-this-keyword").json()
         ids = [c["conversation_id"] for c in body["conversations"]]

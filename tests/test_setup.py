@@ -323,7 +323,7 @@ def test_11_reset_password_cli_revokes_all_refreshes(tmp_path, monkeypatch):
     # Bootstrap directly: create the user + insert two active refresh
     # tokens for them, then call reset_password as a library.
     from datetime import datetime, timedelta, timezone
-    from db.connection import get_db
+    from db.transaction import transaction
     from db.schema import init_db
     from db.auth_schema import init_auth_db
     from auth.password import hash_password
@@ -332,8 +332,7 @@ def test_11_reset_password_cli_revokes_all_refreshes(tmp_path, monkeypatch):
     init_db()
     init_auth_db()
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             "INSERT INTO users (email, password_hash, role, is_active, "
             "created_at, password_changed_at) VALUES (?, ?, 'admin', 1, ?, ?)",
@@ -348,36 +347,26 @@ def test_11_reset_password_cli_revokes_all_refreshes(tmp_path, monkeypatch):
                 "user_agent, ip) VALUES (?, ?, 'fam', NULL, ?, NULL, ?, ?, ?)",
                 (_hash_refresh(tok), uid, future, now, "test", "127.0.0.1"),
             )
-        con.commit()
-    finally:
-        con.close()
 
     # Apply the password reset machinery (mirrors what the CLI does).
     new_hash = hash_password("newpassword12")
-    con = get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "UPDATE users SET password_hash = ?, password_changed_at = ? "
             "WHERE id = ?",
             (new_hash, datetime.now(timezone.utc).isoformat(), uid),
         )
-        con.commit()
-    finally:
-        con.close()
     revoked = revoke_all_for_user(uid)
     assert revoked == 2
 
     # Verify in DB: hash changed, both refreshes revoked_at IS NOT NULL.
-    con = get_db()
-    try:
+    with transaction() as con:
         h = con.execute(
             "SELECT password_hash FROM users WHERE id = ?", (uid,)
         ).fetchone()["password_hash"]
         rows = con.execute(
             "SELECT revoked_at FROM refresh_tokens WHERE user_id = ?", (uid,)
         ).fetchall()
-    finally:
-        con.close()
     assert h == new_hash
     assert all(r["revoked_at"] is not None for r in rows)
 

@@ -25,25 +25,23 @@ def client(monkeypatch, tmp_path):
     from db.schema import init_db
     init_db()
 
-    from db.connection import get_db
-    con = get_db()
-    con.execute(
-        "INSERT INTO scans (id, ts, symbol, estado, señal, setup, price, lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo, payload) "
-        "VALUES (1, '2026-01-15T10:00:00Z', 'BTCUSDT', 'NEUTRAL', 0, 0, 50000.0, 30.0, 45.0, 2, 'standard', 1, 0, '{}')"
-    )
-    con.execute(
-        "INSERT INTO scans (id, ts, symbol, estado, señal, setup, price, lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo, payload) "
-        "VALUES (2, '2026-01-15T10:05:00Z', 'BTCUSDT', 'LONG', 1, 0, 50000.0, 20.0, 40.0, 5, 'premium', 1, 1, '{}')"
-    )
-    # B.5 #258: include tenant_id matching synthetic test user (id=0 per
-    # auth.middleware._synthetic_test_user). Without this, the post-B.5
-    # tenant filter on GET /positions excludes NULL-tenant rows.
-    con.execute(
-        "INSERT INTO positions (id, scan_id, symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, size_usd, qty, tenant_id) "
-        "VALUES (1, 2, 'BTCUSDT', 'LONG', 'open', 50000.0, '2026-01-15T10:05:00Z', 49000.0, 54000.0, 100.0, 0.002, 0)"
-    )
-    con.commit()
-    con.close()
+    from db.transaction import transaction
+    with transaction() as con:
+        con.execute(
+            "INSERT INTO scans (id, ts, symbol, estado, señal, setup, price, lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo, payload) "
+            "VALUES (1, '2026-01-15T10:00:00Z', 'BTCUSDT', 'NEUTRAL', 0, 0, 50000.0, 30.0, 45.0, 2, 'standard', 1, 0, '{}')"
+        )
+        con.execute(
+            "INSERT INTO scans (id, ts, symbol, estado, señal, setup, price, lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo, payload) "
+            "VALUES (2, '2026-01-15T10:05:00Z', 'BTCUSDT', 'LONG', 1, 0, 50000.0, 20.0, 40.0, 5, 'premium', 1, 1, '{}')"
+        )
+        # B.5 #258: include tenant_id matching synthetic test user (id=0 per
+        # auth.middleware._synthetic_test_user). Without this, the post-B.5
+        # tenant filter on GET /positions excludes NULL-tenant rows.
+        con.execute(
+            "INSERT INTO positions (id, scan_id, symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, size_usd, qty, tenant_id) "
+            "VALUES (1, 2, 'BTCUSDT', 'LONG', 'open', 50000.0, '2026-01-15T10:05:00Z', 49000.0, 54000.0, 100.0, 0.002, 0)"
+        )
 
     # Test config (api_key="test-key")
     cfg_path = tmp_path / "config.json"

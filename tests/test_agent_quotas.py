@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from datetime import datetime, timezone
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -64,8 +65,7 @@ def test_daily_window_reset_on_a_new_day(tmp_db, monkeypatch):
     today = "2026-05-19"
     monkeypatch.setattr(quotas, "_now_utc",
                          lambda: datetime(2026, 5, 19, 12, tzinfo=timezone.utc))
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             """INSERT INTO agent_quotas
                (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
@@ -73,9 +73,6 @@ def test_daily_window_reset_on_a_new_day(tmp_db, monkeypatch):
                VALUES (1, 0.75, 1.0, ?, 5.0, '2026-05-01')""",
             (yesterday,),
         )
-        con.commit()
-    finally:
-        con.close()
 
     snap = quotas.check_quota_pretrun(tenant_id=1)
     assert snap.daily_usd_used == 0.0
@@ -92,17 +89,13 @@ def test_monthly_window_reset_on_a_new_month(tmp_db, monkeypatch):
 
     monkeypatch.setattr(quotas, "_now_utc",
                          lambda: datetime(2026, 6, 1, 8, tzinfo=timezone.utc))
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             """INSERT INTO agent_quotas
                (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
                 monthly_usd_used, monthly_window_start)
                VALUES (2, 0.90, 1.0, '2026-05-31', 19.50, '2026-05-01')""",
         )
-        con.commit()
-    finally:
-        con.close()
 
     snap = quotas.check_quota_pretrun(tenant_id=2)
     assert snap.daily_usd_used == 0.0
@@ -122,8 +115,7 @@ def test_check_quota_pretrun_raises_when_daily_at_cap(tmp_db):
 
     today = _quotas._today_iso()
     month = _quotas._this_month_iso()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             """INSERT INTO agent_quotas
                (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
@@ -131,9 +123,6 @@ def test_check_quota_pretrun_raises_when_daily_at_cap(tmp_db):
                VALUES (9, 1.00, 1.00, ?, 1.00, ?)""",
             (today, month),
         )
-        con.commit()
-    finally:
-        con.close()
 
     with pytest.raises(QuotaExceeded) as exc:
         check_quota_pretrun(tenant_id=9)
@@ -149,8 +138,7 @@ def test_check_quota_pretrun_does_not_raise_when_below_cap(tmp_db):
 
     today = _quotas._today_iso()
     month = _quotas._this_month_iso()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             """INSERT INTO agent_quotas
                (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
@@ -158,9 +146,6 @@ def test_check_quota_pretrun_does_not_raise_when_below_cap(tmp_db):
                VALUES (3, 0.99, 1.00, ?, 0.99, ?)""",
             (today, month),
         )
-        con.commit()
-    finally:
-        con.close()
 
     snap = check_quota_pretrun(tenant_id=3)
     assert snap.daily_usd_used == 0.99
@@ -235,8 +220,7 @@ def test_get_snapshot_does_not_raise_on_exceeded(tmp_db):
 
     today = _quotas._today_iso()
     month = _quotas._this_month_iso()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             """INSERT INTO agent_quotas
                (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
@@ -244,9 +228,6 @@ def test_get_snapshot_does_not_raise_on_exceeded(tmp_db):
                VALUES (50, 2.00, 1.00, ?, 2.00, ?)""",
             (today, month),
         )
-        con.commit()
-    finally:
-        con.close()
 
     snap = get_snapshot(tenant_id=50)  # must NOT raise
     assert snap.daily_usd_used == 2.00

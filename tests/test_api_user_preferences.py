@@ -151,7 +151,7 @@ def test_test_endpoint_no_channels_returns_no_telegram_configured(tmp_path, monk
     from fastapi.testclient import TestClient
     from db.auth_schema import init_auth_db
     from db.schema import init_db
-    from db.connection import get_db
+    from db.transaction import transaction
 
     db_path = str(tmp_path / "test_prefs_no_channels.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
@@ -237,16 +237,14 @@ def test_test_endpoint_does_not_write_to_notifications_sent(seeded_user_with_tel
     import requests
     monkeypatch.setattr(requests, "post", _fake_post)
 
-    from db.connection import get_db
-    con = get_db()
-    before = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
-    con.close()
+    from db.transaction import transaction
+    with transaction() as con:
+        before = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
 
     client = seeded_user_with_telegram
     r = client.post("/preferences/test")
     assert r.status_code == 200  # ensures the endpoint actually ran (regression guard)
 
-    con = get_db()
-    after = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
-    con.close()
+    with transaction() as con:
+        after = con.execute("SELECT COUNT(*) FROM notifications_sent").fetchone()[0]
     assert before == after, "POST /test should NOT write to notifications_sent"

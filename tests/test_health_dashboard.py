@@ -1,5 +1,6 @@
 """B6 dashboard observability — pure fns + endpoint (#187 #200)."""
 import pytest
+from db.transaction import transaction
 
 
 # ── compute_next_conditions ─────────────────────────────────────────────────
@@ -107,11 +108,8 @@ def _insert_closed_position(conn, symbol, pnl, exit_ts):
 def test_sparkline_empty_returns_20_nones(tmp_db):
     import btc_api
     from health import sparkline_for_symbol
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         result = sparkline_for_symbol("BTC", conn)
-    finally:
-        conn.close()
     assert len(result) == 20
     assert all(x is None for x in result)
 
@@ -120,14 +118,10 @@ def test_sparkline_3_wins_pads_with_leading_nones(tmp_db):
     """3 wins → [None, None, ..., 'W', 'W', 'W'] in chronological order."""
     import btc_api
     from health import sparkline_for_symbol
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             _insert_closed_position(conn, "BTC", 10.0, f"2026-04-{1+i:02d}T12:00:00+00:00")
-        conn.commit()
         result = sparkline_for_symbol("BTC", conn)
-    finally:
-        conn.close()
     assert len(result) == 20
     assert result[-3:] == ['W', 'W', 'W']
     assert all(x is None for x in result[:-3])
@@ -137,29 +131,21 @@ def test_sparkline_mixed_wins_losses(tmp_db):
     """W/L based on pnl_usd>0."""
     import btc_api
     from health import sparkline_for_symbol
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _insert_closed_position(conn, "BTC", 10.0, "2026-04-01T12:00:00+00:00")
         _insert_closed_position(conn, "BTC", -5.0, "2026-04-02T12:00:00+00:00")
         _insert_closed_position(conn, "BTC", 0.0, "2026-04-03T12:00:00+00:00")  # breakeven = L
-        conn.commit()
         result = sparkline_for_symbol("BTC", conn)
-    finally:
-        conn.close()
     assert result[-3:] == ['W', 'L', 'L']
 
 
 def test_sparkline_caps_at_20(tmp_db):
     import btc_api
     from health import sparkline_for_symbol
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(25):
             _insert_closed_position(conn, "BTC", 10.0, f"2026-04-{1+i%28:02d}T{i%24:02d}:00:00+00:00")
-        conn.commit()
         result = sparkline_for_symbol("BTC", conn)
-    finally:
-        conn.close()
     assert len(result) == 20
     assert all(x == 'W' for x in result)
 
@@ -179,11 +165,8 @@ def _insert_health_event(conn, symbol, from_state, to_state, reason, ts):
 def test_summarize_recent_alerts_empty_returns_empty_items(tmp_db):
     import btc_api
     from health import summarize_recent_alerts
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         result = summarize_recent_alerts(conn=conn, window_hours=24)
-    finally:
-        conn.close()
     assert result["items"] == []
 
 
@@ -194,15 +177,11 @@ def test_summarize_recent_alerts_3_alerts_emits_warning(tmp_db):
     from health import summarize_recent_alerts
     now = datetime.now(timezone.utc)
     recent_ts = (now - timedelta(hours=2)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _insert_health_event(conn, "BTC", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
         _insert_health_event(conn, "ETH", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
         _insert_health_event(conn, "DOGE", "NORMAL", "ALERT", "wr_below_threshold", recent_ts)
-        conn.commit()
         result = summarize_recent_alerts(conn=conn, window_hours=24)
-    finally:
-        conn.close()
     items = result["items"]
     assert any(i["kind"] == "symbol_failures" for i in items)
     failure_item = next(i for i in items if i["kind"] == "symbol_failures")
@@ -216,13 +195,9 @@ def test_summarize_recent_alerts_excludes_events_outside_window(tmp_db):
     from health import summarize_recent_alerts
     now = datetime.now(timezone.utc)
     old_ts = (now - timedelta(hours=48)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _insert_health_event(conn, "BTC", "NORMAL", "ALERT", "wr_below_threshold", old_ts)
-        conn.commit()
         result = summarize_recent_alerts(conn=conn, window_hours=24)
-    finally:
-        conn.close()
     assert result["items"] == []
 
 
@@ -231,14 +206,11 @@ def test_summarize_recent_alerts_excludes_events_outside_window(tmp_db):
 
 def test_init_db_creates_portfolio_health_events_table(tmp_db):
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             """SELECT name FROM sqlite_master
                WHERE type='table' AND name='portfolio_health_events'"""
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
 
 
@@ -249,14 +221,11 @@ def test_record_portfolio_transition_inserts_row(tmp_db):
         from_tier="NORMAL", to_tier="WARNED",
         reason="3_concurrent_failures", dd_pct=-0.02, concurrent=3,
     )
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             """SELECT from_tier, to_tier, reason, dd_pct, concurrent
                FROM portfolio_health_events ORDER BY ts DESC LIMIT 1"""
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "NORMAL"
     assert row[1] == "WARNED"
     assert row[2] == "3_concurrent_failures"
@@ -328,8 +297,7 @@ def test_get_health_dashboard_empty_db_returns_default_shape(client):
 def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
     """One PROBATION symbol seeded → response includes all the fields."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # Seed PROBATION row + 5 wins
         conn.execute(
             """INSERT INTO symbol_health
@@ -355,9 +323,6 @@ def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
                VALUES ('BTC', 'PAUSED', 'PROBATION', 'reactivated_manual',
                        '{}', '2026-04-20T00:00:00+00:00')"""
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
@@ -450,8 +415,7 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
     # Also insert the closed positions so the (now-removed) equity-curve
     # path would see them — if regression returns, the curve would double-
     # count and inflate current_equity past $10,200.
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i, pnl in enumerate(pnl_sequence):
             reason = "TP" if pnl > 0 else "SL"
             conn.execute(
@@ -469,9 +433,6 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
                     pnl / 100.0,
                 ),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
@@ -507,8 +468,7 @@ def test_get_health_dashboard_isolates_tenants(client):
 
     # Tenant 2 (NOT the request tenant): seed a -$1000 loss → balance $9K, peak $10K.
     apply_pnl_to_capital(2, -1_000.0)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # (a) Tenant 2 has a closed losing trade for ETH.
         conn.execute(
             """INSERT INTO positions
@@ -530,9 +490,6 @@ def test_get_health_dashboard_isolates_tenants(client):
                VALUES ('BTC', 'LONG', 'open', 50000.0,
                        '2026-04-20T12:00:00+00:00', 1.0, 2)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     # Make the price cache see BTC at $55K so the leak (if it existed) would
     # surface a +$5,000 MTM on the tenant-2 position above.
     update_price("BTC", 55_000.0)

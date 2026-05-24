@@ -216,20 +216,18 @@ class TestNotificationsIDOR:
 
 class TestSignalsPerformanceIDOR:
     def _seed_signal_outcome(self, tenant_id: int, score: int, price_24h_higher: bool):
-        from db.connection import get_db
-        con = get_db()
-        signal_price = 100.0
-        price_24h = 110.0 if price_24h_higher else 95.0
-        con.execute(
-            """INSERT INTO signal_outcomes
-               (scan_id, symbol, signal_ts, signal_price, score, macro_ok,
-                price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
-               VALUES (NULL, ?, ?, ?, ?, 1, ?, 5.0, -2.0, 'completed', ?)""",
-            (f"SYM{tenant_id}", f"2026-01-{tenant_id:02d}T00:00:00Z",
-             signal_price, score, price_24h, tenant_id),
-        )
-        con.commit()
-        con.close()
+        from db.transaction import transaction
+        with transaction() as con:
+            signal_price = 100.0
+            price_24h = 110.0 if price_24h_higher else 95.0
+            con.execute(
+                """INSERT INTO signal_outcomes
+                   (scan_id, symbol, signal_ts, signal_price, score, macro_ok,
+                    price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
+                   VALUES (NULL, ?, ?, ?, ?, 1, ?, 5.0, -2.0, 'completed', ?)""",
+                (f"SYM{tenant_id}", f"2026-01-{tenant_id:02d}T00:00:00Z",
+                 signal_price, score, price_24h, tenant_id),
+            )
 
     def test_performance_excludes_other_user_outcomes(self, client):
         # Other user has 10 winning outcomes — would skew win_rate dramatically

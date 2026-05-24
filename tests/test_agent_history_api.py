@@ -55,19 +55,17 @@ def _seed(tenant_id: int, conversation_id: str, user_msg: str,
 def _expire_meta(conversation_id: str, when_iso: str | None = None) -> None:
     """Set expires_at on a conversation to a past timestamp (test-only
     helper — simulates the retention horizon having elapsed)."""
-    from db.connection import get_db
+    from db.transaction import transaction
     past = when_iso or "2000-01-01T00:00:00+00:00"
-    con = get_db()
-    con.execute(
-        "UPDATE agent_conversation_meta SET expires_at = ? WHERE conversation_id = ?",
-        (past, conversation_id),
-    )
-    con.execute(
-        "UPDATE agent_messages SET expires_at = ? WHERE conversation_id = ?",
-        (past, conversation_id),
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        con.execute(
+            "UPDATE agent_conversation_meta SET expires_at = ? WHERE conversation_id = ?",
+            (past, conversation_id),
+        )
+        con.execute(
+            "UPDATE agent_messages SET expires_at = ? WHERE conversation_id = ?",
+            (past, conversation_id),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +96,11 @@ class TestListConversations:
         time.sleep(0.01)
         _seed(0, "new", "nuevo", surface="dock")
         # Pin the OLD one
-        from db.connection import get_db
-        con = get_db()
-        con.execute(
-            "UPDATE agent_conversation_meta SET pinned = 1 WHERE conversation_id = 'old'"
-        )
-        con.commit()
-        con.close()
+        from db.transaction import transaction
+        with transaction() as con:
+            con.execute(
+                "UPDATE agent_conversation_meta SET pinned = 1 WHERE conversation_id = 'old'"
+            )
 
         resp = client.get("/agent/conversations")
         ids = [c["conversation_id"] for c in resp.json()["conversations"]]
@@ -247,7 +243,7 @@ class TestGetMessages:
 
     def test_proposal_state_error_from_agent_side_effects(self, client):
         """Verify error result from agent_side_effects propagates."""
-        from db.connection import get_db
+        from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
             0, "conv-Perr", "cerra",
@@ -259,17 +255,15 @@ class TestGetMessages:
                 "summary":     "Cerrar #10",
             }],
         )
-        con = get_db()
-        con.execute(
-            """INSERT INTO agent_side_effects
-               (tenant_id, conversation_id, ts, action, args_json,
-                idempotency_key, result, http_status, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (0, "conv-Perr", "2026-05-22T10:00:00Z", "close_position",
-             "{}", "prop-perr", "error", 500, future),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_side_effects
+                   (tenant_id, conversation_id, ts, action, args_json,
+                    idempotency_key, result, http_status, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (0, "conv-Perr", "2026-05-22T10:00:00Z", "close_position",
+                 "{}", "prop-perr", "error", 500, future),
+            )
 
         resp = client.get("/agent/conversations/conv-Perr/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
@@ -277,7 +271,7 @@ class TestGetMessages:
 
     def test_proposal_state_conflict_from_agent_side_effects(self, client):
         """conflict result (proposal_id collision) propagates."""
-        from db.connection import get_db
+        from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
             0, "conv-Pconf", "cerra",
@@ -289,17 +283,15 @@ class TestGetMessages:
                 "summary":     "Cerrar #11",
             }],
         )
-        con = get_db()
-        con.execute(
-            """INSERT INTO agent_side_effects
-               (tenant_id, conversation_id, ts, action, args_json,
-                idempotency_key, result, http_status, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (0, "conv-Pconf", "2026-05-22T10:00:00Z", "close_position",
-             "{}", "prop-pconf", "conflict", 409, future),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_side_effects
+                   (tenant_id, conversation_id, ts, action, args_json,
+                    idempotency_key, result, http_status, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (0, "conv-Pconf", "2026-05-22T10:00:00Z", "close_position",
+                 "{}", "prop-pconf", "conflict", 409, future),
+            )
 
         resp = client.get("/agent/conversations/conv-Pconf/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
@@ -318,7 +310,7 @@ class TestGetMessages:
         derivation MUST return 'stale' (no row found for this tenant)
         — NOT 'ok' (which would leak the other tenant's outcome).
         """
-        from db.connection import get_db
+        from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
             0, "conv-Pscope", "x",
@@ -333,21 +325,19 @@ class TestGetMessages:
         # Other tenant confirmed something with the same key — IRL
         # this won't happen because the UNIQUE constraint blocks it,
         # but the test verifies our SELECT wouldn't return it anyway.
-        con = get_db()
-        con.execute(
-            "DELETE FROM agent_side_effects WHERE idempotency_key = ?",
-            ("prop-shared",),
-        )
-        con.execute(
-            """INSERT INTO agent_side_effects
-               (tenant_id, conversation_id, ts, action, args_json,
-                idempotency_key, result, http_status, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (999, "other-conv", "2026-05-22T10:00:00Z", "close_position",
-             "{}", "prop-shared", "ok", 200, future),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                "DELETE FROM agent_side_effects WHERE idempotency_key = ?",
+                ("prop-shared",),
+            )
+            con.execute(
+                """INSERT INTO agent_side_effects
+                   (tenant_id, conversation_id, ts, action, args_json,
+                    idempotency_key, result, http_status, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (999, "other-conv", "2026-05-22T10:00:00Z", "close_position",
+                 "{}", "prop-shared", "ok", 200, future),
+            )
 
         resp = client.get("/agent/conversations/conv-Pscope/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
@@ -360,17 +350,15 @@ class TestGetMessages:
         must not 500 the whole transcript. Log warning + degrade to
         empty chips. PR #434 review issue #2."""
         import logging
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(0, "conv-Mal", "hola", assistant_text="ok")
         # Corrupt the assistant row's tool_chips_json directly
-        con = get_db()
-        con.execute(
-            "UPDATE agent_messages SET tool_chips_json = ? "
-            "WHERE conversation_id = ? AND role = 'assistant'",
-            ("{NOT VALID JSON", "conv-Mal"),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                "UPDATE agent_messages SET tool_chips_json = ? "
+                "WHERE conversation_id = ? AND role = 'assistant'",
+                ("{NOT VALID JSON", "conv-Mal"),
+            )
 
         with caplog.at_level(logging.WARNING, logger="api.agent.history"):
             resp = client.get("/agent/conversations/conv-Mal/messages")
@@ -383,16 +371,14 @@ class TestGetMessages:
 
     def test_malformed_proposals_json_falls_back_gracefully(self, client, caplog):
         import logging
-        from db.connection import get_db
+        from db.transaction import transaction
         _seed(0, "conv-MalP", "hola", assistant_text="ok")
-        con = get_db()
-        con.execute(
-            "UPDATE agent_messages SET proposals_json = ? "
-            "WHERE conversation_id = ? AND role = 'assistant'",
-            ("not json at all", "conv-MalP"),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                "UPDATE agent_messages SET proposals_json = ? "
+                "WHERE conversation_id = ? AND role = 'assistant'",
+                ("not json at all", "conv-MalP"),
+            )
 
         with caplog.at_level(logging.WARNING, logger="api.agent.history"):
             resp = client.get("/agent/conversations/conv-MalP/messages")
@@ -406,7 +392,7 @@ class TestGetMessages:
     def test_proposal_state_ok_from_agent_side_effects(self, client):
         """If the user confirmed the proposal, agent_side_effects has the
         terminal result. State derives from there, not from expires_at."""
-        from db.connection import get_db
+        from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
             0, "conv-P3", "cerra",
@@ -419,17 +405,15 @@ class TestGetMessages:
             }],
         )
         # Pretend the confirm fired and recorded an 'ok'
-        con = get_db()
-        con.execute(
-            """INSERT INTO agent_side_effects
-               (tenant_id, conversation_id, ts, action, args_json,
-                idempotency_key, result, http_status, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (0, "conv-P3", "2026-05-22T10:00:00Z", "close_position",
-             "{}", "prop-p3", "ok", 200, future),
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_side_effects
+                   (tenant_id, conversation_id, ts, action, args_json,
+                    idempotency_key, result, http_status, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (0, "conv-P3", "2026-05-22T10:00:00Z", "close_position",
+                 "{}", "prop-p3", "ok", 200, future),
+            )
 
         resp = client.get("/agent/conversations/conv-P3/messages")
         assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")

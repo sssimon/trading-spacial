@@ -36,14 +36,12 @@ def _insert_position(
         "entry_ts": entry_ts,
     })
     if status == "closed":
-        from db.connection import get_db
-        con = get_db()
-        con.execute(
-            "UPDATE positions SET status=?, exit_ts=? WHERE id=?",
-            (status, exit_ts, pos["id"]),
-        )
-        con.commit()
-        con.close()
+        from db.transaction import transaction
+        with transaction() as con:
+            con.execute(
+                "UPDATE positions SET status=?, exit_ts=? WHERE id=?",
+                (status, exit_ts, pos["id"]),
+            )
     return pos
 
 

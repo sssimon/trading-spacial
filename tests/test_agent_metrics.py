@@ -15,6 +15,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from db.transaction import transaction
 
 
 # ── Fixtures ───────────────────────────────────────────────────────
@@ -79,8 +80,7 @@ def _seed_turn(*, tenant_id: int = 1, cost_usd: float = 0.10, role: str = "assis
     import btc_api
     import json as _json
     ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "INSERT INTO agent_conversations "
             "(tenant_id, surface, conversation_id, ts, role, model, "
@@ -93,9 +93,6 @@ def _seed_turn(*, tenant_id: int = 1, cost_usd: float = 0.10, role: str = "assis
              _json.dumps(content_summary) if content_summary else None,
              1 if refused else 0),
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 # ── GET /agent/metrics ─────────────────────────────────────────────
@@ -222,8 +219,7 @@ def test_turn_429_when_tenant_quota_exceeded(admin_client):
     try:
         today = _quotas._today_iso()
         month = _quotas._this_month_iso()
-        con = btc_api.get_db()
-        try:
+        with transaction() as con:
             con.execute(
                 """INSERT INTO agent_quotas
                    (tenant_id, daily_usd_used, daily_usd_cap, daily_window_start,
@@ -231,9 +227,6 @@ def test_turn_429_when_tenant_quota_exceeded(admin_client):
                    VALUES (1, 1.00, 1.00, ?, 1.00, ?)""",
                 (today, month),
             )
-            con.commit()
-        finally:
-            con.close()
 
         resp = admin_client.post(
             "/agent/conversations/c1/turn",
@@ -340,14 +333,11 @@ def test_audit_wrapper_records_cancelled_when_iterator_ends_early(tmp_db):
     asyncio.run(_drive())
 
     # Audit row exists with role='error' and content_summary='cancelled'.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT role, content_json FROM agent_conversations "
             "WHERE conversation_id = 'conv-cancel'",
         ).fetchone()
-    finally:
-        con.close()
     assert row is not None
     d = dict(row)
     assert d["role"] == "error"
@@ -385,12 +375,9 @@ def test_audit_wrapper_does_not_double_record_on_normal_end(tmp_db):
 
     asyncio.run(_drive())
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT role FROM agent_conversations WHERE conversation_id = 'conv-normal'",
         ).fetchall()
-    finally:
-        con.close()
     assert len(rows) == 1
     assert dict(rows[0])["role"] == "assistant"

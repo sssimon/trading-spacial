@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from db.transaction import transaction
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────
@@ -251,11 +252,8 @@ def test_propose_close_position_emits_envelope_for_own_position(proposal_env, tm
     from api.agent.tools.propose_handlers import propose_close_position
     from api.agent.proposals import load_proposal_row
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id = _seed_position(con, tenant_id=1, status="open")
-    finally:
-        con.close()
 
     out = propose_close_position(
         tenant_id=1, conversation_id="c1",
@@ -279,11 +277,8 @@ def test_propose_close_position_rejects_other_tenant(proposal_env, tmp_db):
     import btc_api
     from api.agent.tools.propose_handlers import propose_close_position
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         other_id = _seed_position(con, tenant_id=2, status="open")
-    finally:
-        con.close()
 
     out = propose_close_position(
         tenant_id=1, conversation_id="c1",
@@ -291,11 +286,8 @@ def test_propose_close_position_rejects_other_tenant(proposal_env, tmp_db):
     )
     assert out == {"error": "not_found"}
     # No proposal persisted.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute("SELECT * FROM agent_side_effects").fetchall()
-    finally:
-        con.close()
     assert rows == []
 
 
@@ -303,11 +295,8 @@ def test_propose_close_position_rejects_closed_position(proposal_env, tmp_db):
     import btc_api
     from api.agent.tools.propose_handlers import propose_close_position
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id = _seed_position(con, tenant_id=1, status="closed")
-    finally:
-        con.close()
 
     out = propose_close_position(
         tenant_id=1, conversation_id="c1",
@@ -339,11 +328,8 @@ def test_confirm_succeeds_and_executes_downstream(authed_client):
     import btc_api
     client = authed_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
-    finally:
-        con.close()
 
     resp = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -356,13 +342,10 @@ def test_confirm_succeeds_and_executes_downstream(authed_client):
     assert body["idempotent"] is False
 
     # And the position is actually closed.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT status, exit_reason FROM positions WHERE id = ?", (pos_id,),
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["status"] == "closed"
     assert dict(row)["exit_reason"] == "MANUAL_AGENT"
 
@@ -374,11 +357,8 @@ def test_confirm_is_idempotent_on_double_click(authed_client):
     import btc_api
     client = authed_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
-    finally:
-        con.close()
 
     r1 = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -404,11 +384,8 @@ def test_confirm_returns_404_for_cross_tenant_attempt(authed_client, monkeypatch
     import btc_api
     client = authed_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _pos_id, proposal = _build_signed_close_proposal(con, tenant_id=2)
-    finally:
-        con.close()
 
     # client is bound to tenant_id=1 via the fixture override.
     resp = client.post(
@@ -425,11 +402,8 @@ def test_confirm_returns_400_on_tampered_signature(authed_client):
     import btc_api
     client = authed_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
-    finally:
-        con.close()
 
     mac, payload = proposal.signed_payload.split(".", 1)
     flipped = ("a" if mac[0] != "a" else "b") + mac[1:]
@@ -442,13 +416,10 @@ def test_confirm_returns_400_on_tampered_signature(authed_client):
     assert resp.json() == {"detail": "signature_mismatch"}
 
     # And the position is STILL open.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT status FROM positions WHERE id = ?", (pos_id,),
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["status"] == "open"
 
 
@@ -464,8 +435,7 @@ def test_confirm_returns_410_on_expired(authed_client):
         args={"position_id": 1, "exit_price": 1.0},
         tenant_id=1,
     )
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         # Insert manually with a past expires_at.
         con.execute(
             "INSERT INTO agent_side_effects "
@@ -476,9 +446,6 @@ def test_confirm_returns_410_on_expired(authed_client):
             "        '2020-01-01T00:05:00+00:00')",
             (p.proposal_id,),
         )
-        con.commit()
-    finally:
-        con.close()
 
     resp = client.post(
         f"/agent/proposals/{p.proposal_id}/confirm",
@@ -494,8 +461,7 @@ def test_confirm_returns_409_on_state_drift(authed_client):
     import btc_api
     client = authed_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
         # Simulate the position closing in another flow before confirm.
         con.execute(
@@ -503,9 +469,6 @@ def test_confirm_returns_409_on_state_drift(authed_client):
             "  exit_ts = '2026-05-19T20:00:00+00:00', exit_price = 49000 "
             "WHERE id = ?", (pos_id,),
         )
-        con.commit()
-    finally:
-        con.close()
 
     resp = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -514,14 +477,11 @@ def test_confirm_returns_409_on_state_drift(authed_client):
     assert resp.status_code == 409
     assert resp.json() == {"detail": "state_drift"}
     # The row in agent_side_effects records the drift.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT result FROM agent_side_effects WHERE idempotency_key = ?",
             (proposal.proposal_id,),
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["result"] == "state_drift"
 
 
@@ -534,12 +494,9 @@ def test_confirm_rejects_proposal_id_mismatch(authed_client):
     client = authed_client
 
     # Build two distinct proposals.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id_a = _seed_position(con, tenant_id=1, status="open")
         pos_id_b = _seed_position(con, tenant_id=1, status="open")
-    finally:
-        con.close()
     p_a = sign_proposal(action="close_position",
                          args={"position_id": pos_id_a, "exit_price": 10.0},
                          tenant_id=1)
@@ -558,12 +515,9 @@ def test_confirm_rejects_proposal_id_mismatch(authed_client):
     assert resp.json() == {"detail": "proposal_id_mismatch"}
 
     # And neither position closed.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute("SELECT status FROM positions WHERE id IN (?,?)",
                             (pos_id_a, pos_id_b)).fetchall()
-    finally:
-        con.close()
     assert all(dict(r)["status"] == "open" for r in rows)
 
 
@@ -591,15 +545,12 @@ def test_confirm_403_when_viewer_tries_apply_tune(viewer_client, monkeypatch):
     assert resp.json() == {"detail": "role_required"}
 
     # Audit trail records the role rejection (not 'error', not 'state_drift').
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT result, http_status FROM agent_side_effects "
             "WHERE idempotency_key = ?",
             (p.proposal_id,),
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["result"] == "role_required"
     assert dict(row)["http_status"] == 403
 
@@ -634,11 +585,8 @@ def test_confirm_close_position_works_for_viewer_on_own_position(viewer_client):
     import btc_api
     client = viewer_client
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
-    finally:
-        con.close()
 
     resp = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -647,13 +595,10 @@ def test_confirm_close_position_works_for_viewer_on_own_position(viewer_client):
     assert resp.status_code == 200
     assert resp.json()["result"] == "ok"
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT status, exit_reason FROM positions WHERE id = ?", (pos_id,),
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["status"] == "closed"
     assert dict(row)["exit_reason"] == "MANUAL_AGENT"
 

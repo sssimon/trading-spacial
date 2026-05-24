@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -33,8 +34,7 @@ def _seed_spend(amount_usd: float, *, hours_ago: float = 1):
     a ts the given hours in the past."""
     import btc_api
     ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "INSERT INTO agent_conversations "
             "(tenant_id, surface, conversation_id, ts, role, model, "
@@ -44,9 +44,6 @@ def _seed_spend(amount_usd: float, *, hours_ago: float = 1):
             "        100, 50, 0, 0, 1000, ?)",
             (ts, amount_usd),
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 # ── Explicit trip ──────────────────────────────────────────────────
@@ -204,8 +201,7 @@ def test_breaker_spend_excludes_non_assistant_rows(tmp_db):
     from api.agent.circuit_breaker import current_global_spend_24h
 
     ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         # An assistant row with $1.00 cost (counts).
         con.execute(
             "INSERT INTO agent_conversations "
@@ -229,9 +225,6 @@ def test_breaker_spend_excludes_non_assistant_rows(tmp_db):
             "        0, 0, 0, 0, 100, 99.00)",
             (ts,),
         )
-        con.commit()
-    finally:
-        con.close()
 
     total = current_global_spend_24h()
     # Only the assistant row counts; the error row's $99 is excluded.

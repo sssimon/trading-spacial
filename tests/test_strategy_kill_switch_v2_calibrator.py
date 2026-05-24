@@ -1,5 +1,6 @@
 """Tests for strategy.kill_switch_v2_calibrator — auto-calibrator daemon (#187 #214 B4b.1)."""
 import pytest
+from db.transaction import transaction
 
 
 # ── B4b.1: schema smoke test ────────────────────────────────────────────────
@@ -14,13 +15,10 @@ def test_init_db_creates_kill_switch_recommendations_table(tmp_path, monkeypatch
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = [r[1] for r in conn.execute(
             "PRAGMA table_info(kill_switch_recommendations)"
         ).fetchall()]
-    finally:
-        conn.close()
 
     expected = {
         "id", "ts", "triggered_by", "slider_value",
@@ -142,16 +140,13 @@ def test_persist_recommendation_inserts_row(tmp_path, monkeypatch):
     assert isinstance(rec_id, int)
     assert rec_id > 0
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             "SELECT ts, triggered_by, slider_value, projected_pnl, "
             "projected_dd, status, report_json "
             "FROM kill_switch_recommendations WHERE id = ?",
             (rec_id,),
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == now.isoformat()
     assert json.loads(row[1]) == ["manual"]
     assert row[2] is None
@@ -259,13 +254,10 @@ def test_calibrator_loop_safety_net_fires_when_table_empty(
 
     assert call_count["n"] == 1
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT triggered_by, status FROM kill_switch_recommendations"
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
     import json
     assert json.loads(rows[0][0]) == ["safety_net"]
@@ -308,13 +300,10 @@ def test_calibrator_loop_does_not_fire_when_recent_recalibration(
     }
     kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM kill_switch_recommendations"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert count == 1
 
 
@@ -337,13 +326,10 @@ def test_calibrator_loop_exits_cleanly_when_stop_event_set(
     cfg_fn = lambda: {}
     kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM kill_switch_recommendations"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert count == 0
 
 
@@ -405,14 +391,11 @@ def test_post_recalibrate_returns_recommendation_id(tmp_path, monkeypatch):
         assert body["status"] in ("pending", "no_feasible")
 
         rec_id = body["recommendation_id"]
-        conn = btc_api.get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 "SELECT triggered_by, status FROM kill_switch_recommendations "
                 "WHERE id = ?", (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
         import json
         assert json.loads(row[0]) == ["manual"]
         assert row[1] in ("pending", "no_feasible")
@@ -865,16 +848,12 @@ def test_get_recommendations_logs_warning_on_corrupt_row(
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
 
     # Insert a row with corrupted triggered_by (not valid JSON)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, status, report_json) VALUES (?, ?, ?, ?)",
             ("2026-04-25T12:00:00+00:00", "not-valid-json", "no_feasible", "{}"),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     try:
         import logging
@@ -936,14 +915,11 @@ def test_post_recalibrate_uses_v2_optimizer_with_grid(tmp_path, monkeypatch):
         body = resp.json()
 
         rec_id = body["recommendation_id"]
-        conn = btc_api.get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 "SELECT report_json FROM kill_switch_recommendations WHERE id = ?",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
         import json
         report = json.loads(row[0])
         # Real v2 report has stub=False and includes grid + dd_target
@@ -981,14 +957,11 @@ def test_post_recalibrate_falls_back_to_stub_when_v2_raises(tmp_path, monkeypatc
         assert body["status"] == "no_feasible"
 
         rec_id = body["recommendation_id"]
-        conn = btc_api.get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 "SELECT report_json FROM kill_switch_recommendations WHERE id = ?",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
         import json
         report = json.loads(row[0])
         # Stub is True in fallback path
@@ -1250,8 +1223,7 @@ def test_load_last_applied_recommendation_returns_latest_applied(tmp_path, monke
     btc_api.init_db()
 
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # pending row
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
@@ -1273,9 +1245,6 @@ def test_load_last_applied_recommendation_returns_latest_applied(tmp_path, monke
             "VALUES (?, '[\"manual\"]', 70, 300.0, -0.03, 'applied', '{}')",
             ("2026-04-24T10:00:00+00:00",),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     row = _load_last_applied_recommendation()
     assert row is not None
@@ -1307,8 +1276,7 @@ def test_load_last_calibration_regime_score_extracts_from_report_json(tmp_path, 
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, slider_value, status, report_json) "
@@ -1318,9 +1286,6 @@ def test_load_last_calibration_regime_score_extracts_from_report_json(tmp_path, 
                 json.dumps({"regime_score": 72.5, "stub": False}),
             ),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     assert _load_last_calibration_regime_score() == pytest.approx(72.5)
 
@@ -1336,17 +1301,13 @@ def test_load_last_calibration_regime_score_handles_missing_field(tmp_path, monk
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, slider_value, status, report_json) "
             "VALUES (?, '[\"safety_net\"]', NULL, 'no_feasible', '{}')",
             ("2026-04-25T10:00:00+00:00",),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     assert _load_last_calibration_regime_score() is None
 
@@ -1383,8 +1344,7 @@ def test_count_symbols_with_recent_alerts_counts_distinct_symbols(tmp_path, monk
     inside = (now - timedelta(hours=10)).isoformat()
     outside = (now - timedelta(hours=100)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # BTC ALERT (inside)
         conn.execute(
             "INSERT INTO kill_switch_decisions "
@@ -1434,9 +1394,6 @@ def test_count_symbols_with_recent_alerts_counts_distinct_symbols(tmp_path, monk
             "VALUES (?, 'DOGEUSDT', 'v1', 'ALERT', 'NORMAL', 0.5, 0)",
             (inside,),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     # Distinct: BTC, ETH, XRP = 3
     assert _count_symbols_with_recent_alerts(window_hours=72.0) == 3
@@ -1453,8 +1410,7 @@ def test_mark_prior_pending_as_superseded_only_pending(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # 3 rows: pending(id=1), applied(id=2), pending(id=3 — the "new" one)
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
@@ -1472,20 +1428,14 @@ def test_mark_prior_pending_as_superseded_only_pending(tmp_path, monkeypatch):
             "(ts, triggered_by, status, report_json) "
             "VALUES ('2026-04-25T10:00:00+00:00', '[]', 'pending', '{}')",
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     # Mark prior pending as superseded; new id is 3
     _mark_prior_pending_as_superseded(new_id=3)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
         ).fetchall()
-    finally:
-        conn.close()
     statuses = {r[0]: r[1] for r in rows}
     assert statuses[1] == "superseded"
     assert statuses[2] == "applied"   # untouched
@@ -1610,8 +1560,7 @@ def test_calibrator_loop_rate_limit_blocks_repeated_auto_trigger(tmp_path, monke
     # Force an event_cascade by seeding ALERTs
     now = datetime.now(tz=timezone.utc)
     inside = (now - timedelta(hours=2)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
             conn.execute(
                 "INSERT INTO kill_switch_decisions "
@@ -1619,9 +1568,6 @@ def test_calibrator_loop_rate_limit_blocks_repeated_auto_trigger(tmp_path, monke
                 "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
                 (inside, sym),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     stop_event = threading.Event()
     def fake_wait(seconds):
@@ -1642,13 +1588,10 @@ def test_calibrator_loop_rate_limit_blocks_repeated_auto_trigger(tmp_path, monke
     kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
     # Should have only the seed row — second persist blocked by cooldown
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM kill_switch_recommendations"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert count == 1
 
 
@@ -1669,8 +1612,7 @@ def test_calibrator_loop_event_cascade_fires_when_3_alerts_in_window(
     # Seed 3 ALERT decisions for distinct symbols (within 72h)
     now = datetime.now(tz=timezone.utc)
     inside = (now - timedelta(hours=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
             conn.execute(
                 "INSERT INTO kill_switch_decisions "
@@ -1678,9 +1620,6 @@ def test_calibrator_loop_event_cascade_fires_when_3_alerts_in_window(
                 "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
                 (inside, sym),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     stop_event = threading.Event()
     def fake_wait(seconds):
@@ -1704,13 +1643,10 @@ def test_calibrator_loop_event_cascade_fires_when_3_alerts_in_window(
 
     # Should have persisted with event_cascade in triggered_by
     import json
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT triggered_by, status FROM kill_switch_recommendations"
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
     triggered = json.loads(rows[0][0])
     # event_cascade triggered alongside any other firing trigger (e.g., safety_net)
@@ -1748,17 +1684,13 @@ def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
 
     # Add a profitable trade so v2 grid produces a new pending
     inside = (datetime.now(tz=timezone.utc) - timedelta(days=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (inside, inside),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     stop_event = threading.Event()
     def fake_wait(seconds):
@@ -1769,8 +1701,7 @@ def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
     # safety_net 30d + last persist 2d ago → safety_net WON'T fire
     # But we also seeded the cascade so let's keep cascade firing the new pending
     inside_alert = (datetime.now(tz=timezone.utc) - timedelta(hours=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
             conn.execute(
                 "INSERT INTO kill_switch_decisions "
@@ -1778,9 +1709,6 @@ def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
                 "VALUES (?, ?, 'v2_shadow', 'ALERT', 'NORMAL', 0.5, 0)",
                 (inside_alert, sym),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg_fn = lambda: {"kill_switch": {"v2": {
         "auto_calibrator": {
@@ -1796,13 +1724,10 @@ def test_calibrator_loop_pending_marks_prior_pending_as_superseded(
     }}}
     kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT id, status FROM kill_switch_recommendations ORDER BY id"
         ).fetchall()
-    finally:
-        conn.close()
     statuses = {r[0]: r[1] for r in rows}
     # Original pending (id=1) → superseded
     assert statuses[1] == "superseded"
@@ -1827,8 +1752,7 @@ def test_calibrator_loop_pending_sends_telegram_notification(
     # Seed cascade trigger
     now = datetime.now(tz=timezone.utc)
     inside = (now - timedelta(hours=5)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for sym in ("BTCUSDT", "ETHUSDT", "ADAUSDT"):
             conn.execute(
                 "INSERT INTO kill_switch_decisions "
@@ -1843,9 +1767,6 @@ def test_calibrator_loop_pending_sends_telegram_notification(
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (inside, inside),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     captured = []
     import strategy.kill_switch_v2_calibrator as cal_mod
@@ -1935,14 +1856,11 @@ def test_post_apply_recommendation_marks_applied_and_writes_config(
         assert ks_v2.get("aggressiveness") == 65
 
         # DB row updated
-        conn = btc_api.get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
         assert row[0] == "applied"
         assert row[1] == "operator"
     finally:
@@ -1980,17 +1898,13 @@ def test_post_apply_recommendation_400_when_already_applied(tmp_path, monkeypatc
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
     monkeypatch.setattr(btc_api, "save_config", lambda updates: updates)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, slider_value, status, applied_ts, applied_by, report_json) "
             "VALUES ('2026-04-25T10:00:00+00:00', '[\"manual\"]', 65, 'applied', "
             "'2026-04-25T11:00:00+00:00', 'operator', '{}')",
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     try:
         client = TestClient(btc_api.app)
@@ -2031,14 +1945,11 @@ def test_post_ignore_recommendation_marks_ignored(tmp_path, monkeypatch):
         assert resp.status_code == 200
         assert resp.json()["status"] == "ignored"
 
-        conn = btc_api.get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 "SELECT status, applied_by FROM kill_switch_recommendations WHERE id=?",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
         assert row[0] == "ignored"
         assert row[1] == "operator"
     finally:
@@ -2155,16 +2066,12 @@ def test_apply_endpoint_rejects_out_of_range_slider(tmp_path, monkeypatch):
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
 
     # Insert a row with slider=150 directly
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, slider_value, status, report_json) "
             "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', 150, 'pending', '{}')",
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     try:
         client = TestClient(btc_api.app)
@@ -2188,16 +2095,12 @@ def test_apply_endpoint_rejects_no_feasible_with_null_slider(tmp_path, monkeypat
     btc_api.app.dependency_overrides[btc_api.verify_api_key] = lambda: None
 
     # Insert pending row with NULL slider (corrupt — would normally be no_feasible)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO kill_switch_recommendations "
             "(ts, triggered_by, slider_value, status, report_json) "
             "VALUES ('2026-04-25T12:00:00+00:00', '[\"manual\"]', NULL, 'pending', '{}')",
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     try:
         client = TestClient(btc_api.app)
@@ -2297,13 +2200,10 @@ def test_calibrator_loop_no_telegram_for_no_feasible(tmp_path, monkeypatch):
     cal.kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
     # Persisted, but Telegram NOT called for no_feasible
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT status FROM kill_switch_recommendations"
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
     assert rows[0][0] == "no_feasible"
     assert captured == []  # No Telegram for no_feasible

@@ -358,7 +358,7 @@ class TestFailQuiet:
         def _explode(*_a, **_kw):
             raise sqlite3.OperationalError("disk full")
 
-        monkeypatch.setattr(audit, "get_db", _explode)
+        monkeypatch.setattr(audit, "transaction", _explode)
 
         # Should not raise
         audit.record_history(

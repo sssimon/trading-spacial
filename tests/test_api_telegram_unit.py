@@ -116,10 +116,9 @@ def test_push_webhook_writes_audit_row(signal_rep, cfg, tmp_path, monkeypatch):
         mock_post.return_value = MagicMock(status_code=200, ok=True)
         push_webhook(signal_rep, scan_id=42, cfg=cfg)
 
-    from db.connection import get_db
-    con = get_db()
-    rows = con.execute("SELECT scan_id, url, status, ok FROM webhooks_sent").fetchall()
-    con.close()
+    from db.transaction import transaction
+    with transaction() as con:
+        rows = con.execute("SELECT scan_id, url, status, ok FROM webhooks_sent").fetchall()
     assert len(rows) == 1
     assert rows[0][0] == 42  # scan_id
     assert rows[0][3] == 1   # ok=True

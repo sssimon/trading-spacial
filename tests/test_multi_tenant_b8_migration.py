@@ -41,37 +41,35 @@ def seeded_db(tmp_path, monkeypatch):
 
     from db.auth_schema import init_auth_db
     from db.schema import init_db
-    from db.connection import get_db
+    from db.transaction import transaction
 
     init_db()
     init_auth_db()
 
     # Insert a real user (id=1)
-    con = get_db()
-    con.execute(
-        "INSERT INTO users (id, email, password_hash, role, is_active, "
-        "created_at, password_changed_at) VALUES "
-        "(1, 'samuel@example.com', 'hash', 'admin', 1, "
-        "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
-    )
-    # Pre-multi-tenant rows: tenant_id NULL across each per-user table
-    con.execute(
-        "INSERT INTO positions (symbol, direction, status, entry_price, "
-        "entry_ts) VALUES ('BTCUSDT', 'LONG', 'closed', 65000, "
-        "'2026-04-01T00:00:00')"
-    )
-    con.execute(
-        "INSERT INTO positions (symbol, direction, status, entry_price, "
-        "entry_ts) VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
-        "'2026-04-02T00:00:00')"
-    )
-    con.execute(
-        "INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, "
-        "signal_price, score, status) VALUES "
-        "(1, 'BTCUSDT', '2026-04-01T00:00:00', 65000, 5, 'completed')"
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        con.execute(
+            "INSERT INTO users (id, email, password_hash, role, is_active, "
+            "created_at, password_changed_at) VALUES "
+            "(1, 'samuel@example.com', 'hash', 'admin', 1, "
+            "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
+        )
+        # Pre-multi-tenant rows: tenant_id NULL across each per-user table
+        con.execute(
+            "INSERT INTO positions (symbol, direction, status, entry_price, "
+            "entry_ts) VALUES ('BTCUSDT', 'LONG', 'closed', 65000, "
+            "'2026-04-01T00:00:00')"
+        )
+        con.execute(
+            "INSERT INTO positions (symbol, direction, status, entry_price, "
+            "entry_ts) VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
+            "'2026-04-02T00:00:00')"
+        )
+        con.execute(
+            "INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, "
+            "signal_price, score, status) VALUES "
+            "(1, 'BTCUSDT', '2026-04-01T00:00:00', 65000, 5, 'completed')"
+        )
 
     yield db_path
 
@@ -123,32 +121,28 @@ class TestMigrationLogic:
         """Pre-reg §2.1: default mode is dry-run; no writes."""
         from scripts.migrate_to_multitenant import run
         from db.capital import db_get_capital
-        from db.connection import get_db
+        from db.transaction import transaction
 
         exit_code = run(self._make_args(execute=False))
         assert exit_code == 0
 
         # NULL-tenant rows must remain NULL
-        con = get_db()
-        try:
+        with transaction() as con:
             null_pos = con.execute(
                 "SELECT COUNT(*) FROM positions WHERE tenant_id IS NULL"
             ).fetchone()[0]
-        finally:
-            con.close()
         assert null_pos == 2
         assert db_get_capital(1) is None  # no capital row created
 
     def test_execute_stamps_tenant_id(self, seeded_db):
         """Pre-reg §2.3: --execute backfills tenant_id on NULL rows."""
         from scripts.migrate_to_multitenant import run
-        from db.connection import get_db
+        from db.transaction import transaction
 
         exit_code = run(self._make_args(execute=True))
         assert exit_code == 0
 
-        con = get_db()
-        try:
+        with transaction() as con:
             null_pos = con.execute(
                 "SELECT COUNT(*) FROM positions WHERE tenant_id IS NULL"
             ).fetchone()[0]
@@ -158,8 +152,6 @@ class TestMigrationLogic:
             null_sigs = con.execute(
                 "SELECT COUNT(*) FROM signal_outcomes WHERE tenant_id IS NULL"
             ).fetchone()[0]
-        finally:
-            con.close()
         assert null_pos == 0
         assert owned == 2
         assert null_sigs == 0
@@ -217,17 +209,14 @@ class TestMigrationLogic:
     def test_neither_flag_defaults_to_dry_run(self, seeded_db):
         """Pre-reg §2.1: no --execute → dry-run (no writes)."""
         from scripts.migrate_to_multitenant import run
-        from db.connection import get_db
+        from db.transaction import transaction
 
         # execute=False (default)
         assert run(self._make_args(execute=False)) == 0
-        con = get_db()
-        try:
+        with transaction() as con:
             null_pos = con.execute(
                 "SELECT COUNT(*) FROM positions WHERE tenant_id IS NULL"
             ).fetchone()[0]
-        finally:
-            con.close()
         assert null_pos == 2  # unchanged
 
     def test_validates_row_count_unchanged(self, seeded_db):

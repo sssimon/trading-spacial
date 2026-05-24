@@ -1,5 +1,6 @@
 """apply_reduce_factor — scales size by config.reduce_size_factor when state is REDUCED."""
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -72,8 +73,7 @@ def test_reduce_factor_applied_when_state_probation(tmp_db):
     from health import apply_reduce_factor
     import btc_api
     # Seed PROBATION row directly
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -81,9 +81,6 @@ def test_reduce_factor_applied_when_state_probation(tmp_db):
                VALUES ('UNI', 'PROBATION', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     cfg = {"kill_switch": {"enabled": True, "reduce_size_factor": 0.5}}
     assert apply_reduce_factor(1.0, "UNI", cfg) == 0.5
     assert apply_reduce_factor(1000.0, "UNI", cfg) == 500.0
@@ -93,8 +90,7 @@ def test_probation_size_factor_config_override(tmp_db):
     """v2.probation.size_factor overrides reduce_size_factor for PROBATION only."""
     from health import apply_reduce_factor
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -102,9 +98,6 @@ def test_probation_size_factor_config_override(tmp_db):
                VALUES ('JUP', 'PROBATION', '2026-04-01T00:00:00+00:00',
                        '2026-04-01T00:00:00+00:00', '{}', 13, '2026-04-01T00:00:00+00:00', 15)"""
         )
-        conn.commit()
-    finally:
-        conn.close()
     cfg = {"kill_switch": {
         "enabled": True, "reduce_size_factor": 0.5,
         "v2": {"probation": {"size_factor": 0.25}},

@@ -1,5 +1,6 @@
 """Tests for strategy.kill_switch_v2 — portfolio circuit breaker (#187 B2)."""
 import pytest
+from db.transaction import transaction
 
 
 def test_interpolate_threshold_at_slider_0():
@@ -366,8 +367,7 @@ def test_emit_shadow_uses_cache_for_multi_symbol_mtm(tmp_path, monkeypatch, _cle
     btc_api.init_db()
 
     # Seed 2 open positions in 2 different symbols, both priced
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts, tenant_id) "
             "VALUES('BTCUSDT', 'LONG', 50000, 0.01, 'open', '2026-04-20T10:00:00+00:00', 1)"
@@ -376,9 +376,6 @@ def test_emit_shadow_uses_cache_for_multi_symbol_mtm(tmp_path, monkeypatch, _cle
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, entry_ts, tenant_id) "
             "VALUES('ETHUSDT', 'LONG', 3000, 1.0, 'open', '2026-04-20T10:00:00+00:00', 1)"
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     # Simulate two prior scans that populated the cache for both symbols
     update_price("BTCUSDT", 51_000.0)   # +$10 on 0.01 qty
@@ -443,16 +440,12 @@ def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_
     # Seed one closed trade: -$50 PnL
     # With capital=$1000 → DD = -50/1000 = -0.05 (REDUCED band at slider=50)
     # With capital=$100k → DD = -50/100_000 = -0.0005 (NORMAL — the bug)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES('BTCUSDT', 'LONG', 50000, 0.01, "
             "'closed', '2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', -50.0, 1)"
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
@@ -502,13 +495,10 @@ def test_init_db_creates_kill_switch_v2_state_table(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = [r[1] for r in conn.execute(
             "PRAGMA table_info(kill_switch_v2_state)"
         ).fetchall()]
-    finally:
-        conn.close()
 
     assert "symbol" in cols
     assert "velocity_cooldown_until" in cols
@@ -734,8 +724,7 @@ def test_load_recent_sl_timestamps_filters_by_symbol_and_reason(tmp_path, monkey
     inside2 = (now - timedelta(hours=3)).isoformat()
     outside = (now - timedelta(hours=10)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # BTC SL inside window — should count
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -776,9 +765,6 @@ def test_load_recent_sl_timestamps_filters_by_symbol_and_reason(tmp_path, monkey
             "entry_ts, tenant_id) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?, 1)",
             (inside1,),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     result = _load_recent_sl_timestamps("BTCUSDT", now=now, window_hours=6.0)
     assert len(result) == 2
@@ -841,8 +827,7 @@ def test_emit_shadow_writes_velocity_active_true_on_trigger(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: now)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -851,9 +836,6 @@ def test_emit_shadow_writes_velocity_active_true_on_trigger(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 100,
@@ -871,14 +853,11 @@ def test_emit_shadow_writes_velocity_active_true_on_trigger(
     assert len(rows) == 1
     assert rows[0]["velocity_active"] is True
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         state_row = conn.execute(
             "SELECT velocity_cooldown_until, velocity_last_trigger_ts "
             "FROM kill_switch_v2_state WHERE symbol='BTCUSDT'"
         ).fetchone()
-    finally:
-        conn.close()
     assert state_row is not None
     # cooldown_until == now + 4h exactly (guards against bugs that store a
     # different field into the cooldown column)
@@ -905,8 +884,7 @@ def test_emit_shadow_writes_velocity_active_false_when_below_threshold(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: now)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(2):
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -915,9 +893,6 @@ def test_emit_shadow_writes_velocity_active_false_when_below_threshold(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 100,
@@ -932,13 +907,10 @@ def test_emit_shadow_writes_velocity_active_false_when_below_threshold(
     rows = observability.query_decisions(symbol="BTCUSDT", engine="v2_shadow")
     assert rows[0]["velocity_active"] is False
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         state_row = conn.execute(
             "SELECT * FROM kill_switch_v2_state WHERE symbol='BTCUSDT'"
         ).fetchone()
-    finally:
-        conn.close()
     assert state_row is None
 
 
@@ -969,8 +941,7 @@ def test_emit_shadow_velocity_active_decays_after_cooldown_expires(
 
     t0 = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(sh, "_now", lambda: t0)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             ts = (t0 - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -979,9 +950,6 @@ def test_emit_shadow_velocity_active_decays_after_cooldown_expires(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
     emit_shadow_decision(symbol="BTCUSDT", cfg=cfg, tenant_id=1)
 
     t1 = t0 + timedelta(hours=10)
@@ -1094,8 +1062,7 @@ def test_emit_shadow_does_not_touch_v1_decisions(
     assert len(v1_before) == 1
 
     # Seed 3 BTC SLs so velocity triggers in shadow
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -1104,9 +1071,6 @@ def test_emit_shadow_does_not_touch_v1_decisions(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 100,
@@ -1162,8 +1126,7 @@ def test_emit_shadow_multi_symbol_state_is_independent(
     assert rows[0]["velocity_active"] is False
 
     # ETH state row should NOT exist (no trigger, nothing written)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         eth_row = conn.execute(
             "SELECT * FROM kill_switch_v2_state WHERE symbol='ETHUSDT'"
         ).fetchone()
@@ -1172,8 +1135,6 @@ def test_emit_shadow_multi_symbol_state_is_independent(
             "SELECT velocity_cooldown_until FROM kill_switch_v2_state "
             "WHERE symbol='BTCUSDT'"
         ).fetchone()
-    finally:
-        conn.close()
     assert eth_row is None, "ETH eval must not create a state row when nothing triggers"
     assert btc_row[0] == (now + timedelta(hours=2)).isoformat(), \
         "BTC state must be untouched by ETH evaluation"
@@ -1203,8 +1164,7 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
     monkeypatch.setattr(sh, "_now", lambda: now)
 
     # Seed 3 BTC SLs → velocity eval will trigger and upsert state
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -1213,9 +1173,6 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     # Make record_decision raise (simulates a downstream failure after state
     # has already been upserted)
@@ -1244,14 +1201,11 @@ def test_emit_shadow_partial_write_state_persists_when_record_decision_fails(
     assert len(rows) == 0, "record_decision failure must not leave a v2_shadow row"
 
     # But state IS persisted (upsert happened before record_decision)
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         state_row = conn.execute(
             "SELECT velocity_cooldown_until "
             "FROM kill_switch_v2_state WHERE symbol='BTCUSDT'"
         ).fetchone()
-    finally:
-        conn.close()
     assert state_row is not None, (
         "State upsert commits before record_decision; this is expected and "
         "documented (shadow is more conservative than the log — next scan "
@@ -1581,17 +1535,13 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -52.0, 1)",
             ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -1636,17 +1586,13 @@ def test_bear_regime_makes_reduced_threshold_laxer_enough_to_flip_tier(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -57.0, 1)",
             ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -1718,8 +1664,7 @@ def test_emit_shadow_bull_regime_cfg_eff_threaded_to_velocity_path(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: now)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(3):
             ts = (now - timedelta(hours=i + 1)).isoformat()
             conn.execute(
@@ -1728,9 +1673,6 @@ def test_emit_shadow_bull_regime_cfg_eff_threaded_to_velocity_path(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -10.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 100,
@@ -1828,13 +1770,10 @@ def test_init_db_creates_kill_switch_v2_baseline_table(tmp_path, monkeypatch):
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         cols = [r[1] for r in conn.execute(
             "PRAGMA table_info(kill_switch_v2_baseline)"
         ).fetchall()]
-    finally:
-        conn.close()
 
     assert "symbol" in cols
     assert "baseline_wr" in cols
@@ -2045,8 +1984,7 @@ def test_load_closed_trades_for_symbol_filters_by_symbol_and_status(tmp_path, mo
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES "
@@ -2071,9 +2009,6 @@ def test_load_closed_trades_for_symbol_filters_by_symbol_and_status(tmp_path, mo
             "('ETHUSDT', 'LONG', 3000, 1.0, 'closed', "
             "'2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', 20.0, 1)",
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     rows = _load_closed_trades_for_symbol("BTCUSDT")
     assert len(rows) == 1
@@ -2200,12 +2135,8 @@ def test_evaluate_per_symbol_tier_with_telemetry_below_min_trades(
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(sh, "_now", lambda: now)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         _seed_n_closed_trades(conn, "BTCUSDT", n=50, win_rate=0.5)
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -2243,8 +2174,7 @@ def test_evaluate_per_symbol_tier_with_telemetry_alert_fires(
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(sh, "_now", lambda: now)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # 100 historical trades at WR=0.5 in March (so they don't dominate rolling-20)
         for _ in range(50):
             conn.execute(
@@ -2268,9 +2198,6 @@ def test_evaluate_per_symbol_tier_with_telemetry_alert_fires(
                 "'2026-04-20T10:00:00+00:00', ?, -5.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -2354,8 +2281,7 @@ def test_evaluate_per_symbol_tier_with_telemetry_recomputes_when_stale(
         {"wr": 0.5, "sigma": 0.5, "count": 50},
         now=now - timedelta(days=10),
     )
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(100):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -2364,9 +2290,6 @@ def test_evaluate_per_symbol_tier_with_telemetry_recomputes_when_stale(
                 "'2026-04-20T10:00:00+00:00', ?, 10.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -2435,8 +2358,7 @@ def test_emit_shadow_writes_per_symbol_tier_alert_when_baseline_breaks(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc))
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for _ in range(50):
             conn.execute(
                 "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -2458,9 +2380,6 @@ def test_emit_shadow_writes_per_symbol_tier_alert_when_baseline_breaks(
                 "'2026-04-20T10:00:00+00:00', ?, -5.0, 1)",
                 (f"2026-04-20T{(i % 24):02d}:00:00+00:00",),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
@@ -2610,8 +2529,7 @@ def test_evaluate_per_symbol_tier_with_telemetry_cached_count_gates_decision(
     )
 
     # Insert 200 live closed trades — enough that a recompute would give count>=100
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         for i in range(200):
             ts_h = i % 24
             ts = f"2026-04-20T{ts_h:02d}:00:00+00:00"
@@ -2621,9 +2539,6 @@ def test_evaluate_per_symbol_tier_with_telemetry_cached_count_gates_decision(
                 "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, -5.0, 1)",
                 (ts, ts),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,

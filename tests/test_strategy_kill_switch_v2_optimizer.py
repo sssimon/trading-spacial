@@ -1,5 +1,6 @@
 """Tests for run_optimization_v2 + helpers (#187 #216 B4b.2)."""
 import pytest
+from db.transaction import transaction
 
 
 # ── B4b.2: optimizer helpers ────────────────────────────────────────────────
@@ -20,8 +21,7 @@ def test_load_closed_positions_window_filters_by_window(tmp_path, monkeypatch):
     inside = (now - timedelta(days=10)).isoformat()
     outside = (now - timedelta(days=400)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # Inside window (10d ago)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -42,9 +42,6 @@ def test_load_closed_positions_window_filters_by_window(tmp_path, monkeypatch):
             "entry_ts, tenant_id) VALUES ('BTCUSDT', 'LONG', 50000, 0.01, 'open', ?, 1)",
             (inside,),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     rows = _load_closed_positions_window(window_days=365.0, now=now)
     assert len(rows) == 1
@@ -67,8 +64,7 @@ def test_load_closed_positions_window_orders_by_entry_ts(tmp_path, monkeypatch):
     earlier = (now - timedelta(days=20)).isoformat()
     later = (now - timedelta(days=10)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # Insert later first (out of order)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -82,9 +78,6 @@ def test_load_closed_positions_window_orders_by_entry_ts(tmp_path, monkeypatch):
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -5.0, 1)",
             (earlier, earlier),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     rows = _load_closed_positions_window(window_days=365.0, now=now)
     assert len(rows) == 2
@@ -243,17 +236,13 @@ def test_run_optimization_v2_no_feasible_when_all_blow_target(tmp_path, monkeypa
     # Insert a single -200 USD trade (DD = -0.20, blows -0.01 target)
     now = datetime.now(tz=timezone.utc)
     ts = (now - timedelta(days=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -200.0, 1)",
             (ts, ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = _basic_optimizer_cfg()
     cfg["kill_switch"]["v2"]["auto_calibrator"] = {
@@ -280,17 +269,13 @@ def test_run_optimization_v2_picks_max_pnl_among_feasible(tmp_path, monkeypatch)
 
     now = datetime.now(tz=timezone.utc)
     ts = (now - timedelta(days=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = _basic_optimizer_cfg()
     cfg["kill_switch"]["v2"]["auto_calibrator"] = {
@@ -376,8 +361,7 @@ def test_run_optimization_v2_filters_out_of_window_trades(tmp_path, monkeypatch)
     inside_ts = (now - timedelta(days=10)).isoformat()
     outside_ts = (now - timedelta(days=400)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # Inside the 365-day window: profitable +50
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -393,9 +377,6 @@ def test_run_optimization_v2_filters_out_of_window_trades(tmp_path, monkeypatch)
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', -1000.0, 1)",
             (outside_ts, outside_ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = _basic_optimizer_cfg()
     cfg["kill_switch"]["v2"]["auto_calibrator"] = {
@@ -425,8 +406,7 @@ def test_run_optimization_v2_excludes_null_pnl_trades(tmp_path, monkeypatch):
     now = datetime.now(tz=timezone.utc)
     ts = (now - timedelta(days=10)).isoformat()
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # Valid trade with non-null pnl
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -441,9 +421,6 @@ def test_run_optimization_v2_excludes_null_pnl_trades(tmp_path, monkeypatch):
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'SL', NULL, 1)",
             (ts, ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     rows = _load_closed_positions_window(window_days=365.0, now=now)
     assert len(rows) == 1
@@ -506,8 +483,7 @@ def test_run_optimization_v2_regime_score_can_change_recommended_slider(
 
     now = datetime.now(tz=timezone.utc)
     ts = (now - timedelta(days=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         # A profitable trade — both regimes would take it (NORMAL portfolio)
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
@@ -515,9 +491,6 @@ def test_run_optimization_v2_regime_score_can_change_recommended_slider(
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     cfg = _basic_optimizer_cfg()
     cfg["kill_switch"]["v2"]["auto_calibrator"] = {
@@ -552,17 +525,13 @@ def test_calibrator_loop_uses_real_v2_with_profitable_trades(
     # Seed a profitable closed trade within the backtest window
     now = datetime.now(tz=timezone.utc)
     ts = (now - timedelta(days=10)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
             "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
             "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', 50.0, 1)",
             (ts, ts),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     stop_event = threading.Event()
     def fake_wait(seconds):
@@ -594,13 +563,10 @@ def test_calibrator_loop_uses_real_v2_with_profitable_trades(
 
     kill_switch_calibrator_loop(cfg_fn, stop_event=stop_event)
 
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             "SELECT triggered_by, status, report_json FROM kill_switch_recommendations"
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
     import json
     triggered = json.loads(rows[0][0])

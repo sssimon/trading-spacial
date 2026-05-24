@@ -29,6 +29,7 @@ from __future__ import annotations
 import pytest
 
 from tests._fakes import FakeAnthropicClient, FakeTurnBuilder
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -177,18 +178,14 @@ async def test_propose_close_path_uses_id_from_tool_result(tmp_db, monkeypatch):
     from api.agent.tools import handlers as h
 
     # Seed: tenant 1 has open position #7 for ETHUSDT.
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "INSERT INTO positions "
             "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
             "VALUES ('ETHUSDT', 'LONG', 'open', 3000, '2026-05-19T10:00:00+00:00', "
             "        1000, 1)",
         )
-        con.commit()
         pos_id = con.execute("SELECT MAX(id) AS id FROM positions").fetchone()["id"]
-    finally:
-        con.close()
 
     # Real get_positions handler (uses the DB). Real
     # propose_close_position too — it signs a real envelope.

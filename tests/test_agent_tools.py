@@ -34,6 +34,7 @@ import inspect
 import json
 
 import pytest
+from db.transaction import transaction
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────
@@ -56,14 +57,11 @@ def tmp_db(tmp_path, monkeypatch):
 
 def test_init_db_creates_agent_audit_tables(tmp_db):
     import btc_api
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name IN ('agent_conversations', 'agent_side_effects', 'agent_quotas')"
         ).fetchall()
-    finally:
-        con.close()
     names = {r[0] for r in rows}
     assert names == {"agent_conversations", "agent_side_effects", "agent_quotas"}, (
         f"Missing agent audit table(s); found {names}"
@@ -76,8 +74,7 @@ def test_agent_side_effects_idempotency_key_is_unique(tmp_db):
     double-click in Phase 3 — pre-reg §10.2."""
     import sqlite3
     import btc_api
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "INSERT INTO agent_side_effects "
             "(tenant_id, conversation_id, ts, action, args_json, "
@@ -85,7 +82,6 @@ def test_agent_side_effects_idempotency_key_is_unique(tmp_db):
             "VALUES (1, 'c1', '2026-05-19T10:00:00+00:00', 'close_position', "
             "'{}', 'key-a', 'ok', 200)"
         )
-        con.commit()
         with pytest.raises(sqlite3.IntegrityError):
             con.execute(
                 "INSERT INTO agent_side_effects "
@@ -94,9 +90,6 @@ def test_agent_side_effects_idempotency_key_is_unique(tmp_db):
                 "VALUES (1, 'c1', '2026-05-19T10:00:01+00:00', 'close_position', "
                 "'{}', 'key-a', 'ok', 200)"
             )
-            con.commit()
-    finally:
-        con.close()
 
 
 # ── 2. Tenant isolation per handler ─────────────────────────────────────
@@ -126,11 +119,8 @@ def test_get_positions_filters_strictly_by_tenant(tmp_db):
     from api.agent.tools.handlers import get_positions
     import btc_api
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _seed_two_tenant_positions(con)
-    finally:
-        con.close()
 
     out_a = get_positions(tenant_id=1)
     out_b = get_positions(tenant_id=2)
@@ -145,11 +135,8 @@ def test_get_closed_trades_filters_strictly_by_tenant(tmp_db):
     from api.agent.tools.handlers import get_closed_trades
     import btc_api
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         _seed_two_tenant_positions(con)
-    finally:
-        con.close()
 
     a = get_closed_trades(tenant_id=1, window="30d")
     b = get_closed_trades(tenant_id=2, window="30d")
@@ -175,18 +162,14 @@ def test_get_position_detail_returns_not_found_for_other_tenant(tmp_db):
     from api.agent.tools.handlers import get_position_detail
     import btc_api
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             "INSERT INTO positions "
             "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
             "VALUES ('BTCUSDT', 'LONG', 'open', 50000, "
             "'2026-05-15T10:00:00+00:00', 1000, 2)"
         )
-        con.commit()
         other_tenant_pos_id = cur.lastrowid
-    finally:
-        con.close()
 
     # tenant 1 asks for tenant 2's position id
     out_existing = get_position_detail(tenant_id=1, position_id=other_tenant_pos_id)
@@ -202,18 +185,14 @@ def test_get_position_detail_returns_row_for_own_tenant(tmp_db):
     from api.agent.tools.handlers import get_position_detail
     import btc_api
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             "INSERT INTO positions "
             "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
             "VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
             "'2026-05-15T10:00:00+00:00', 500, 7)"
         )
-        con.commit()
         own_pos_id = cur.lastrowid
-    finally:
-        con.close()
 
     out = get_position_detail(tenant_id=7, position_id=own_pos_id)
     assert out["id"] == own_pos_id

@@ -24,6 +24,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from db.transaction import transaction
 
 
 # ── Schema + backfill ───────────────────────────────────────────
@@ -54,8 +55,7 @@ def test_backfill_provider_from_model_prefix(tmp_path, monkeypatch):
     btc_api.init_db()
 
     # Insert rows with NULL provider (simulating pre-Fase-4 data).
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         ts = datetime.now(timezone.utc).isoformat()
         for model in ("claude-sonnet-4-6", "claude-opus-4-7",
                        "deepseek-chat", "deepseek-reasoner"):
@@ -67,22 +67,16 @@ def test_backfill_provider_from_model_prefix(tmp_path, monkeypatch):
             )
         # Force provider to NULL so the backfill has something to do.
         con.execute("UPDATE agent_conversations SET provider = NULL")
-        con.commit()
-    finally:
-        con.close()
 
     # Run init_db again — idempotent, but the backfill UPDATE only
     # touches WHERE provider IS NULL. After this, all 4 rows have
     # provider populated.
     btc_api.init_db()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT model, provider FROM agent_conversations "
             "ORDER BY model ASC"
         ).fetchall()
-    finally:
-        con.close()
     by_model = {r["model"]: r["provider"] for r in rows}
     assert by_model["claude-sonnet-4-6"]  == "anthropic"
     assert by_model["claude-opus-4-7"]    == "anthropic"
@@ -98,8 +92,7 @@ def test_backfill_does_not_overwrite_existing_provider(tmp_path, monkeypatch):
     db_path = str(tmp_path / "signals.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
     btc_api.init_db()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         ts = datetime.now(timezone.utc).isoformat()
         con.execute(
             "INSERT INTO agent_conversations "
@@ -107,18 +100,12 @@ def test_backfill_does_not_overwrite_existing_provider(tmp_path, monkeypatch):
             "VALUES (1, 'dock', 'sentinel', ?, 'assistant', 'claude-sonnet-4-6', 'custom-vendor')",
             (ts,),
         )
-        con.commit()
-    finally:
-        con.close()
 
     btc_api.init_db()  # re-run migration
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT provider FROM agent_conversations WHERE conversation_id = 'sentinel'"
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["provider"] == "custom-vendor"
 
 
@@ -141,14 +128,11 @@ def test_record_turn_persists_provider_and_reasoning_tokens(tmp_path, monkeypatc
         cost_usd=0.05,
     )
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT provider, reasoning_tokens, model "
             "FROM agent_conversations WHERE conversation_id = 'c1'"
         ).fetchone()
-    finally:
-        con.close()
     d = dict(row)
     assert d["provider"] == "deepseek"
     assert d["reasoning_tokens"] == 150
@@ -172,14 +156,11 @@ def test_record_turn_stores_null_reasoning_tokens_when_absent(tmp_path, monkeypa
         input_tokens=100, output_tokens=200,
         cost_usd=0.05,
     )
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT reasoning_tokens FROM agent_conversations "
             "WHERE conversation_id = 'c2'"
         ).fetchone()
-    finally:
-        con.close()
     assert dict(row)["reasoning_tokens"] is None
 
 
@@ -209,14 +190,11 @@ def test_record_turn_preserves_explicit_zero_reasoning_tokens(tmp_path, monkeypa
         reasoning_tokens=0,  # explicit zero
         cost_usd=0.01,
     )
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT reasoning_tokens FROM agent_conversations "
             "WHERE conversation_id = 'c-zero'"
         ).fetchone()
-    finally:
-        con.close()
     # 0 preserved, NOT collapsed to NULL.
     assert dict(row)["reasoning_tokens"] == 0
     assert dict(row)["reasoning_tokens"] is not None
@@ -360,8 +338,7 @@ def _seed_assistant(tenant_id, model, cost_usd, provider, reasoning_tokens=None,
                      hours_ago=1):
     import btc_api
     ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "INSERT INTO agent_conversations "
             "(tenant_id, surface, conversation_id, ts, role, model, provider, "
@@ -371,9 +348,6 @@ def _seed_assistant(tenant_id, model, cost_usd, provider, reasoning_tokens=None,
             (tenant_id, f"conv-{ts}", ts, model, provider,
              reasoning_tokens, cost_usd),
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 def _admin_client_fixture(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@
 Same (event_type, event_key) within window_seconds returns False (don't send).
 Outside window or first occurrence returns True (send)."""
 import pytest
+from db.transaction import transaction
 
 
 @pytest.fixture
@@ -59,8 +60,7 @@ def test_record_older_than_window_allows_resend(tmp_db):
 
     # Backdate a row manually — 2 hours old, window is 60 seconds
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO notifications_sent
                (event_type, event_key, priority, payload_json,
@@ -68,8 +68,5 @@ def test_record_older_than_window_allows_resend(tmp_db):
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             ("health", "health:BTC:PAUSED", "warning", "{}", "telegram", "ok", past, None),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     assert should_send("health", "health:BTC:PAUSED", window_seconds=60) is True

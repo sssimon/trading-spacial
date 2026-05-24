@@ -337,10 +337,9 @@ def test_push_webhook_with_poisoned_cfg_skips_request(monkeypatch, tmp_path):
         assert not mock_post.called, "push_webhook must NOT dial a link-local URL"
 
     # Blocked attempt is audited (status=0, ok=0) so operators can see it.
-    from db.connection import get_db
-    con = get_db()
-    rows = con.execute("SELECT scan_id, status, ok FROM webhooks_sent").fetchall()
-    con.close()
+    from db.transaction import transaction
+    with transaction() as con:
+        rows = con.execute("SELECT scan_id, status, ok FROM webhooks_sent").fetchall()
     assert len(rows) == 1
     assert rows[0][0] == 999     # scan_id
     assert rows[0][1] == 0       # status

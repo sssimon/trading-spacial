@@ -11,6 +11,7 @@ import sqlite3
 import tempfile
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
+from db.transaction import transaction
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1678,16 +1679,14 @@ class TestSignalPerformance:
         import btc_api
         from unittest.mock import patch
 
-        con = btc_api.get_db()
-        # Insert a pending signal from 2 hours ago
-        ts_2h_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        con.execute("""
-            INSERT INTO signal_outcomes
-            (scan_id, symbol, signal_ts, signal_price, score, status)
-            VALUES (99, 'BTCUSDT', ?, 60000.0, 5, 'pending')
-        """, (ts_2h_ago,))
-        con.commit()
-        con.close()
+        with transaction() as con:
+            # Insert a pending signal from 2 hours ago
+            ts_2h_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+            con.execute("""
+                INSERT INTO signal_outcomes
+                (scan_id, symbol, signal_ts, signal_price, score, status)
+                VALUES (99, 'BTCUSDT', ?, 60000.0, 5, 'pending')
+            """, (ts_2h_ago,))
 
         # Pass current price — should fill price_1h without calling get_klines for milestones
         with patch.object(btc_api.md, "get_klines") as mock_klines:
@@ -1708,9 +1707,8 @@ class TestSignalPerformance:
                 assert args[0][1] == "1h"  # interval must be 1h, not 1m
 
         # Verify price_1h was set from current_prices
-        con = btc_api.get_db()
-        row = con.execute("SELECT * FROM signal_outcomes WHERE scan_id = 99").fetchone()
-        con.close()
+        with transaction() as con:
+            row = con.execute("SELECT * FROM signal_outcomes WHERE scan_id = 99").fetchone()
         assert row["price_1h"] == 61500.0
 
     def test_check_pending_handles_utc_suffix_format(self, caplog):
@@ -1727,14 +1725,12 @@ class TestSignalPerformance:
             "%Y-%m-%d %H:%M:%S UTC"
         )
 
-        con = btc_api.get_db()
-        con.execute("""
-            INSERT INTO signal_outcomes
-            (scan_id, symbol, signal_ts, signal_price, score, status)
-            VALUES (300, 'BTCUSDT', ?, 60000.0, 5, 'pending')
-        """, (ts_2h_ago,))
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute("""
+                INSERT INTO signal_outcomes
+                (scan_id, symbol, signal_ts, signal_price, score, status)
+                VALUES (300, 'BTCUSDT', ?, 60000.0, 5, 'pending')
+            """, (ts_2h_ago,))
 
         with patch.object(btc_api.md, "get_klines") as mock_klines:
             import pandas as pd
@@ -1755,9 +1751,8 @@ class TestSignalPerformance:
             f"production timestamp format: {[r.getMessage() for r in bad_warnings]}"
         )
 
-        con = btc_api.get_db()
-        row = con.execute("SELECT * FROM signal_outcomes WHERE scan_id = 300").fetchone()
-        con.close()
+        with transaction() as con:
+            row = con.execute("SELECT * FROM signal_outcomes WHERE scan_id = 300").fetchone()
         assert row["price_1h"] == 61500.0, (
             "Row update was skipped — fix did not reach the update branch"
         )
@@ -1767,16 +1762,14 @@ class TestSignalPerformance:
         import btc_api
         from unittest.mock import patch
 
-        con = btc_api.get_db()
-        ts_3h_ago = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
-        for scan_id in (200, 201, 202):
-            con.execute("""
-                INSERT INTO signal_outcomes
-                (scan_id, symbol, signal_ts, signal_price, score, status)
-                VALUES (?, 'ETHUSDT', ?, 3000.0, 4, 'pending')
-            """, (scan_id, ts_3h_ago))
-        con.commit()
-        con.close()
+        with transaction() as con:
+            ts_3h_ago = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+            for scan_id in (200, 201, 202):
+                con.execute("""
+                    INSERT INTO signal_outcomes
+                    (scan_id, symbol, signal_ts, signal_price, score, status)
+                    VALUES (?, 'ETHUSDT', ?, 3000.0, 4, 'pending')
+                """, (scan_id, ts_3h_ago))
 
         with patch.object(btc_api.md, "get_klines") as mock_klines:
             import pandas as pd
@@ -1792,20 +1785,18 @@ class TestSignalPerformance:
 
     def test_performance_with_data(self, client):
         import btc_api
-        con = btc_api.get_db()
-        # B.5: rows must carry tenant_id matching the JWT override (1)
-        # so the strict-filter GET surfaces them. NULL tenant_id rows are
-        # invisible to per-tenant queries by design.
-        con.execute("""
-            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
-            VALUES (1, 'BTCUSDT', '2025-01-01T00:00:00', 60000.0, 8, 62000.0, 5.0, -1.0, 'completed', 1)
-        """)
-        con.execute("""
-            INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
-            VALUES (2, 'ETHUSDT', '2025-01-01T01:00:00', 3000.0, 4, 2900.0, 1.0, -5.0, 'completed', 1)
-        """)
-        con.commit()
-        con.close()
+        with transaction() as con:
+            # B.5: rows must carry tenant_id matching the JWT override (1)
+            # so the strict-filter GET surfaces them. NULL tenant_id rows are
+            # invisible to per-tenant queries by design.
+            con.execute("""
+                INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
+                VALUES (1, 'BTCUSDT', '2025-01-01T00:00:00', 60000.0, 8, 62000.0, 5.0, -1.0, 'completed', 1)
+            """)
+            con.execute("""
+                INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, signal_price, score, price_24h, max_runup_pct, max_drawdown_pct, status, tenant_id)
+                VALUES (2, 'ETHUSDT', '2025-01-01T01:00:00', 3000.0, 4, 2900.0, 1.0, -5.0, 'completed', 1)
+            """)
 
         r = client.get("/signals/performance")
         assert r.status_code == 200
