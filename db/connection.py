@@ -3,9 +3,15 @@
 Extracted from btc_api.py:798-857 in PR0 of the api+db domain refactor (2026-04-27).
 
 Design:
-- get_db() returns a fresh sqlite3.Connection per call (no singleton).
-  This is critical for thread safety: scanner_loop and FastAPI request
-  handlers share the same DB file but each opens its own connection.
+- get_db() returns a fresh `_DbHandle` per call (no singleton). The handle
+  wraps a sqlite3.Connection and works as both:
+    (a) context manager — `with get_db() as con: …` closes on exit,
+        including on exception (#128 fix).
+    (b) legacy raw-connection — `con = get_db(); …; con.close()` still
+        works via attribute delegation. The test suite + a couple of
+        scripts still use this; the production code is migrated to (a).
+  Fresh-per-call is critical for thread safety: scanner_loop and FastAPI
+  request handlers share the same DB file but each opens its own connection.
 - _DictRow is a tuple subclass that supports both indexed access (row[0])
   AND dict-style access (row["column"]). It exists because health
   persistence tests rely on tuple equality while route code wants
@@ -69,8 +75,61 @@ class _DictRow(tuple):
         return self._mapping.keys()
 
 
-def get_db() -> sqlite3.Connection:
+class _DbHandle:
+    """Wrapper around sqlite3.Connection that supports both call patterns.
+
+    Returned by get_db(). Usable in two ways:
+
+        # Preferred — context manager, closes on exit even on exception (#128).
+        with get_db() as con:
+            con.execute(...)
+            con.commit()
+
+        # Legacy — manual close. Still works (read-only attribute access
+        # delegates to the wrapped connection); caller is responsible for
+        # close(). This path is kept so the test suite (200+ legacy call
+        # sites) doesn't have to migrate in lockstep with the production fix.
+        con = get_db()
+        try:
+            con.execute(...)
+            con.commit()
+        finally:
+            con.close()
+
+    Production code on this branch is on the context-manager pattern; tests
+    and one-off scripts may continue using the legacy pattern until a
+    follow-up sweep migrates them.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._closed = False
+
+    def __enter__(self) -> _DbHandle:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        self.close()
+        return False
+
+    def __getattr__(self, name: str):
+        # Delegate execute/commit/cursor/... to the underlying connection.
+        # __getattr__ only fires for missing attributes — _conn / _closed
+        # are real instance attrs and hit normally.
+        return getattr(self._conn, name)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._conn.close()
+            self._closed = True
+
+
+def get_db() -> _DbHandle:
     """Open a fresh DB connection with the dict-row factory.
+
+    Returns a _DbHandle that works as both a context manager and (legacy) a
+    raw connection. Prefer the context-manager pattern — it closes on
+    exception, which is the #128 fix.
 
     Sub-fix (2026-04-29): set busy_timeout=5000ms to prevent immediate
     "database is locked" errors under contention. Was 0 (default),
@@ -80,7 +139,7 @@ def get_db() -> sqlite3.Connection:
     con = sqlite3.connect(_resolve_db_file())
     con.row_factory = _DictRow
     con.execute("PRAGMA busy_timeout = 5000")
-    return con
+    return _DbHandle(con)
 
 
 def backup_db() -> None:

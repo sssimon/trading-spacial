@@ -73,8 +73,7 @@ def record_turn(
         DeepSeekProvider adapter. NULL or 0 elsewhere.
     """
     try:
-        con = get_db()
-        try:
+        with get_db() as con:
             con.execute(
                 """INSERT INTO agent_conversations
                    (tenant_id, surface, conversation_id, ts, role, model,
@@ -100,8 +99,6 @@ def record_turn(
                 ),
             )
             con.commit()
-        finally:
-            con.close()
     except Exception:  # noqa: BLE001
         log.warning(
             "record_turn failed for tenant=%s conv=%s — audit row dropped",
@@ -195,8 +192,7 @@ def record_history(
         ]
         rows_inserted = 0
 
-        con = get_db()
-        try:
+        with get_db() as con:
             # Cross-tenant guard (PR #433 review fix). The H.1 schema
             # makes conversation_id the sole PK on agent_conversation_meta,
             # so two tenants writing the same conversation_id collide.
@@ -271,8 +267,6 @@ def record_history(
                 ),
             )
             con.commit()
-        finally:
-            con.close()
     except Exception:  # noqa: BLE001
         log.warning(
             "record_history failed for tenant=%s conv=%s — history rows dropped",

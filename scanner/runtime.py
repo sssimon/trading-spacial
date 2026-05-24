@@ -138,9 +138,8 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
     """
     from datetime import datetime, timezone  # noqa: PLC0415
 
-    con = get_db()
-    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
-    con.close()
+    with get_db() as con:
+        rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
 
     if not rows:
         return
@@ -202,10 +201,9 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
                 set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
                 params     = list(updates.values()) + [r["id"]]
 
-                con_up = get_db()
-                con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
-                con_up.commit()
-                con_up.close()
+                with get_db() as con_up:
+                    con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
+                    con_up.commit()
                 updated_count += 1
 
         except Exception as e:

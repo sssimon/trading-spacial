@@ -39,8 +39,7 @@ def get_notifications(
     from notifier._storage import list_unread
     if not unread:
         # Full list (both read + unread) — direct query (list_unread filters on read_at).
-        con = get_db()
-        try:
+        with get_db() as con:
             rows = con.execute(
                 """SELECT id, event_type, event_key, priority, payload_json,
                           channels_sent, delivery_status, sent_at, read_at, error_log
@@ -50,8 +49,6 @@ def get_notifications(
                    LIMIT ?""",
                 (tenant_id, limit),
             ).fetchall()
-        finally:
-            con.close()
         cols = ("id", "event_type", "event_key", "priority", "payload_json",
                 "channels_sent", "delivery_status", "sent_at", "read_at", "error_log")
         return {"notifications": [dict(zip(cols, r)) for r in rows]}

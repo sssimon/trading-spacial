@@ -147,8 +147,7 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
     """Return the agent_quotas row for `tenant_id`. INSERT default
     values if absent. Resets stale daily/monthly windows IN-LINE so
     the returned row already reflects the current window."""
-    con = get_db()
-    try:
+    with get_db() as con:
         today = _today_iso()
         month = _this_month_iso()
         row = con.execute(
@@ -199,8 +198,6 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
                 (tenant_id,),
             ).fetchone()
         return row
-    finally:
-        con.close()
 
 
 def _to_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
@@ -231,8 +228,7 @@ def _materialize_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
 def _apply_spend(tenant_id: int, cost_usd: float) -> None:
     """Increment daily + monthly counters atomically. Resets first if
     a window passed (mirrors _read_or_seed_row's reset logic)."""
-    con = get_db()
-    try:
+    with get_db() as con:
         today = _today_iso()
         month = _this_month_iso()
         row = con.execute(
@@ -275,5 +271,3 @@ def _apply_spend(tenant_id: int, cost_usd: float) -> None:
             (daily, today, monthly, month, tenant_id),
         )
         con.commit()
-    finally:
-        con.close()

@@ -49,8 +49,7 @@ def _load_closed_trades(*, tenant_id: int) -> list[dict[str, Any]]:
     tenant. Aggregating across tenants implicitly is not allowed.
     """
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         rows = conn.execute(
             """SELECT symbol, exit_ts, pnl_usd
                FROM positions
@@ -59,8 +58,6 @@ def _load_closed_trades(*, tenant_id: int) -> list[dict[str, Any]]:
                ORDER BY exit_ts""",
             (tenant_id,),
         ).fetchall()
-    finally:
-        conn.close()
     return [
         {"symbol": r[0], "exit_ts": r[1], "pnl_usd": r[2] or 0.0}
         for r in rows
@@ -73,16 +70,13 @@ def _load_open_positions(*, tenant_id: int) -> list[dict[str, Any]]:
     See `_load_closed_trades` for the multi-tenant policy rationale.
     """
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         rows = conn.execute(
             """SELECT symbol, entry_price, qty, direction
                FROM positions
                WHERE status = 'open' AND tenant_id = ?""",
             (tenant_id,),
         ).fetchall()
-    finally:
-        conn.close()
     return [
         {
             "symbol": r[0],
@@ -109,8 +103,7 @@ def _load_recent_sl_timestamps(
     from datetime import timedelta
     import btc_api
     cutoff = (now - timedelta(hours=float(window_hours))).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         rows = conn.execute(
             """SELECT exit_ts
                FROM positions
@@ -121,24 +114,19 @@ def _load_recent_sl_timestamps(
                  AND exit_ts >= ?""",
             (symbol, cutoff),
         ).fetchall()
-    finally:
-        conn.close()
     return [r[0] for r in rows if r[0]]
 
 
 def _load_v2_state(symbol: str) -> dict[str, Any]:
     """Load per-symbol v2 state. Returns keys with None defaults if row missing."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         row = conn.execute(
             """SELECT velocity_cooldown_until, velocity_last_trigger_ts
                FROM kill_switch_v2_state
                WHERE symbol = ?""",
             (symbol,),
         ).fetchone()
-    finally:
-        conn.close()
     if row is None:
         return {
             "velocity_cooldown_until": None,
@@ -153,8 +141,7 @@ def _load_v2_state(symbol: str) -> dict[str, Any]:
 def _upsert_v2_state(symbol: str, state: dict[str, Any], now) -> None:
     """Upsert v2 state for a symbol. updated_at is set to now.isoformat()."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         conn.execute(
             """INSERT INTO kill_switch_v2_state
                  (symbol, velocity_cooldown_until, velocity_last_trigger_ts, updated_at)
@@ -171,8 +158,6 @@ def _upsert_v2_state(symbol: str, state: dict[str, Any], now) -> None:
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
@@ -223,8 +208,7 @@ def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
 def _load_closed_trades_for_symbol(symbol: str) -> list[dict[str, Any]]:
     """Load closed positions for a symbol with non-NULL exit_ts."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         rows = conn.execute(
             """SELECT exit_ts, pnl_usd
                FROM positions
@@ -234,24 +218,19 @@ def _load_closed_trades_for_symbol(symbol: str) -> list[dict[str, Any]]:
                ORDER BY exit_ts""",
             (symbol,),
         ).fetchall()
-    finally:
-        conn.close()
     return [{"exit_ts": r[0], "pnl_usd": r[1]} for r in rows]
 
 
 def _load_baseline(symbol: str) -> dict[str, Any] | None:
     """Load per-symbol baseline. Returns None if no row exists."""
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         row = conn.execute(
             """SELECT baseline_wr, baseline_sigma, trades_count, computed_at
                FROM kill_switch_v2_baseline
                WHERE symbol = ?""",
             (symbol,),
         ).fetchone()
-    finally:
-        conn.close()
     if row is None:
         return None
     return {
@@ -277,8 +256,7 @@ def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
             f"_upsert_baseline: baseline dict missing required keys: {missing}"
         )
 
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         conn.execute(
             """INSERT INTO kill_switch_v2_baseline
                  (symbol, baseline_wr, baseline_sigma, trades_count, computed_at)
@@ -297,8 +275,6 @@ def _upsert_baseline(symbol: str, baseline: dict[str, Any], now) -> None:
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def _is_baseline_stale(

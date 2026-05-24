@@ -27,11 +27,10 @@ router = APIRouter(prefix="/tune", tags=["tune"])
 @router.get("/latest", summary="Latest tune result")
 def tune_latest():
     """Returns the most recent tune_result row (with parsed results_json) or null."""
-    con = get_db()
-    row = con.execute(
-        "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    con.close()
+    with get_db() as con:
+        row = con.execute(
+            "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     if not row:
         return None
     result = dict(row)
@@ -52,61 +51,58 @@ def tune_latest():
 )
 def tune_apply():
     """Applies the latest pending tune proposal to config.json symbol_overrides."""
-    con = get_db()
-    row = con.execute(
-        "SELECT * FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail="No pending tune proposal found")
+    with get_db() as con:
+        row = con.execute(
+            "SELECT * FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No pending tune proposal found")
 
-    result = dict(row)
-    tune_id = result["id"]
+        result = dict(row)
+        tune_id = result["id"]
 
-    # Parse results_json to extract CHANGE recommendations
-    try:
-        results = json.loads(result["results_json"]) if result.get("results_json") else {}
-    except (json.JSONDecodeError, TypeError):
-        con.close()
-        raise HTTPException(status_code=500, detail="Invalid results_json in tune proposal")
+        # Parse results_json to extract CHANGE recommendations
+        try:
+            results = json.loads(result["results_json"]) if result.get("results_json") else {}
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=500, detail="Invalid results_json in tune proposal")
 
-    # Create config backup
-    now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    backup_name = f"config_backup_{now_str}.json"
-    backup_path = os.path.join(_SCRIPT_DIR, backup_name)
-    if os.path.exists(CONFIG_FILE):
-        shutil.copy2(CONFIG_FILE, backup_path)
+        # Create config backup
+        now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        backup_name = f"config_backup_{now_str}.json"
+        backup_path = os.path.join(_SCRIPT_DIR, backup_name)
+        if os.path.exists(CONFIG_FILE):
+            shutil.copy2(CONFIG_FILE, backup_path)
 
-    # Load config and apply changes
-    cfg = load_config()
-    overrides = cfg.get("symbol_overrides", {})
-    applied_count = 0
+        # Load config and apply changes
+        cfg = load_config()
+        overrides = cfg.get("symbol_overrides", {})
+        applied_count = 0
 
-    # Extract CHANGE recommendations from results
-    recommendations = results.get("recommendations", [])
-    for rec in recommendations:
-        if rec.get("action") != "CHANGE":
-            continue
-        symbol = rec.get("symbol", "")
-        params = rec.get("params", {})
-        if symbol and params:
-            if symbol not in overrides:
-                overrides[symbol] = {}
-            overrides[symbol].update(params)
-            applied_count += 1
+        # Extract CHANGE recommendations from results
+        recommendations = results.get("recommendations", [])
+        for rec in recommendations:
+            if rec.get("action") != "CHANGE":
+                continue
+            symbol = rec.get("symbol", "")
+            params = rec.get("params", {})
+            if symbol and params:
+                if symbol not in overrides:
+                    overrides[symbol] = {}
+                overrides[symbol].update(params)
+                applied_count += 1
 
-    cfg["symbol_overrides"] = overrides
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-    log.info(f"Auto-tune applied: {applied_count} changes, backup: {backup_name}")
+        cfg["symbol_overrides"] = overrides
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        log.info(f"Auto-tune applied: {applied_count} changes, backup: {backup_name}")
 
-    # Update tune_result status
-    con.execute(
-        "UPDATE tune_results SET status = 'applied', applied_ts = ?, changes_count = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), applied_count, tune_id)
-    )
-    con.commit()
-    con.close()
+        # Update tune_result status
+        con.execute(
+            "UPDATE tune_results SET status = 'applied', applied_ts = ?, changes_count = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), applied_count, tune_id)
+        )
+        con.commit()
 
     return {"ok": True, "applied": applied_count, "backup": backup_name}
 
@@ -119,18 +115,16 @@ def tune_apply():
 )
 def tune_reject():
     """Rejects the latest pending tune proposal."""
-    con = get_db()
-    row = con.execute(
-        "SELECT id FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail="No pending tune proposal found")
+    with get_db() as con:
+        row = con.execute(
+            "SELECT id FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No pending tune proposal found")
 
-    con.execute(
-        "UPDATE tune_results SET status = 'rejected' WHERE id = ?",
-        (row["id"],)
-    )
-    con.commit()
-    con.close()
+        con.execute(
+            "UPDATE tune_results SET status = 'rejected' WHERE id = ?",
+            (row["id"],)
+        )
+        con.commit()
     return {"ok": True}

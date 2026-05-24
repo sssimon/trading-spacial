@@ -131,14 +131,11 @@ def get_position_detail(*, tenant_id: int, position_id: int) -> dict:
     row exists but doesn't belong to this tenant, return 'not_found' —
     never reveals existence cross-tenant.
     """
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT * FROM positions WHERE id=? AND tenant_id=?",
             (position_id, tenant_id),
         ).fetchone()
-    finally:
-        con.close()
     if row is None:
         return {"error": "not_found"}
     return _position_to_summary(_row_to_dict(row))

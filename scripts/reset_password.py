@@ -52,13 +52,10 @@ def _prompt_email(initial: str | None) -> str:
 
 
 def _find_user(email: str) -> tuple[int, bool] | None:
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT id, is_active FROM users WHERE email = ?", (email,)
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     return int(row["id"]), bool(row["is_active"])
@@ -80,16 +77,13 @@ def _prompt_new_password() -> str:
 
 def _update_password(user_id: int, pwd_hash: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             "UPDATE users SET password_hash = ?, password_changed_at = ? "
             "WHERE id = ?",
             (pwd_hash, now, user_id),
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def main() -> None:

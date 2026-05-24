@@ -221,8 +221,7 @@ def list_conversations(
     Pre-reg D.7: tenant_id from JWT, never from query/body.
     """
     now = _now_iso()
-    con = get_db()
-    try:
+    with get_db() as con:
         # Parameters live in two buckets so the order in execute() lines
         # up with the placeholder order in the final SQL: JOIN clause
         # comes BEFORE WHERE, so any `?` in the JOIN must be earlier in
@@ -295,8 +294,6 @@ def list_conversations(
             limit=limit,
             offset=offset,
         )
-    finally:
-        con.close()
 
 
 # ── GET /agent/conversations/{id}/messages ─────────────────────────────
@@ -324,8 +321,7 @@ def get_messages(
     signed_payload is never persisted and therefore never returned.
     """
     now = _now_iso()
-    con = get_db()
-    try:
+    with get_db() as con:
         meta = con.execute(
             "SELECT conversation_id, tenant_id, title, surface, pinned, expires_at "
             "FROM agent_conversation_meta WHERE conversation_id = ?",
@@ -389,8 +385,6 @@ def get_messages(
             pinned=bool(meta["pinned"]),
             messages=messages,
         )
-    finally:
-        con.close()
 
 
 # ── DELETE /agent/conversations/{id} — soft delete ─────────────────────
@@ -419,8 +413,7 @@ def delete_conversation(
     returns 404 — no observable difference from "doesn't exist".
     """
     now = _now_iso()
-    con = get_db()
-    try:
+    with get_db() as con:
         cursor = con.execute(
             "UPDATE agent_conversation_meta SET expires_at = ? "
             "WHERE conversation_id = ? AND tenant_id = ? AND expires_at > ?",
@@ -439,8 +432,6 @@ def delete_conversation(
         )
         con.commit()
         return DeleteResponse(ok=True)
-    finally:
-        con.close()
 
 
 # ── POST /agent/conversations/{id}/pin — toggle ────────────────────────
@@ -465,8 +456,7 @@ def toggle_pin(
     """Toggle pinned (0 → 1, 1 → 0). IDOR-safe: UPDATE WHERE tenant_id;
     rowcount = 0 → 404 with the same body as 'doesn't exist'."""
     now = _now_iso()
-    con = get_db()
-    try:
+    with get_db() as con:
         cursor = con.execute(
             "UPDATE agent_conversation_meta SET pinned = 1 - pinned "
             "WHERE conversation_id = ? AND tenant_id = ? AND expires_at > ?",
@@ -485,5 +475,3 @@ def toggle_pin(
             (conversation_id, tenant_id),
         ).fetchone()
         return PinResponse(ok=True, pinned=bool(new_state["pinned"]))
-    finally:
-        con.close()

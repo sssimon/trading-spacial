@@ -39,8 +39,7 @@ def record_delivery(
     error_log: str | None = None,
     tenant_id: Optional[int] = None,
 ) -> int:
-    conn = _conn()
-    try:
+    with _conn() as conn:
         cur = conn.execute(
             """INSERT INTO notifications_sent
                (event_type, event_key, priority, payload_json,
@@ -55,16 +54,13 @@ def record_delivery(
         )
         conn.commit()
         return cur.lastrowid
-    finally:
-        conn.close()
 
 
 def list_unread(
     limit: int = 50,
     tenant_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    conn = _conn()
-    try:
+    with _conn() as conn:
         if tenant_id is None:
             rows = conn.execute(
                 """SELECT id, event_type, event_key, priority, payload_json,
@@ -85,8 +81,6 @@ def list_unread(
                    LIMIT ?""",
                 (tenant_id, limit),
             ).fetchall()
-    finally:
-        conn.close()
     cols = ["id", "event_type", "event_key", "priority", "payload_json",
             "channels_sent", "delivery_status", "sent_at", "read_at", "error_log"]
     return [dict(zip(cols, r)) for r in rows]
@@ -101,8 +95,7 @@ def mark_read(
     Returns True if a row was updated, False if not (e.g., IDOR: trying to
     mark another user's notification).
     """
-    conn = _conn()
-    try:
+    with _conn() as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE id = ?",
@@ -116,14 +109,11 @@ def mark_read(
             )
         conn.commit()
         return cur.rowcount > 0
-    finally:
-        conn.close()
 
 
 def mark_all_read(tenant_id: Optional[int] = None) -> int:
     """Mark all unread as read. Scope-limited by tenant_id when provided."""
-    conn = _conn()
-    try:
+    with _conn() as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE read_at IS NULL",
@@ -137,5 +127,3 @@ def mark_all_read(tenant_id: Optional[int] = None) -> int:
             )
         conn.commit()
         return cur.rowcount
-    finally:
-        conn.close()

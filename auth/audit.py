@@ -53,8 +53,7 @@ def log_auth_event(
     ts = datetime.now(timezone.utc).isoformat()
 
     try:
-        con = get_db()
-        try:
+        with get_db() as con:
             con.execute(
                 """
                 INSERT INTO auth_events
@@ -72,8 +71,6 @@ def log_auth_event(
                 ),
             )
             con.commit()
-        finally:
-            con.close()
     except Exception as exc:
         # Audit failure must NOT break the calling flow. Log to stderr with
         # enough detail to reconstruct the event later from server logs.

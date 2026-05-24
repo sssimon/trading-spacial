@@ -24,8 +24,7 @@ def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any
     import btc_api
 
     cutoff = (now - timedelta(days=float(window_days))).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         rows = conn.execute(
             """SELECT symbol, entry_ts, exit_ts, exit_reason, pnl_usd
                FROM positions
@@ -36,8 +35,6 @@ def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any
                ORDER BY entry_ts""",
             (cutoff,),
         ).fetchall()
-    finally:
-        conn.close()
     return [
         {"symbol": r[0], "entry_ts": r[1], "exit_ts": r[2],
          "exit_reason": r[3], "pnl_usd": r[4]}

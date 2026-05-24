@@ -103,16 +103,13 @@ def _global_spend_last_24h() -> float:
     """
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=24)).isoformat()
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS total "
             "FROM agent_conversations "
             "WHERE ts >= ? AND role = 'assistant'",
             (cutoff,),
         ).fetchone()
-    finally:
-        con.close()
     return float(dict(row)["total"] or 0.0)
 
 

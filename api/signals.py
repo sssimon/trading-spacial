@@ -241,13 +241,12 @@ def get_signals_performance(
     (tenant_id=NULL) are invisible. Each user sees their own performance
     tracking.
     """
-    con = get_db()
     # Solo señales completadas (24h de historia) — filtradas por tenant
-    rows = con.execute(
-        "SELECT * FROM signal_outcomes WHERE status = 'completed' AND tenant_id = ?",
-        (tenant_id,),
-    ).fetchall()
-    con.close()
+    with get_db() as con:
+        rows = con.execute(
+            "SELECT * FROM signal_outcomes WHERE status = 'completed' AND tenant_id = ?",
+            (tenant_id,),
+        ).fetchall()
 
     if not rows:
         return {
@@ -349,9 +348,8 @@ def latest_message(
 
 @router.get("/{scan_id}", summary="Detalle de un escaneo por ID")
 def signal_by_id(scan_id: int):
-    con = get_db()
-    row = con.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()
-    con.close()
+    with get_db() as con:
+        row = con.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Escaneo #{scan_id} no encontrado")
     row     = dict(row)

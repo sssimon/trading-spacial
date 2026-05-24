@@ -155,8 +155,7 @@ def _bootstrap_first_user() -> None:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         pwd_hash = hash_password(init_pwd)
-        con = get_db()
-        try:
+        with get_db() as con:
             cur = con.execute(
                 "INSERT INTO users (email, password_hash, role, is_active, "
                 "created_at, password_changed_at) VALUES (?, ?, 'admin', 1, ?, ?)",
@@ -164,8 +163,6 @@ def _bootstrap_first_user() -> None:
             )
             uid = int(cur.lastrowid or 0)
             con.commit()
-        finally:
-            con.close()
         mark_setup_completed(ip=None, method="env_vars")
         log_auth_event(
             event_type="initial_setup_completed",

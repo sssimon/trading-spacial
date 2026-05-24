@@ -20,8 +20,7 @@ log = logging.getLogger("db.auth_schema")
 
 def init_auth_db() -> None:
     """Create auth tables if missing. Safe to call repeatedly."""
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -86,19 +85,14 @@ def init_auth_db() -> None:
             "ON auth_events(ts DESC)"
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def has_any_user() -> bool:
     """True if at least one user exists. Used by app boot to print a hint
     when the DB is fresh and nobody has run scripts/create_user.py yet."""
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute("SELECT 1 FROM users LIMIT 1").fetchone()
         return row is not None
-    finally:
-        con.close()
 
 
 # ─── system_state (added 2026-04-29 with first-time setup) ─────────────────
@@ -112,8 +106,7 @@ def has_any_user() -> bool:
 
 def init_system_state() -> None:
     """Idempotent — create system_state if missing."""
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS system_state (
@@ -124,8 +117,6 @@ def init_system_state() -> None:
             """
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def is_setup_completed() -> bool:
@@ -136,14 +127,11 @@ def is_setup_completed() -> bool:
     system stays inaccessible via web. Recovery requires CLI or a manual
     DELETE on this row (documented in README).
     """
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT 1 FROM system_state WHERE key = 'setup_completed_at'"
         ).fetchone()
         return row is not None
-    finally:
-        con.close()
 
 
 def mark_setup_completed(*, ip: str | None, method: str) -> None:
@@ -156,8 +144,7 @@ def mark_setup_completed(*, ip: str | None, method: str) -> None:
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
             "VALUES ('setup_completed_at', ?, ?)",
@@ -174,5 +161,3 @@ def mark_setup_completed(*, ip: str | None, method: str) -> None:
             (method, now),
         )
         con.commit()
-    finally:
-        con.close()

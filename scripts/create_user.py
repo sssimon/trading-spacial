@@ -67,21 +67,17 @@ def _prompt_password() -> str:
 
 
 def _email_exists(email: str) -> bool:
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT 1 FROM users WHERE email = ?", (email,)
         ).fetchone()
         return row is not None
-    finally:
-        con.close()
 
 
 def _create_user(email: str, password_hash: str, role: str) -> int:
     """Insert and return the new user_id."""
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with get_db() as con:
         cur = con.execute(
             """
             INSERT INTO users
@@ -93,8 +89,6 @@ def _create_user(email: str, password_hash: str, role: str) -> int:
         )
         con.commit()
         return int(cur.lastrowid or 0)
-    finally:
-        con.close()
 
 
 def main() -> None:

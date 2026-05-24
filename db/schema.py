@@ -40,251 +40,248 @@ log = logging.getLogger("db.schema")
 
 def init_db() -> None:
     """Create or migrate all tables. Idempotent."""
-    con = get_db()
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS scans (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts          TEXT    NOT NULL,
-            symbol      TEXT    NOT NULL DEFAULT 'BTCUSDT',
-            estado      TEXT    NOT NULL,
-            señal       INTEGER NOT NULL DEFAULT 0,
-            setup       INTEGER NOT NULL DEFAULT 0,
-            price       REAL,
-            lrc_pct     REAL,
-            rsi_1h      REAL,
-            score       INTEGER,
-            score_label TEXT,
-            macro_ok    INTEGER,
-            gatillo     INTEGER,
-            payload     TEXT
-        )
-    """)
-    # Migración: agregar columna symbol si la tabla ya existía sin ella
-    try:
-        con.execute("ALTER TABLE scans ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
-        log.info("DB migrada: columna 'symbol' añadida.")
-    except sqlite3.OperationalError:
-        pass  # columna ya existe
+    with get_db() as con:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS scans (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts          TEXT    NOT NULL,
+                symbol      TEXT    NOT NULL DEFAULT 'BTCUSDT',
+                estado      TEXT    NOT NULL,
+                señal       INTEGER NOT NULL DEFAULT 0,
+                setup       INTEGER NOT NULL DEFAULT 0,
+                price       REAL,
+                lrc_pct     REAL,
+                rsi_1h      REAL,
+                score       INTEGER,
+                score_label TEXT,
+                macro_ok    INTEGER,
+                gatillo     INTEGER,
+                payload     TEXT
+            )
+        """)
+        # Migración: agregar columna symbol si la tabla ya existía sin ella
+        try:
+            con.execute("ALTER TABLE scans ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
+            log.info("DB migrada: columna 'symbol' añadida.")
+        except sqlite3.OperationalError:
+            pass  # columna ya existe
 
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS webhooks_sent (
-            id      INTEGER PRIMARY KEY AUTOINCREMENT,
-            scan_id INTEGER REFERENCES scans(id),
-            ts      TEXT,
-            url     TEXT,
-            status  INTEGER,
-            ok      INTEGER
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS positions (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            scan_id     INTEGER REFERENCES scans(id),
-            symbol      TEXT    NOT NULL,
-            direction   TEXT    NOT NULL DEFAULT 'LONG',
-            status      TEXT    NOT NULL DEFAULT 'open',
-            entry_price REAL    NOT NULL,
-            entry_ts    TEXT    NOT NULL,
-            sl_price    REAL,
-            tp_price    REAL,
-            size_usd    REAL,
-            qty         REAL,
-            exit_price  REAL,
-            exit_ts     TEXT,
-            exit_reason TEXT,
-            pnl_usd     REAL,
-            pnl_pct     REAL,
-            atr_entry   REAL,
-            be_mult     REAL,
-            notes       TEXT
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS signal_outcomes (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            scan_id         INTEGER UNIQUE REFERENCES scans(id),
-            symbol          TEXT    NOT NULL,
-            signal_ts       TEXT    NOT NULL,
-            signal_price    REAL    NOT NULL,
-            score           INTEGER,
-            macro_ok        INTEGER,
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS webhooks_sent (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id INTEGER REFERENCES scans(id),
+                ts      TEXT,
+                url     TEXT,
+                status  INTEGER,
+                ok      INTEGER
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS positions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id     INTEGER REFERENCES scans(id),
+                symbol      TEXT    NOT NULL,
+                direction   TEXT    NOT NULL DEFAULT 'LONG',
+                status      TEXT    NOT NULL DEFAULT 'open',
+                entry_price REAL    NOT NULL,
+                entry_ts    TEXT    NOT NULL,
+                sl_price    REAL,
+                tp_price    REAL,
+                size_usd    REAL,
+                qty         REAL,
+                exit_price  REAL,
+                exit_ts     TEXT,
+                exit_reason TEXT,
+                pnl_usd     REAL,
+                pnl_pct     REAL,
+                atr_entry   REAL,
+                be_mult     REAL,
+                notes       TEXT
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS signal_outcomes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id         INTEGER UNIQUE REFERENCES scans(id),
+                symbol          TEXT    NOT NULL,
+                signal_ts       TEXT    NOT NULL,
+                signal_price    REAL    NOT NULL,
+                score           INTEGER,
+                macro_ok        INTEGER,
 
-            -- Performance medida en intervalos
-            price_1h        REAL,
-            price_4h        REAL,
-            price_24h       REAL,
+                -- Performance medida en intervalos
+                price_1h        REAL,
+                price_4h        REAL,
+                price_24h       REAL,
 
-            -- Puntos extremos en 24h
-            max_runup_pct   REAL,  -- mejor retorno %
-            max_drawdown_pct REAL,  -- peor retorno %
+                -- Puntos extremos en 24h
+                max_runup_pct   REAL,  -- mejor retorno %
+                max_drawdown_pct REAL,  -- peor retorno %
 
-            status          TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
-            last_checked_ts TEXT
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS tune_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            status TEXT DEFAULT 'pending',
-            results_json TEXT,
-            report_md TEXT,
-            applied_ts TEXT,
-            changes_count INTEGER DEFAULT 0
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS notifications_sent (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type      TEXT    NOT NULL,
-            event_key       TEXT    NOT NULL,
-            priority        TEXT    NOT NULL DEFAULT 'info',
-            payload_json    TEXT    NOT NULL,
-            channels_sent   TEXT    NOT NULL,
-            delivery_status TEXT    NOT NULL DEFAULT 'ok',
-            sent_at         TEXT    NOT NULL,
-            read_at         TEXT,
-            error_log       TEXT
-        )
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
-            ON notifications_sent(sent_at DESC) WHERE read_at IS NULL
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS symbol_health (
-            symbol              TEXT PRIMARY KEY,
-            state               TEXT NOT NULL DEFAULT 'NORMAL',
-            state_since         TEXT NOT NULL,
-            last_evaluated_at   TEXT NOT NULL,
-            last_metrics_json   TEXT,
-            manual_override     INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS symbol_health_events (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol          TEXT NOT NULL,
-            from_state      TEXT NOT NULL,
-            to_state        TEXT NOT NULL,
-            trigger_reason  TEXT NOT NULL,
-            metrics_json    TEXT NOT NULL,
-            ts              TEXT NOT NULL
-        )
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_health_events_symbol
-            ON symbol_health_events(symbol, ts DESC)
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS kill_switch_decisions (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts              TEXT NOT NULL,
-            scan_id         INTEGER,
-            symbol          TEXT NOT NULL,
-            engine          TEXT NOT NULL,
-            per_symbol_tier TEXT NOT NULL,
-            portfolio_tier  TEXT NOT NULL,
-            velocity_active INTEGER DEFAULT 0,
-            size_factor     REAL NOT NULL,
-            skip            INTEGER NOT NULL,
-            reasons_json    TEXT,
-            slider_value    REAL
-        )
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_ks_decisions_ts
-            ON kill_switch_decisions(ts)
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_ks_decisions_symbol_ts
-            ON kill_switch_decisions(symbol, ts)
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS kill_switch_v2_state (
-            symbol                    TEXT PRIMARY KEY,
-            velocity_cooldown_until   TEXT,
-            velocity_last_trigger_ts  TEXT,
-            updated_at                TEXT NOT NULL
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS kill_switch_v2_baseline (
-            symbol         TEXT PRIMARY KEY,
-            baseline_wr    REAL NOT NULL,
-            baseline_sigma REAL NOT NULL,
-            trades_count   INTEGER NOT NULL,
-            computed_at    TEXT NOT NULL
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS kill_switch_recommendations (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts              TEXT NOT NULL,
-            triggered_by    TEXT NOT NULL,
-            slider_value    REAL,
-            projected_pnl   REAL,
-            projected_dd    REAL,
-            status          TEXT NOT NULL,
-            applied_ts      TEXT,
-            applied_by      TEXT,
-            report_json     TEXT NOT NULL
-        )
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_recommendations_ts
-            ON kill_switch_recommendations(ts)
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS portfolio_health_events (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_tier       TEXT NOT NULL,
-            to_tier         TEXT NOT NULL,
-            reason          TEXT NOT NULL,
-            dd_pct          REAL,
-            concurrent      INTEGER,
-            ts              TEXT NOT NULL
-        )
-    """)
-    con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_portfolio_events_ts
-            ON portfolio_health_events(ts DESC)
-    """)
-    con.commit()
-    con.close()
+                status          TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
+                last_checked_ts TEXT
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS tune_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                results_json TEXT,
+                report_md TEXT,
+                applied_ts TEXT,
+                changes_count INTEGER DEFAULT 0
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS notifications_sent (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type      TEXT    NOT NULL,
+                event_key       TEXT    NOT NULL,
+                priority        TEXT    NOT NULL DEFAULT 'info',
+                payload_json    TEXT    NOT NULL,
+                channels_sent   TEXT    NOT NULL,
+                delivery_status TEXT    NOT NULL DEFAULT 'ok',
+                sent_at         TEXT    NOT NULL,
+                read_at         TEXT,
+                error_log       TEXT
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notif_sent_unread
+                ON notifications_sent(sent_at DESC) WHERE read_at IS NULL
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS symbol_health (
+                symbol              TEXT PRIMARY KEY,
+                state               TEXT NOT NULL DEFAULT 'NORMAL',
+                state_since         TEXT NOT NULL,
+                last_evaluated_at   TEXT NOT NULL,
+                last_metrics_json   TEXT,
+                manual_override     INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS symbol_health_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol          TEXT NOT NULL,
+                from_state      TEXT NOT NULL,
+                to_state        TEXT NOT NULL,
+                trigger_reason  TEXT NOT NULL,
+                metrics_json    TEXT NOT NULL,
+                ts              TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_health_events_symbol
+                ON symbol_health_events(symbol, ts DESC)
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS kill_switch_decisions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              TEXT NOT NULL,
+                scan_id         INTEGER,
+                symbol          TEXT NOT NULL,
+                engine          TEXT NOT NULL,
+                per_symbol_tier TEXT NOT NULL,
+                portfolio_tier  TEXT NOT NULL,
+                velocity_active INTEGER DEFAULT 0,
+                size_factor     REAL NOT NULL,
+                skip            INTEGER NOT NULL,
+                reasons_json    TEXT,
+                slider_value    REAL
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ks_decisions_ts
+                ON kill_switch_decisions(ts)
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ks_decisions_symbol_ts
+                ON kill_switch_decisions(symbol, ts)
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS kill_switch_v2_state (
+                symbol                    TEXT PRIMARY KEY,
+                velocity_cooldown_until   TEXT,
+                velocity_last_trigger_ts  TEXT,
+                updated_at                TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS kill_switch_v2_baseline (
+                symbol         TEXT PRIMARY KEY,
+                baseline_wr    REAL NOT NULL,
+                baseline_sigma REAL NOT NULL,
+                trades_count   INTEGER NOT NULL,
+                computed_at    TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS kill_switch_recommendations (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              TEXT NOT NULL,
+                triggered_by    TEXT NOT NULL,
+                slider_value    REAL,
+                projected_pnl   REAL,
+                projected_dd    REAL,
+                status          TEXT NOT NULL,
+                applied_ts      TEXT,
+                applied_by      TEXT,
+                report_json     TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recommendations_ts
+                ON kill_switch_recommendations(ts)
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_health_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_tier       TEXT NOT NULL,
+                to_tier         TEXT NOT NULL,
+                reason          TEXT NOT NULL,
+                dd_pct          REAL,
+                concurrent      INTEGER,
+                ts              TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_portfolio_events_ts
+                ON portfolio_health_events(ts DESC)
+        """)
+        con.commit()
     log.info(f"DB inicializada: {_resolve_db_file()}")
 
     # Migrate: add atr_entry and be_mult columns if missing
     try:
-        con_mig = get_db()
-        cols = [r[1] for r in con_mig.execute("PRAGMA table_info(positions)").fetchall()]
-        if "atr_entry" not in cols:
-            con_mig.execute("ALTER TABLE positions ADD COLUMN atr_entry REAL")
-            con_mig.commit()
-            log.info("DB migration: added atr_entry column to positions")
-        if "be_mult" not in cols:
-            con_mig.execute("ALTER TABLE positions ADD COLUMN be_mult REAL")
-            con_mig.commit()
-            log.info("DB migration: added be_mult column to positions")
-        con_mig.close()
+        with get_db() as con_mig:
+            cols = [r[1] for r in con_mig.execute("PRAGMA table_info(positions)").fetchall()]
+            if "atr_entry" not in cols:
+                con_mig.execute("ALTER TABLE positions ADD COLUMN atr_entry REAL")
+                con_mig.commit()
+                log.info("DB migration: added atr_entry column to positions")
+            if "be_mult" not in cols:
+                con_mig.execute("ALTER TABLE positions ADD COLUMN be_mult REAL")
+                con_mig.commit()
+                log.info("DB migration: added be_mult column to positions")
     except Exception as e:
         log.warning(f"DB migration check: {e}")
 
     # B5 PROBATION migration: add 3 columns to symbol_health if missing (#199)
     try:
-        con_mig2 = get_db()
-        cols2 = [r[1] for r in con_mig2.execute("PRAGMA table_info(symbol_health)").fetchall()]
-        for col, ddl in (
-            ("probation_trades_remaining", "INTEGER"),
-            ("probation_started_at", "TEXT"),
-            ("paused_days_at_entry", "INTEGER"),
-        ):
-            if col not in cols2:
-                con_mig2.execute(f"ALTER TABLE symbol_health ADD COLUMN {col} {ddl}")
-                con_mig2.commit()
-                log.info(f"DB migration: added {col} column to symbol_health")
-        con_mig2.close()
+        with get_db() as con_mig2:
+            cols2 = [r[1] for r in con_mig2.execute("PRAGMA table_info(symbol_health)").fetchall()]
+            for col, ddl in (
+                ("probation_trades_remaining", "INTEGER"),
+                ("probation_started_at", "TEXT"),
+                ("paused_days_at_entry", "INTEGER"),
+            ):
+                if col not in cols2:
+                    con_mig2.execute(f"ALTER TABLE symbol_health ADD COLUMN {col} {ddl}")
+                    con_mig2.commit()
+                    log.info(f"DB migration: added {col} column to symbol_health")
     except Exception as e:
         log.warning(f"DB migration B5 PROBATION: {e}")
 
@@ -327,8 +324,7 @@ def _migrate_multi_tenant_b1() -> None:
     tables via CREATE TABLE IF NOT EXISTS; new indexes via CREATE INDEX IF NOT
     EXISTS. Safe to call repeatedly.
     """
-    con = get_db()
-    try:
+    with get_db() as con:
         # Step 1: Add nullable tenant_id to each per-user table
         for table in PER_USER_TABLES:
             try:
@@ -394,8 +390,6 @@ def _migrate_multi_tenant_b1() -> None:
         )
 
         con.commit()
-    finally:
-        con.close()
 
 
 def _migrate_agent_audit() -> None:
@@ -406,145 +400,143 @@ def _migrate_agent_audit() -> None:
 
     Schema source: docs/superpowers/specs/es/2026-05-19-trading-copilot-production-grade-pre-reg.md §9.1.
     """
-    con = get_db()
     try:
-        # agent_conversations: every turn (user / assistant / tool_result)
-        # written by the server-side loop. content_json is the redacted
-        # payload — full tool_use input/output is NOT persisted here; the
-        # tool side-effect surface lives in agent_side_effects below.
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_conversations (
-                id                          INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id                   INTEGER NOT NULL,
-                surface                     TEXT    NOT NULL,
-                conversation_id             TEXT    NOT NULL,
-                ts                          TEXT    NOT NULL,
-                role                        TEXT,
-                model                       TEXT,
-                input_tokens                INTEGER,
-                output_tokens               INTEGER,
-                cache_read_input_tokens     INTEGER,
-                cache_creation_input_tokens INTEGER,
-                latency_ms                  INTEGER,
-                cost_usd                    REAL,
-                content_json                TEXT,
-                refused                     INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_conv_tenant_ts "
-            "ON agent_conversations(tenant_id, ts DESC)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_conv_conversation "
-            "ON agent_conversations(conversation_id, ts ASC)"
-        )
-
-        # agent_side_effects: the propose/confirm ledger. idempotency_key
-        # is UNIQUE so a double-click confirm cannot execute twice. action
-        # is one of: close_position | reactivate_symbol | apply_tune.
-        # result: ok | error | conflict | expired.
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_side_effects (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id       INTEGER NOT NULL,
-                conversation_id TEXT,
-                ts              TEXT    NOT NULL,
-                action          TEXT    NOT NULL,
-                args_json       TEXT,
-                idempotency_key TEXT    NOT NULL UNIQUE,
-                result          TEXT,
-                http_status     INTEGER
-            )
-            """
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_side_effects_tenant_ts "
-            "ON agent_side_effects(tenant_id, ts DESC)"
-        )
-
-        # agent_quotas: one row per tenant. daily_window_start and
-        # monthly_window_start drive the computed-on-read reset (pre-reg
-        # §9.1) — no cron needed. UNIQUE on tenant_id so upserts via
-        # ON CONFLICT(tenant_id) DO UPDATE work.
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_quotas (
-                tenant_id            INTEGER PRIMARY KEY,
-                daily_usd_used       REAL    NOT NULL DEFAULT 0,
-                daily_usd_cap        REAL    NOT NULL DEFAULT 1.0,
-                daily_window_start   TEXT    NOT NULL,
-                monthly_usd_used     REAL    NOT NULL DEFAULT 0,
-                monthly_window_start TEXT    NOT NULL
-            )
-            """
-        )
-
-        # Phase 3 (#400): agent_side_effects gains `expires_at` so the
-        # confirm endpoint can short-circuit expired proposals without
-        # re-deriving the TTL from the signed payload. Idempotent ADD
-        # COLUMN (the existing rows have NULL — they predate the column,
-        # and a NULL expires_at is treated as "no TTL enforcement" for
-        # rows seeded before this migration).
-        try:
-            con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
-            log.info("DB migration: added expires_at column to agent_side_effects")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-
-        # Fase 4 of the multi-provider epic: agent_conversations gains
-        # `provider` + `reasoning_tokens` columns so /agent/metrics can
-        # report per-provider spend + R1 reasoning telemetry.
-        #   - provider: closed enum 'anthropic' | 'deepseek' | ... (the
-        #     vendor name from PROVIDER_NAME_BY_PREFIX). NULL for rows
-        #     pre-Fase-4 if backfill skipped them (it shouldn't — the
-        #     UPDATE below covers every known prefix).
-        #   - reasoning_tokens: only DS-reasoner populates this today
-        #     (DS's usage.completion_tokens_details.reasoning_tokens
-        #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
-        # Both ALTERs are idempotent (try/except on OperationalError).
-        # The backfill is also idempotent because it only touches rows
-        # WHERE provider IS NULL — running it twice is a no-op.
-        try:
-            con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
-            log.info("DB migration: added provider column to agent_conversations")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        try:
-            con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
-            log.info("DB migration: added reasoning_tokens column to agent_conversations")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-
-        # Backfill provider from model. Only touches rows where provider
-        # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
-        # uses model-prefix matching that mirrors PROVIDER_NAME_BY_PREFIX
-        # in api/agent/providers/registry.py; if a future provider adds
-        # a new prefix, mirror it HERE too (single source of truth would
-        # be ideal but importing the registry from db.schema introduces
-        # a circular at startup).
-        try:
+        with get_db() as con:
+            # agent_conversations: every turn (user / assistant / tool_result)
+            # written by the server-side loop. content_json is the redacted
+            # payload — full tool_use input/output is NOT persisted here; the
+            # tool side-effect surface lives in agent_side_effects below.
             con.execute(
-                "UPDATE agent_conversations SET provider = 'anthropic' "
-                "WHERE provider IS NULL AND model LIKE 'claude-%'"
+                """
+                CREATE TABLE IF NOT EXISTS agent_conversations (
+                    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id                   INTEGER NOT NULL,
+                    surface                     TEXT    NOT NULL,
+                    conversation_id             TEXT    NOT NULL,
+                    ts                          TEXT    NOT NULL,
+                    role                        TEXT,
+                    model                       TEXT,
+                    input_tokens                INTEGER,
+                    output_tokens               INTEGER,
+                    cache_read_input_tokens     INTEGER,
+                    cache_creation_input_tokens INTEGER,
+                    latency_ms                  INTEGER,
+                    cost_usd                    REAL,
+                    content_json                TEXT,
+                    refused                     INTEGER NOT NULL DEFAULT 0
+                )
+                """
             )
             con.execute(
-                "UPDATE agent_conversations SET provider = 'deepseek' "
-                "WHERE provider IS NULL AND model LIKE 'deepseek-%'"
+                "CREATE INDEX IF NOT EXISTS idx_agent_conv_tenant_ts "
+                "ON agent_conversations(tenant_id, ts DESC)"
             )
-            log.info("DB migration: backfilled provider column from model prefix")
-        except sqlite3.OperationalError as e:
-            log.warning("DB migration: provider backfill failed: %s", e)
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_conv_conversation "
+                "ON agent_conversations(conversation_id, ts ASC)"
+            )
 
-        con.commit()
-        log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
+            # agent_side_effects: the propose/confirm ledger. idempotency_key
+            # is UNIQUE so a double-click confirm cannot execute twice. action
+            # is one of: close_position | reactivate_symbol | apply_tune.
+            # result: ok | error | conflict | expired.
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_side_effects (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id       INTEGER NOT NULL,
+                    conversation_id TEXT,
+                    ts              TEXT    NOT NULL,
+                    action          TEXT    NOT NULL,
+                    args_json       TEXT,
+                    idempotency_key TEXT    NOT NULL UNIQUE,
+                    result          TEXT,
+                    http_status     INTEGER
+                )
+                """
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_side_effects_tenant_ts "
+                "ON agent_side_effects(tenant_id, ts DESC)"
+            )
+
+            # agent_quotas: one row per tenant. daily_window_start and
+            # monthly_window_start drive the computed-on-read reset (pre-reg
+            # §9.1) — no cron needed. UNIQUE on tenant_id so upserts via
+            # ON CONFLICT(tenant_id) DO UPDATE work.
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_quotas (
+                    tenant_id            INTEGER PRIMARY KEY,
+                    daily_usd_used       REAL    NOT NULL DEFAULT 0,
+                    daily_usd_cap        REAL    NOT NULL DEFAULT 1.0,
+                    daily_window_start   TEXT    NOT NULL,
+                    monthly_usd_used     REAL    NOT NULL DEFAULT 0,
+                    monthly_window_start TEXT    NOT NULL
+                )
+                """
+            )
+
+            # Phase 3 (#400): agent_side_effects gains `expires_at` so the
+            # confirm endpoint can short-circuit expired proposals without
+            # re-deriving the TTL from the signed payload. Idempotent ADD
+            # COLUMN (the existing rows have NULL — they predate the column,
+            # and a NULL expires_at is treated as "no TTL enforcement" for
+            # rows seeded before this migration).
+            try:
+                con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
+                log.info("DB migration: added expires_at column to agent_side_effects")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+            # Fase 4 of the multi-provider epic: agent_conversations gains
+            # `provider` + `reasoning_tokens` columns so /agent/metrics can
+            # report per-provider spend + R1 reasoning telemetry.
+            #   - provider: closed enum 'anthropic' | 'deepseek' | ... (the
+            #     vendor name from PROVIDER_NAME_BY_PREFIX). NULL for rows
+            #     pre-Fase-4 if backfill skipped them (it shouldn't — the
+            #     UPDATE below covers every known prefix).
+            #   - reasoning_tokens: only DS-reasoner populates this today
+            #     (DS's usage.completion_tokens_details.reasoning_tokens
+            #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
+            # Both ALTERs are idempotent (try/except on OperationalError).
+            # The backfill is also idempotent because it only touches rows
+            # WHERE provider IS NULL — running it twice is a no-op.
+            try:
+                con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
+                log.info("DB migration: added provider column to agent_conversations")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            try:
+                con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
+                log.info("DB migration: added reasoning_tokens column to agent_conversations")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+            # Backfill provider from model. Only touches rows where provider
+            # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
+            # uses model-prefix matching that mirrors PROVIDER_NAME_BY_PREFIX
+            # in api/agent/providers/registry.py; if a future provider adds
+            # a new prefix, mirror it HERE too (single source of truth would
+            # be ideal but importing the registry from db.schema introduces
+            # a circular at startup).
+            try:
+                con.execute(
+                    "UPDATE agent_conversations SET provider = 'anthropic' "
+                    "WHERE provider IS NULL AND model LIKE 'claude-%'"
+                )
+                con.execute(
+                    "UPDATE agent_conversations SET provider = 'deepseek' "
+                    "WHERE provider IS NULL AND model LIKE 'deepseek-%'"
+                )
+                log.info("DB migration: backfilled provider column from model prefix")
+            except sqlite3.OperationalError as e:
+                log.warning("DB migration: provider backfill failed: %s", e)
+
+            con.commit()
+            log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
     except Exception as e:  # noqa: BLE001
         log.warning("DB migration agent audit: %s", e)
-    finally:
-        con.close()
 
 
 def _migrate_agent_history() -> None:
@@ -568,77 +560,75 @@ def _migrate_agent_history() -> None:
     agent_side_effects (proposals execution log), agent_quotas (cost
     budget). Those keep their own lifecycle and retention.
     """
-    con = get_db()
     try:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id       INTEGER NOT NULL,
-                conversation_id TEXT    NOT NULL,
-                ts              TEXT    NOT NULL,
-                role            TEXT    NOT NULL,
-                content         TEXT    NOT NULL,
-                reasoning       TEXT,
-                tool_chips_json TEXT,
-                proposals_json  TEXT,
-                expires_at      TEXT    NOT NULL
+        with get_db() as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_messages (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id       INTEGER NOT NULL,
+                    conversation_id TEXT    NOT NULL,
+                    ts              TEXT    NOT NULL,
+                    role            TEXT    NOT NULL,
+                    content         TEXT    NOT NULL,
+                    reasoning       TEXT,
+                    tool_chips_json TEXT,
+                    proposals_json  TEXT,
+                    expires_at      TEXT    NOT NULL
+                )
+                """
             )
-            """
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_conv_ts "
-            "ON agent_messages(tenant_id, conversation_id, ts ASC)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_ts "
-            "ON agent_messages(tenant_id, ts DESC)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_messages_expires "
-            "ON agent_messages(expires_at)"
-        )
-
-        # conversation_id is the natural PK — UUID generated by the
-        # frontend (newConversationId() in frontend/src/agent/client.ts).
-        # The explicit NOT NULL is required: SQLite enforces NOT NULL
-        # implicitly only on `INTEGER PRIMARY KEY` (the rowid alias),
-        # not on TEXT PRIMARY KEY — without it, NULL would slip past
-        # the PK check and corrupt the index.
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_conversation_meta (
-                conversation_id TEXT    NOT NULL PRIMARY KEY,
-                tenant_id       INTEGER NOT NULL,
-                title           TEXT,
-                surface         TEXT    NOT NULL,
-                first_ts        TEXT    NOT NULL,
-                last_ts         TEXT    NOT NULL,
-                message_count   INTEGER NOT NULL DEFAULT 0,
-                pinned          INTEGER NOT NULL DEFAULT 0,
-                expires_at      TEXT    NOT NULL
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_conv_ts "
+                "ON agent_messages(tenant_id, conversation_id, ts ASC)"
             )
-            """
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_last "
-            "ON agent_conversation_meta(tenant_id, last_ts DESC)"
-        )
-        # Pinned conversations float to the top of the sidebar; the
-        # secondary key on last_ts DESC keeps non-pinned ordered by
-        # recency within their bucket. Index ordering matters: SQLite
-        # uses leading columns for filtering and trailing for ordering.
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_pinned "
-            "ON agent_conversation_meta(tenant_id, pinned DESC, last_ts DESC)"
-        )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_ts "
+                "ON agent_messages(tenant_id, ts DESC)"
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_messages_expires "
+                "ON agent_messages(expires_at)"
+            )
 
-        con.commit()
-        log.info("DB migration: agent_messages + agent_conversation_meta ready")
+            # conversation_id is the natural PK — UUID generated by the
+            # frontend (newConversationId() in frontend/src/agent/client.ts).
+            # The explicit NOT NULL is required: SQLite enforces NOT NULL
+            # implicitly only on `INTEGER PRIMARY KEY` (the rowid alias),
+            # not on TEXT PRIMARY KEY — without it, NULL would slip past
+            # the PK check and corrupt the index.
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_conversation_meta (
+                    conversation_id TEXT    NOT NULL PRIMARY KEY,
+                    tenant_id       INTEGER NOT NULL,
+                    title           TEXT,
+                    surface         TEXT    NOT NULL,
+                    first_ts        TEXT    NOT NULL,
+                    last_ts         TEXT    NOT NULL,
+                    message_count   INTEGER NOT NULL DEFAULT 0,
+                    pinned          INTEGER NOT NULL DEFAULT 0,
+                    expires_at      TEXT    NOT NULL
+                )
+                """
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_last "
+                "ON agent_conversation_meta(tenant_id, last_ts DESC)"
+            )
+            # Pinned conversations float to the top of the sidebar; the
+            # secondary key on last_ts DESC keeps non-pinned ordered by
+            # recency within their bucket. Index ordering matters: SQLite
+            # uses leading columns for filtering and trailing for ordering.
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_pinned "
+                "ON agent_conversation_meta(tenant_id, pinned DESC, last_ts DESC)"
+            )
+
+            con.commit()
+            log.info("DB migration: agent_messages + agent_conversation_meta ready")
     except Exception as e:  # noqa: BLE001
         log.warning("DB migration agent history: %s", e)
-    finally:
-        con.close()
 
 
 def backfill_tenant(user_id: int) -> dict[str, int]:
@@ -661,8 +651,7 @@ def backfill_tenant(user_id: int) -> dict[str, int]:
         Dict mapping table name to count of rows updated.
     """
     affected: dict[str, int] = {}
-    con = get_db()
-    try:
+    with get_db() as con:
         for table in PER_USER_TABLES:
             cursor = con.execute(
                 f"UPDATE {table} SET tenant_id = ? WHERE tenant_id IS NULL",
@@ -670,6 +659,4 @@ def backfill_tenant(user_id: int) -> dict[str, int]:
             )
             affected[table] = cursor.rowcount
         con.commit()
-    finally:
-        con.close()
     return affected

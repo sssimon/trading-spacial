@@ -134,11 +134,10 @@ def check_position_stops(symbol: str, price: float, now: datetime | None = None)
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    con = get_db()
-    rows = con.execute(
-        "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
-    ).fetchall()
-    con.close()
+    with get_db() as con:
+        rows = con.execute(
+            "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
+        ).fetchall()
 
     cfg = load_config()
 
@@ -153,26 +152,24 @@ def check_position_stops(symbol: str, price: float, now: datetime | None = None)
             be_threshold = pos["entry_price"] + round(atr_entry * _be_mult, 2)
             if price >= be_threshold and pos["sl_price"] < pos["entry_price"]:
                 new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
+                with get_db() as con_trail:
+                    con_trail.execute(
+                        "UPDATE positions SET sl_price = ? WHERE id = ?",
+                        (new_sl, pos["id"])
+                    )
+                    con_trail.commit()
                 pos["sl_price"] = new_sl
                 log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
         elif atr_entry and pos["direction"] == "SHORT" and pos["sl_price"]:
             be_threshold = pos["entry_price"] - round(atr_entry * _be_mult, 2)
             if price <= be_threshold and pos["sl_price"] > pos["entry_price"]:
                 new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
+                with get_db() as con_trail:
+                    con_trail.execute(
+                        "UPDATE positions SET sl_price = ? WHERE id = ?",
+                        (new_sl, pos["id"])
+                    )
+                    con_trail.commit()
                 pos["sl_price"] = new_sl
                 log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
 
@@ -352,16 +349,14 @@ def delete_position(
 ):
     # B.5 #258: ownership-enforced via inline SELECT (db helper doesn't have
     # delete primitive yet; refactor deferred to follow-up)
-    con = get_db()
-    row = con.execute(
-        "SELECT id FROM positions WHERE id=? AND tenant_id=?",
-        (pos_id, tenant_id),
-    ).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
-    con.commit()
-    con.close()
+    with get_db() as con:
+        row = con.execute(
+            "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+            (pos_id, tenant_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
+        con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
+        con.commit()
     update_positions_json()
     return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}

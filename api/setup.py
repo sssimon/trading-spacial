@@ -145,8 +145,7 @@ def setup_post(
     ip = _client_ip(request)
     ua = (request.headers.get("User-Agent") or "")[:512] or None
 
-    con = get_db()
-    try:
+    with get_db() as con:
         cur = con.execute(
             """
             INSERT INTO users
@@ -158,8 +157,6 @@ def setup_post(
         )
         user_id = int(cur.lastrowid or 0)
         con.commit()
-    finally:
-        con.close()
 
     mark_setup_completed(ip=ip, method="web")
     consume_token()

@@ -23,13 +23,10 @@ INITIAL_CAPITAL_DEFAULT = 10_000.0
 
 def db_get_capital(tenant_id: int) -> Optional[dict]:
     """Return current capital row for tenant, or None if uninitialized."""
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
-    finally:
-        con.close()
     return dict(row) if row else None
 
 
@@ -42,13 +39,10 @@ def db_list_active_tenant_ids() -> list[int]:
     onboarded tenants" and callers should treat that as a no-op rather
     than computing implicit single-system aggregates.
     """
-    con = get_db()
-    try:
+    with get_db() as con:
         rows = con.execute(
             "SELECT tenant_id FROM capital ORDER BY tenant_id ASC"
         ).fetchall()
-    finally:
-        con.close()
     return [int(r[0]) for r in rows]
 
 
@@ -102,8 +96,7 @@ def db_upsert_capital(
     Returns the resulting row.
     """
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with get_db() as con:
         existing = con.execute(
             "SELECT id, peak_balance, max_drawdown_pct FROM capital WHERE tenant_id = ?",
             (tenant_id,),
@@ -135,6 +128,4 @@ def db_upsert_capital(
         row = con.execute(
             "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
-    finally:
-        con.close()
     return dict(row)

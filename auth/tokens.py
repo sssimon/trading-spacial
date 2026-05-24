@@ -130,8 +130,7 @@ def create_refresh_token(
     fid = family_id or uuid.uuid4().hex
     expires = now + timedelta(days=_refresh_days())
 
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             """
             INSERT INTO refresh_tokens
@@ -151,8 +150,6 @@ def create_refresh_token(
             ),
         )
         con.commit()
-    finally:
-        con.close()
     return token
 
 
@@ -161,8 +158,7 @@ def lookup_refresh(token: str) -> Optional[RefreshTokenRecord]:
     if not token:
         return None
     h = _hash_refresh(token)
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             """
             SELECT id, token_hash, user_id, family_id, parent_hash,
@@ -171,8 +167,6 @@ def lookup_refresh(token: str) -> Optional[RefreshTokenRecord]:
             """,
             (h,),
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     return RefreshTokenRecord(
@@ -193,16 +187,13 @@ def revoke_refresh(token_hash: str, *, now: Optional[datetime] = None) -> None:
     """Mark one refresh token as revoked (does not DELETE — audit trail)."""
     if now is None:
         now = datetime.now(timezone.utc)
-    con = get_db()
-    try:
+    with get_db() as con:
         con.execute(
             "UPDATE refresh_tokens SET revoked_at = ? "
             "WHERE token_hash = ? AND revoked_at IS NULL",
             (now.isoformat(), token_hash),
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def revoke_family(family_id: str, *, now: Optional[datetime] = None) -> int:
@@ -213,8 +204,7 @@ def revoke_family(family_id: str, *, now: Optional[datetime] = None) -> int:
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    con = get_db()
-    try:
+    with get_db() as con:
         cur = con.execute(
             "UPDATE refresh_tokens SET revoked_at = ? "
             "WHERE family_id = ? AND revoked_at IS NULL",
@@ -222,8 +212,6 @@ def revoke_family(family_id: str, *, now: Optional[datetime] = None) -> int:
         )
         con.commit()
         return cur.rowcount or 0
-    finally:
-        con.close()
 
 
 def revoke_all_for_user(user_id: int, *, now: Optional[datetime] = None) -> int:
@@ -233,8 +221,7 @@ def revoke_all_for_user(user_id: int, *, now: Optional[datetime] = None) -> int:
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    con = get_db()
-    try:
+    with get_db() as con:
         cur = con.execute(
             "UPDATE refresh_tokens SET revoked_at = ? "
             "WHERE user_id = ? AND revoked_at IS NULL",
@@ -242,5 +229,3 @@ def revoke_all_for_user(user_id: int, *, now: Optional[datetime] = None) -> int:
         )
         con.commit()
         return cur.rowcount or 0
-    finally:
-        con.close()

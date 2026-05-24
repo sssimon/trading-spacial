@@ -37,8 +37,7 @@ def should_send(
         return True
 
     import btc_api
-    conn = btc_api.get_db()
-    try:
+    with btc_api.get_db() as conn:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
         row = conn.execute(
             """SELECT 1 FROM notifications_sent
@@ -46,6 +45,4 @@ def should_send(
                LIMIT 1""",
             (event_type, event_key, cutoff.isoformat()),
         ).fetchone()
-    finally:
-        conn.close()
     return row is None

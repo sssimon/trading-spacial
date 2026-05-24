@@ -36,17 +36,15 @@ def _list_active_users() -> list[dict]:
     so callers fall back to the legacy broadcast path.
     """
     import sqlite3
-    con = get_db()
     try:
-        rows = con.execute(
-            "SELECT id, email FROM users WHERE is_active = 1 ORDER BY id"
-        ).fetchall()
+        with get_db() as con:
+            rows = con.execute(
+                "SELECT id, email FROM users WHERE is_active = 1 ORDER BY id"
+            ).fetchall()
     except sqlite3.OperationalError as e:
         if "no such table" in str(e).lower():
             return []
         raise
-    finally:
-        con.close()
     return [dict(r) for r in rows]
 
 

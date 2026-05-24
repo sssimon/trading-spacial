@@ -78,15 +78,12 @@ def propose_close_position(
     rationale:       str,
 ) -> dict:
     """Verify ownership, sign a close_position proposal, persist."""
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT symbol, direction, status, entry_price, size_usd "
             "FROM positions WHERE id = ? AND tenant_id = ?",
             (position_id, tenant_id),
         ).fetchone()
-    finally:
-        con.close()
     if row is None:
         return {"error": "not_found"}
     pos = dict(row)
@@ -129,14 +126,11 @@ def propose_reactivate_symbol(
     norm = symbol.upper().strip()
     if not norm.endswith("USDT"):
         norm = f"{norm}USDT"
-    con = get_db()
-    try:
+    with get_db() as con:
         row = con.execute(
             "SELECT state FROM symbol_health WHERE symbol = ?",
             (norm,),
         ).fetchone()
-    finally:
-        con.close()
     if row is None:
         return {"error": "not_found"}
     state = dict(row)["state"]
