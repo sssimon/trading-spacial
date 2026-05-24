@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 import requests as req_lib
 
 from api.security.url_validation import validate_outbound_url
-from db.connection import get_db
+from db.transaction import transaction
 from notifier import notify, SignalEvent
 from notifier._templates import fmt_price
 
@@ -201,13 +201,11 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
         url = validate_outbound_url(url, allow_private=allow_private)
     except ValueError as e:
         log.warning("Webhook push abortado: '%s' rechazado por SSRF guard — %s", url, e)
-        con = get_db()
-        con.execute(
-            "INSERT INTO webhooks_sent (scan_id, ts, url, status, ok) VALUES (?,?,?,?,?)",
-            (scan_id, datetime.now(timezone.utc).isoformat(), url, 0, 0)
-        )
-        con.commit()
-        con.close()
+        with transaction() as con:
+            con.execute(
+                "INSERT INTO webhooks_sent (scan_id, ts, url, status, ok) VALUES (?,?,?,?,?)",
+                (scan_id, datetime.now(timezone.utc).isoformat(), url, 0, 0)
+            )
         return
 
     msg     = build_telegram_message(rep)
@@ -251,10 +249,8 @@ def push_webhook(rep: dict, scan_id: int, cfg: dict):
         status, ok = 0, False
         log.warning(f"Webhook fallo -> {e}")
 
-    con = get_db()
-    con.execute(
-        "INSERT INTO webhooks_sent (scan_id, ts, url, status, ok) VALUES (?,?,?,?,?)",
-        (scan_id, datetime.now(timezone.utc).isoformat(), url, status, 1 if ok else 0)
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        con.execute(
+            "INSERT INTO webhooks_sent (scan_id, ts, url, status, ok) VALUES (?,?,?,?,?)",
+            (scan_id, datetime.now(timezone.utc).isoformat(), url, status, 1 if ok else 0)
+        )

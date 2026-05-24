@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.config import load_config, save_config
 from api.deps import verify_api_key
 from auth.dependencies import require_role
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.kill_switch")
 
@@ -87,8 +87,7 @@ def kill_switch_list_recommendations(
     """List auto-calibrator recommendations, latest first."""
     import json as _json
 
-    conn = get_db()
-    try:
+    with transaction() as conn:
         sql = (
             "SELECT id, ts, triggered_by, slider_value, projected_pnl, "
             "projected_dd, status, applied_ts, applied_by, report_json "
@@ -104,8 +103,6 @@ def kill_switch_list_recommendations(
         sql += " ORDER BY ts DESC LIMIT ?"
         params.append(int(limit))
         rows = conn.execute(sql, params).fetchall()
-    finally:
-        conn.close()
 
     result = []
     for r in rows:
@@ -154,15 +151,12 @@ def kill_switch_apply_recommendation(rec_id: int):
     from datetime import datetime, timezone
 
     try:
-        conn = get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 """SELECT id, status, slider_value
                    FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
 
         if row is None:
             raise HTTPException(status_code=404, detail=f"recommendation {rec_id} not found")
@@ -197,23 +191,19 @@ def kill_switch_apply_recommendation(rec_id: int):
 
         # Update DB row
         now_iso = datetime.now(tz=timezone.utc).isoformat()
-        conn = get_db()
-        try:
+        with transaction() as conn:
             conn.execute(
                 """UPDATE kill_switch_recommendations
                    SET status = 'applied', applied_ts = ?, applied_by = 'operator'
                    WHERE id = ?""",
                 (now_iso, rec_id),
             )
-            conn.commit()
             updated = conn.execute(
                 """SELECT id, ts, triggered_by, slider_value, projected_pnl,
                           projected_dd, status, applied_ts, applied_by, report_json
                    FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
 
         log.warning(
             "Kill switch v2: operator applied recomendación id=%d slider=%d",
@@ -253,14 +243,11 @@ def kill_switch_ignore_recommendation(rec_id: int):
     from datetime import datetime, timezone
 
     try:
-        conn = get_db()
-        try:
+        with transaction() as conn:
             row = conn.execute(
                 """SELECT id, status FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
 
         if row is None:
             raise HTTPException(status_code=404, detail=f"recommendation {rec_id} not found")
@@ -271,23 +258,19 @@ def kill_switch_ignore_recommendation(rec_id: int):
             )
 
         now_iso = datetime.now(tz=timezone.utc).isoformat()
-        conn = get_db()
-        try:
+        with transaction() as conn:
             conn.execute(
                 """UPDATE kill_switch_recommendations
                    SET status = 'ignored', applied_ts = ?, applied_by = 'operator'
                    WHERE id = ?""",
                 (now_iso, rec_id),
             )
-            conn.commit()
             updated = conn.execute(
                 """SELECT id, ts, triggered_by, slider_value, projected_pnl,
                           projected_dd, status, applied_ts, applied_by, report_json
                    FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),
             ).fetchone()
-        finally:
-            conn.close()
 
         log.warning(
             "Kill switch v2: operator ignored recomendación id=%d", rec_id,

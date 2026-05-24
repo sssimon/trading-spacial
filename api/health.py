@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.health")
 
@@ -34,16 +34,13 @@ class ReactivateRequest(BaseModel):
 @router.get("/health/symbols", dependencies=[Depends(verify_api_key)])
 def get_health_symbols():
     """List current health state per symbol."""
-    con = get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             """SELECT symbol, state, state_since, last_evaluated_at,
                       last_metrics_json, manual_override
                FROM symbol_health
                ORDER BY symbol"""
         ).fetchall()
-    finally:
-        con.close()
     cols = ("symbol", "state", "state_since", "last_evaluated_at",
             "last_metrics_json", "manual_override")
     return {"symbols": [dict(zip(cols, r)) for r in rows]}
@@ -55,8 +52,7 @@ def get_health_events(
     limit: int = Query(50, ge=1, le=500, description="Max rows to return (capped to prevent unbounded scans)"),
 ):
     """Transition history. Optionally filter by symbol."""
-    con = get_db()
-    try:
+    with transaction() as con:
         if symbol:
             rows = con.execute(
                 """SELECT id, symbol, from_state, to_state, trigger_reason,
@@ -72,8 +68,6 @@ def get_health_events(
                    FROM symbol_health_events ORDER BY ts DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
-    finally:
-        con.close()
     cols = ("id", "symbol", "from_state", "to_state", "trigger_reason",
             "metrics_json", "ts")
     return {"events": [dict(zip(cols, r)) for r in rows]}
@@ -121,9 +115,8 @@ def health_check():
 
     # Database connectivity
     try:
-        con = get_db()
-        con.execute("SELECT 1")
-        con.close()
+        with transaction() as con:
+            con.execute("SELECT 1")
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = f"error: {e}"

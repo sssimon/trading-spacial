@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.config import load_config, CONFIG_FILE
 from api.deps import verify_api_key
 from auth.dependencies import require_role
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.tune")
 
@@ -27,11 +27,10 @@ router = APIRouter(prefix="/tune", tags=["tune"])
 @router.get("/latest", summary="Latest tune result")
 def tune_latest():
     """Returns the most recent tune_result row (with parsed results_json) or null."""
-    con = get_db()
-    row = con.execute(
-        "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    con.close()
+    with transaction() as con:
+        row = con.execute(
+            "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     if not row:
         return None
     result = dict(row)
@@ -52,12 +51,12 @@ def tune_latest():
 )
 def tune_apply():
     """Applies the latest pending tune proposal to config.json symbol_overrides."""
-    con = get_db()
-    row = con.execute(
-        "SELECT * FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    with transaction() as con:
+        row = con.execute(
+            "SELECT * FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
     if not row:
-        con.close()
         raise HTTPException(status_code=404, detail="No pending tune proposal found")
 
     result = dict(row)
@@ -67,7 +66,6 @@ def tune_apply():
     try:
         results = json.loads(result["results_json"]) if result.get("results_json") else {}
     except (json.JSONDecodeError, TypeError):
-        con.close()
         raise HTTPException(status_code=500, detail="Invalid results_json in tune proposal")
 
     # Create config backup
@@ -101,12 +99,11 @@ def tune_apply():
     log.info(f"Auto-tune applied: {applied_count} changes, backup: {backup_name}")
 
     # Update tune_result status
-    con.execute(
-        "UPDATE tune_results SET status = 'applied', applied_ts = ?, changes_count = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), applied_count, tune_id)
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        con.execute(
+            "UPDATE tune_results SET status = 'applied', applied_ts = ?, changes_count = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), applied_count, tune_id)
+        )
 
     return {"ok": True, "applied": applied_count, "backup": backup_name}
 
@@ -119,18 +116,14 @@ def tune_apply():
 )
 def tune_reject():
     """Rejects the latest pending tune proposal."""
-    con = get_db()
-    row = con.execute(
-        "SELECT id FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail="No pending tune proposal found")
-
-    con.execute(
-        "UPDATE tune_results SET status = 'rejected' WHERE id = ?",
-        (row["id"],)
-    )
-    con.commit()
-    con.close()
+    with transaction() as con:
+        row = con.execute(
+            "SELECT id FROM tune_results WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No pending tune proposal found")
+        con.execute(
+            "UPDATE tune_results SET status = 'rejected' WHERE id = ?",
+            (row["id"],)
+        )
     return {"ok": True}

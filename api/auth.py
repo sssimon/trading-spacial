@@ -78,7 +78,7 @@ from auth.tokens import (
     _access_minutes,
     _refresh_days,
 )
-from db.connection import get_db
+from db.transaction import transaction
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -220,8 +220,7 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 def _user_by_email(email: str) -> Optional[User]:
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             """
             SELECT id, email, password_hash, role, is_active, created_at,
@@ -230,8 +229,6 @@ def _user_by_email(email: str) -> Optional[User]:
             """,
             (email,),
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     return User(
@@ -250,26 +247,19 @@ def _user_by_email(email: str) -> Optional[User]:
 def _password_hash_for_email(email: str) -> Optional[str]:
     """Fetch the bcrypt hash for an email. Used by login + change_password.
     Returns None if user does not exist."""
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT password_hash FROM users WHERE email = ?", (email,)
         ).fetchone()
-    finally:
-        con.close()
     return row["password_hash"] if row else None
 
 
 def _update_last_login(user_id: int) -> None:
-    con = get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "UPDATE users SET last_login_at = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), user_id),
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 # ─── Routes ─────────────────────────────────────────────────────────────────
@@ -557,16 +547,12 @@ def change_password(
 
     new_hash = hash_password(body.new_password)
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "UPDATE users SET password_hash = ?, password_changed_at = ? "
             "WHERE id = ?",
             (new_hash, now, user.id),
         )
-        con.commit()
-    finally:
-        con.close()
 
     # Revoke ALL refresh tokens for this user — forces re-login on every
     # device they have. Spec compliance: a password change should invalidate
@@ -590,8 +576,7 @@ def change_password(
 def _hydrate_user(user_id: int) -> Optional[User]:
     """Refresh-flow user hydration. Mirrors the middleware helper but returns
     None if user is gone or deactivated (caller decides what to do)."""
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             """
             SELECT id, email, role, is_active, created_at, password_changed_at,
@@ -600,8 +585,6 @@ def _hydrate_user(user_id: int) -> Optional[User]:
             """,
             (user_id,),
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     return User(

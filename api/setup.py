@@ -32,7 +32,7 @@ from auth.setup import (
 )
 from auth.setup_html import render_completed_redirect, render_setup_page
 from db.auth_schema import has_any_user, is_setup_completed, mark_setup_completed
-from db.connection import get_db
+from db.transaction import transaction
 
 
 log = logging.getLogger("api.setup")
@@ -145,8 +145,7 @@ def setup_post(
     ip = _client_ip(request)
     ua = (request.headers.get("User-Agent") or "")[:512] or None
 
-    con = get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             """
             INSERT INTO users
@@ -157,9 +156,6 @@ def setup_post(
             (email_clean, pwd_hash, now, now),
         )
         user_id = int(cur.lastrowid or 0)
-        con.commit()
-    finally:
-        con.close()
 
     mark_setup_completed(ip=ip, method="web")
     consume_token()
