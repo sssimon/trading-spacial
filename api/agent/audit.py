@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.agent.audit")
 
@@ -73,8 +73,7 @@ def record_turn(
         DeepSeekProvider adapter. NULL or 0 elsewhere.
     """
     try:
-        con = get_db()
-        try:
+        with transaction() as con:
             con.execute(
                 """INSERT INTO agent_conversations
                    (tenant_id, surface, conversation_id, ts, role, model,
@@ -99,9 +98,6 @@ def record_turn(
                     1 if refused else 0,
                 ),
             )
-            con.commit()
-        finally:
-            con.close()
     except Exception:  # noqa: BLE001
         log.warning(
             "record_turn failed for tenant=%s conv=%s — audit row dropped",
@@ -195,8 +191,7 @@ def record_history(
         ]
         rows_inserted = 0
 
-        con = get_db()
-        try:
+        with transaction() as con:
             # Cross-tenant guard (PR #433 review fix). The H.1 schema
             # makes conversation_id the sole PK on agent_conversation_meta,
             # so two tenants writing the same conversation_id collide.
@@ -270,9 +265,6 @@ def record_history(
                     surface, now_iso, now_iso, rows_inserted, expires_at,
                 ),
             )
-            con.commit()
-        finally:
-            con.close()
     except Exception:  # noqa: BLE001
         log.warning(
             "record_history failed for tenant=%s conv=%s — history rows dropped",

@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.agent.quotas")
 
@@ -147,8 +147,7 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
     """Return the agent_quotas row for `tenant_id`. INSERT default
     values if absent. Resets stale daily/monthly windows IN-LINE so
     the returned row already reflects the current window."""
-    con = get_db()
-    try:
+    with transaction() as con:
         today = _today_iso()
         month = _this_month_iso()
         row = con.execute(
@@ -170,7 +169,6 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
                    VALUES (?, 0, ?, ?, 0, ?)""",
                 (tenant_id, DEFAULT_DAILY_USD_CAP, today, month),
             )
-            con.commit()
             row = con.execute(
                 "SELECT * FROM agent_quotas WHERE tenant_id = ?",
                 (tenant_id,),
@@ -193,14 +191,11 @@ def _read_or_seed_row(tenant_id: int) -> sqlite3.Row:
                    WHERE tenant_id = ?""",
                 (new_daily, today, new_monthly, month, tenant_id),
             )
-            con.commit()
             row = con.execute(
                 "SELECT * FROM agent_quotas WHERE tenant_id = ?",
                 (tenant_id,),
             ).fetchone()
         return row
-    finally:
-        con.close()
 
 
 def _to_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
@@ -231,8 +226,7 @@ def _materialize_snapshot(row: sqlite3.Row) -> QuotaSnapshot:
 def _apply_spend(tenant_id: int, cost_usd: float) -> None:
     """Increment daily + monthly counters atomically. Resets first if
     a window passed (mirrors _read_or_seed_row's reset logic)."""
-    con = get_db()
-    try:
+    with transaction() as con:
         today = _today_iso()
         month = _this_month_iso()
         row = con.execute(
@@ -252,7 +246,6 @@ def _apply_spend(tenant_id: int, cost_usd: float) -> None:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (tenant_id, cost_usd, DEFAULT_DAILY_USD_CAP, today, cost_usd, month),
             )
-            con.commit()
             # cur.rowcount tells us which branch fired: 1 = we inserted
             # (charge already booked, done), 0 = a parallel writer beat
             # us so we re-read and fall through to the UPDATE path to
@@ -274,6 +267,3 @@ def _apply_spend(tenant_id: int, cost_usd: float) -> None:
                WHERE tenant_id = ?""",
             (daily, today, monthly, month, tenant_id),
         )
-        con.commit()
-    finally:
-        con.close()

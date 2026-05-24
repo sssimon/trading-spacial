@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("api.agent.proposals")
 
@@ -278,38 +278,34 @@ def persist_proposal(
     token_urlsafe each time).
     """
     import sqlite3
-    con = get_db()
     try:
-        con.execute(
-            """INSERT INTO agent_side_effects
-               (tenant_id, conversation_id, ts, action, args_json,
-                idempotency_key, result, http_status, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)""",
-            (
-                tenant_id,
-                conversation_id,
-                datetime.now(timezone.utc).isoformat(),
-                proposal.action,
-                json.dumps(proposal.args, sort_keys=True),
-                proposal.proposal_id,
-                proposal.expires_at,
-            ),
-        )
-        con.commit()
+        with transaction() as con:
+            con.execute(
+                """INSERT INTO agent_side_effects
+                   (tenant_id, conversation_id, ts, action, args_json,
+                    idempotency_key, result, http_status, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)""",
+                (
+                    tenant_id,
+                    conversation_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    proposal.action,
+                    json.dumps(proposal.args, sort_keys=True),
+                    proposal.proposal_id,
+                    proposal.expires_at,
+                ),
+            )
     except sqlite3.IntegrityError:
         log.warning(
             "persist_proposal: idempotency_key collision for %s — ignoring",
             proposal.proposal_id,
         )
-    finally:
-        con.close()
 
 
 def load_proposal_row(proposal_id: str) -> Optional[dict]:
     """Fetch the row from agent_side_effects. Returns None if absent.
     Caller compares result column to decide pending vs consumed."""
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             """SELECT id, tenant_id, conversation_id, ts, action, args_json,
                       idempotency_key, result, http_status, expires_at
@@ -317,8 +313,6 @@ def load_proposal_row(proposal_id: str) -> Optional[dict]:
                WHERE idempotency_key = ?""",
             (proposal_id,),
         ).fetchone()
-    finally:
-        con.close()
     return dict(row) if row else None
 
 
@@ -345,17 +339,13 @@ def mark_proposal_result(
     agent_side_effects rows with result IS NULL — they should match.
     """
     try:
-        con = get_db()
-        try:
+        with transaction() as con:
             con.execute(
                 "UPDATE agent_side_effects "
                 "SET result = ?, http_status = ? "
                 "WHERE idempotency_key = ?",
                 (result, http_status, proposal_id),
             )
-            con.commit()
-        finally:
-            con.close()
     except Exception:  # noqa: BLE001
         log.warning(
             "mark_proposal_result failed for proposal_id=%s — audit drift; "

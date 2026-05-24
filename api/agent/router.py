@@ -51,6 +51,7 @@ from api.agent.proposals import (
 from api.agent.streaming import sse_serialize
 from auth.dependencies import get_current_tenant_id, get_current_user, require_role
 from auth.models import User
+from db.transaction import transaction
 
 log = logging.getLogger("api.agent.router")
 
@@ -389,14 +390,11 @@ def _execute_proposed_action(
         # SL/TP/TIME_LIMIT between propose and confirm):
         #   1. row must still exist for this tenant (IDOR null pattern)
         #   2. row must still be `open` (not closed by another flow)
-        con = btc_api.get_db()
-        try:
+        with transaction() as con:
             current = con.execute(
                 "SELECT status FROM positions WHERE id=? AND tenant_id=?",
                 (position_id, tenant_id),
             ).fetchone()
-        finally:
-            con.close()
         if current is None or dict(current).get("status") != "open":
             raise HTTPException(status_code=409, detail="state_drift")
         pos = db_close_position(
@@ -491,7 +489,6 @@ def get_agent_metrics():
     """
     from datetime import datetime, timedelta, timezone
     from api.agent.circuit_breaker import current_global_spend_24h
-    import btc_api
 
     status = get_agent_status()
     breaker_state = {
@@ -503,8 +500,7 @@ def get_agent_metrics():
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     today_iso  = datetime.now(timezone.utc).date().isoformat() + "T00:00:00+00:00"
 
-    con = btc_api.get_db()
-    try:
+    with transaction() as con:
         today_row = con.execute(
             "SELECT "
             "  COUNT(*) AS turn_count, "
@@ -576,8 +572,6 @@ def get_agent_metrics():
             except (TypeError, ValueError):
                 reason = "unknown"
             error_breakdown_24h.append({"reason": reason, "count": d["count"]})
-    finally:
-        con.close()
 
     return {
         "breaker":             breaker_state,
