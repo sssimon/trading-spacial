@@ -17,7 +17,6 @@ from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
 from db.capital import apply_pnl_to_capital
-from db.connection import get_db
 from db.positions import (
     _calc_pnl,
     db_close_position,
@@ -25,6 +24,7 @@ from db.positions import (
     db_get_positions,
     db_update_position,
 )
+from db.transaction import transaction
 
 log = logging.getLogger("api.positions")
 
@@ -127,54 +127,91 @@ def update_positions_json():
         log.warning(f"update_positions_json error: {e}")
 
 
-def check_position_stops(symbol: str, price: float, now: datetime | None = None):
+def check_position_stops(
+    symbol: str | None = None,
+    price: float | None = None,
+    now: datetime | None = None,
+    *,
+    symbol_price_overrides: dict[str, float] | None = None,
+):
     """Auto-cierra posiciones abiertas si el precio toca TP, SL o time-limit. Sends notifications.
 
+    One transaction per (symbol, price) tick covers BOTH the SELECT of open
+    positions AND the per-position trailing-SL UPDATE. This names the trading
+    invariant (plan 2026-05-24-transaction-unit-of-work, F-05): every mutation
+    derived from one tick of price decision belongs to one serializable
+    transaction. Concurrent operator edits serialize via BEGIN IMMEDIATE.
+
+    Position-close mutations are delegated to `db_close_position` (which owns
+    its own connection today — migration deferred to Tasks 6-9 of the plan).
+    Notifications and event-log writes are side effects kept OUTSIDE the
+    transaction by design (file I/O + network must not extend the DB lock).
+
     `now` is injectable for deterministic testing; defaults to current UTC time.
+
+    `symbol_price_overrides` is a test-injection seam: when provided, the
+    function iterates per (symbol, price) entry and runs the full decision
+    cycle for each. Default `None` preserves the legacy `(symbol, price)`
+    signature for production callers.
     """
+    if symbol_price_overrides is not None:
+        for sym, p in symbol_price_overrides.items():
+            check_position_stops(sym, p, now=now)
+        return
+
+    if symbol is None or price is None:
+        raise TypeError(
+            "check_position_stops requires (symbol, price) or "
+            "symbol_price_overrides={...}"
+        )
+
     if now is None:
         now = datetime.now(timezone.utc)
-    con = get_db()
-    rows = con.execute(
-        "SELECT * FROM positions WHERE symbol=? AND status='open'", (symbol.upper(),)
-    ).fetchall()
-    con.close()
 
     cfg = load_config()
 
-    for pos in [dict(r) for r in rows]:
+    # Single unit of work: read open positions for `symbol` AND apply trailing-SL
+    # updates atomically. A concurrent operator edit (e.g. PUT /positions/{id})
+    # either serializes before this tx (and we observe its sl_price) or after
+    # (and it observes ours). No interleaved partial state is possible.
+    with transaction() as con:
+        rows = con.execute(
+            "SELECT * FROM positions WHERE symbol=? AND status='open'",
+            (symbol.upper(),),
+        ).fetchall()
+        pos_list = [dict(r) for r in rows]
+
+        for pos in pos_list:
+            # Trailing ratchet: move SL to breakeven when profit >= be_mult × ATR
+            atr_entry = pos.get("atr_entry")
+            _be_mult = pos.get("be_mult") or 1.5  # per-symbol from config, fallback 1.5
+            if atr_entry and pos["direction"] == "LONG" and pos["sl_price"]:
+                be_threshold = pos["entry_price"] + round(atr_entry * _be_mult, 2)
+                if price >= be_threshold and pos["sl_price"] < pos["entry_price"]:
+                    new_sl = pos["entry_price"]
+                    con.execute(
+                        "UPDATE positions SET sl_price = ? WHERE id = ?",
+                        (new_sl, pos["id"]),
+                    )
+                    pos["sl_price"] = new_sl
+                    log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
+            elif atr_entry and pos["direction"] == "SHORT" and pos["sl_price"]:
+                be_threshold = pos["entry_price"] - round(atr_entry * _be_mult, 2)
+                if price <= be_threshold and pos["sl_price"] > pos["entry_price"]:
+                    new_sl = pos["entry_price"]
+                    con.execute(
+                        "UPDATE positions SET sl_price = ? WHERE id = ?",
+                        (new_sl, pos["id"]),
+                    )
+                    pos["sl_price"] = new_sl
+                    log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
+
+    # Per-position TP/SL/time-limit close decision + side effects happen
+    # outside the read/trail tx. db_close_position owns its own write tx today;
+    # collapsing it into this unit of work is Tasks 6-9 in the migration plan.
+    for pos in pos_list:
         reason = None
         exit_price = None
-
-        # Trailing ratchet: move SL to breakeven when profit >= be_mult × ATR
-        atr_entry = pos.get("atr_entry")
-        _be_mult = pos.get("be_mult") or 1.5  # per-symbol from config, fallback 1.5
-        if atr_entry and pos["direction"] == "LONG" and pos["sl_price"]:
-            be_threshold = pos["entry_price"] + round(atr_entry * _be_mult, 2)
-            if price >= be_threshold and pos["sl_price"] < pos["entry_price"]:
-                new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
-                pos["sl_price"] = new_sl
-                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
-        elif atr_entry and pos["direction"] == "SHORT" and pos["sl_price"]:
-            be_threshold = pos["entry_price"] - round(atr_entry * _be_mult, 2)
-            if price <= be_threshold and pos["sl_price"] > pos["entry_price"]:
-                new_sl = pos["entry_price"]
-                con_trail = get_db()
-                con_trail.execute(
-                    "UPDATE positions SET sl_price = ? WHERE id = ?",
-                    (new_sl, pos["id"])
-                )
-                con_trail.commit()
-                con_trail.close()
-                pos["sl_price"] = new_sl
-                log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
 
         if pos["direction"] == "LONG":
             if pos["tp_price"] and price >= pos["tp_price"]:
@@ -351,17 +388,16 @@ def delete_position(
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     # B.5 #258: ownership-enforced via inline SELECT (db helper doesn't have
-    # delete primitive yet; refactor deferred to follow-up)
-    con = get_db()
-    row = con.execute(
-        "SELECT id FROM positions WHERE id=? AND tenant_id=?",
-        (pos_id, tenant_id),
-    ).fetchone()
-    if not row:
-        con.close()
-        raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
-    con.commit()
-    con.close()
+    # delete primitive yet; refactor deferred to follow-up).
+    # Wrapped in a single transaction so the ownership check + status flip
+    # serialize against any concurrent operator edit of the same row.
+    with transaction() as con:
+        row = con.execute(
+            "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+            (pos_id, tenant_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
+        con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
     update_positions_json()
     return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}
