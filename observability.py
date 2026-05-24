@@ -9,9 +9,10 @@ Append-only. Queries read by symbol/engine/time window.
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any
+
+from db.transaction import transaction
 
 
 PORTFOLIO_FAILURE_TIERS = {"ALERT", "REDUCED", "PAUSED", "PROBATION"}
@@ -19,11 +20,6 @@ PORTFOLIO_FAILURE_TIERS = {"ALERT", "REDUCED", "PAUSED", "PROBATION"}
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _conn() -> sqlite3.Connection:
-    import btc_api
-    return btc_api.get_db()
 
 
 def record_decision(
@@ -39,8 +35,7 @@ def record_decision(
     velocity_active: bool = False,
 ) -> int:
     """Insert a decision row. Returns the row id."""
-    conn = _conn()
-    try:
+    with transaction() as conn:
         cur = conn.execute(
             """INSERT INTO kill_switch_decisions
                (ts, scan_id, symbol, engine, per_symbol_tier, portfolio_tier,
@@ -52,10 +47,7 @@ def record_decision(
                 json.dumps(reasons, default=str), slider_value,
             ),
         )
-        conn.commit()
         return cur.lastrowid
-    finally:
-        conn.close()
 
 
 def query_decisions(
@@ -65,8 +57,7 @@ def query_decisions(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Query decisions, newest first. Optional filters by symbol, engine, time."""
-    conn = _conn()
-    try:
+    with transaction() as conn:
         where: list[str] = []
         params: list[Any] = []
         if symbol:
@@ -98,8 +89,6 @@ def query_decisions(
             d["velocity_active"] = bool(d["velocity_active"])
             result.append(d)
         return result
-    finally:
-        conn.close()
 
 
 def compute_portfolio_aggregate(
@@ -130,8 +119,7 @@ def get_current_state(
     Takes the latest decision per symbol from the log (filtered to the
     given engine) and computes portfolio aggregate.
     """
-    conn = _conn()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             """SELECT d.symbol, d.per_symbol_tier, d.portfolio_tier, d.size_factor,
                       d.skip, d.velocity_active, d.ts, d.reasons_json
@@ -146,8 +134,6 @@ def get_current_state(
                WHERE d.engine = ?""",
             (engine, engine),
         ).fetchall()
-    finally:
-        conn.close()
 
     cols = ["symbol", "per_symbol_tier", "portfolio_tier", "size_factor",
             "skip", "velocity_active", "ts", "reasons_json"]

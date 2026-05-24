@@ -28,8 +28,9 @@ import requests as req_lib
 from api.telegram import push_telegram_direct, push_webhook
 from btc_scanner import scan
 from data import market_data as md
-from db.connection import backup_db, get_db
+from db.connection import backup_db
 from db.signals import get_signals_summary, save_scan
+from db.transaction import transaction
 from notifier import notify, SystemEvent
 
 log = logging.getLogger("scanner.runtime")
@@ -138,9 +139,8 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
     """
     from datetime import datetime, timezone  # noqa: PLC0415
 
-    con = get_db()
-    rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
-    con.close()
+    with transaction() as con:
+        rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
 
     if not rows:
         return
@@ -202,10 +202,8 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
                 set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
                 params     = list(updates.values()) + [r["id"]]
 
-                con_up = get_db()
-                con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
-                con_up.commit()
-                con_up.close()
+                with transaction() as con_up:
+                    con_up.execute(f"UPDATE signal_outcomes SET {set_clause} WHERE id = ?", params)
                 updated_count += 1
 
         except Exception as e:

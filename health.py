@@ -12,6 +12,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from db.transaction import transaction
+
 
 log = logging.getLogger("health")
 
@@ -388,8 +390,7 @@ def _decrement_probation_counter(symbol: str) -> None:
     Floored at 0. No-op if the symbol is not in PROBATION (uses a state-guarded
     UPDATE so we don't accidentally write to non-PROBATION rows).
     """
-    conn = _conn()
-    try:
+    with transaction() as conn:
         conn.execute(
             """UPDATE symbol_health
                SET probation_trades_remaining = MAX(
@@ -398,9 +399,6 @@ def _decrement_probation_counter(symbol: str) -> None:
                WHERE symbol = ? AND state = 'PROBATION'""",
             (symbol,),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
@@ -423,14 +421,11 @@ def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
 
         # Concurrent failures: a property of symbol_health (system-wide), so
         # we read it once and reuse it across the per-tenant loop.
-        conn = _conn()
-        try:
+        with transaction() as conn:
             n_failures = conn.execute(
                 """SELECT COUNT(*) FROM symbol_health
                    WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
             ).fetchone()[0]
-        finally:
-            conn.close()
 
         for tid in tenant_ids:
             portfolio_dd = _compute_current_portfolio_dd(cfg, tenant_id=tid)
@@ -488,21 +483,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _conn():
-    import btc_api
-    return btc_api.get_db()
-
-
 def get_symbol_state(symbol: str) -> str:
     """Return the current state of a symbol, or 'NORMAL' if it has no row."""
-    conn = _conn()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             "SELECT state FROM symbol_health WHERE symbol=?",
             (symbol,),
         ).fetchone()
-    finally:
-        conn.close()
     return row[0] if row else "NORMAL"
 
 
@@ -544,18 +531,12 @@ def summarize_recent_alerts(
     `kill_switch_decisions` for `velocity_burst`. Returns {"items": [...]}
     where each item has kind/text/severity/ts.
     """
-    if conn is None:
-        conn = _conn()
-        owns_conn = True
-    else:
-        owns_conn = False
-
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
     items: list[dict[str, Any]] = []
 
-    try:
+    def _gather(c) -> None:
         # symbol_failures: distinct symbols entering ALERT/REDUCED/PAUSED
-        rows = conn.execute(
+        rows = c.execute(
             """SELECT DISTINCT symbol, MAX(ts) AS latest
                FROM symbol_health_events
                WHERE ts >= ? AND to_state IN ('ALERT', 'REDUCED', 'PAUSED')
@@ -574,7 +555,7 @@ def summarize_recent_alerts(
             })
 
         # auto_reactivation: PROBATION transitions with reason starting "reactivated_auto"
-        rows = conn.execute(
+        rows = c.execute(
             """SELECT COUNT(*) AS n, MAX(ts) AS latest
                FROM symbol_health_events
                WHERE ts >= ? AND to_state = 'PROBATION'
@@ -590,7 +571,7 @@ def summarize_recent_alerts(
             })
 
         # velocity_burst: count of decisions with velocity_active=1
-        rows = conn.execute(
+        rows = c.execute(
             """SELECT COUNT(*) AS n, MAX(ts) AS latest
                FROM kill_switch_decisions
                WHERE ts >= ? AND velocity_active = 1""",
@@ -604,11 +585,14 @@ def summarize_recent_alerts(
                 "ts": rows[1],
             })
 
-        # Sort newest-first
-        items.sort(key=lambda x: x["ts"], reverse=True)
-    finally:
-        if owns_conn:
-            conn.close()
+    if conn is None:
+        with transaction() as own_conn:
+            _gather(own_conn)
+    else:
+        _gather(conn)
+
+    # Sort newest-first
+    items.sort(key=lambda x: x["ts"], reverse=True)
 
     return {"items": items}
 
@@ -616,9 +600,8 @@ def summarize_recent_alerts(
 def _record_evaluation(symbol: str, metrics: dict[str, Any], new_state: str) -> None:
     """Update last_evaluated_at + last_metrics_json without changing state.
     Creates the row if it doesn't exist. No event is emitted."""
-    conn = _conn()
     now = _now_iso()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health (symbol, state, state_since, last_evaluated_at, last_metrics_json)
                VALUES (?, ?, ?, ?, ?)
@@ -627,9 +610,6 @@ def _record_evaluation(symbol: str, metrics: dict[str, Any], new_state: str) -> 
                  last_metrics_json = excluded.last_metrics_json""",
             (symbol, new_state, now, now, json.dumps(metrics, default=str)),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def apply_transition(
@@ -650,8 +630,7 @@ def apply_transition(
     now = _now_iso()
     metrics_json = json.dumps(metrics, default=str)
 
-    conn = _conn()
-    try:
+    with transaction() as conn:
         extra_sets = ""
         if manual_override is not None:
             extra_sets = ", manual_override = excluded.manual_override"
@@ -695,9 +674,6 @@ def apply_transition(
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (symbol, from_state, new_state, reason, metrics_json, now),
             )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
@@ -706,8 +682,7 @@ def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
     Selected columns: state, state_since, manual_override,
     probation_trades_remaining, probation_started_at, paused_days_at_entry.
     """
-    conn = _conn()
-    try:
+    with transaction() as conn:
         row = conn.execute(
             """SELECT state, state_since, manual_override,
                       probation_trades_remaining, probation_started_at,
@@ -715,8 +690,6 @@ def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
                FROM symbol_health WHERE symbol=?""",
             (symbol,),
         ).fetchone()
-    finally:
-        conn.close()
     if row is None:
         return None
     return {
@@ -786,8 +759,7 @@ def reactivate_symbol(
     # B5 C2 fix: single atomic transaction (state + probation columns + event row)
     # to close the race window where a concurrent trigger_health_evaluation could
     # read NULL counter and silently revert state to NORMAL between two writes.
-    conn = _conn()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO symbol_health
                (symbol, state, state_since, last_evaluated_at, last_metrics_json,
@@ -815,9 +787,6 @@ def reactivate_symbol(
                VALUES (?, ?, 'PROBATION', ?, ?, ?)""",
             (symbol, current, f"reactivated_{reason}", metrics_json, now_iso),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     # B5 C1 fix: notify on PROBATION entry (auto + manual reactivations).
     # Previously dead code in evaluate_and_record (which never returns
@@ -847,11 +816,8 @@ def evaluate_and_record(symbol: str, cfg: dict[str, Any], now: datetime | None =
     if now is None:
         now = datetime.now(timezone.utc)
 
-    conn = _conn()
-    try:
+    with transaction() as conn:
         metrics = compute_rolling_metrics(symbol, conn, now=now)
-    finally:
-        conn.close()
 
     # B5: inject current probation_trades_remaining into metrics so evaluate_state
     # can apply the PROBATION branch. Read from the symbol_health row.
@@ -1016,31 +982,24 @@ def record_portfolio_transition(
     """
     if from_tier == to_tier:
         return
-    conn = _conn()
-    try:
+    with transaction() as conn:
         conn.execute(
             """INSERT INTO portfolio_health_events
                (from_tier, to_tier, reason, dd_pct, concurrent, ts)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (from_tier, to_tier, reason, float(dd_pct), int(concurrent), _now_iso()),
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def recent_portfolio_transitions(limit: int = 5) -> list[dict[str, Any]]:
     """B6: Last N portfolio-tier transitions, newest first."""
-    conn = _conn()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             """SELECT from_tier, to_tier, reason, dd_pct, concurrent, ts
                FROM portfolio_health_events
                ORDER BY ts DESC LIMIT ?""",
             (limit,),
         ).fetchall()
-    finally:
-        conn.close()
     return [
         {
             "from_tier": r[0], "to_tier": r[1], "reason": r[2],
@@ -1075,8 +1034,7 @@ def get_dashboard_state(
     ks_cfg = (cfg.get("kill_switch") or {})
     now = datetime.now(timezone.utc)
 
-    conn = _conn()
-    try:
+    with transaction() as conn:
         # Build symbol list: union of DEFAULT_SYMBOLS + any DB rows. This way
         # the dashboard always shows the curated 10 (as NORMAL placeholders if
         # not yet evaluated) AND any historical/legacy rows in symbol_health.
@@ -1276,8 +1234,6 @@ def get_dashboard_state(
                 "severity": severity,
                 "ts": now.isoformat(),
             })
-    finally:
-        conn.close()
 
     return {
         "symbols": symbols_out,

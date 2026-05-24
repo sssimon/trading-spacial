@@ -40,7 +40,7 @@ from db.auth_schema import (
     has_any_user, init_auth_db, init_system_state,
     is_setup_completed, mark_setup_completed,
 )
-from db.connection import get_db
+from db.transaction import transaction
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -90,8 +90,7 @@ from api.agent.history import router as agent_history_router
 from btc_scanner import scan  # noqa: F401 — patch("btc_api.scan", ...) in test_api.py line 421
 from data import market_data as md  # used directly at line 145; patch.object(btc_api.md) in test_api.py
 # DB_FILE: monkeypatched as btc_api.DB_FILE by ~25 test files to redirect SQLite path
-# get_db: called as btc_api.get_db() in test_api.py, test_health_persistence.py, and many others
-from db.connection import DB_FILE, get_db  # noqa: F401
+from db.connection import DB_FILE  # noqa: F401
 from db.schema import init_db  # used in lifespan() at line 67; also btc_api.init_db() in many tests
 # get_latest_scan + get_signals_summary: used in this file (lines 112, 133)
 # get_latest_signal, get_scans, save_scan: called as btc_api.<name> in test_api.py
@@ -155,17 +154,13 @@ def _bootstrap_first_user() -> None:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         pwd_hash = hash_password(init_pwd)
-        con = get_db()
-        try:
+        with transaction() as con:
             cur = con.execute(
                 "INSERT INTO users (email, password_hash, role, is_active, "
                 "created_at, password_changed_at) VALUES (?, ?, 'admin', 1, ?, ?)",
                 (init_email.lower(), pwd_hash, now, now),
             )
             uid = int(cur.lastrowid or 0)
-            con.commit()
-        finally:
-            con.close()
         mark_setup_completed(ip=None, method="env_vars")
         log_auth_event(
             event_type="initial_setup_completed",

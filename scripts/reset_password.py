@@ -33,7 +33,7 @@ from auth.password import hash_password  # noqa: E402
 from auth.setup import validate_setup_password  # noqa: E402
 from auth.tokens import revoke_all_for_user  # noqa: E402
 from db.auth_schema import init_auth_db  # noqa: E402
-from db.connection import get_db  # noqa: E402
+from db.transaction import transaction  # noqa: E402
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -52,13 +52,10 @@ def _prompt_email(initial: str | None) -> str:
 
 
 def _find_user(email: str) -> tuple[int, bool] | None:
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT id, is_active FROM users WHERE email = ?", (email,)
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     return int(row["id"]), bool(row["is_active"])
@@ -80,16 +77,12 @@ def _prompt_new_password() -> str:
 
 def _update_password(user_id: int, pwd_hash: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         con.execute(
             "UPDATE users SET password_hash = ?, password_changed_at = ? "
             "WHERE id = ?",
             (pwd_hash, now, user_id),
         )
-        con.commit()
-    finally:
-        con.close()
 
 
 def main() -> None:

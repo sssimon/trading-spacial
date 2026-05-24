@@ -34,7 +34,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from auth.password import hash_password, password_meets_minimum  # noqa: E402
 from db.auth_schema import init_auth_db  # noqa: E402
-from db.connection import get_db  # noqa: E402
+from db.transaction import transaction  # noqa: E402
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -67,21 +67,17 @@ def _prompt_password() -> str:
 
 
 def _email_exists(email: str) -> bool:
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT 1 FROM users WHERE email = ?", (email,)
         ).fetchone()
-        return row is not None
-    finally:
-        con.close()
+    return row is not None
 
 
 def _create_user(email: str, password_hash: str, role: str) -> int:
     """Insert and return the new user_id."""
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         cur = con.execute(
             """
             INSERT INTO users
@@ -91,10 +87,7 @@ def _create_user(email: str, password_hash: str, role: str) -> int:
             """,
             (email, password_hash, role, now, now),
         )
-        con.commit()
         return int(cur.lastrowid or 0)
-    finally:
-        con.close()
 
 
 def main() -> None:

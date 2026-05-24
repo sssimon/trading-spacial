@@ -21,11 +21,10 @@ _GRID_STEP = 5
 def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any]]:
     """Load closed positions with exit_ts within the last window_days, ordered by entry_ts."""
     from datetime import timedelta
-    import btc_api
+    from db.transaction import transaction
 
     cutoff = (now - timedelta(days=float(window_days))).isoformat()
-    conn = btc_api.get_db()
-    try:
+    with transaction() as conn:
         rows = conn.execute(
             """SELECT symbol, entry_ts, exit_ts, exit_reason, pnl_usd
                FROM positions
@@ -36,8 +35,6 @@ def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any
                ORDER BY entry_ts""",
             (cutoff,),
         ).fetchall()
-    finally:
-        conn.close()
     return [
         {"symbol": r[0], "entry_ts": r[1], "exit_ts": r[2],
          "exit_reason": r[3], "pnl_usd": r[4]}

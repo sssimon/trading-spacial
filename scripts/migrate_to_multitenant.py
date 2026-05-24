@@ -35,8 +35,8 @@ from db.capital import (  # noqa: E402
     db_get_capital,
     db_upsert_capital,
 )
-from db.connection import get_db  # noqa: E402
 from db.schema import PER_USER_TABLES, backfill_tenant  # noqa: E402
+from db.transaction import transaction  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,52 +52,40 @@ log = logging.getLogger("migrate_to_multitenant")
 
 def _validate_user(user_id: int) -> Optional[dict]:
     """Return user row dict or None if not found."""
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT id, email FROM users WHERE id = ?", (user_id,),
         ).fetchone()
-    finally:
-        con.close()
     return dict(row) if row else None
 
 
 def _list_known_users() -> list[dict]:
-    con = get_db()
-    try:
+    with transaction() as con:
         rows = con.execute("SELECT id, email FROM users ORDER BY id").fetchall()
-    finally:
-        con.close()
     return [dict(r) for r in rows]
 
 
 def _snapshot_counts() -> dict[str, dict[str, int]]:
     """For each per-user table: total + null_tenant counts."""
-    con = get_db()
-    try:
-        out: dict[str, dict[str, int]] = {}
+    out: dict[str, dict[str, int]] = {}
+    with transaction() as con:
         for table in PER_USER_TABLES:
             total = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             null_n = con.execute(
                 f"SELECT COUNT(*) FROM {table} WHERE tenant_id IS NULL"
             ).fetchone()[0]
             out[table] = {"total": int(total), "null_tenant": int(null_n)}
-    finally:
-        con.close()
     return out
 
 
 def _spot_check_positions(tenant_id: int, limit: int = 10) -> list[dict]:
-    con = get_db()
-    try:
+    with transaction() as con:
         rows = con.execute(
             "SELECT id, symbol, status, entry_ts, exit_ts, pnl_usd "
             "FROM positions WHERE tenant_id = ? "
             "ORDER BY id DESC LIMIT ?",
             (tenant_id, limit),
         ).fetchall()
-    finally:
-        con.close()
     return [dict(r) for r in rows]
 
 
