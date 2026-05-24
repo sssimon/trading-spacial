@@ -23,7 +23,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("db.positions")
 
@@ -44,36 +44,34 @@ def db_create_position(data: dict, tenant_id: Optional[int] = None) -> dict:
     Per B.5: API callers always pass tenant_id from JWT; internal/legacy
     callers may pass None (row inserted with tenant_id NULL).
     """
-    con = get_db()
     entry = float(data["entry_price"])
     qty   = float(data.get("qty") or (float(data.get("size_usd", 0) or 0) / entry if entry else 0))
     ts    = data.get("entry_ts") or datetime.now(timezone.utc).isoformat()
-    cur = con.execute("""
-        INSERT INTO positions
-            (scan_id, symbol, direction, status, entry_price, entry_ts,
-             sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes,
-             tenant_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (
-        data.get("scan_id"),
-        data["symbol"].upper(),
-        data.get("direction", "LONG").upper(),
-        "open",
-        entry,
-        ts,
-        data.get("sl_price"),
-        data.get("tp_price"),
-        data.get("size_usd"),
-        qty,
-        data.get("atr_entry"),
-        data.get("be_mult"),
-        data.get("notes", ""),
-        tenant_id,  # NULL if not provided — legacy behavior
-    ))
-    pos_id = cur.lastrowid
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
+    with transaction() as con:
+        cur = con.execute("""
+            INSERT INTO positions
+                (scan_id, symbol, direction, status, entry_price, entry_ts,
+                 sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes,
+                 tenant_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            data.get("scan_id"),
+            data["symbol"].upper(),
+            data.get("direction", "LONG").upper(),
+            "open",
+            entry,
+            ts,
+            data.get("sl_price"),
+            data.get("tp_price"),
+            data.get("size_usd"),
+            qty,
+            data.get("atr_entry"),
+            data.get("be_mult"),
+            data.get("notes", ""),
+            tenant_id,  # NULL if not provided — legacy behavior
+        ))
+        pos_id = cur.lastrowid
+        row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
     return dict(row)
 
 
@@ -84,23 +82,22 @@ def db_last_exit_ts(symbol: str, tenant_id: Optional[int] = None) -> Optional[da
     across ALL users — correct semantic for scanner cooldown (system-wide).
     When tenant_id is int, filters to that user's exits only.
     """
-    con = get_db()
-    if tenant_id is None:
-        row = con.execute(
-            "SELECT exit_ts FROM positions "
-            "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
-            "ORDER BY exit_ts DESC LIMIT 1",
-            (symbol.upper(),),
-        ).fetchone()
-    else:
-        row = con.execute(
-            "SELECT exit_ts FROM positions "
-            "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
-            "AND tenant_id=? "
-            "ORDER BY exit_ts DESC LIMIT 1",
-            (symbol.upper(), tenant_id),
-        ).fetchone()
-    con.close()
+    with transaction() as con:
+        if tenant_id is None:
+            row = con.execute(
+                "SELECT exit_ts FROM positions "
+                "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+                "ORDER BY exit_ts DESC LIMIT 1",
+                (symbol.upper(),),
+            ).fetchone()
+        else:
+            row = con.execute(
+                "SELECT exit_ts FROM positions "
+                "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+                "AND tenant_id=? "
+                "ORDER BY exit_ts DESC LIMIT 1",
+                (symbol.upper(), tenant_id),
+            ).fetchone()
     if not row or not row[0]:
         return None
     try:
@@ -128,7 +125,6 @@ def db_get_positions(
     caller doesn't load the full history into Python just to discard it
     (PR #403 review issue 3).
     """
-    con = get_db()
     clauses: list[str] = []
     params: list = []
     if status and status != "all":
@@ -145,10 +141,10 @@ def db_get_positions(
         clauses.append(f"{ts_col} >= ?")
         params.append(since)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    rows = con.execute(
-        f"SELECT * FROM positions{where} ORDER BY id DESC", params,
-    ).fetchall()
-    con.close()
+    with transaction() as con:
+        rows = con.execute(
+            f"SELECT * FROM positions{where} ORDER BY id DESC", params,
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -163,31 +159,28 @@ def db_close_position(
     If tenant_id is provided and the position does NOT belong to that tenant,
     returns None (IDOR protection — caller sees same behavior as 'not found').
     """
-    con = get_db()
-    if tenant_id is None:
-        row = con.execute(
-            "SELECT * FROM positions WHERE id=?", (pos_id,),
-        ).fetchone()
-    else:
-        row = con.execute(
-            "SELECT * FROM positions WHERE id=? AND tenant_id=?",
-            (pos_id, tenant_id),
-        ).fetchone()
-    if not row:
-        con.close()
-        return None
-    pos = dict(row)
-    qty = pos.get("qty") or 0
-    pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
-    exit_ts = datetime.now(timezone.utc).isoformat()
-    con.execute("""
-        UPDATE positions
-        SET status=?, exit_price=?, exit_ts=?, exit_reason=?, pnl_usd=?, pnl_pct=?
-        WHERE id=?
-    """, ("closed", exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, pos_id))
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
+    with transaction() as con:
+        if tenant_id is None:
+            row = con.execute(
+                "SELECT * FROM positions WHERE id=?", (pos_id,),
+            ).fetchone()
+        else:
+            row = con.execute(
+                "SELECT * FROM positions WHERE id=? AND tenant_id=?",
+                (pos_id, tenant_id),
+            ).fetchone()
+        if not row:
+            return None
+        pos = dict(row)
+        qty = pos.get("qty") or 0
+        pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
+        exit_ts = datetime.now(timezone.utc).isoformat()
+        con.execute("""
+            UPDATE positions
+            SET status=?, exit_price=?, exit_ts=?, exit_reason=?, pnl_usd=?, pnl_pct=?
+            WHERE id=?
+        """, ("closed", exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, pos_id))
+        row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
     closed = dict(row)
     # Kill switch #138: trigger health evaluation for this symbol.
     try:
@@ -213,20 +206,17 @@ def db_update_position(
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return None
-    con = get_db()
-    # Ownership pre-check when tenant_id provided
-    if tenant_id is not None:
-        owner_row = con.execute(
-            "SELECT id FROM positions WHERE id=? AND tenant_id=?",
-            (pos_id, tenant_id),
-        ).fetchone()
-        if not owner_row:
-            con.close()
-            return None
-    sets = ", ".join(f"{k}=?" for k in updates)
-    vals = list(updates.values()) + [pos_id]
-    con.execute(f"UPDATE positions SET {sets} WHERE id=?", vals)
-    con.commit()
-    row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    con.close()
+    with transaction() as con:
+        # Ownership pre-check when tenant_id provided
+        if tenant_id is not None:
+            owner_row = con.execute(
+                "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+                (pos_id, tenant_id),
+            ).fetchone()
+            if not owner_row:
+                return None
+        sets = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [pos_id]
+        con.execute(f"UPDATE positions SET {sets} WHERE id=?", vals)
+        row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
     return dict(row) if row else None

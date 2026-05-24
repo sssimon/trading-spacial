@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.connection import get_db
+from db.transaction import transaction
 
 log = logging.getLogger("db.user_preferences")
 
@@ -43,13 +43,10 @@ def _decode_row(row) -> dict:
 
 def db_get_user_preferences(tenant_id: int) -> Optional[dict]:
     """Return preferences row for tenant, or None if not yet set."""
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
-    finally:
-        con.close()
     if row is None:
         return None
     return _decode_row(row)
@@ -71,8 +68,7 @@ def db_upsert_user_preferences(
     Returns resulting row with JSON fields parsed.
     """
     now = datetime.now(timezone.utc).isoformat()
-    con = get_db()
-    try:
+    with transaction() as con:
         existing = con.execute(
             "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
@@ -100,10 +96,7 @@ def db_upsert_user_preferences(
                    WHERE tenant_id = ?""",
                 (effective_sf, effective_ms, effective_nc, now, tenant_id),
             )
-        con.commit()
         row = con.execute(
             "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
-    finally:
-        con.close()
     return _decode_row(row)

@@ -1,6 +1,9 @@
 """Thin wrapper around signals.db for notification records.
 
-Uses btc_api.get_db() so tests monkeypatching DB_FILE work transparently.
+Uses db.transaction.transaction() — the single entry point for all DB access
+post-Task 8 of the transaction unit-of-work refactor. Tests that previously
+relied on monkeypatching btc_api.DB_FILE still work because the underlying
+_resolve_db_file() helper honours that attribute.
 
 ## Multi-tenancy (B.5 follow-up #258 — 2026-05-15)
 
@@ -19,14 +22,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from db.transaction import transaction
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _conn():
-    import btc_api
-    return btc_api.get_db()
 
 
 def record_delivery(
@@ -39,8 +39,7 @@ def record_delivery(
     error_log: str | None = None,
     tenant_id: Optional[int] = None,
 ) -> int:
-    conn = _conn()
-    try:
+    with transaction() as conn:
         cur = conn.execute(
             """INSERT INTO notifications_sent
                (event_type, event_key, priority, payload_json,
@@ -53,18 +52,14 @@ def record_delivery(
                 _now_iso(), error_log, tenant_id,
             ),
         )
-        conn.commit()
         return cur.lastrowid
-    finally:
-        conn.close()
 
 
 def list_unread(
     limit: int = 50,
     tenant_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    conn = _conn()
-    try:
+    with transaction() as conn:
         if tenant_id is None:
             rows = conn.execute(
                 """SELECT id, event_type, event_key, priority, payload_json,
@@ -85,8 +80,6 @@ def list_unread(
                    LIMIT ?""",
                 (tenant_id, limit),
             ).fetchall()
-    finally:
-        conn.close()
     cols = ["id", "event_type", "event_key", "priority", "payload_json",
             "channels_sent", "delivery_status", "sent_at", "read_at", "error_log"]
     return [dict(zip(cols, r)) for r in rows]
@@ -101,8 +94,7 @@ def mark_read(
     Returns True if a row was updated, False if not (e.g., IDOR: trying to
     mark another user's notification).
     """
-    conn = _conn()
-    try:
+    with transaction() as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE id = ?",
@@ -114,16 +106,12 @@ def mark_read(
                 "WHERE id = ? AND tenant_id = ?",
                 (_now_iso(), notification_id, tenant_id),
             )
-        conn.commit()
         return cur.rowcount > 0
-    finally:
-        conn.close()
 
 
 def mark_all_read(tenant_id: Optional[int] = None) -> int:
     """Mark all unread as read. Scope-limited by tenant_id when provided."""
-    conn = _conn()
-    try:
+    with transaction() as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE read_at IS NULL",
@@ -135,7 +123,4 @@ def mark_all_read(tenant_id: Optional[int] = None) -> int:
                 "WHERE read_at IS NULL AND tenant_id = ?",
                 (_now_iso(), tenant_id),
             )
-        conn.commit()
         return cur.rowcount
-    finally:
-        conn.close()

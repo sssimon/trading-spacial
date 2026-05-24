@@ -38,7 +38,7 @@ from starlette.types import ASGIApp
 
 from auth.models import User
 from auth.tokens import verify_access_token
-from db.connection import get_db
+from db.transaction import transaction
 
 
 def _bypass_role_or_none() -> str | None:
@@ -134,8 +134,7 @@ def _hydrate_user_from_db(user_id: int) -> User | None:
     sqlite read per protected request — acceptable for 2-5 users at one
     request every few seconds.
     """
-    con = get_db()
-    try:
+    with transaction() as con:
         row = con.execute(
             """
             SELECT id, email, role, is_active, created_at, password_changed_at,
@@ -144,8 +143,6 @@ def _hydrate_user_from_db(user_id: int) -> User | None:
             """,
             (user_id,),
         ).fetchone()
-    finally:
-        con.close()
     if not row:
         return None
     if not row["is_active"]:
