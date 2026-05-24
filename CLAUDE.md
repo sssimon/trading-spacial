@@ -233,6 +233,22 @@ The original guardrail (Epic A passes + Epic B implemented) was **overridden 202
 4. Monitor for 1–2 weeks alongside the B.8 backup-retention empirical validation (signal-dispatch row + capital update + clean window — see `project_b8_backup_retention.md`)
 5. If a real isolation issue surfaces (something the IDOR suite missed), **reopen #271** and document the gap before continuing
 
+## Database access
+
+All DB access goes through `db.transaction.transaction()`. The context manager owns `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` / `close`. Callers never call `con.commit()`, `con.rollback()`, or `con.close()` inside the block.
+
+Pattern:
+
+```python
+from db.transaction import transaction
+
+with transaction() as con:
+    con.execute("INSERT INTO ...", (...,))
+    rows = con.execute("SELECT ...").fetchall()
+```
+
+For multi-statement atomicity, keep all statements inside one `with transaction()` block. Helpers like `db_close_position` currently own their own transactions; cross-helper atomicity is a future refinement (see plan `docs/superpowers/plans/2026-05-24-transaction-unit-of-work.md`).
+
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
 - The webhook process itself is not supervised by the watchdog (only btc_api.py is)
