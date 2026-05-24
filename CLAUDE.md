@@ -212,9 +212,20 @@ The repo contains a **locked holdout dataset** at `data/holdout/` that must NOT 
 
    **Agent tooling note (Bayesian update mechanics).** The skill `pymc-bayesian-modeling` (installed 2026-05-15, globally available; `Skill` tool name `pymc-bayesian-modeling`) is the canonical tool when an §A.4 prior re-evaluation checkpoint needs to be materialized as a quantified posterior — PyMC + NUTS sampling + LOO/WAIC model comparison + posterior predictive checks. Invoke it for: the #318 posterior over grid-coverage probability; A.4-1.5 model comparison across the 4 regime configs `{60_40, 70_30, 80_20, no_detector}`; the regime-allocation Phase 3 verdict-conditional posterior over P(strategy viable); any hierarchical symbol × config posterior on sweep grids. Do NOT invoke it for the institutional 2-3-sentence prose magnitude updates (R1/R2/R3/Phase-2/3 pre-reg §A.4 checkpoints by default produce prose only). The §A.4 pattern is prose-by-default and PyMC-on-demand.
 
-### Inviting users — guardrail (#271)
+### Inviting users — guardrail (#271, CLOSED 2026-05-16)
 
-`trading.sdar.dev` does **not** get additional user accounts until both: (a) Epic A passes its validation bar (A.4 documented, A.6 published), and (b) Epic B (#253) is implemented. This is a self-imposed contract; closing #271 requires explicit confirmation of both conditions.
+The original guardrail (Epic A passes + Epic B implemented) was **overridden 2026-05-15** and **closed 2026-05-16**. Inviting non-Samuel users (papá, María, etc.) on `trading.sdar.dev` is now **unblocked**.
+
+**What changed:**
+- **Epic A waived** — archived as terminal-not-passed (PR #316 inflection-point: edge inflated by simulator bugs; #338 regime-allocation pivot returned `PHASE_3_INSUFFICIENT_DATA`; PR #357 Direction A verdict `EDGE_WEAK`, only Q2 operator-discretion exit timing confirmed as edge). Framing shifted to "operator-discretion + per-user data isolation" — invitees use the system as operator-filters of their own positions, not as auto-strategy users. The original "share validated strategy" risk no longer applies.
+- **Epic B (#253) shipped** — B.1→B.8 all merged in `080a74e`. B.7 IDOR suite green (17/17). B.8 production migration executed 2026-05-16 (3,306 signal_outcomes + 410 notifications stamped `tenant_id=1`, capital row created, zero downtime).
+
+**Operational checklist when inviting a new user** (from #271 closure comment):
+1. Create the account via the `auth` flow
+2. Verify they only see their own positions / notifications in the UI (no leakage from Samuel's data)
+3. Confirm the per-user signal dispatcher (B.4, `notifier/dispatch_per_user.py`) routes scanner output to both users
+4. Monitor for 1–2 weeks alongside the B.8 backup-retention empirical validation (signal-dispatch row + capital update + clean window — see `project_b8_backup_retention.md`)
+5. If a real isolation issue surfaces (something the IDOR suite missed), **reopen #271** and document the gap before continuing
 
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
