@@ -1,0 +1,56 @@
+{
+  "format_version": 1,
+  "shape": "flat_per_symbol",
+  "symbol_overrides": {
+    "ADAUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 0.5,
+      "atr_tp_mult": 4.0
+    },
+    "AVAXUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 1.5,
+      "atr_tp_mult": 4.0
+    },
+    "BTCUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 1.0,
+      "atr_tp_mult": 4.0
+    },
+    "DOGEUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 0.7,
+      "atr_tp_mult": 4.0
+    },
+    "ETHUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 1.2,
+      "atr_tp_mult": 4.0
+    },
+    "JUPUSDT": {
+      "atr_be_mult": 2.5,
+      "atr_sl_mult": 0.5,
+      "atr_tp_mult": 4.0
+    },
+    "PENDLEUSDT": {
+      "atr_be_mult": 2.0,
+      "atr_sl_mult": 0.5,
+      "atr_tp_mult": 3.0
+    },
+    "RUNEUSDT": {
+      "atr_be_mult": 2.5,
+      "atr_sl_mult": 0.7,
+      "atr_tp_mult": 6.0
+    },
+    "UNIUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 1.0,
+      "atr_tp_mult": 3.0
+    },
+    "XLMUSDT": {
+      "atr_be_mult": 1.5,
+      "atr_sl_mult": 0.5,
+      "atr_tp_mult": 4.0
+    }
+  }
+}

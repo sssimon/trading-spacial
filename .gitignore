@@ -74,8 +74,17 @@ frontend/dist/
 
 # ── Claude Code ──────────────────────────────────────────────
 # settings.local.json puede contener rutas/permisos personales
+# Se ignora todo .claude/ para no filtrar configuración local de la sesión
+.claude/
 .claude/settings.local.json
 .claude/worktrees/
+
+# ── Playwright MCP (screenshots/transcripts de sesiones locales) ──
+.playwright-mcp/
+
+# ── Screenshots ad-hoc en la raíz ─────────────────────────────
+# Solo en la raíz: PNGs en subcarpetas (p. ej. Backtesting_BTCUSDT/) sí se commitean
+/*.png
 
 # ── Git worktrees (subagent-driven development) ──────────────
 .worktrees/
