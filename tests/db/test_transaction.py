@@ -13,7 +13,7 @@ import threading
 import pytest
 
 from db.transaction import transaction
-from db.connection import init_db
+from db.schema import init_db
 
 
 @pytest.fixture

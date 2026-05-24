@@ -45,15 +45,6 @@ def _resolve_db_file() -> str:
         return DB_FILE
 
 
-def _dict_row_factory(cursor: sqlite3.Cursor, row: tuple) -> "_DictRow":
-    """Module-level row factory that delegates to _DictRow.
-
-    Required by _open_configured_connection so both the legacy get_db() path
-    and the new transaction() path share the same row class without duplication.
-    """
-    return _DictRow(cursor, row)
-
-
 class _DictRow(tuple):
     """Row factory that behaves as a plain tuple (supports == comparison) while
     also supporting dict-style access via row["column"] and row.get("column").
@@ -133,15 +124,3 @@ def backup_db() -> None:
     except Exception as e:
         log.warning(f"DB backup failed: {e}")
 
-
-# Re-export init_db so test code that imports from db.connection can find it.
-# The canonical implementation lives in db.schema to keep schema DDL separate.
-# This avoids a circular import by using a lazy import inside the function.
-def init_db() -> None:
-    """Initialize the database. Delegates to db.schema.init_db().
-
-    Re-exported here so callers can use `from db.connection import init_db`
-    without needing to know the canonical location.
-    """
-    from db.schema import init_db as _init_db  # noqa: PLC0415
-    _init_db()

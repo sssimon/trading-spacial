@@ -11,7 +11,7 @@ import sqlite3
 
 from db.connection import _open_configured_connection
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("db.transaction")
 
 
 @contextmanager
