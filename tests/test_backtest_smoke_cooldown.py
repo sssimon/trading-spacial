@@ -13,6 +13,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OHLCV_DB = os.path.join(REPO_ROOT, "data", "ohlcv.db")
 CONFIG_DEFAULTS_PATH = os.path.join(REPO_ROOT, "config.defaults.json")
 
+# Marked `network` so conftest auto-skips when live Binance/Bybit unreachable
+# (HTTP 451/403). Pre-existing environmental constraint.
+pytestmark = pytest.mark.network
+
 
 CURATED_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT",

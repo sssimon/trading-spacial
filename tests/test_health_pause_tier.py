@@ -22,6 +22,8 @@ def tmp_db(tmp_path, monkeypatch):
 
 
 def _insert_closed(conn, symbol, pnl, exit_ts):
+    # Caller owns the transaction; conn.commit() would violate
+    # db.transaction's contract and break the outer CM's COMMIT.
     conn.execute(
         """INSERT INTO positions
            (symbol, direction, status, entry_price, entry_ts,
@@ -29,7 +31,6 @@ def _insert_closed(conn, symbol, pnl, exit_ts):
            VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
-    conn.commit()
 
 
 CFG = {"kill_switch": {

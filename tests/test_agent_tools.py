@@ -112,7 +112,9 @@ def _seed_two_tenant_positions(con):
                 " ?, ?, ?, ?)",
                 (direction, status, base_price, exit_price, exit_ts, pnl, tid),
             )
-    con.commit()
+    # No con.commit() — db.transaction's context manager COMMITs on clean
+    # exit; calling commit() here would leave the outer CM with no active
+    # tx and raise "cannot commit - no transaction is active".
 
 
 def test_get_positions_filters_strictly_by_tenant(tmp_db):

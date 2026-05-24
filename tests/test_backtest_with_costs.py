@@ -18,6 +18,10 @@ requires_ohlcv = pytest.mark.skipif(
     not os.path.exists(OHLCV_DB), reason="requires cached market data (data/ohlcv.db)",
 )
 
+# Marked `network` so conftest auto-skips when live Binance/Bybit unreachable
+# (cache may exist but be missing the needed window → falls through to live).
+pytestmark = pytest.mark.network
+
 
 @pytest.fixture
 def btc_data(tmp_path, monkeypatch):

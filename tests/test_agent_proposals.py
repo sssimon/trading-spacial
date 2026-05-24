@@ -237,13 +237,17 @@ def test_is_expired_treats_null_as_expired():
 
 
 def _seed_position(con, *, tenant_id: int, status: str = "open", id: int | None = None):
+    # NOTE: caller is responsible for the transaction boundary. The CALLER's
+    # `with transaction():` block will COMMIT on clean exit. The previous
+    # con.commit() here violated db.transaction's contract (caller MUST NOT
+    # commit) and caused "cannot commit - no transaction is active" when the
+    # outer CM tried to COMMIT.
     cur = con.execute(
         "INSERT INTO positions "
         "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
         "VALUES ('BTCUSDT', 'LONG', ?, 50000, '2026-04-20T10:00:00+00:00', 1000, ?)",
         (status, tenant_id),
     )
-    con.commit()
     return cur.lastrowid
 
 
@@ -308,11 +312,18 @@ def test_propose_close_position_rejects_closed_position(proposal_env, tmp_db):
 # ── Confirm endpoint ──────────────────────────────────────────────────
 
 
-def _build_signed_close_proposal(con, *, tenant_id: int, exit_price: float = 51000.0):
-    """Helper: seed an open position, sign + persist a close_position
-    proposal, return (pos_id, proposal_obj)."""
+def _build_signed_close_proposal(*, tenant_id: int, exit_price: float = 51000.0):
+    """Helper: seed an open position (own tx), sign + persist a
+    close_position proposal, return (pos_id, proposal_obj).
+
+    NOTE: This helper owns its own transaction boundaries (one for the
+    INSERT, persist_proposal opens its own). Callers MUST NOT wrap this
+    in `with transaction():` — that would nest two writer transactions
+    on different connections and deadlock under BEGIN IMMEDIATE.
+    """
     from api.agent.proposals import sign_proposal, persist_proposal
-    pos_id = _seed_position(con, tenant_id=tenant_id, status="open")
+    with transaction() as con:
+        pos_id = _seed_position(con, tenant_id=tenant_id, status="open")
     p = sign_proposal(
         action="close_position",
         args={"position_id": pos_id, "exit_price": exit_price},
@@ -328,8 +339,7 @@ def test_confirm_succeeds_and_executes_downstream(authed_client):
     import btc_api
     client = authed_client
 
-    with transaction() as con:
-        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
+    pos_id, proposal = _build_signed_close_proposal(tenant_id=1)
 
     resp = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -357,8 +367,7 @@ def test_confirm_is_idempotent_on_double_click(authed_client):
     import btc_api
     client = authed_client
 
-    with transaction() as con:
-        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
+    pos_id, proposal = _build_signed_close_proposal(tenant_id=1)
 
     r1 = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",
@@ -384,8 +393,7 @@ def test_confirm_returns_404_for_cross_tenant_attempt(authed_client, monkeypatch
     import btc_api
     client = authed_client
 
-    with transaction() as con:
-        _pos_id, proposal = _build_signed_close_proposal(con, tenant_id=2)
+    _pos_id, proposal = _build_signed_close_proposal(tenant_id=2)
 
     # client is bound to tenant_id=1 via the fixture override.
     resp = client.post(
@@ -402,8 +410,7 @@ def test_confirm_returns_400_on_tampered_signature(authed_client):
     import btc_api
     client = authed_client
 
-    with transaction() as con:
-        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
+    pos_id, proposal = _build_signed_close_proposal(tenant_id=1)
 
     mac, payload = proposal.signed_payload.split(".", 1)
     flipped = ("a" if mac[0] != "a" else "b") + mac[1:]
@@ -461,9 +468,9 @@ def test_confirm_returns_409_on_state_drift(authed_client):
     import btc_api
     client = authed_client
 
+    pos_id, proposal = _build_signed_close_proposal(tenant_id=1)
+    # Simulate the position closing in another flow before confirm.
     with transaction() as con:
-        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
-        # Simulate the position closing in another flow before confirm.
         con.execute(
             "UPDATE positions SET status = 'closed', exit_reason = 'SL', "
             "  exit_ts = '2026-05-19T20:00:00+00:00', exit_price = 49000 "
@@ -585,8 +592,7 @@ def test_confirm_close_position_works_for_viewer_on_own_position(viewer_client):
     import btc_api
     client = viewer_client
 
-    with transaction() as con:
-        pos_id, proposal = _build_signed_close_proposal(con, tenant_id=1)
+    pos_id, proposal = _build_signed_close_proposal(tenant_id=1)
 
     resp = client.post(
         f"/agent/proposals/{proposal.proposal_id}/confirm",

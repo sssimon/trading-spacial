@@ -80,6 +80,7 @@ def test_evaluate_signal_returns_full_precision_for_doge_price():
     assert abs(tp_price - entry_price) == pytest.approx(tp_dist, abs=1e-12)
 
 
+@pytest.mark.network  # falls through to live fetch when cache misses; conftest skips
 @pytest.mark.skipif(
     not os.path.exists(OHLCV_DB), reason="requires cached market data (data/ohlcv.db)",
 )

@@ -17,6 +17,55 @@ if TESTS_DIR not in sys.path:
     sys.path.insert(0, TESTS_DIR)
 
 
+# ─── Network reachability gate (project-wide) ─────────────────────────────
+#
+# A subset of tests reach live Binance / Bybit when the local OHLCV cache
+# misses. From EU IPs Binance returns HTTP 451 and Bybit's CloudFront 403.
+# Tests marked @pytest.mark.network (or that we know in advance will hit
+# live data) are auto-skipped when the providers aren't reachable from this
+# environment. This is independent of the transaction() migration — purely
+# infrastructure. Set FORCE_NETWORK_TESTS=1 to force them to run anyway.
+
+
+def _binance_reachable_once() -> bool:
+    if os.getenv("FORCE_NETWORK_TESTS") == "1":
+        return True
+    try:
+        import requests  # noqa: PLC0415
+        r = requests.get("https://api.binance.com/api/v3/ping", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+_NETWORK_OK = _binance_reachable_once()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip @pytest.mark.network tests when live providers are unreachable."""
+    if _NETWORK_OK:
+        return
+    skip_marker = pytest.mark.skip(
+        reason="live Binance/Bybit unreachable from this environment "
+               "(HTTP 451/403); set FORCE_NETWORK_TESTS=1 to override",
+    )
+    for item in items:
+        if "network" in item.keywords:
+            item.add_marker(skip_marker)
+
+
+# ─── anyio backend (project-wide) ─────────────────────────────────────────
+#
+# Without this fixture, pytest-anyio parametrizes every @pytest.mark.anyio
+# test with both 'asyncio' and 'trio'. trio is not a project dependency, so
+# the [trio] params raise ModuleNotFoundError. Pin all anyio tests to the
+# asyncio backend. Tests that specifically need a different backend can
+# override this fixture locally.
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
 @pytest.fixture(autouse=True)
 def _reset_unknown_regime_warned():
     """Auto-clear strategy.core._unknown_regime_warned between tests so the

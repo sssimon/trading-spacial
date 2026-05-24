@@ -76,6 +76,7 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
 # and could surface third-party strings that legitimately mention 'holdout'.
 EXCLUDED_DIR_PARTS: set[str] = {
     ".git", ".worktrees", ".venv", "venv", "env",
+    ".claude",               # Claude Code worktrees, settings, transcripts
     "__pycache__", "node_modules", "frontend",
     "data/holdout",          # the locked dataset itself (no .py inside, defensive)
     "data/backtest",         # CSV cache (no .py)

@@ -517,6 +517,7 @@ class TestArtefactReproducibility:
         assert path_a.read_text().rstrip("\n") == json.dumps(decoded, sort_keys=True, indent=2, ensure_ascii=False)
 
 
+@pytest.mark.network  # falls through to live fetch when cache misses; conftest skips
 @pytest.mark.skipif(
     not os.path.exists(OHLCV_DB),
     reason="requires cached market data (data/ohlcv.db)",

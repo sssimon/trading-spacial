@@ -23,6 +23,13 @@ OHLCV_DB = os.path.join(
 )
 
 
+# Marked `network` so conftest's pytest_collection_modifyitems auto-skips when
+# live Binance/Bybit is unreachable (HTTP 451/403 from EU/blocked regions).
+# These parity tests need the live fetcher to fill cache misses. Pre-existing
+# environmental constraint — unrelated to the transaction() migration.
+pytestmark = pytest.mark.network
+
+
 @pytest.mark.skipif(
     not os.path.exists(OHLCV_DB), reason="requires cached market data (data/ohlcv.db)",
 )

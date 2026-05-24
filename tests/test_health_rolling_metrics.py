@@ -17,7 +17,11 @@ def tmp_db(tmp_path, monkeypatch):
 
 
 def _insert_closed_position(conn, symbol, pnl_usd, exit_ts):
-    """Insert a closed position directly. exit_ts is an ISO datetime string."""
+    """Insert a closed position directly. exit_ts is an ISO datetime string.
+
+    Caller owns the transaction; conn.commit() would violate db.transaction's
+    contract and break the outer CM's COMMIT.
+    """
     conn.execute(
         """INSERT INTO positions
            (symbol, direction, status, entry_price, entry_ts,
@@ -25,7 +29,6 @@ def _insert_closed_position(conn, symbol, pnl_usd, exit_ts):
            VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl_usd, pnl_usd / 100.0),
     )
-    conn.commit()
 
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
