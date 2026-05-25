@@ -413,3 +413,41 @@ def test_in_tx_race_already_closed_does_not_fire_side_effects(fresh_db_with_two_
     assert he.call_count == 0
     assert nf.call_count == 0
     assert up.call_count == 0
+
+
+# ---- Invariant 13: tenant reassignment between precheck and write-tx (closes #461) ----
+
+def test_tenant_reassignment_between_precheck_and_write_rejects_close(fresh_db_with_two_tenants):
+    """If tenant_id changes between precheck and BEGIN IMMEDIATE, the operator
+    must collapse to NOT_FOUND. Validates that snapshot re-validation in the
+    write-tx covers the IDOR race window that #461 named.
+
+    Setup: position 1 owned by tenant 1. We construct PositionClosure(USER, 1),
+    enter it (precheck reads tenant_id=1), then directly UPDATE the row to
+    tenant_id=2 before execute() runs. The write-tx's re-SELECT should detect
+    the reassignment and return not_found."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    # __enter__ runs the precheck.
+    closure.__enter__()
+
+    # Simulate tenant reassignment between precheck and write-tx.
+    with transaction() as con:
+        con.execute("UPDATE positions SET tenant_id = 2 WHERE id = 1")
+
+    # execute() opens the write-tx and re-validates the snapshot. The mismatch
+    # must collapse to NOT_FOUND (IDOR-safe).
+    outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    assert outcome.status == "not_found"
+
+    # The position is unchanged; status is still 'open'.
+    with transaction() as con:
+        pos = con.execute("SELECT status, tenant_id FROM positions WHERE id=1").fetchone()
+    assert pos["status"] == "open"
+    assert pos["tenant_id"] == 2  # The reassignment is unchanged (we wrote it, operator did not touch it)
