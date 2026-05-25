@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 log = logging.getLogger("db.user_preferences")
 
@@ -41,9 +42,16 @@ def _decode_row(row) -> dict:
     return d
 
 
-def db_get_user_preferences(tenant_id: int) -> Optional[dict]:
-    """Return preferences row for tenant, or None if not yet set."""
-    with transaction() as con:
+def db_get_user_preferences(
+    tenant_id: int,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Return preferences row for tenant, or None if not yet set.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    """
+    with _tx_or_use(con) as con:
         row = con.execute(
             "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
@@ -58,6 +66,7 @@ def db_upsert_user_preferences(
     symbol_filter: Optional[list[str]] = None,
     min_score: Optional[int] = None,
     notify_channels: Optional[dict[str, Any]] = None,
+    con: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Insert or replace user_preferences row for tenant.
 
@@ -66,9 +75,11 @@ def db_upsert_user_preferences(
     - On update: preserve existing value (no overwrite)
 
     Returns resulting row with JSON fields parsed.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
     """
     now = datetime.now(timezone.utc).isoformat()
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         existing = con.execute(
             "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()

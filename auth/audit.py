@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 log = logging.getLogger("auth.audit")
 
@@ -38,6 +39,7 @@ def log_auth_event(
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
     metadata: Optional[dict[str, Any]] = None,
+    con: Optional[sqlite3.Connection] = None,
 ) -> None:
     """Insert one row into auth_events. Never raises.
 
@@ -53,7 +55,7 @@ def log_auth_event(
     ts = datetime.now(timezone.utc).isoformat()
 
     try:
-        with transaction() as con:
+        with _tx_or_use(con) as con:
             con.execute(
                 """
                 INSERT INTO auth_events

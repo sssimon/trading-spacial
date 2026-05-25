@@ -19,10 +19,11 @@ the proper home for fan-out logic to per-user notifications.
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 
 def _now_iso() -> str:
@@ -38,8 +39,10 @@ def record_delivery(
     delivery_status: str,
     error_log: str | None = None,
     tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> int:
-    with transaction() as conn:
+    with _tx_or_use(con) as conn:
         cur = conn.execute(
             """INSERT INTO notifications_sent
                (event_type, event_key, priority, payload_json,
@@ -58,8 +61,10 @@ def record_delivery(
 def list_unread(
     limit: int = 50,
     tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> list[dict[str, Any]]:
-    with transaction() as conn:
+    with _tx_or_use(con) as conn:
         if tenant_id is None:
             rows = conn.execute(
                 """SELECT id, event_type, event_key, priority, payload_json,
@@ -88,13 +93,15 @@ def list_unread(
 def mark_read(
     notification_id: int,
     tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> bool:
     """Mark notification as read. Ownership-enforced when tenant_id provided.
 
     Returns True if a row was updated, False if not (e.g., IDOR: trying to
     mark another user's notification).
     """
-    with transaction() as conn:
+    with _tx_or_use(con) as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE id = ?",
@@ -109,9 +116,13 @@ def mark_read(
         return cur.rowcount > 0
 
 
-def mark_all_read(tenant_id: Optional[int] = None) -> int:
+def mark_all_read(
+    tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> int:
     """Mark all unread as read. Scope-limited by tenant_id when provided."""
-    with transaction() as conn:
+    with _tx_or_use(con) as conn:
         if tenant_id is None:
             cur = conn.execute(
                 "UPDATE notifications_sent SET read_at = ? WHERE read_at IS NULL",

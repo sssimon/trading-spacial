@@ -32,9 +32,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from typing import Optional
 
 from db.connection import _open_configured_connection, _resolve_db_file
-from db.transaction import transaction
+from db.transaction import transaction, _tx_or_use
 
 log = logging.getLogger("db.schema")
 
@@ -325,7 +326,10 @@ PER_USER_TABLES: tuple[str, ...] = (
 )
 
 
-def _migrate_multi_tenant_b1() -> None:
+def _migrate_multi_tenant_b1(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
     """Idempotent multi-tenant B.1 migration: add tenant_id to per-user tables
     + new capital + user_preferences tables + indexes.
 
@@ -333,7 +337,7 @@ def _migrate_multi_tenant_b1() -> None:
     tables via CREATE TABLE IF NOT EXISTS; new indexes via CREATE INDEX IF NOT
     EXISTS. Safe to call repeatedly.
     """
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         # Step 1: Add nullable tenant_id to each per-user table
         for table in PER_USER_TABLES:
             try:
@@ -399,7 +403,10 @@ def _migrate_multi_tenant_b1() -> None:
         )
 
 
-def _migrate_agent_audit() -> None:
+def _migrate_agent_audit(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
     """Idempotent Phase 1 migration for the copilot audit + budget surface.
 
     Creates three tables and their indexes. Safe to call repeatedly:
@@ -408,7 +415,7 @@ def _migrate_agent_audit() -> None:
     Schema source: docs/superpowers/specs/es/2026-05-19-trading-copilot-production-grade-pre-reg.md §9.1.
     """
     try:
-        with transaction() as con:
+        with _tx_or_use(con) as con:
             # agent_conversations: every turn (user / assistant / tool_result)
             # written by the server-side loop. content_json is the redacted
             # payload — full tool_use input/output is NOT persisted here; the
@@ -545,7 +552,10 @@ def _migrate_agent_audit() -> None:
         log.warning("DB migration agent audit: %s", e)
 
 
-def _migrate_agent_history() -> None:
+def _migrate_agent_history(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
     """Idempotent H.1 migration for the per-tenant conversation history.
 
     Creates two tables and their indexes. Safe to call repeatedly:
@@ -567,7 +577,7 @@ def _migrate_agent_history() -> None:
     budget). Those keep their own lifecycle and retention.
     """
     try:
-        with transaction() as con:
+        with _tx_or_use(con) as con:
             con.execute(
                 """
                 CREATE TABLE IF NOT EXISTS agent_messages (
@@ -636,7 +646,11 @@ def _migrate_agent_history() -> None:
         log.warning("DB migration agent history: %s", e)
 
 
-def backfill_tenant(user_id: int) -> dict[str, int]:
+def backfill_tenant(
+    user_id: int,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> dict[str, int]:
     """Set `tenant_id = user_id` for all rows where tenant_id IS NULL.
 
     Pre-reg §3.3: idempotent — running twice is a no-op (no NULL rows after
@@ -656,7 +670,7 @@ def backfill_tenant(user_id: int) -> dict[str, int]:
         Dict mapping table name to count of rows updated.
     """
     affected: dict[str, int] = {}
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         for table in PER_USER_TABLES:
             cursor = con.execute(
                 f"UPDATE {table} SET tenant_id = ? WHERE tenant_id IS NULL",

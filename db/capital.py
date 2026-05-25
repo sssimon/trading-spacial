@@ -8,10 +8,11 @@ Pre-reg: docs/superpowers/plans/2026-05-16-multi-tenant-b5-capital-prefs-pre-reg
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 log = logging.getLogger("db.capital")
 
@@ -21,16 +22,26 @@ log = logging.getLogger("db.capital")
 INITIAL_CAPITAL_DEFAULT = 10_000.0
 
 
-def db_get_capital(tenant_id: int) -> Optional[dict]:
-    """Return current capital row for tenant, or None if uninitialized."""
-    with transaction() as con:
+def db_get_capital(
+    tenant_id: int,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Return current capital row for tenant, or None if uninitialized.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    """
+    with _tx_or_use(con) as con:
         row = con.execute(
             "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
         ).fetchone()
     return dict(row) if row else None
 
 
-def db_list_active_tenant_ids() -> list[int]:
+def db_list_active_tenant_ids(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> list[int]:
     """Return tenant ids with an existing capital row, sorted ascending.
 
     Used by background processes (scanner, calibrator, shadow emitter) to
@@ -38,15 +49,22 @@ def db_list_active_tenant_ids() -> list[int]:
     legacy single-tenant single-pass pattern. An empty list means "no
     onboarded tenants" and callers should treat that as a no-op rather
     than computing implicit single-system aggregates.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
     """
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         rows = con.execute(
             "SELECT tenant_id FROM capital ORDER BY tenant_id ASC"
         ).fetchall()
     return [int(r[0]) for r in rows]
 
 
-def apply_pnl_to_capital(tenant_id: int, pnl_usd: float) -> Optional[dict]:
+def apply_pnl_to_capital(
+    tenant_id: int,
+    pnl_usd: float,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
     """B.2 hook: a position closed for `tenant_id` with realized `pnl_usd`.
 
     Updates the tenant's capital row with monotonic-peak + current-drawdown
@@ -55,28 +73,36 @@ def apply_pnl_to_capital(tenant_id: int, pnl_usd: float) -> Optional[dict]:
 
     Returns the resulting capital row. Locks are documented in
     docs/superpowers/plans/2026-05-16-multi-tenant-b2-capital-tracker-pre-reg.md §2.3.
+
+    Per Task 8.5: single-tx refactor. Previously this opened two separate
+    transactions (db_get_capital + db_upsert_capital), giving a small read-
+    then-write race window. We now wrap both inside one `_tx_or_use(con)`
+    block so the get→compute→upsert sequence is atomic on whichever
+    connection the caller owns (or a fresh one if `con is None`).
     """
-    row = db_get_capital(tenant_id)
-    if row is None:
-        prior_balance = INITIAL_CAPITAL_DEFAULT
-        prior_peak = INITIAL_CAPITAL_DEFAULT
-    else:
-        prior_balance = float(row["balance"])
-        prior_peak = float(row["peak_balance"])
+    with _tx_or_use(con) as inner_con:
+        row = db_get_capital(tenant_id, con=inner_con)
+        if row is None:
+            prior_balance = INITIAL_CAPITAL_DEFAULT
+            prior_peak = INITIAL_CAPITAL_DEFAULT
+        else:
+            prior_balance = float(row["balance"])
+            prior_peak = float(row["peak_balance"])
 
-    new_balance = prior_balance + float(pnl_usd)
-    new_peak = max(prior_peak, new_balance)  # monotonic — never decreases
-    if new_peak > 0:
-        new_dd_pct = (new_peak - new_balance) / new_peak * 100.0
-    else:
-        new_dd_pct = None  # peak ≤ 0 leaves drawdown undefined
+        new_balance = prior_balance + float(pnl_usd)
+        new_peak = max(prior_peak, new_balance)  # monotonic — never decreases
+        if new_peak > 0:
+            new_dd_pct = (new_peak - new_balance) / new_peak * 100.0
+        else:
+            new_dd_pct = None  # peak ≤ 0 leaves drawdown undefined
 
-    return db_upsert_capital(
-        tenant_id,
-        balance=new_balance,
-        peak_balance=new_peak,
-        max_drawdown_pct=new_dd_pct,
-    )
+        return db_upsert_capital(
+            tenant_id,
+            balance=new_balance,
+            peak_balance=new_peak,
+            max_drawdown_pct=new_dd_pct,
+            con=inner_con,
+        )
 
 
 def db_upsert_capital(
@@ -85,6 +111,7 @@ def db_upsert_capital(
     balance: float,
     peak_balance: Optional[float] = None,
     max_drawdown_pct: Optional[float] = None,
+    con: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Insert or replace capital row for tenant.
 
@@ -94,9 +121,11 @@ def db_upsert_capital(
     - max_drawdown_pct: preserve when not given (existing row) OR None (new row).
 
     Returns the resulting row.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
     """
     now = datetime.now(timezone.utc).isoformat()
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         existing = con.execute(
             "SELECT id, peak_balance, max_drawdown_pct FROM capital WHERE tenant_id = ?",
             (tenant_id,),

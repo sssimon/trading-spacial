@@ -553,7 +553,9 @@ def _load_current_regime_score() -> float | None:
         return None
 
 
-def _compute_current_portfolio_dd(cfg: dict[str, Any], *, tenant_id: int) -> float:
+def _compute_current_portfolio_dd(
+    cfg: dict[str, Any], *, tenant_id: int, conn=None,
+) -> float:
     """Compute live portfolio DD from `tenant_id`'s closed trades + open positions MTM.
 
     Reuses kill_switch_v2.compute_portfolio_dd + compute_portfolio_equity_curve.
@@ -562,6 +564,10 @@ def _compute_current_portfolio_dd(cfg: dict[str, Any], *, tenant_id: int) -> flo
     Per multi-tenant policy: `tenant_id` is required. The capital base is the
     tenant's ledger balance when present, falling back to cfg["capital_usd"]
     for tenants without a capital row (legacy / pre-onboarding case).
+
+    Per Task 8.5: optional `conn` for caller-controlled transaction composition
+    (e.g. get_dashboard_state, which owns an outer tx and would deadlock if
+    inner helpers opened their own).
     """
     try:
         from strategy.kill_switch_v2 import (
@@ -571,14 +577,14 @@ def _compute_current_portfolio_dd(cfg: dict[str, Any], *, tenant_id: int) -> flo
             _load_closed_trades, _load_open_positions, _snapshot_prices,
         )
         from db.capital import db_get_capital
-        cap_row = db_get_capital(tenant_id)
+        cap_row = db_get_capital(tenant_id, con=conn)
         if cap_row and cap_row.get("balance") is not None:
             capital_base = float(cap_row["balance"])
         else:
             capital_base = float(cfg.get("capital_usd", 1000.0))
         equity_curve = compute_portfolio_equity_curve(
-            closed_trades=_load_closed_trades(tenant_id=tenant_id),
-            open_positions=_load_open_positions(tenant_id=tenant_id),
+            closed_trades=_load_closed_trades(tenant_id=tenant_id, conn=conn),
+            open_positions=_load_open_positions(tenant_id=tenant_id, conn=conn),
             capital_base=capital_base,
             now_price_by_symbol=_snapshot_prices(),
         )

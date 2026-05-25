@@ -676,13 +676,22 @@ def apply_transition(
             )
 
 
-def _get_symbol_health_row(symbol: str) -> dict[str, Any] | None:
+def _get_symbol_health_row(
+    symbol: str,
+    *,
+    conn=None,
+) -> dict[str, Any] | None:
     """Return the symbol_health row for `symbol`, or None if absent.
 
     Selected columns: state, state_since, manual_override,
     probation_trades_remaining, probation_started_at, paused_days_at_entry.
+
+    Per Task 8.5: optional `conn` lets a caller (e.g. get_dashboard_state)
+    reuse its outer transaction instead of opening a nested one that would
+    deadlock on BEGIN IMMEDIATE.
     """
-    with transaction() as conn:
+    from db.transaction import _tx_or_use  # local import to avoid module-init churn
+    with _tx_or_use(conn) as conn:
         row = conn.execute(
             """SELECT state, state_since, manual_override,
                       probation_trades_remaining, probation_started_at,
@@ -974,15 +983,20 @@ def record_portfolio_transition(
     reason: str,
     dd_pct: float = 0.0,
     concurrent: int = 0,
+    *,
+    conn=None,
 ) -> None:
     """B6: Append a portfolio-tier transition row.
 
     Idempotency / dedup is the caller's responsibility — fires only when a
     transition actually happens (from_tier != to_tier).
+
+    Per Task 8.5: optional `conn` for caller-controlled transaction composition.
     """
     if from_tier == to_tier:
         return
-    with transaction() as conn:
+    from db.transaction import _tx_or_use  # local import
+    with _tx_or_use(conn) as conn:
         conn.execute(
             """INSERT INTO portfolio_health_events
                (from_tier, to_tier, reason, dd_pct, concurrent, ts)
@@ -991,9 +1005,17 @@ def record_portfolio_transition(
         )
 
 
-def recent_portfolio_transitions(limit: int = 5) -> list[dict[str, Any]]:
-    """B6: Last N portfolio-tier transitions, newest first."""
-    with transaction() as conn:
+def recent_portfolio_transitions(
+    limit: int = 5,
+    *,
+    conn=None,
+) -> list[dict[str, Any]]:
+    """B6: Last N portfolio-tier transitions, newest first.
+
+    Per Task 8.5: optional `conn` for caller-controlled transaction composition.
+    """
+    from db.transaction import _tx_or_use  # local import
+    with _tx_or_use(conn) as conn:
         rows = conn.execute(
             """SELECT from_tier, to_tier, reason, dd_pct, concurrent, ts
                FROM portfolio_health_events
@@ -1027,14 +1049,18 @@ def get_dashboard_state(
             falls back to cfg["capital_usd"] for display while still
             tenant-scoping the position queries.
     """
-    from db.capital import db_get_capital
-    capital = db_get_capital(tenant_id)
     from btc_scanner import DEFAULT_SYMBOLS
 
     ks_cfg = (cfg.get("kill_switch") or {})
     now = datetime.now(timezone.utc)
 
+    # Task 8.5: open ONE transaction and thread `conn` through every helper.
+    # Previously each helper opened its own tx → nested-BEGIN-IMMEDIATE
+    # deadlock. db_get_capital is now also called inside the outer tx so it
+    # serializes against any concurrent capital write.
     with transaction() as conn:
+        from db.capital import db_get_capital
+        capital = db_get_capital(tenant_id, con=conn)
         # Build symbol list: union of DEFAULT_SYMBOLS + any DB rows. This way
         # the dashboard always shows the curated 10 (as NORMAL placeholders if
         # not yet evaluated) AND any historical/legacy rows in symbol_health.
@@ -1053,7 +1079,7 @@ def get_dashboard_state(
         # Symbols
         symbols_out: list[dict[str, Any]] = []
         for sym in symbols_iter:
-            row = _get_symbol_health_row(sym)  # opens its own conn
+            row = _get_symbol_health_row(sym, conn=conn)  # Task 8.5: share outer tx
             if row is None:
                 # No row → NORMAL placeholder, empty metrics
                 state = "NORMAL"
@@ -1151,7 +1177,7 @@ def get_dashboard_state(
                 from strategy.kill_switch_v2_shadow import (
                     _load_open_positions, _snapshot_prices,
                 )
-                open_positions = _load_open_positions(tenant_id=tenant_id)
+                open_positions = _load_open_positions(tenant_id=tenant_id, conn=conn)
                 prices = _snapshot_prices()
                 open_mtm = 0.0
                 for pos in open_positions:
@@ -1192,7 +1218,7 @@ def get_dashboard_state(
             tenant_balance = float(cfg.get("capital_usd", 1000.0))
             try:
                 from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
-                portfolio_dd = _compute_current_portfolio_dd(cfg, tenant_id=tenant_id)
+                portfolio_dd = _compute_current_portfolio_dd(cfg, tenant_id=tenant_id, conn=conn)
             except Exception:
                 log.warning(
                     "get_dashboard_state legacy DD computation failed", exc_info=True,
@@ -1221,7 +1247,7 @@ def get_dashboard_state(
             "peak_equity": peak_equity,
             "current_equity": current_equity,
             "concurrent_failures": int(n_failures),
-            "recent_transitions": recent_portfolio_transitions(limit=5),
+            "recent_transitions": recent_portfolio_transitions(limit=5, conn=conn),
         }
 
         # Alerts (24h window) — append portfolio_dd item if non-NORMAL

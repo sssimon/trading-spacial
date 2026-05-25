@@ -20,10 +20,11 @@ Pre-reg: docs/superpowers/plans/2026-05-15-multi-tenant-b5-api-enforcement-pre-r
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 log = logging.getLogger("db.positions")
 
@@ -38,16 +39,24 @@ def _calc_pnl(direction: str, entry: float, exit_p: float, qty: float):
     return round(pnl_usd, 4), round(pnl_pct, 4)
 
 
-def db_create_position(data: dict, tenant_id: Optional[int] = None) -> dict:
+def db_create_position(
+    data: dict,
+    tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> dict:
     """Create position. If tenant_id provided, persisted on the row.
 
     Per B.5: API callers always pass tenant_id from JWT; internal/legacy
     callers may pass None (row inserted with tenant_id NULL).
+
+    Per Task 8.5: optional `con` lets a caller fold this write into an
+    outer transaction (cross-helper atomicity).
     """
     entry = float(data["entry_price"])
     qty   = float(data.get("qty") or (float(data.get("size_usd", 0) or 0) / entry if entry else 0))
     ts    = data.get("entry_ts") or datetime.now(timezone.utc).isoformat()
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         cur = con.execute("""
             INSERT INTO positions
                 (scan_id, symbol, direction, status, entry_price, entry_ts,
@@ -75,14 +84,21 @@ def db_create_position(data: dict, tenant_id: Optional[int] = None) -> dict:
     return dict(row)
 
 
-def db_last_exit_ts(symbol: str, tenant_id: Optional[int] = None) -> Optional[datetime]:
+def db_last_exit_ts(
+    symbol: str,
+    tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[datetime]:
     """Return last exit_ts (UTC, tz-aware) for symbol's closed positions, or None.
 
     Per B.5: when tenant_id is None (default), returns the most recent exit
     across ALL users — correct semantic for scanner cooldown (system-wide).
     When tenant_id is int, filters to that user's exits only.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
     """
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         if tenant_id is None:
             row = con.execute(
                 "SELECT exit_ts FROM positions "
@@ -113,6 +129,8 @@ def db_get_positions(
     status: Optional[str] = None,
     tenant_id: Optional[int] = None,
     since: Optional[str] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> list:
     """List positions, optionally filtered by status, tenant_id, and since.
 
@@ -141,7 +159,7 @@ def db_get_positions(
         clauses.append(f"{ts_col} >= ?")
         params.append(since)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         rows = con.execute(
             f"SELECT * FROM positions{where} ORDER BY id DESC", params,
         ).fetchall()
@@ -153,13 +171,20 @@ def db_close_position(
     exit_price: float,
     exit_reason: str,
     tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """Close position by id. Per B.5: ownership-enforced when tenant_id given.
 
     If tenant_id is provided and the position does NOT belong to that tenant,
     returns None (IDOR protection — caller sees same behavior as 'not found').
+
+    Per Task 8.5: optional `con` lets a caller (e.g. `check_position_stops`)
+    fold the close + capital + outcomes mutations into one outer transaction
+    instead of three separate atomic boundaries.
     """
-    with transaction() as con:
+    _caller_owned_con = con  # remember whether caller threaded a tx in
+    with _tx_or_use(con) as con:
         if tenant_id is None:
             row = con.execute(
                 "SELECT * FROM positions WHERE id=?", (pos_id,),
@@ -183,12 +208,21 @@ def db_close_position(
         row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
     closed = dict(row)
     # Kill switch #138: trigger health evaluation for this symbol.
-    try:
-        from health import trigger_health_evaluation  # noqa: PLC0415
-        from api.config import load_config  # noqa: PLC0415
-        trigger_health_evaluation(pos["symbol"], load_config())
-    except Exception as e:
-        log.warning("health trigger skipped for position close: %s", e)
+    #
+    # Task 8.5: when the caller passes its own `con`, it owns an outer
+    # transaction that hasn't committed yet. `trigger_health_evaluation`
+    # opens a FRESH connection and would BEGIN IMMEDIATE against the
+    # writer lock the outer tx still holds → deadlock. The caller is
+    # responsible for triggering health evaluation post-commit in that
+    # case. When called standalone (con is None), our own tx has already
+    # committed by the time we reach here, so the trigger is safe.
+    if _caller_owned_con is None:
+        try:
+            from health import trigger_health_evaluation  # noqa: PLC0415
+            from api.config import load_config  # noqa: PLC0415
+            trigger_health_evaluation(pos["symbol"], load_config())
+        except Exception as e:
+            log.warning("health trigger skipped for position close: %s", e)
     return closed
 
 
@@ -196,17 +230,21 @@ def db_update_position(
     pos_id: int,
     data: dict,
     tenant_id: Optional[int] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """Update position fields. Per B.5: ownership-enforced when tenant_id given.
 
     Returns None if position not found OR (when tenant_id provided) the
     position does not belong to that tenant.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
     """
     allowed = {"sl_price", "tp_price", "size_usd", "qty", "notes", "entry_price", "atr_entry", "be_mult"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return None
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         # Ownership pre-check when tenant_id provided
         if tenant_id is not None:
             owner_row = con.execute(

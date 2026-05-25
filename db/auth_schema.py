@@ -12,15 +12,23 @@ from btc_api.lifespan() right after init_db().
 from __future__ import annotations
 
 import logging
+import sqlite3
+from typing import Optional
 
-from db.transaction import transaction
+from db.transaction import _tx_or_use
 
 log = logging.getLogger("db.auth_schema")
 
 
-def init_auth_db() -> None:
-    """Create auth tables if missing. Safe to call repeatedly."""
-    with transaction() as con:
+def init_auth_db(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Create auth tables if missing. Safe to call repeatedly.
+
+    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    """
+    with _tx_or_use(con) as con:
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -86,10 +94,13 @@ def init_auth_db() -> None:
         )
 
 
-def has_any_user() -> bool:
+def has_any_user(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> bool:
     """True if at least one user exists. Used by app boot to print a hint
     when the DB is fresh and nobody has run scripts/create_user.py yet."""
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         row = con.execute("SELECT 1 FROM users LIMIT 1").fetchone()
     return row is not None
 
@@ -103,9 +114,12 @@ def has_any_user() -> bool:
 # place without schema churn.
 
 
-def init_system_state() -> None:
+def init_system_state(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
     """Idempotent — create system_state if missing."""
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS system_state (
@@ -117,7 +131,10 @@ def init_system_state() -> None:
         )
 
 
-def is_setup_completed() -> bool:
+def is_setup_completed(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> bool:
     """True if setup_completed_at row exists.
 
     We deliberately do NOT also infer "completed" from has_any_user(): the
@@ -125,14 +142,19 @@ def is_setup_completed() -> bool:
     system stays inaccessible via web. Recovery requires CLI or a manual
     DELETE on this row (documented in README).
     """
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         row = con.execute(
             "SELECT 1 FROM system_state WHERE key = 'setup_completed_at'"
         ).fetchone()
     return row is not None
 
 
-def mark_setup_completed(*, ip: str | None, method: str) -> None:
+def mark_setup_completed(
+    *,
+    ip: str | None,
+    method: str,
+    con: Optional[sqlite3.Connection] = None,
+) -> None:
     """Persist that initial setup ran. method ∈ {web, cli, env_vars}.
 
     Stored as two separate rows so a SELECT * shows both fields. Uses
@@ -142,7 +164,7 @@ def mark_setup_completed(*, ip: str | None, method: str) -> None:
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         con.execute(
             "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
             "VALUES ('setup_completed_at', ?, ?)",

@@ -6,15 +6,22 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from db.transaction import transaction
+from db.transaction import transaction, _tx_or_use
 
 log = logging.getLogger("db.signals")
 
 
 def save_scan(rep: dict) -> int:
+    # NOTE (Task 8.5): save_scan is intentionally NOT given a `con` parameter.
+    # It uses two separate transactions by design so that an outcomes-insert
+    # failure does NOT roll back the scan write (the scan is the source of
+    # truth; outcomes are best-effort tracking). Adding `con` here would
+    # ambiguously suggest the caller could control both — but the second
+    # nested write would deadlock or break the no-rollback contract.
     symbol  = rep.get("symbol", "BTCUSDT")
     estado  = rep.get("estado", "")
     señal   = 1 if rep.get("señal_activa") else 0
@@ -57,7 +64,9 @@ def save_scan(rep: dict) -> int:
 
 def get_scans(limit=50, only_signals=False, only_setups=False,
               since_hours: Optional[float] = None,
-              symbol: Optional[str] = None) -> list:
+              symbol: Optional[str] = None,
+              *,
+              con: Optional[sqlite3.Connection] = None) -> list:
     conds  = []
     params = []
     if symbol:
@@ -73,7 +82,7 @@ def get_scans(limit=50, only_signals=False, only_setups=False,
         params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params.append(limit)
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         rows  = con.execute(
             f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", params
         ).fetchall()
@@ -84,6 +93,8 @@ def get_latest_scan_per_symbol(
     limit: int = 10,
     only_signals: bool = False,
     since_hours: Optional[float] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
 ) -> list:
     """Return the latest scan per symbol, newest-first, capped at `limit`.
 
@@ -111,7 +122,7 @@ def get_latest_scan_per_symbol(
         params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params.append(limit)
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         rows = con.execute(
             f"""SELECT * FROM scans
                 WHERE id IN (
@@ -125,8 +136,12 @@ def get_latest_scan_per_symbol(
     return [dict(r) for r in rows]
 
 
-def get_latest_signal(symbol: Optional[str] = None) -> Optional[dict]:
-    with transaction() as con:
+def get_latest_signal(
+    symbol: Optional[str] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    with _tx_or_use(con) as con:
         if symbol:
             row = con.execute(
                 "SELECT * FROM scans WHERE señal=1 AND symbol=? ORDER BY id DESC LIMIT 1",
@@ -139,8 +154,12 @@ def get_latest_signal(symbol: Optional[str] = None) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def get_latest_scan(symbol: Optional[str] = None) -> Optional[dict]:
-    with transaction() as con:
+def get_latest_scan(
+    symbol: Optional[str] = None,
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    with _tx_or_use(con) as con:
         if symbol:
             row = con.execute(
                 "SELECT * FROM scans WHERE symbol=? ORDER BY id DESC LIMIT 1",
@@ -151,9 +170,12 @@ def get_latest_scan(symbol: Optional[str] = None) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def get_signals_summary() -> list:
+def get_signals_summary(
+    *,
+    con: Optional[sqlite3.Connection] = None,
+) -> list:
     """Último escaneo de cada símbolo activo, ordenado por señal y score."""
-    with transaction() as con:
+    with _tx_or_use(con) as con:
         rows = con.execute("""
             SELECT s.* FROM scans s
             INNER JOIN (

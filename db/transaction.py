@@ -54,3 +54,30 @@ def transaction() -> Iterator[sqlite3.Connection]:
             con.execute("COMMIT")
     finally:
         con.close()
+
+
+@contextmanager
+def _tx_or_use(con: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+    """If `con` is None, open a new transaction(). Otherwise yield the
+    provided connection (the caller already owns a transaction).
+
+    Usage in helpers that may be called both standalone and inside a caller-
+    controlled transaction:
+
+        def db_close_position(pos_id, ..., con: sqlite3.Connection | None = None):
+            with _tx_or_use(con) as con:
+                con.execute("UPDATE positions SET status='closed' WHERE id=?", (pos_id,))
+
+    Rationale (Task 8.5 of plan 2026-05-24-transaction-unit-of-work): helpers
+    that own their own `transaction()` cannot be composed inside an outer
+    caller-owned transaction without deadlocking on BEGIN IMMEDIATE (the
+    inner conn waits for the outer's writer lock, busy_timeout fires).
+    This wrapper resolves that by letting the outer caller pass `con` to
+    each helper, while standalone callers (passing `con=None`) still get
+    their own atomic boundary.
+    """
+    if con is None:
+        with transaction() as new_con:
+            yield new_con
+    else:
+        yield con

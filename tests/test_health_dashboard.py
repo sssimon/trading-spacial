@@ -252,23 +252,11 @@ def test_recent_portfolio_transitions_returns_last_5(tmp_db):
 
 # ── GET /health/dashboard endpoint ─────────────────────────────────────────
 #
-# All tests below are blocked by Task 8.5 (deferred). health.get_dashboard_state
-# opens an outer `with transaction()` and then loops `_get_symbol_health_row`,
-# which opens its OWN inner `with transaction()`. Under db.transaction's
-# BEGIN IMMEDIATE contract, the inner tx on a fresh connection blocks waiting
-# for the outer writer lock and times out → "database is locked". The fix is
-# to thread the connection through `_get_symbol_health_row` (and friends), but
-# that's the helper-takes-optional-con refactor deferred to Task 8.5. Until
-# then these endpoint paths are demonstrably broken under the new contract
-# and the tests deserve to stay green as documentation of intended shape.
-
-_NESTED_TX_BUG_REASON = (
-    "blocked by Task 8.5: health.get_dashboard_state opens an outer transaction "
-    "and helpers (e.g. _get_symbol_health_row) open inner transactions on a "
-    "separate connection — deadlocks on BEGIN IMMEDIATE. Production-code fix "
-    "deferred to the helper-takes-con refactor (Task 8.5)."
-)
-pytestmark_dashboard = pytest.mark.skip(reason=_NESTED_TX_BUG_REASON)
+# Task 8.5 (DONE): helpers now accept an optional `con`/`conn`, so
+# get_dashboard_state threads its outer transaction through every inner
+# helper (_get_symbol_health_row, _load_open_positions, recent_portfolio_
+# transitions, etc.). The nested-BEGIN-IMMEDIATE deadlock is gone and
+# these tests now run.
 
 
 @pytest.fixture
@@ -298,7 +286,6 @@ def client(tmp_path, monkeypatch):
         btc_api.app.dependency_overrides.pop(get_current_tenant_id, None)
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_empty_db_returns_default_shape(client):
     """Empty DB → portfolio NORMAL + symbols=[] (or all DEFAULT_SYMBOLS as NORMAL placeholders) + alerts.items=[]."""
     resp = client.get("/health/dashboard")
@@ -313,7 +300,6 @@ def test_get_health_dashboard_empty_db_returns_default_shape(client):
     assert data["portfolio"]["tier"] == "NORMAL"
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
     """One PROBATION symbol seeded → response includes all the fields."""
     import btc_api
@@ -356,7 +342,6 @@ def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
     assert "PROBATION" in btc["next_conditions"] or "trades" in btc["next_conditions"].lower()
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_unevaluated_symbol_has_placeholder_text(client):
     """B6 boundary: symbol with no row → next_conditions='Sin datos aún', not 'Saludable'.
 
@@ -374,7 +359,6 @@ def test_get_health_dashboard_unevaluated_symbol_has_placeholder_text(client):
         )
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeypatch):
     """Even with kill_switch.enabled=False, the dashboard still serves a snapshot
     (read-only — useful for post-mortems)."""
@@ -384,7 +368,6 @@ def test_get_health_dashboard_disabled_kill_switch_still_returns(client, monkeyp
     assert resp.status_code == 200
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_uses_tenant_capital_when_present(client):
     """Epic B #253 wire (issue #382): the dashboard reports the tenant's real
     capital, not the legacy cfg.capital_usd default.
@@ -405,7 +388,6 @@ def test_get_health_dashboard_uses_tenant_capital_when_present(client):
     assert portfolio["dd_pct"] == pytest.approx(-(12_000.0 - 10_000.0) / 12_000.0)
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_falls_back_when_tenant_has_no_capital(client):
     """When the tenant has no capital row yet, the dashboard preserves the
     legacy single-tenant behavior: cfg.capital_usd (default $1000)."""
@@ -416,7 +398,6 @@ def test_get_health_dashboard_falls_back_when_tenant_has_no_capital(client):
     assert portfolio["peak_equity"] == pytest.approx(1000.0)
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
     """Regression for #382 review: when the tenant has a non-trivial trade
     history already folded into `capital.balance` via apply_pnl_to_capital,
@@ -471,7 +452,6 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
     assert portfolio["dd_pct"] == pytest.approx(expected_dd, abs=1e-6)
 
 
-@pytestmark_dashboard
 def test_get_health_dashboard_isolates_tenants(client):
     """Multi-tenant isolation (per "todo tiene que ser multitenant" policy):
     tenant 1's dashboard MUST NOT reflect tenant 2's positions, regardless

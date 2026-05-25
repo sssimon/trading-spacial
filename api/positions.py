@@ -49,12 +49,17 @@ _EVENT_LOG_LABELS = {
 }
 
 
-def _apply_close_to_capital(closed_pos: dict) -> None:
+def _apply_close_to_capital(closed_pos: dict, *, con=None) -> None:
     """B.2 #255: roll realized P&L from a just-closed position into the
     owner's capital ledger.
 
     Skips positions with tenant_id=NULL (legacy/scanner pre-multi-tenant) or
     pnl_usd=None (no quantified outcome — e.g. qty=0). Locks: pre-reg §2.1, §2.2.
+
+    Per Task 8.5: optional `con` threads the capital update into the caller's
+    open transaction (e.g. `check_position_stops` folding close + capital
+    into one unit of work). Standalone callers (manual /positions/{id}/close)
+    leave `con=None` and let `apply_pnl_to_capital` open its own tx.
     """
     tenant_id = closed_pos.get("tenant_id")
     pnl_usd = closed_pos.get("pnl_usd")
@@ -65,7 +70,7 @@ def _apply_close_to_capital(closed_pos: dict) -> None:
         )
         return
     try:
-        apply_pnl_to_capital(int(tenant_id), float(pnl_usd))
+        apply_pnl_to_capital(int(tenant_id), float(pnl_usd), con=con)
     except Exception as e:
         # Capital update is best-effort: a ledger failure must NOT block the
         # position-close lifecycle. Operator reconciles via separate audit.
@@ -170,10 +175,17 @@ def check_position_stops(
 
     cfg = load_config()
 
-    # Single unit of work: read open positions for `symbol` AND apply trailing-SL
-    # updates atomically. A concurrent operator edit (e.g. PUT /positions/{id})
-    # either serializes before this tx (and we observe its sl_price) or after
-    # (and it observes ours). No interleaved partial state is possible.
+    # Task 8.5: ONE unit of work now covers read + trail-SL + close +
+    # capital ledger update. Previously the close + capital lived in their
+    # own transactions, so a crash between them left a closed position
+    # whose P&L was never folded into the tenant's balance. Now the close
+    # and capital roll-in serialize atomically with the read.
+    #
+    # Side effects (event-log file write + Telegram notify) stay OUTSIDE
+    # the transaction by design — file I/O / network must not extend the
+    # DB lock. We collect them in `post_tx_actions` and run after commit.
+    post_tx_actions: list[dict] = []
+
     with transaction() as con:
         rows = con.execute(
             "SELECT * FROM positions WHERE symbol=? AND status='open'",
@@ -206,97 +218,121 @@ def check_position_stops(
                     pos["sl_price"] = new_sl
                     log.info(f"Trailing: #{pos['id']} {symbol} SL moved to breakeven ${new_sl:.2f}")
 
-    # Per-position TP/SL/time-limit close decision + side effects happen
-    # outside the read/trail tx. db_close_position owns its own write tx today;
-    # collapsing it into this unit of work is Tasks 6-9 in the migration plan.
-    for pos in pos_list:
-        reason = None
-        exit_price = None
+        for pos in pos_list:
+            reason = None
+            exit_price = None
 
-        if pos["direction"] == "LONG":
-            if pos["tp_price"] and price >= pos["tp_price"]:
-                reason, exit_price = "TP_HIT", pos["tp_price"]
-            elif pos["sl_price"] and price <= pos["sl_price"]:
-                reason, exit_price = "SL_HIT", pos["sl_price"]
-        else:  # SHORT
-            if pos["tp_price"] and price <= pos["tp_price"]:
-                reason, exit_price = "TP_HIT", pos["tp_price"]
-            elif pos["sl_price"] and price >= pos["sl_price"]:
-                reason, exit_price = "SL_HIT", pos["sl_price"]
+            if pos["direction"] == "LONG":
+                if pos["tp_price"] and price >= pos["tp_price"]:
+                    reason, exit_price = "TP_HIT", pos["tp_price"]
+                elif pos["sl_price"] and price <= pos["sl_price"]:
+                    reason, exit_price = "SL_HIT", pos["sl_price"]
+            else:  # SHORT
+                if pos["tp_price"] and price <= pos["tp_price"]:
+                    reason, exit_price = "TP_HIT", pos["tp_price"]
+                elif pos["sl_price"] and price >= pos["sl_price"]:
+                    reason, exit_price = "SL_HIT", pos["sl_price"]
 
-        if reason is None:
-            overrides = cfg.get("symbol_overrides", {}).get(symbol.upper(), {})
-            _tl_h = _validated_time_limit_hours(overrides.get("time_limit_hours"), symbol)
-            if _tl_h is not None and pos.get("entry_ts"):
-                try:
-                    entry_dt = datetime.fromisoformat(pos["entry_ts"])
-                    if entry_dt.tzinfo is None:
-                        entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-                except (ValueError, TypeError) as e:
-                    log.warning(
-                        f"check_position_stops: malformed entry_ts on position "
-                        f"#{pos['id']} ({symbol}): {pos.get('entry_ts')!r} — "
-                        f"skipping time-limit check (SL/TP unaffected). Error: {e}"
-                    )
-                    continue
-
-                hours_open = (now - entry_dt).total_seconds() / 3600
-                if hours_open >= _tl_h:
-                    # Stateless config resolution: a lowered time_limit_hours
-                    # edit applies retroactively to long-open positions. The
-                    # buffer (2× scan_interval) absorbs normal scanner lag —
-                    # warn only when we're materially past that.
-                    scan_interval_sec = _validated_scan_interval_sec(
-                        cfg, "check_position_stops", log
-                    )
-                    buffer_h = (scan_interval_sec / 3600) * 2
-                    if hours_open > _tl_h + buffer_h:
+            if reason is None:
+                overrides = cfg.get("symbol_overrides", {}).get(symbol.upper(), {})
+                _tl_h = _validated_time_limit_hours(overrides.get("time_limit_hours"), symbol)
+                if _tl_h is not None and pos.get("entry_ts"):
+                    try:
+                        entry_dt = datetime.fromisoformat(pos["entry_ts"])
+                        if entry_dt.tzinfo is None:
+                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                    except (ValueError, TypeError) as e:
                         log.warning(
-                            f"check_position_stops: TIME_LIMIT trigger fired "
-                            f"materially past horizon for #{pos['id']} {symbol} "
-                            f"(hours_open={hours_open:.1f} vs "
-                            f"time_limit_hours={_tl_h}, "
-                            f"buffer={buffer_h:.2f}h) — likely config edit "
-                            f"while position open"
+                            f"check_position_stops: malformed entry_ts on position "
+                            f"#{pos['id']} ({symbol}): {pos.get('entry_ts')!r} — "
+                            f"skipping time-limit check (SL/TP unaffected). Error: {e}"
                         )
-                    reason, exit_price = "TIME_LIMIT_HIT", price
+                        continue
 
-        if reason:
-            closed = db_close_position(pos["id"], exit_price, reason)
-            log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
-            _write_position_event_log(pos, reason, exit_price)
-            # B.2 #255: roll realized P&L into owner's capital (no-op if NULL tenant)
-            if closed:
-                _apply_close_to_capital(closed)
+                    hours_open = (now - entry_dt).total_seconds() / 3600
+                    if hours_open >= _tl_h:
+                        # Stateless config resolution: a lowered time_limit_hours
+                        # edit applies retroactively to long-open positions. The
+                        # buffer (2× scan_interval) absorbs normal scanner lag —
+                        # warn only when we're materially past that.
+                        scan_interval_sec = _validated_scan_interval_sec(
+                            cfg, "check_position_stops", log
+                        )
+                        buffer_h = (scan_interval_sec / 3600) * 2
+                        if hours_open > _tl_h + buffer_h:
+                            log.warning(
+                                f"check_position_stops: TIME_LIMIT trigger fired "
+                                f"materially past horizon for #{pos['id']} {symbol} "
+                                f"(hours_open={hours_open:.1f} vs "
+                                f"time_limit_hours={_tl_h}, "
+                                f"buffer={buffer_h:.2f}h) — likely config edit "
+                                f"while position open"
+                            )
+                        reason, exit_price = "TIME_LIMIT_HIT", price
 
-            # Send exit notification via the centralized notifier (#162 PR B).
-            entry = pos.get("entry_price", 0)
-            qty = pos.get("qty", 0)
-            pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
+            if reason:
+                # Task 8.5: pass `con=con` so the close write joins this tx.
+                closed = db_close_position(pos["id"], exit_price, reason, con=con)
+                log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
+                # B.2 #255: roll realized P&L into owner's capital, in the
+                # same tx (close + capital atomic together).
+                if closed:
+                    _apply_close_to_capital(closed, con=con)
 
-            try:
-                from notifier import notify, PositionExitEvent  # noqa: PLC0415
-                # Map legacy reason strings ("SL_HIT"/"TP_HIT"/"TIME_LIMIT_HIT")
-                # to tier codes used by the notifier templates.
-                exit_reason_code = "SL" if reason == "SL_HIT" else (
-                    "TP" if reason == "TP_HIT" else (
-                        "TIME_LIMIT" if reason == "TIME_LIMIT_HIT" else reason
-                    )
+                # Defer file-log + Telegram notify to AFTER commit. These are
+                # slow I/O (file / HTTP) and must not extend the DB writer lock.
+                post_tx_actions.append({
+                    "pos": pos,
+                    "reason": reason,
+                    "exit_price": exit_price,
+                })
+
+    # Out-of-transaction side effects: event log + health trigger + exit
+    # notification. db_close_position skipped the health trigger because we
+    # passed `con=con` (it would deadlock on the still-open writer lock),
+    # so we fire it here post-commit.
+    for action in post_tx_actions:
+        pos = action["pos"]
+        reason = action["reason"]
+        exit_price = action["exit_price"]
+
+        _write_position_event_log(pos, reason, exit_price)
+
+        # Kill switch #138: deferred health trigger (Task 8.5).
+        try:
+            from health import trigger_health_evaluation  # noqa: PLC0415
+            trigger_health_evaluation(pos["symbol"], cfg)
+        except Exception as e:
+            log.warning("health trigger skipped for position close: %s", e)
+
+        # Send exit notification via the centralized notifier (#162 PR B).
+        entry = pos.get("entry_price", 0)
+        qty = pos.get("qty", 0)
+        pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
+
+        try:
+            from notifier import notify, PositionExitEvent  # noqa: PLC0415
+            # Map legacy reason strings ("SL_HIT"/"TP_HIT"/"TIME_LIMIT_HIT")
+            # to tier codes used by the notifier templates.
+            exit_reason_code = "SL" if reason == "SL_HIT" else (
+                "TP" if reason == "TP_HIT" else (
+                    "TIME_LIMIT" if reason == "TIME_LIMIT_HIT" else reason
                 )
-                notify(
-                    PositionExitEvent(
-                        symbol=symbol,
-                        direction=pos.get("direction", "LONG"),
-                        exit_reason=exit_reason_code,
-                        entry_price=float(entry or 0.0),
-                        exit_price=float(exit_price or 0.0),
-                        pnl_usd=float(pnl_usd or 0.0),
-                        pnl_pct=float(pnl_pct or 0.0),
-                    ),
-                    cfg=cfg,
-                )
-            except Exception as e:
-                log.warning(f"Failed to notify {reason} for {symbol}: {e}")
+            )
+            notify(
+                PositionExitEvent(
+                    symbol=symbol,
+                    direction=pos.get("direction", "LONG"),
+                    exit_reason=exit_reason_code,
+                    entry_price=float(entry or 0.0),
+                    exit_price=float(exit_price or 0.0),
+                    pnl_usd=float(pnl_usd or 0.0),
+                    pnl_pct=float(pnl_pct or 0.0),
+                ),
+                cfg=cfg,
+            )
+        except Exception as e:
+            log.warning(f"Failed to notify {reason} for {symbol}: {e}")
 
 
 @router.get("", summary="Listar posiciones")

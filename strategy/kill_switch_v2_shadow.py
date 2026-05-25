@@ -40,16 +40,18 @@ def _snapshot_prices() -> dict[str, float]:
     return dict(_PRICE_CACHE)
 
 
-def _load_closed_trades(*, tenant_id: int) -> list[dict[str, Any]]:
+def _load_closed_trades(*, tenant_id: int, conn=None) -> list[dict[str, Any]]:
     """Load closed positions for `tenant_id` from DB for portfolio equity computation.
 
     Per the multi-tenant policy (epic B #253), `tenant_id` is required:
     background processes that don't have a user context must iterate via
     `db.capital.db_list_active_tenant_ids()` and call this loader once per
     tenant. Aggregating across tenants implicitly is not allowed.
+
+    Per Task 8.5: optional `conn` for caller-controlled transaction composition.
     """
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import _tx_or_use
+    with _tx_or_use(conn) as conn:
         rows = conn.execute(
             """SELECT symbol, exit_ts, pnl_usd
                FROM positions
@@ -64,13 +66,16 @@ def _load_closed_trades(*, tenant_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def _load_open_positions(*, tenant_id: int) -> list[dict[str, Any]]:
+def _load_open_positions(*, tenant_id: int, conn=None) -> list[dict[str, Any]]:
     """Load open positions for `tenant_id` from DB for MTM.
 
     See `_load_closed_trades` for the multi-tenant policy rationale.
+
+    Per Task 8.5: optional `conn` for caller-controlled transaction composition
+    (e.g. get_dashboard_state).
     """
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import _tx_or_use
+    with _tx_or_use(conn) as conn:
         rows = conn.execute(
             """SELECT symbol, entry_price, qty, direction
                FROM positions
