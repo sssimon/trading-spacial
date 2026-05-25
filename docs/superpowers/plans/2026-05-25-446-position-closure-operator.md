@@ -6,6 +6,8 @@
 
 **Architecture:** Three-layer separation per Voronov's ontology: (1) pure SQL operators in `db/`, `auth/`, `notifier/`, etc. — receive `con`, no side-effects, no `_tx_or_use`; (2) business operators in new `operators/` package — own `transaction()`, orchestrate side-effects, declare atomicity; (3) callers (endpoints, scanner, scripts) — instantiate operators OR wrap helpers in explicit `with transaction()` blocks. The first inhabitant of layer 2 is `PositionClosure`. Other operators (`PositionOpening`, etc.) emerge only when caller composition demands them.
 
+**Access primitives in `db/transaction.py`:** `transaction()` for read-write unit-of-work (BEGIN IMMEDIATE / COMMIT / ROLLBACK / close), `read_only_connection()` for pre-validation reads outside any transaction (no BEGIN; close on exit). Operators may use both; pure SQL helpers receive `con` and use neither.
+
 **Tech Stack:** Python 3, `sqlite3` stdlib, `contextlib`, `pytest`.
 
 ---
@@ -31,7 +33,7 @@ Locked decisions:
 - `operators/__init__.py` — empty marker for the new business-operator package.
 - `operators/position_closure.py` — `PositionClosure` context manager + `CloseOutcome` dataclass.
 - `tests/operators/__init__.py` — empty.
-- `tests/operators/test_position_closure.py` — 9 invariant tests (anchors #451).
+- `tests/operators/test_position_closure.py` — 10 invariant tests (anchors #451; invariant 10 encodes the "best-effort post-commit" commitment).
 
 ### Modified files (close-flow specific)
 
@@ -455,9 +457,46 @@ def test_legacy_null_tenant_position_close_skips_capital(fresh_db_with_two_tenan
         cap_null = con.execute("SELECT * FROM capital WHERE tenant_id IS NULL").fetchall()
     assert pos["status"] == "closed"
     assert cap_null == []
+
+
+# ---- Invariant 10: post-commit side-effect failure does NOT rollback close ----
+
+def test_side_effect_failure_does_not_rollback_close(fresh_db_with_two_tenants):
+    """Best-effort post-commit contract: if any of the 4 __exit__ side-effects
+    raises, the close + capital remain durably committed. Encodes the
+    Voronov AMBER F2 finding — the 'best-effort' commitment must live in
+    the test suite, not only in prose. A future contributor who 'fixes' the
+    try/except in __exit__ to raise will fail this test."""
+    from operators.position_closure import PositionClosure
+
+    # Force each of the 4 post-commit side-effects to raise. None of them
+    # should rollback the close (impossible — already committed) and none
+    # should propagate to the caller.
+    with patch("operators.position_closure._write_position_event_log",
+               side_effect=IOError("event log down")), \
+         patch("operators.position_closure.trigger_health_evaluation",
+               side_effect=RuntimeError("health module crashed")), \
+         patch("operators.position_closure.notify",
+               side_effect=ConnectionError("telegram unreachable")), \
+         patch("operators.position_closure.update_positions_json",
+               side_effect=OSError("disk full")):
+        with PositionClosure(
+            pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+            mode="USER", caller_tenant_id=1,
+        ) as closure:
+            outcome = closure.execute()
+
+    # Caller observes a clean close. All four side-effect failures were
+    # swallowed and logged as WARN by __exit__.
+    assert outcome.status == "closed"
+    with transaction() as con:
+        pos = con.execute("SELECT status FROM positions WHERE id=1").fetchone()
+        cap = con.execute("SELECT balance FROM capital WHERE tenant_id=1").fetchone()
+    assert pos["status"] == "closed"
+    assert cap["balance"] != 10000.0  # P&L was applied in the in-tx step
 ```
 
-- [ ] **Step 3: Verify all 9 tests fail with ModuleNotFoundError**
+- [ ] **Step 3: Verify all 10 tests fail with ModuleNotFoundError**
 
 Run: `pytest tests/operators/test_position_closure.py -v 2>&1 | tail -20`
 Expected: `ModuleNotFoundError: No module named 'operators'` (collection error).
@@ -466,22 +505,53 @@ Expected: `ModuleNotFoundError: No module named 'operators'` (collection error).
 
 ```bash
 git add tests/operators/
-git commit -m "test(operators): add 9 invariant tests for PositionClosure (anchors #451)"
-```
+git commit -m "test(operators): add 10 invariant tests for PositionClosure (anchors #451)
+
+Invariant 10 encodes Voronov AMBER F2: post-commit side-effect failure
+does NOT rollback the close. Locks the 'best-effort log-and-continue'
+contract in the test suite so a future 'fix' that turns the try/except
+into raise fails loudly."
 
 ---
 
-### Task 3: Create the operators package + CloseOutcome dataclass
+### Task 3: Create the operators package + CloseOutcome dataclass + read_only_connection helper
 
 **Files:**
 - Create: `operators/__init__.py`
 - Create: `operators/position_closure.py` (skeleton only — full implementation in Task 4)
+- Modify: `db/transaction.py` (add `read_only_connection()` context manager — names the 4th access pattern per Voronov AMBER F6)
 
 - [ ] **Step 1: Create empty package marker**
 
 Create `operators/__init__.py` as an empty file.
 
-- [ ] **Step 2: Create `operators/position_closure.py` with `CloseOutcome` dataclass and class skeleton**
+- [ ] **Step 2: Add `read_only_connection()` to `db/transaction.py`**
+
+Append to `db/transaction.py` (after `transaction()`):
+
+```python
+@contextmanager
+def read_only_connection() -> Iterator[sqlite3.Connection]:
+    """Open a configured connection for read-only work outside any transaction.
+
+    Use when an operator needs pre-validation reads (ownership check,
+    existence check) that must NOT hold a writer lock. The connection
+    closes on exit; no BEGIN/COMMIT is issued.
+
+    Caller contract:
+    - MAY use con.execute for SELECT.
+    - MUST NOT issue INSERT/UPDATE/DELETE — if SQLite's autocommit triggers,
+      the write happens without the operator's atomicity guarantee.
+    - MUST NOT escape the connection past the `with` block.
+    """
+    con = _open_configured_connection()
+    try:
+        yield con
+    finally:
+        con.close()
+```
+
+- [ ] **Step 3: Create `operators/position_closure.py` with `CloseOutcome` dataclass and class skeleton**
 
 ```python
 """PositionClosure — business operator for closing a position.
@@ -493,6 +563,15 @@ Section 'PositionClosure operator contract spec'.
 Single legal entry point for closing a position. The only caller of
 transaction() in the close-flow. db/* helpers are pure SQL and receive
 con from this operator.
+
+NOTE on `mode` parameter (Voronov AMBER F1): `mode` is a Literal flag
+that bifurcates ownership-check behavior (USER enforces, SYSTEM skips).
+This works for the two modes present today. If a third mode ever emerges
+(BATCH, RECONCILIATION, etc.), the flag-based dispatcher becomes a
+homograph of the _tx_or_use pattern this PR closed. Resolve at that
+point by splitting into subclasses (`UserPositionClosure`,
+`SystemPositionClosure`) sharing an abstract base where the ownership
+contract lives in the type, not in a runtime branch.
 """
 from __future__ import annotations
 from contextlib import closing
@@ -569,19 +648,23 @@ class PositionClosure:
         raise NotImplementedError  # Filled in Task 4
 ```
 
-- [ ] **Step 3: Verify import works (tests should still fail but with a different error now)**
+- [ ] **Step 4: Verify imports work**
 
-Run: `python -c "from operators.position_closure import PositionClosure, CloseOutcome; print('ok')"`
+Run: `python -c "from operators.position_closure import PositionClosure, CloseOutcome; from db.transaction import read_only_connection, transaction; print('ok')"`
 Expected: `ok`.
 
 Run: `pytest tests/operators/test_position_closure.py -v 2>&1 | tail -10`
 Expected: tests collect, fail with `NotImplementedError` instead of `ModuleNotFoundError`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add operators/
-git commit -m "feat(operators): skeleton for PositionClosure + CloseOutcome dataclass"
+git add operators/ db/transaction.py
+git commit -m "feat(operators): skeleton for PositionClosure + CloseOutcome dataclass + read_only_connection helper
+
+read_only_connection() names the 4th DB access pattern (read outside
+any tx, no BEGIN, close on exit). PositionClosure.__enter__ will use
+it for pre-validation reads (Voronov AMBER F6)."
 ```
 
 ---
@@ -653,9 +736,10 @@ def db_close_position_sql(
 
 - [ ] **Step 3: Implement `__enter__`, `execute()`, and `__exit__` in `operators/position_closure.py`**
 
-Replace the three `NotImplementedError` stubs with real implementations. Add the required imports to the top of the file:
+Replace the three `NotImplementedError` stubs with real implementations. Update imports at the top of the file (drop `_open_configured_connection` direct import; add `read_only_connection` instead):
 
 ```python
+from db.transaction import transaction, read_only_connection
 from db.positions import db_get_position_by_id, db_close_position_sql, _calc_pnl
 from db.capital import apply_pnl_to_capital
 from api.positions import _write_position_event_log, update_positions_json
@@ -664,14 +748,16 @@ from notifier import notify
 from api.config import load_config
 ```
 
+Remove the `from contextlib import closing` and `from db.connection import _open_configured_connection` lines that were in the skeleton (Task 3) — they're no longer needed.
+
 Then the three methods:
 
 ```python
     def __enter__(self) -> "PositionClosure":
         if self._consumed:
             raise RuntimeError("PositionClosure is single-use; construct a new one")
-        # Open a short-lived read-only connection outside any write transaction.
-        with closing(_open_configured_connection()) as con:
+        # Pre-validation read outside any write transaction (no lock contention).
+        with read_only_connection() as con:
             self._pre_row = db_get_position_by_id(con, self._pos_id)
         if self._pre_row is None:
             self._state = "NOT_FOUND"
@@ -1416,6 +1502,15 @@ Three-layer separation:
 
 Receive `con: sqlite3.Connection` as a mandatory first argument. They run SQL and return data. No `transaction()` calls. No side-effects (no HTTP, no file I/O, no logging beyond DEBUG). Examples: `db_close_position_sql`, `db_get_capital`, `apply_pnl_to_capital`, `db_create_position`.
 
+**Documented exceptions** (Cat. 2 hidden business operators living in helper directories — operator-extraction deferred to separate tickets per the rationale in `docs/superpowers/analysis/2026-05-25-446-preconditions-synthesis.md`):
+
+- `db/schema.py::init_db` — bootstrap orchestrator; opens its own `transaction()` and calls migration helpers.
+- `db/signals.py::save_scan` — dual-transaction pattern (scan write + outcomes write); calls `transaction()` directly twice.
+- `auth/audit.py::log_auth_event` — fallback to stderr if DB write fails; calls `transaction()` directly.
+- `notifier/dispatch_per_user.py::dispatch_signal_to_users` — fan-out orchestrator; calls `transaction()` directly and fires `notify()` side-effect.
+
+These four are recognized exceptions today. When their operator-extraction lands, they migrate to `operators/` and this list shrinks.
+
 ### 2. Business operators (`operators/*.py`)
 
 Own `transaction()` for one named business transition. Orchestrate side-effects. Declare atomicity. The only legal entry point for the transitions they represent. Currently: `PositionClosure` (closing a position with atomic capital roll-in + post-commit health/notify/event-log/snapshot).
@@ -1442,6 +1537,20 @@ from db.signals import get_latest_signal
 with transaction() as con:
     sig = get_latest_signal(con, "BTCUSDT")
 \`\`\`
+
+### 4. Read-only pre-validation outside any transaction (`read_only_connection()`)
+
+When an operator needs to read state BEFORE deciding whether to open a write transaction (e.g., ownership check that should not acquire a writer lock), use `read_only_connection()` from `db.transaction`:
+
+\`\`\`python
+from db.transaction import read_only_connection
+
+with read_only_connection() as con:
+    row = db_get_position_by_id(con, pos_id)
+# no transaction was opened; no lock held.
+\`\`\`
+
+Only used by operators today (`PositionClosure.__enter__`). Pure SQL helpers never call this — they receive `con` from their caller.
 
 New business operators emerge from evidence (caller composes >1 helper + side-effect with conditional behavior), not preemptively. See `docs/superpowers/analysis/2026-05-25-446-tx-or-use-analysis-and-direction.md` for the rationale (Voronov, 2026-05-25).
 ```
@@ -1558,6 +1667,8 @@ Implements the architectural direction articulated by Voronov on 2026-05-25 (see
 - Operator-extraction for the 4 remaining Cat. 2 hidden operators: `save_scan`, `init_db`, `log_auth_event`, `dispatch_signal_to_users`. They function correctly with `transaction()` directly; operator-naming is a separate exercise per Voronov's evidential rule.
 - `PositionOpening` operator: precondition 2 confirmed no current symptoms (no contract interrogation, no conditional side-effects, minimal composition). Create when evidence emerges.
 - Outbox infrastructure for true compensable post-commit delivery: v1 is best-effort log-and-continue. Separate epic.
+- **Retry policy for capital lock contention** (Voronov AMBER F4): under SQLite `BEGIN IMMEDIATE`, `apply_pnl_to_capital` failures will most commonly be `sqlite3.OperationalError: database is locked` rather than logic errors. Current operator surfaces these as exception → close aborted → user clicks Close again → likely same lock. No retry, no backoff, no metric for "how often does capital-lock abort closes in prod". Acceptable for v1; needs explicit retry policy + observability before high-concurrency multi-tenant scenarios.
+- **`mode="USER"|"SYSTEM"` flag → subclass migration** (Voronov AMBER F1): the Literal flag works for 2 modes today. A third mode (BATCH, RECONCILIATION) reintroduces the dual-contract shape this PR closed. Resolve by splitting into `UserPositionClosure` / `SystemPositionClosure` sharing an abstract base when that third mode emerges. Documented in operator's module docstring.
 
 ## Test plan
 
@@ -1616,10 +1727,13 @@ The plan is fully executed when this step completes. Manual smoke in prod is the
 **Spec coverage:**
 - All 5 BLOCKERS + 5 HIGHs from Serrano: tracked via tasks (PositionClosure, helper migration, deletion, fixture fix, docs).
 - Voronov's direction C strict: implemented in Tasks 3-4 (operator + pure helpers in db/), Tasks 8-9 (sweep), Task 11 (deletion).
-- All 9 invariants from preconditions synthesis: Task 2 (write tests) + Task 4 (implement to pass).
+- All 10 invariants from preconditions synthesis + Voronov AMBER F2: Task 2 (write tests) + Task 4 (implement to pass). Invariant 10 specifically encodes the "best-effort post-commit" commitment so a future contributor cannot silently change it.
 - Multi-tenancy invariants (precondition 3): tested by invariants 2/3/4/9 + implemented in operator's `__enter__` ownership check.
-- `apply_pnl_to_capital` IN-TX trade-off: Task 5 (signature change) + Task 4 (operator calls it inside tx) + tested by invariant 1.
+- `apply_pnl_to_capital` IN-TX trade-off: Task 5 (signature change) + Task 4 (operator calls it inside tx) + tested by invariant 1. Retry policy hole (Voronov F4) named in deferred list.
 - `_tx_or_use` deletion: Task 11.
+- `read_only_connection()` named primitive (Voronov F6): added to `db/transaction.py` in Task 3 step 2; used by operator's `__enter__` in Task 4; documented in CLAUDE.md Task 13 §4.
+- 4 Cat. 2 hidden operators acknowledged in CLAUDE.md (Voronov F3): Task 13 step 2 enumerates them as documented exceptions, eliminating the doc-vs-code dual-contract Voronov flagged.
+- Operator `mode` flag → subclass migration (Voronov F1): documented in operator module docstring (Task 3 step 3) and deferred list (Task 15 PR body).
 - Preconditions docs referenced in plan header and self-review.
 
 **Placeholder scan:** None of the disallowed patterns present. All code blocks complete. Migration patterns explicit (Before/After examples in Tasks 8/9).
