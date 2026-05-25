@@ -148,3 +148,56 @@ def test_caller_close_breaks_observably(fresh_db):
     with pytest.raises(sqlite3.ProgrammingError):
         with transaction() as con:
             con.close()  # contract violation
+
+
+# ---- read_only_connection enforcement (issue #456) ----
+
+def test_read_only_connection_rejects_insert(fresh_db):
+    """PRAGMA query_only=1 must make INSERT raise OperationalError."""
+    from db.transaction import read_only_connection, transaction
+
+    # Setup: create a table via a normal write transaction.
+    with transaction() as con:
+        con.execute("CREATE TABLE ro_test (x INTEGER)")
+
+    # The read-only connection must reject the INSERT.
+    with pytest.raises(sqlite3.OperationalError, match="(?i)read-only|query_only|attempt to write"):
+        with read_only_connection() as con:
+            con.execute("INSERT INTO ro_test (x) VALUES (1)")
+
+
+def test_read_only_connection_rejects_update(fresh_db):
+    """PRAGMA query_only=1 must make UPDATE raise OperationalError."""
+    from db.transaction import read_only_connection, transaction
+
+    with transaction() as con:
+        con.execute("CREATE TABLE ro_test (x INTEGER)")
+        con.execute("INSERT INTO ro_test (x) VALUES (1)")
+
+    with pytest.raises(sqlite3.OperationalError, match="(?i)read-only|query_only|attempt to write"):
+        with read_only_connection() as con:
+            con.execute("UPDATE ro_test SET x = 2 WHERE x = 1")
+
+
+def test_read_only_connection_allows_select_and_does_not_leak_query_only(fresh_db):
+    """SELECT must succeed under read_only_connection. After exit, a fresh
+    write connection via transaction() must NOT inherit query_only — the
+    PRAGMA is per-connection and the connection closes on exit."""
+    from db.transaction import read_only_connection, transaction
+
+    with transaction() as con:
+        con.execute("CREATE TABLE ro_test (x INTEGER)")
+        con.execute("INSERT INTO ro_test (x) VALUES (42)")
+
+    # SELECT works through read_only_connection.
+    with read_only_connection() as con:
+        row = con.execute("SELECT x FROM ro_test").fetchone()
+    assert row["x"] == 42
+
+    # After the read-only block exits, a fresh transaction() must accept writes
+    # (proves PRAGMA query_only does NOT leak across connections).
+    with transaction() as con:
+        con.execute("INSERT INTO ro_test (x) VALUES (99)")
+    with transaction() as con:
+        rows = con.execute("SELECT x FROM ro_test ORDER BY x").fetchall()
+    assert [r["x"] for r in rows] == [42, 99]
