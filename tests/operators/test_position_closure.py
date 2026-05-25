@@ -373,3 +373,43 @@ def test_side_effect_failure_does_not_rollback_close(fresh_db_with_two_tenants):
         cap = con.execute("SELECT balance FROM capital WHERE tenant_id=1").fetchone()
     assert pos["status"] == "closed"
     assert cap["balance"] != 10000.0  # P&L was applied in the in-tx step
+
+
+# ---- Race: another caller closes between precheck and write-tx BEGIN IMMEDIATE ----
+
+def test_in_tx_race_already_closed_does_not_fire_side_effects(fresh_db_with_two_tenants):
+    """If another caller closes the position between this operator's precheck
+    and its BEGIN IMMEDIATE, the in-tx re-SELECT detects status != 'open' and
+    returns already_closed. Side-effects MUST NOT fire (the other caller already
+    fired them). Regresses the bug where _result_row was set in the in-tx
+    already_closed branch, causing duplicate side-effect emission."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads status=open
+
+    # Another caller closes the position before this closure's execute().
+    with transaction() as con:
+        con.execute(
+            "UPDATE positions SET status = 'closed', exit_price = 109.0, "
+            "exit_reason = 'TP_HIT', exit_ts = ? WHERE id = 1",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+
+    # execute() opens the write-tx, re-SELECTs, sees status='closed', returns already_closed.
+    # Side-effects (notify, health, event log, snapshot) MUST NOT fire.
+    with patch("operators.position_closure._write_position_event_log") as ev, \
+         patch("operators.position_closure.trigger_health_evaluation") as he, \
+         patch("operators.position_closure.notify") as nf, \
+         patch("operators.position_closure.update_positions_json") as up:
+        outcome = closure.execute()
+        closure.__exit__(None, None, None)
+
+    assert outcome.status == "already_closed"
+    assert ev.call_count == 0
+    assert he.call_count == 0
+    assert nf.call_count == 0
+    assert up.call_count == 0

@@ -177,7 +177,8 @@ class PositionClosure:
                 # Tenant reassigned between precheck and write-tx. IDOR-safe collapse.
                 return CloseOutcome(status="not_found", position=None, pnl_usd=None, pnl_pct=None)
             if row["status"] != "open":
-                self._result_row = row
+                # Race: another caller closed this position between precheck and BEGIN IMMEDIATE.
+                # Do NOT set self._result_row — the other caller already fired side-effects.
                 return CloseOutcome(
                     status="already_closed", position=row, pnl_usd=None, pnl_pct=None,
                 )
