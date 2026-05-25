@@ -235,19 +235,64 @@ The original guardrail (Epic A passes + Epic B implemented) was **overridden 202
 
 ## Database access
 
-All DB access goes through `db.transaction.transaction()`. The context manager owns `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` / `close`. Callers never call `con.commit()`, `con.rollback()`, or `con.close()` inside the block.
+Three-layer separation:
+
+### 1. Pure SQL helpers (`db/*.py`, `auth/*.py`, etc.)
+
+Receive `con: sqlite3.Connection` as a mandatory first argument. They run SQL and return data. No `transaction()` calls. No side-effects (no HTTP, no file I/O, no logging beyond DEBUG). Examples: `db_close_position_sql`, `db_get_capital`, `apply_pnl_to_capital`, `db_create_position`.
+
+**Documented exceptions** (Cat. 2 hidden business operators living in helper directories — operator-extraction deferred to separate tickets per the rationale in `docs/superpowers/analysis/2026-05-25-446-preconditions-synthesis.md`):
+
+- `db/schema.py::init_db` — bootstrap orchestrator; opens its own `transaction()` and calls migration helpers.
+- `db/signals.py::save_scan` — dual-transaction pattern (scan write + outcomes write); calls `transaction()` directly twice.
+- `auth/audit.py::log_auth_event` — fallback to stderr if DB write fails; calls `transaction()` directly.
+- `notifier/dispatch_per_user.py::dispatch_signal_to_users` — fan-out orchestrator; calls `transaction()` directly and fires `notify()` side-effect.
+
+These four are recognized exceptions today. When their operator-extraction lands, they migrate to `operators/` and this list shrinks.
+
+### 2. Business operators (`operators/*.py`)
+
+Own `transaction()` for one named business transition. Orchestrate side-effects. Declare atomicity. The only legal entry point for the transitions they represent. Currently: `PositionClosure` (closing a position with atomic capital roll-in + post-commit health/notify/event-log/snapshot).
 
 Pattern:
 
 ```python
-from db.transaction import transaction
+from operators.position_closure import PositionClosure
 
-with transaction() as con:
-    con.execute("INSERT INTO ...", (...,))
-    rows = con.execute("SELECT ...").fetchall()
+with PositionClosure(
+    pos_id=42, exit_price=110.0, exit_reason="TP_HIT",
+    mode="USER", caller_tenant_id=tenant_id,
+) as closure:
+    outcome = closure.execute()
 ```
 
-For multi-statement atomicity, keep all statements inside one `with transaction()` block. Helpers like `db_close_position` currently own their own transactions; cross-helper atomicity is a future refinement (see plan `docs/superpowers/plans/2026-05-24-transaction-unit-of-work.md`).
+### 3. Direct `with transaction()` for ad-hoc unit-of-work
+
+When the caller needs a transactional scope around one or more pure SQL helpers but the operation isn't a named business transition, wrap the helpers in `with transaction() as con:` directly:
+
+```python
+from db.transaction import transaction
+from db.signals import get_latest_signal
+
+with transaction() as con:
+    sig = get_latest_signal(con, "BTCUSDT")
+```
+
+### 4. Read-only pre-validation outside any transaction (`read_only_connection()`)
+
+When an operator needs to read state BEFORE deciding whether to open a write transaction (e.g., ownership check that should not acquire a writer lock), use `read_only_connection()` from `db.transaction`:
+
+```python
+from db.transaction import read_only_connection
+
+with read_only_connection() as con:
+    row = db_get_position_by_id(con, pos_id)
+# no transaction was opened; no lock held.
+```
+
+Only used by operators today (`PositionClosure.__enter__`). Pure SQL helpers never call this — they receive `con` from their caller.
+
+New business operators emerge from evidence (caller composes >1 helper + side-effect with conditional behavior), not preemptively. See `docs/superpowers/analysis/2026-05-25-446-tx-or-use-analysis-and-direction.md` for the rationale (Voronov, 2026-05-25).
 
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
