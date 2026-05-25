@@ -96,7 +96,7 @@ from db.schema import init_db  # used in lifespan() at line 67; also btc_api.ini
 # get_latest_signal, get_scans, save_scan: called as btc_api.<name> in test_api.py
 from db.signals import get_latest_scan, get_latest_signal, get_scans, get_signals_summary, save_scan  # noqa: F401
 # db_*: called as btc_api.db_* in test_api.py (position CRUD, lines 827–1088)
-from db.positions import db_close_position, db_create_position, db_get_positions, db_update_position  # noqa: F401
+from db.positions import db_create_position, db_get_positions, db_update_position  # noqa: F401
 from notifier import notify, SystemEvent  # used directly at line 171
 from scanner.runtime import (
     _scanner_state, execute_scan_for_symbol, check_pending_signal_outcomes,

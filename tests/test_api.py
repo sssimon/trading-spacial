@@ -908,9 +908,11 @@ class TestPositionsCRUD:
     def test_get_positions_filter_status(self):
         """Filter positions by status."""
         import btc_api
+        from operators.position_closure import PositionClosure
         btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
         pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
-        btc_api.db_close_position(pos2["id"], 3800.0, "TP_HIT")
+        with PositionClosure(pos2["id"], 3800.0, "TP_HIT", mode="SYSTEM") as c:
+            c.execute()
 
         open_pos = btc_api.db_get_positions(status="open")
         closed_pos = btc_api.db_get_positions(status="closed")
@@ -925,9 +927,11 @@ class TestPositionsCRUD:
     def test_get_positions_status_all_returns_everything(self):
         """status='all' behaves same as no filter."""
         import btc_api
+        from operators.position_closure import PositionClosure
         btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
         pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
-        btc_api.db_close_position(pos2["id"], 3800.0, "MANUAL")
+        with PositionClosure(pos2["id"], 3800.0, "MANUAL", mode="SYSTEM") as c:
+            c.execute()
 
         all_pos = btc_api.db_get_positions(status="all")
         assert len(all_pos) == 2
@@ -941,18 +945,21 @@ class TestPositionsCRUD:
         assert positions[0]["id"] == p2["id"]
         assert positions[1]["id"] == p1["id"]
 
-    # --- db_close_position ---
+    # --- PositionClosure (migrated from db_close_position, Task 7) ---
 
     def test_close_position(self):
         """Close a position and verify exit data."""
         import btc_api
+        from operators.position_closure import PositionClosure
         pos = btc_api.db_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
             "direction": "LONG",
         })
-        closed = btc_api.db_close_position(pos["id"], 68000.0, "TP_HIT")
+        with PositionClosure(pos["id"], 68000.0, "TP_HIT", mode="SYSTEM") as c:
+            outcome = c.execute()
+        closed = outcome.position
         assert closed is not None
         assert closed["exit_price"] == 68000.0
         assert closed["exit_reason"] == "TP_HIT"
@@ -962,64 +969,74 @@ class TestPositionsCRUD:
     def test_close_position_pnl_long(self):
         """P&L calculation correct for LONG position."""
         import btc_api
+        from operators.position_closure import PositionClosure
         pos = btc_api.db_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
             "direction": "LONG",
         })
-        closed = btc_api.db_close_position(pos["id"], 68000.0, "TP_HIT")
+        with PositionClosure(pos["id"], 68000.0, "TP_HIT", mode="SYSTEM") as c:
+            outcome = c.execute()
         # PnL = (68000 - 65000) * 0.1 = 300
-        assert closed["pnl_usd"] == pytest.approx(300.0, abs=0.01)
-        assert closed["pnl_pct"] > 0
+        assert outcome.pnl_usd == pytest.approx(300.0, abs=0.01)
+        assert outcome.pnl_pct > 0
 
     def test_close_position_pnl_long_loss(self):
         """Negative P&L for LONG position that drops."""
         import btc_api
+        from operators.position_closure import PositionClosure
         pos = btc_api.db_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
             "direction": "LONG",
         })
-        closed = btc_api.db_close_position(pos["id"], 63000.0, "SL_HIT")
+        with PositionClosure(pos["id"], 63000.0, "SL_HIT", mode="SYSTEM") as c:
+            outcome = c.execute()
         # PnL = (63000 - 65000) * 0.1 = -200
-        assert closed["pnl_usd"] == pytest.approx(-200.0, abs=0.01)
-        assert closed["pnl_pct"] < 0
+        assert outcome.pnl_usd == pytest.approx(-200.0, abs=0.01)
+        assert outcome.pnl_pct < 0
 
     def test_close_position_pnl_short(self):
         """P&L calculation correct for SHORT position."""
         import btc_api
+        from operators.position_closure import PositionClosure
         pos = btc_api.db_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 68000.0,
             "qty": 0.1,
             "direction": "SHORT",
         })
-        closed = btc_api.db_close_position(pos["id"], 65000.0, "TP_HIT")
+        with PositionClosure(pos["id"], 65000.0, "TP_HIT", mode="SYSTEM") as c:
+            outcome = c.execute()
         # PnL for SHORT = (entry - exit) * qty = (68000 - 65000) * 0.1 = 300
-        assert closed["pnl_usd"] == pytest.approx(300.0, abs=0.01)
-        assert closed["pnl_pct"] > 0
+        assert outcome.pnl_usd == pytest.approx(300.0, abs=0.01)
+        assert outcome.pnl_pct > 0
 
     def test_close_position_pnl_short_loss(self):
         """Negative P&L for SHORT position that rises."""
         import btc_api
+        from operators.position_closure import PositionClosure
         pos = btc_api.db_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
             "direction": "SHORT",
         })
-        closed = btc_api.db_close_position(pos["id"], 68000.0, "SL_HIT")
+        with PositionClosure(pos["id"], 68000.0, "SL_HIT", mode="SYSTEM") as c:
+            outcome = c.execute()
         # PnL = (65000 - 68000) * 0.1 = -300
-        assert closed["pnl_usd"] == pytest.approx(-300.0, abs=0.01)
-        assert closed["pnl_pct"] < 0
+        assert outcome.pnl_usd == pytest.approx(-300.0, abs=0.01)
+        assert outcome.pnl_pct < 0
 
     def test_close_nonexistent_position_returns_none(self):
-        """Closing a position that does not exist returns None."""
-        import btc_api
-        result = btc_api.db_close_position(9999, 68000.0, "MANUAL")
-        assert result is None
+        """Closing a position that does not exist returns not_found."""
+        from operators.position_closure import PositionClosure
+        with PositionClosure(9999, 68000.0, "MANUAL", mode="SYSTEM") as c:
+            outcome = c.execute()
+        assert outcome.status == "not_found"
+        assert outcome.position is None
 
     # --- db_update_position ---
 
@@ -1241,7 +1258,9 @@ class TestPositionsCRUD:
             "tp_price": 70000.0,
             "direction": "LONG",
         })
-        btc_api.db_close_position(pos["id"], 68000.0, "MANUAL")
+        from operators.position_closure import PositionClosure
+        with PositionClosure(pos["id"], 68000.0, "MANUAL", mode="SYSTEM") as c:
+            c.execute()
         # Now check stops with price below SL -- should NOT re-close
         btc_api.check_position_stops("BTCUSDT", 60000.0)
         closed_pos = btc_api.db_get_positions(status="closed")

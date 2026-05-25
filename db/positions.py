@@ -166,66 +166,6 @@ def db_get_positions(
     return [dict(r) for r in rows]
 
 
-def db_close_position(
-    pos_id: int,
-    exit_price: float,
-    exit_reason: str,
-    tenant_id: Optional[int] = None,
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> Optional[dict]:
-    """Close position by id. Per B.5: ownership-enforced when tenant_id given.
-
-    If tenant_id is provided and the position does NOT belong to that tenant,
-    returns None (IDOR protection — caller sees same behavior as 'not found').
-
-    Per Task 8.5: optional `con` lets a caller (e.g. `check_position_stops`)
-    fold the close + capital + outcomes mutations into one outer transaction
-    instead of three separate atomic boundaries.
-    """
-    _caller_owned_con = con  # remember whether caller threaded a tx in
-    with _tx_or_use(con) as con:
-        if tenant_id is None:
-            row = con.execute(
-                "SELECT * FROM positions WHERE id=?", (pos_id,),
-            ).fetchone()
-        else:
-            row = con.execute(
-                "SELECT * FROM positions WHERE id=? AND tenant_id=?",
-                (pos_id, tenant_id),
-            ).fetchone()
-        if not row:
-            return None
-        pos = dict(row)
-        qty = pos.get("qty") or 0
-        pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
-        exit_ts = datetime.now(timezone.utc).isoformat()
-        con.execute("""
-            UPDATE positions
-            SET status=?, exit_price=?, exit_ts=?, exit_reason=?, pnl_usd=?, pnl_pct=?
-            WHERE id=?
-        """, ("closed", exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, pos_id))
-        row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
-    closed = dict(row)
-    # Kill switch #138: trigger health evaluation for this symbol.
-    #
-    # Task 8.5: when the caller passes its own `con`, it owns an outer
-    # transaction that hasn't committed yet. `trigger_health_evaluation`
-    # opens a FRESH connection and would BEGIN IMMEDIATE against the
-    # writer lock the outer tx still holds → deadlock. The caller is
-    # responsible for triggering health evaluation post-commit in that
-    # case. When called standalone (con is None), our own tx has already
-    # committed by the time we reach here, so the trigger is safe.
-    if _caller_owned_con is None:
-        try:
-            from health import trigger_health_evaluation  # noqa: PLC0415
-            from api.config import load_config  # noqa: PLC0415
-            trigger_health_evaluation(pos["symbol"], load_config())
-        except Exception as e:
-            log.warning("health trigger skipped for position close: %s", e)
-    return closed
-
-
 def db_get_position_by_id(
     con: sqlite3.Connection, pos_id: int,
 ) -> Optional[dict]:

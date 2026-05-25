@@ -380,16 +380,16 @@ def _execute_proposed_action(
         # 'role_required' in audit.
         raise HTTPException(status_code=403, detail="role_required")
     if action == ACTION_CLOSE_POSITION:
-        from db.positions import db_close_position
-        import btc_api
+        from operators.position_closure import PositionClosure  # noqa: PLC0415
         position_id = int(args["position_id"])
         exit_price = float(args["exit_price"])
-        # TOCTOU guards (both have to fire — db_close_position itself
+        # TOCTOU guards (both have to fire — PositionClosure itself
         # only filters by id+tenant, NOT by status, and would happily
         # overwrite the exit_reason of a position already closed via
         # SL/TP/TIME_LIMIT between propose and confirm):
         #   1. row must still exist for this tenant (IDOR null pattern)
         #   2. row must still be `open` (not closed by another flow)
+        # Pre-check outside the write tx for quick rejection:
         with transaction() as con:
             current = con.execute(
                 "SELECT status FROM positions WHERE id=? AND tenant_id=?",
@@ -397,13 +397,17 @@ def _execute_proposed_action(
             ).fetchone()
         if current is None or dict(current).get("status") != "open":
             raise HTTPException(status_code=409, detail="state_drift")
-        pos = db_close_position(
-            position_id, exit_price, "MANUAL_AGENT",
-            tenant_id=tenant_id,
-        )
-        if pos is None:
+        with PositionClosure(
+            pos_id=position_id,
+            exit_price=exit_price,
+            exit_reason="MANUAL_AGENT",
+            mode="USER",
+            caller_tenant_id=tenant_id,
+        ) as closure:
+            outcome = closure.execute()
+        if outcome.status != "closed":
             raise HTTPException(status_code=409, detail="state_drift")
-        return {"position": pos}
+        return {"position": outcome.position}
 
     if action == ACTION_REACTIVATE_SYMBOL:
         from health import get_symbol_state, reactivate_symbol

@@ -115,13 +115,15 @@ class TestDbGetPositions:
         assert len(all_positions) == 2
 
     def test_status_and_tenant_combined(self, initialized_db):
-        from db.positions import db_create_position, db_close_position, db_get_positions
+        from db.positions import db_create_position, db_get_positions
+        from operators.position_closure import PositionClosure
         db_create_position({"symbol": "BTC", "entry_price": 80000, "size_usd": 500}, tenant_id=1)
         db_create_position({"symbol": "ETH", "entry_price": 2300, "size_usd": 500}, tenant_id=1)
         # Close one for user 1
         all_pos = db_get_positions(tenant_id=1)
         first_id = all_pos[0]["id"]
-        db_close_position(first_id, 81000, "MANUAL", tenant_id=1)
+        with PositionClosure(first_id, 81000, "MANUAL", mode="USER", caller_tenant_id=1) as c:
+            c.execute()
 
         open_for_1 = db_get_positions(status="open", tenant_id=1)
         closed_for_1 = db_get_positions(status="closed", tenant_id=1)
@@ -140,30 +142,36 @@ class TestDbGetPositions:
 
 
 # ---------------------------------------------------------------------------
-# db_close_position — ownership enforced
+# PositionClosure — ownership enforced (migrated from db_close_position, Task 7)
 # ---------------------------------------------------------------------------
 
 
 class TestDbClosePosition:
     def test_owner_can_close(self, initialized_db):
-        from db.positions import db_create_position, db_close_position
+        from db.positions import db_create_position
+        from operators.position_closure import PositionClosure
         pos = db_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
             tenant_id=1,
         )
-        closed = db_close_position(pos["id"], 81000, "MANUAL", tenant_id=1)
-        assert closed is not None
-        assert closed["status"] == "closed"
+        with PositionClosure(pos["id"], 81000, "MANUAL", mode="USER", caller_tenant_id=1) as c:
+            outcome = c.execute()
+        assert outcome.status == "closed"
+        assert outcome.position is not None
+        assert outcome.position["status"] == "closed"
 
     def test_non_owner_returns_none(self, initialized_db):
-        """IDOR protection: user 2 tries to close user 1's position → None."""
-        from db.positions import db_create_position, db_close_position
+        """IDOR protection: user 2 tries to close user 1's position → not_found."""
+        from db.positions import db_create_position
+        from operators.position_closure import PositionClosure
         pos = db_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
             tenant_id=1,
         )
-        closed = db_close_position(pos["id"], 81000, "MANUAL", tenant_id=2)
-        assert closed is None
+        with PositionClosure(pos["id"], 81000, "MANUAL", mode="USER", caller_tenant_id=2) as c:
+            outcome = c.execute()
+        assert outcome.status == "not_found"
+        assert outcome.position is None
 
         # Verify position still open
         from db.positions import db_get_positions
@@ -171,14 +179,17 @@ class TestDbClosePosition:
         assert all_pos[0]["status"] == "open"
 
     def test_legacy_no_tenant_works(self, initialized_db):
-        """tenant_id=None preserves legacy: any position closeable."""
-        from db.positions import db_create_position, db_close_position
+        """SYSTEM mode (no tenant_id) can close any position."""
+        from db.positions import db_create_position
+        from operators.position_closure import PositionClosure
         pos = db_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
             tenant_id=1,
         )
-        closed = db_close_position(pos["id"], 81000, "MANUAL")  # no tenant_id
-        assert closed is not None
+        with PositionClosure(pos["id"], 81000, "MANUAL", mode="SYSTEM") as c:
+            outcome = c.execute()
+        assert outcome.status == "closed"
+        assert outcome.position is not None
 
 
 # ---------------------------------------------------------------------------
@@ -220,12 +231,14 @@ class TestDbUpdatePosition:
 
 class TestDbLastExitTs:
     def test_filter_by_tenant(self, initialized_db):
-        from db.positions import db_create_position, db_close_position, db_last_exit_ts
+        from db.positions import db_create_position, db_last_exit_ts
+        from operators.position_closure import PositionClosure
         # User 1 closes a BTC position
         pos1 = db_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500}, tenant_id=1,
         )
-        db_close_position(pos1["id"], 81000, "MANUAL", tenant_id=1)
+        with PositionClosure(pos1["id"], 81000, "MANUAL", mode="USER", caller_tenant_id=1) as c:
+            c.execute()
         # User 2 also has a BTC trade, but never closed
         db_create_position(
             {"symbol": "BTC", "entry_price": 79000, "size_usd": 500}, tenant_id=2,

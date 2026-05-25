@@ -36,7 +36,7 @@ from notifier import notify, PositionExitEvent
 
 log = logging.getLogger("operators.position_closure")
 
-_VALID_EXIT_REASONS = frozenset({"MANUAL", "SL_HIT", "TP_HIT", "TIME_LIMIT_HIT"})
+_VALID_EXIT_REASONS = frozenset({"MANUAL", "MANUAL_AGENT", "SL_HIT", "TP_HIT", "TIME_LIMIT_HIT"})
 
 
 @dataclass(frozen=True)
