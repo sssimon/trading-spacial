@@ -44,7 +44,8 @@ def seeded_db(tmp_path, monkeypatch):
     from db.transaction import transaction
 
     init_db()
-    init_auth_db()
+    with transaction() as con:
+        init_auth_db(con)
 
     # Insert a real user (id=1)
     with transaction() as con:

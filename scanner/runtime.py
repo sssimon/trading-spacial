@@ -329,7 +329,9 @@ def scanner_loop():
 
         # Actualizar data/symbols_status.json al final de cada ciclo
         try:
-            rows = get_signals_summary()
+            from db.transaction import transaction  # noqa: PLC0415
+            with transaction() as con:
+                rows = get_signals_summary(con)
             update_symbols_json(rows)
         except Exception as e:
             log.warning(f"update_symbols_json error en ciclo: {e}")

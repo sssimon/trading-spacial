@@ -17,8 +17,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.transaction import _tx_or_use
-
 log = logging.getLogger("db.user_preferences")
 
 
@@ -43,30 +41,29 @@ def _decode_row(row) -> dict:
 
 
 def db_get_user_preferences(
+    con: sqlite3.Connection,
     tenant_id: int,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """Return preferences row for tenant, or None if not yet set.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 8 (#446): `con` is now mandatory positional. Callers must pass an
+    open `sqlite3.Connection` from a surrounding `transaction()` block.
     """
-    with _tx_or_use(con) as con:
-        row = con.execute(
-            "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
-        ).fetchone()
+    row = con.execute(
+        "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
     if row is None:
         return None
     return _decode_row(row)
 
 
 def db_upsert_user_preferences(
+    con: sqlite3.Connection,
     tenant_id: int,
     *,
     symbol_filter: Optional[list[str]] = None,
     min_score: Optional[int] = None,
     notify_channels: Optional[dict[str, Any]] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Insert or replace user_preferences row for tenant.
 
@@ -76,38 +73,37 @@ def db_upsert_user_preferences(
 
     Returns resulting row with JSON fields parsed.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 8 (#446): `con` is now mandatory positional first arg.
     """
     now = datetime.now(timezone.utc).isoformat()
-    with _tx_or_use(con) as con:
-        existing = con.execute(
-            "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
-        ).fetchone()
+    existing = con.execute(
+        "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
 
-        sf_json = json.dumps(symbol_filter) if symbol_filter is not None else None
-        nc_json = json.dumps(notify_channels) if notify_channels is not None else None
+    sf_json = json.dumps(symbol_filter) if symbol_filter is not None else None
+    nc_json = json.dumps(notify_channels) if notify_channels is not None else None
 
-        if existing is None:
-            con.execute(
-                """INSERT INTO user_preferences
-                   (tenant_id, symbol_filter_json, min_score, notify_channels_json,
-                    updated_at)
-                   VALUES (?, ?, COALESCE(?, 4), ?, ?)""",
-                (tenant_id, sf_json, min_score, nc_json, now),
-            )
-        else:
-            # Preserve fields when None passed
-            effective_sf = sf_json if sf_json is not None else existing["symbol_filter_json"]
-            effective_ms = min_score if min_score is not None else existing["min_score"]
-            effective_nc = nc_json if nc_json is not None else existing["notify_channels_json"]
-            con.execute(
-                """UPDATE user_preferences
-                   SET symbol_filter_json = ?, min_score = ?,
-                       notify_channels_json = ?, updated_at = ?
-                   WHERE tenant_id = ?""",
-                (effective_sf, effective_ms, effective_nc, now, tenant_id),
-            )
-        row = con.execute(
-            "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
-        ).fetchone()
+    if existing is None:
+        con.execute(
+            """INSERT INTO user_preferences
+               (tenant_id, symbol_filter_json, min_score, notify_channels_json,
+                updated_at)
+               VALUES (?, ?, COALESCE(?, 4), ?, ?)""",
+            (tenant_id, sf_json, min_score, nc_json, now),
+        )
+    else:
+        # Preserve fields when None passed
+        effective_sf = sf_json if sf_json is not None else existing["symbol_filter_json"]
+        effective_ms = min_score if min_score is not None else existing["min_score"]
+        effective_nc = nc_json if nc_json is not None else existing["notify_channels_json"]
+        con.execute(
+            """UPDATE user_preferences
+               SET symbol_filter_json = ?, min_score = ?,
+                   notify_channels_json = ?, updated_at = ?
+               WHERE tenant_id = ?""",
+            (effective_sf, effective_ms, effective_nc, now, tenant_id),
+        )
+    row = con.execute(
+        "SELECT * FROM user_preferences WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
     return _decode_row(row)

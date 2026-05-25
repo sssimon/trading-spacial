@@ -121,7 +121,7 @@ def frozen_scan(monkeypatch, tmp_path):
     # exits" so snapshot doesn't drift with whatever the runner's signals.db
     # happens to contain. The defensive assert catches future regressions
     # where the helper is called without a symbol argument.
-    def _no_prior_exits(symbol, *args, **kwargs):
+    def _no_prior_exits(con, symbol, *args, **kwargs):
         assert isinstance(symbol, str) and symbol, (
             f"db_last_exit_ts called with bad symbol: {symbol!r}"
         )

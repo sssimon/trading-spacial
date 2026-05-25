@@ -70,7 +70,7 @@ def _make_scan_klines(volume=1000.0, base=100.0):
 
 def test_e5_path_a_no_prior_exits_returns_activo_false_with_null_hours(monkeypatch):
     """Path A: db_last_exit_ts → None. activo=False, hours_since_last_exit=None."""
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["activo"] is False
@@ -82,7 +82,7 @@ def test_e5_path_a_no_prior_exits_returns_activo_false_with_null_hours(monkeypat
 def test_e5_path_b_hours_since_exceeds_cooldown_returns_activo_false(monkeypatch):
     """Path B: 10h since exit, 6h required → activo=False."""
     last_exit = datetime.now(timezone.utc) - timedelta(hours=10)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["activo"] is False
@@ -94,7 +94,7 @@ def test_e5_path_b_hours_since_exceeds_cooldown_returns_activo_false(monkeypatch
 def test_e5_path_c_hours_since_below_cooldown_returns_activo_true(monkeypatch):
     """Path C: 1h since exit, 6h required → activo=True (the core blocking path)."""
     last_exit = datetime.now(timezone.utc) - timedelta(hours=1)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["activo"] is True
@@ -105,7 +105,7 @@ def test_e5_path_c_hours_since_below_cooldown_returns_activo_true(monkeypatch):
 def test_e5_path_c_uses_per_symbol_override_not_global(monkeypatch):
     """Per-symbol override binds when global cd would not (8h since exit, cd=14)."""
     last_exit = datetime.now(timezone.utc) - timedelta(hours=8)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 14}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["activo"] is True
@@ -114,7 +114,7 @@ def test_e5_path_c_uses_per_symbol_override_not_global(monkeypatch):
 
 def test_e5_path_d_invalid_override_falls_back_to_global_cooldown_h(monkeypatch, caplog):
     """Path D: invalid override → fallback to COOLDOWN_H. Validator emits 1 warn."""
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     caplog.set_level(logging.WARNING)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": -5}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
@@ -133,7 +133,7 @@ def test_e5_path_d_invalid_override_fallback_USED_in_comparison(monkeypatch, cap
     (missing/None) and let the trade through.
     """
     last_exit = datetime.now(timezone.utc) - timedelta(hours=1)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     caplog.set_level(logging.WARNING)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": -5}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
@@ -146,7 +146,7 @@ def test_e5_path_d_invalid_override_fallback_USED_in_comparison(monkeypatch, cap
 
 def test_e5_path_e_db_exception_fail_open_logs_warning(monkeypatch, caplog):
     """DB query raises → activo=False (fail-open), warning logged."""
-    def _boom(sym):
+    def _boom(con, sym):
         raise RuntimeError("DB connection lost")
     monkeypatch.setattr("db.positions.db_last_exit_ts", _boom)
     caplog.set_level(logging.WARNING)
@@ -161,7 +161,7 @@ def test_e5_path_e_db_exception_fail_open_logs_warning(monkeypatch, caplog):
 def test_e5_path_e_sqlite_operational_error_logs_at_error_level(monkeypatch, caplog):
     """SQLite OperationalError escalates to log.error (not warning)."""
     import sqlite3
-    def _boom(sym):
+    def _boom(con, sym):
         raise sqlite3.OperationalError("database is locked")
     monkeypatch.setattr("db.positions.db_last_exit_ts", _boom)
     caplog.set_level(logging.WARNING)
@@ -177,7 +177,7 @@ def test_e5_path_e_sqlite_operational_error_logs_at_error_level(monkeypatch, cap
 
 def test_e5_path_e_oserror_logs_at_error_level(monkeypatch, caplog):
     """OSError (disk-full, permission-denied, missing parent dir) escalates to error."""
-    def _boom(sym):
+    def _boom(con, sym):
         raise OSError("disk full")
     monkeypatch.setattr("db.positions.db_last_exit_ts", _boom)
     caplog.set_level(logging.WARNING)
@@ -196,7 +196,7 @@ def test_e5_path_e_oserror_logs_at_error_level(monkeypatch, caplog):
 
 def test_e5_dict_always_present_keys_match_baseline_shape(monkeypatch):
     """Frontend pin: 4 keys, types correct. Drift here breaks downstream consumers."""
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
 
@@ -211,7 +211,7 @@ def test_e5_dict_always_present_keys_match_baseline_shape(monkeypatch):
 def test_e5_hours_since_rounded_to_2_decimals(monkeypatch):
     """Round contract: hours_since_last_exit must be limited to 2 decimals."""
     last_exit = datetime.now(timezone.utc) - timedelta(hours=2, minutes=37, seconds=18)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     h = e5["hours_since_last_exit"]
@@ -220,14 +220,14 @@ def test_e5_hours_since_rounded_to_2_decimals(monkeypatch):
 
 
 def test_e5_cooldown_hours_required_reflects_per_symbol_when_present(monkeypatch):
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     cfg = {"symbol_overrides": {"ETHUSDT": {"cooldown_hours": 14}}}
     e5 = scanner._build_e5_cooldown("ETHUSDT", cfg)
     assert e5["cooldown_hours_required"] == 14.0
 
 
 def test_e5_cooldown_hours_required_reflects_global_when_overrides_missing(monkeypatch):
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     cfg = {"symbol_overrides": {}}  # no per-symbol entry
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["cooldown_hours_required"] == float(scanner.COOLDOWN_H)
@@ -236,7 +236,7 @@ def test_e5_cooldown_hours_required_reflects_global_when_overrides_missing(monke
 def test_e5_payload_json_serializable(monkeypatch):
     """The dict ends up in scan() report which is JSON-serialized for /symbols."""
     last_exit = datetime.now(timezone.utc) - timedelta(hours=3)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
     cfg = {"symbol_overrides": {"BTCUSDT": {"cooldown_hours": 6}}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     # Must not raise.
@@ -249,7 +249,7 @@ def test_e5_payload_json_serializable(monkeypatch):
 
 def test_e5_disabled_symbol_does_not_crash(monkeypatch):
     """cfg.symbol_overrides[BTC] = False → no AttributeError on .get('cooldown_hours')."""
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: None)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: None)
     cfg = {"symbol_overrides": {"BTCUSDT": False}}
     e5 = scanner._build_e5_cooldown("BTCUSDT", cfg)
     assert e5["cooldown_hours_required"] == float(scanner.COOLDOWN_H)
@@ -286,7 +286,7 @@ def test_scan_blocks_signal_when_cooldown_active(fake_cfg, monkeypatch):
 
     # Last exit 1h ago — cooldown 14h NOT elapsed → activo=True
     last_exit = datetime.now(timezone.utc) - timedelta(hours=1)
-    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda sym: last_exit)
+    monkeypatch.setattr("db.positions.db_last_exit_ts", lambda con, sym: last_exit)
 
     fake_decision = _make_long_signal()
 

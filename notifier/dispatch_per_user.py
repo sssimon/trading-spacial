@@ -91,7 +91,8 @@ def dispatch_signal_to_users(
     out: dict[int, list[DeliveryReceipt]] = {}
 
     for user in users:
-        prefs = db_get_user_preferences(user["id"], con=con)
+        with _tx_or_use(con) as inner_con:
+            prefs = db_get_user_preferences(inner_con, user["id"])
         if prefs is None:
             symbol_filter = _DEFAULT_SYMBOL_FILTER
             min_score = _DEFAULT_MIN_SCORE

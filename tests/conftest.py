@@ -206,8 +206,10 @@ def unauthed_client(monkeypatch, tmp_path):
     # Initialize schemas in the isolated DB
     from db.schema import init_db
     from db.auth_schema import init_auth_db
+    from db.transaction import transaction
     init_db()
-    init_auth_db()
+    with transaction() as con:
+        init_auth_db(con)
 
     return TestClient(btc_api.app)
 
@@ -228,8 +230,10 @@ def viewer_client(monkeypatch, tmp_path):
 
     from db.schema import init_db
     from db.auth_schema import init_auth_db
+    from db.transaction import transaction
     init_db()
-    init_auth_db()
+    with transaction() as con:
+        init_auth_db(con)
 
     return TestClient(btc_api.app)
 

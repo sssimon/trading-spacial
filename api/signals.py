@@ -203,9 +203,10 @@ def list_signals(
     since_hours:  Optional[float] = Query(None,  description="Ultimas N horas"),
     symbol:       Optional[str]   = Query(None,  description="Filtrar por par (ej: ETHUSDT)"),
 ):
-    rows = get_scans(limit=limit, only_signals=only_signals,
-                     only_setups=only_setups, since_hours=since_hours,
-                     symbol=symbol)
+    with transaction() as con:
+        rows = get_scans(con, limit=limit, only_signals=only_signals,
+                         only_setups=only_setups, since_hours=since_hours,
+                         symbol=symbol)
     return {
         "total": len(rows),
         "signals": [
@@ -299,7 +300,8 @@ def get_signals_performance(
 def latest_signal(
     symbol: Optional[str] = Query(None, description="Filtrar por par (ej: SOLUSDT)")
 ):
-    row = get_latest_signal(symbol)
+    with transaction() as con:
+        row = get_latest_signal(con, symbol)
     if not row:
         msg = f"Sin señales para {symbol}." if symbol else "Sin señales registradas."
         return {"message": msg, "señal": None}
@@ -331,7 +333,8 @@ def latest_signal(
 def latest_message(
     symbol: Optional[str] = Query(None, description="Filtrar por par")
 ):
-    row = get_latest_signal(symbol)
+    with transaction() as con:
+        row = get_latest_signal(con, symbol)
     if not row:
         return {"message": "Sin señales registradas aun."}
     try:

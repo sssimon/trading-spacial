@@ -179,6 +179,28 @@ class TestBuildTelegramMessage:
 #  TESTS — Base de datos (init_db, save_scan, get_scans, etc.)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _tx_get_scans(**kwargs):
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.get_scans(con, **kwargs)
+
+
+def _tx_get_latest_signal(symbol=None):
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.get_latest_signal(con, symbol)
+
+
+def _tx_get_latest_scan(symbol=None):
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.get_latest_scan(con, symbol)
+
+
 class TestDatabase:
     @pytest.fixture(autouse=True)
     def patch_db(self, tmp_db, monkeypatch):
@@ -206,7 +228,7 @@ class TestDatabase:
     def test_get_scans_retorna_lista(self, sample_report):
         import btc_api
         btc_api.save_scan(sample_report)
-        rows = btc_api.get_scans(limit=10)
+        rows = _tx_get_scans(limit=10)
         assert isinstance(rows, list)
         assert len(rows) == 1
 
@@ -214,7 +236,7 @@ class TestDatabase:
         import btc_api
         btc_api.save_scan(sample_report)   # señal completa
         btc_api.save_scan(setup_report)    # setup sin gatillo
-        rows = btc_api.get_scans(only_signals=True)
+        rows = _tx_get_scans(only_signals=True)
         assert len(rows) == 1
         assert rows[0]["señal"] == 1
 
@@ -222,27 +244,27 @@ class TestDatabase:
         import btc_api
         btc_api.save_scan(sample_report)
         btc_api.save_scan(setup_report)
-        rows = btc_api.get_scans(only_setups=True)
+        rows = _tx_get_scans(only_setups=True)
         # Debe incluir señales Y setups
         assert len(rows) == 2
 
     def test_get_latest_signal(self, sample_report):
         import btc_api
         btc_api.save_scan(sample_report)
-        latest = btc_api.get_latest_signal()
+        latest = _tx_get_latest_signal()
         assert latest is not None
         assert latest["señal"] == 1
 
     def test_get_latest_signal_sin_datos(self):
         import btc_api
-        latest = btc_api.get_latest_signal()
+        latest = _tx_get_latest_signal()
         assert latest is None
 
     def test_get_latest_scan(self, sample_report, setup_report):
         import btc_api
         btc_api.save_scan(setup_report)
         btc_api.save_scan(sample_report)  # último
-        latest = btc_api.get_latest_scan()
+        latest = _tx_get_latest_scan()
         assert latest["señal"] == 1
 
     def test_save_scan_guarda_payload_json(self, sample_report):
@@ -268,7 +290,7 @@ class TestDatabase:
         import btc_api
         for _ in range(5):
             btc_api.save_scan(sample_report)
-        rows = btc_api.get_scans(limit=3)
+        rows = _tx_get_scans(limit=3)
         assert len(rows) == 3
 
 
@@ -701,7 +723,7 @@ class TestExecuteScanForSymbol:
 
         cfg = btc_api.load_config()
         btc_api.execute_scan_for_symbol("ETHUSDT", cfg)
-        scans = btc_api.get_scans()
+        scans = _tx_get_scans()
         assert len(scans) >= 1
         assert scans[0]["symbol"] == "ETHUSDT"
 
@@ -809,6 +831,30 @@ class TestExecuteScanForSymbol:
 #  TESTS — Posiciones CRUD (funciones de DB)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _tx_create_position(data: dict):
+    """Test helper: wrap db_create_position in a transaction."""
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.db_create_position(con, data)
+
+
+def _tx_get_positions(status=None, tenant_id=None):
+    """Test helper: wrap db_get_positions in a transaction."""
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.db_get_positions(con, status=status, tenant_id=tenant_id)
+
+
+def _tx_update_position(pos_id: int, data: dict):
+    """Test helper: wrap db_update_position in a transaction."""
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.db_update_position(con, pos_id, data)
+
+
 class TestPositionsCRUD:
     """Tests for the position management system (DB-level functions)."""
 
@@ -825,7 +871,7 @@ class TestPositionsCRUD:
     def test_create_position_basic(self):
         """Create a position with minimal data (symbol + entry_price)."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
         })
@@ -839,7 +885,7 @@ class TestPositionsCRUD:
     def test_create_position_full(self):
         """Create a position with all fields."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "ethusdt",
             "entry_price": 3500.0,
             "sl_price": 3200.0,
@@ -861,7 +907,7 @@ class TestPositionsCRUD:
     def test_create_position_short_direction(self):
         """Create a SHORT position."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 68000.0,
             "direction": "short",
@@ -871,7 +917,7 @@ class TestPositionsCRUD:
     def test_create_position_with_scan_id(self):
         """Position linked to a scan_id."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "scan_id": 42,
@@ -881,7 +927,7 @@ class TestPositionsCRUD:
     def test_create_position_qty_from_size_usd(self):
         """When qty is not given, it is derived from size_usd / entry_price."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 50000.0,
             "size_usd": 1000.0,
@@ -894,29 +940,29 @@ class TestPositionsCRUD:
     def test_get_positions_empty(self):
         """No positions returns empty list."""
         import btc_api
-        positions = btc_api.db_get_positions()
+        positions = _tx_get_positions()
         assert positions == []
 
     def test_get_positions_returns_all(self):
         """Get all positions regardless of status."""
         import btc_api
-        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
-        btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
-        positions = btc_api.db_get_positions()
+        _tx_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        _tx_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        positions = _tx_get_positions()
         assert len(positions) == 2
 
     def test_get_positions_filter_status(self):
         """Filter positions by status."""
         import btc_api
         from operators.position_closure import PositionClosure
-        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
-        pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        _tx_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        pos2 = _tx_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
         with PositionClosure(pos2["id"], 3800.0, "TP_HIT", mode="SYSTEM") as c:
             c.execute()
 
-        open_pos = btc_api.db_get_positions(status="open")
-        closed_pos = btc_api.db_get_positions(status="closed")
-        all_pos = btc_api.db_get_positions()
+        open_pos = _tx_get_positions(status="open")
+        closed_pos = _tx_get_positions(status="closed")
+        all_pos = _tx_get_positions()
 
         assert len(open_pos) == 1
         assert open_pos[0]["symbol"] == "BTCUSDT"
@@ -928,20 +974,20 @@ class TestPositionsCRUD:
         """status='all' behaves same as no filter."""
         import btc_api
         from operators.position_closure import PositionClosure
-        btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
-        pos2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        _tx_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        pos2 = _tx_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
         with PositionClosure(pos2["id"], 3800.0, "MANUAL", mode="SYSTEM") as c:
             c.execute()
 
-        all_pos = btc_api.db_get_positions(status="all")
+        all_pos = _tx_get_positions(status="all")
         assert len(all_pos) == 2
 
     def test_get_positions_ordered_desc(self):
         """Positions are returned in descending id order (newest first)."""
         import btc_api
-        p1 = btc_api.db_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
-        p2 = btc_api.db_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
-        positions = btc_api.db_get_positions()
+        p1 = _tx_create_position({"symbol": "BTCUSDT", "entry_price": 65000})
+        p2 = _tx_create_position({"symbol": "ETHUSDT", "entry_price": 3500})
+        positions = _tx_get_positions()
         assert positions[0]["id"] == p2["id"]
         assert positions[1]["id"] == p1["id"]
 
@@ -951,7 +997,7 @@ class TestPositionsCRUD:
         """Close a position and verify exit data."""
         import btc_api
         from operators.position_closure import PositionClosure
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
@@ -970,7 +1016,7 @@ class TestPositionsCRUD:
         """P&L calculation correct for LONG position."""
         import btc_api
         from operators.position_closure import PositionClosure
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
@@ -986,7 +1032,7 @@ class TestPositionsCRUD:
         """Negative P&L for LONG position that drops."""
         import btc_api
         from operators.position_closure import PositionClosure
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
@@ -1002,7 +1048,7 @@ class TestPositionsCRUD:
         """P&L calculation correct for SHORT position."""
         import btc_api
         from operators.position_closure import PositionClosure
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 68000.0,
             "qty": 0.1,
@@ -1018,7 +1064,7 @@ class TestPositionsCRUD:
         """Negative P&L for SHORT position that rises."""
         import btc_api
         from operators.position_closure import PositionClosure
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
@@ -1043,13 +1089,13 @@ class TestPositionsCRUD:
     def test_update_position_sl_tp(self):
         """Update SL/TP of an open position."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
             "tp_price": 70000.0,
         })
-        updated = btc_api.db_update_position(pos["id"], {
+        updated = _tx_update_position(pos["id"], {
             "sl_price": 64000.0,
             "tp_price": 72000.0,
         })
@@ -1062,34 +1108,34 @@ class TestPositionsCRUD:
     def test_update_position_notes(self):
         """Update notes field."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
         })
-        updated = btc_api.db_update_position(pos["id"], {"notes": "Updated note"})
+        updated = _tx_update_position(pos["id"], {"notes": "Updated note"})
         assert updated["notes"] == "Updated note"
 
     def test_update_position_rejects_invalid_fields(self):
         """Only allowed fields can be updated; invalid fields return None."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
         })
         # db_update_position uses an 'allowed' set whitelist;
         # passing only invalid fields returns None (no updates)
-        result = btc_api.db_update_position(pos["id"], {"malicious_field": "hacked"})
+        result = _tx_update_position(pos["id"], {"malicious_field": "hacked"})
         assert result is None
 
     def test_update_position_mixed_valid_invalid_fields(self):
         """Mixed valid and invalid fields: only valid ones are applied."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
         })
-        updated = btc_api.db_update_position(pos["id"], {
+        updated = _tx_update_position(pos["id"], {
             "sl_price": 64000.0,
             "evil_field": "drop table",
         })
@@ -1099,11 +1145,11 @@ class TestPositionsCRUD:
     def test_update_position_allowed_fields(self):
         """All allowed fields can be updated."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
         })
-        updated = btc_api.db_update_position(pos["id"], {
+        updated = _tx_update_position(pos["id"], {
             "sl_price": 63000.0,
             "tp_price": 70000.0,
             "size_usd": 1000.0,
@@ -1123,7 +1169,7 @@ class TestPositionsCRUD:
     def test_check_stops_sl_hit_long(self):
         """SL hit on LONG position auto-closes it."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1131,7 +1177,7 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 62000.0)  # below SL
-        positions = btc_api.db_get_positions(status="closed")
+        positions = _tx_get_positions(status="closed")
         assert len(positions) == 1
         assert positions[0]["exit_reason"] == "SL_HIT"
         assert positions[0]["exit_price"] == 63000.0  # closes at SL price
@@ -1139,7 +1185,7 @@ class TestPositionsCRUD:
     def test_check_stops_tp_hit_long(self):
         """TP hit on LONG position auto-closes it."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1147,7 +1193,7 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 71000.0)  # above TP
-        positions = btc_api.db_get_positions(status="closed")
+        positions = _tx_get_positions(status="closed")
         assert len(positions) == 1
         assert positions[0]["exit_reason"] == "TP_HIT"
         assert positions[0]["exit_price"] == 70000.0  # closes at TP price
@@ -1155,7 +1201,7 @@ class TestPositionsCRUD:
     def test_check_stops_price_between_sl_tp(self):
         """Price between SL and TP does not close the position."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1163,40 +1209,40 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 66000.0)
-        open_pos = btc_api.db_get_positions(status="open")
-        closed_pos = btc_api.db_get_positions(status="closed")
+        open_pos = _tx_get_positions(status="open")
+        closed_pos = _tx_get_positions(status="closed")
         assert len(open_pos) == 1
         assert len(closed_pos) == 0
 
     def test_check_stops_no_sl_tp(self):
         """Position without SL/TP is never auto-closed."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 50000.0)  # huge drop
-        open_pos = btc_api.db_get_positions(status="open")
+        open_pos = _tx_get_positions(status="open")
         assert len(open_pos) == 1  # still open
 
     def test_check_stops_different_symbol(self):
         """Only positions matching the symbol are checked."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
             "direction": "LONG",
         })
         btc_api.check_position_stops("ETHUSDT", 1000.0)  # different symbol
-        open_pos = btc_api.db_get_positions(status="open")
+        open_pos = _tx_get_positions(status="open")
         assert len(open_pos) == 1  # BTC position still open
 
     def test_check_stops_sl_at_exact_price(self):
         """SL triggered when price equals SL exactly."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1204,14 +1250,14 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 63000.0)  # exactly at SL
-        closed_pos = btc_api.db_get_positions(status="closed")
+        closed_pos = _tx_get_positions(status="closed")
         assert len(closed_pos) == 1
         assert closed_pos[0]["exit_reason"] == "SL_HIT"
 
     def test_check_stops_tp_at_exact_price(self):
         """TP triggered when price equals TP exactly."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1219,21 +1265,21 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 70000.0)  # exactly at TP
-        closed_pos = btc_api.db_get_positions(status="closed")
+        closed_pos = _tx_get_positions(status="closed")
         assert len(closed_pos) == 1
         assert closed_pos[0]["exit_reason"] == "TP_HIT"
 
     def test_check_stops_multiple_positions(self):
         """Multiple open positions for same symbol are all checked."""
         import btc_api
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
             "tp_price": 70000.0,
             "direction": "LONG",
         })
-        btc_api.db_create_position({
+        _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 60000.0,
             "sl_price": 58000.0,
@@ -1242,8 +1288,8 @@ class TestPositionsCRUD:
         })
         # Price triggers TP on second position (>=68000) but not first (needs >=70000)
         btc_api.check_position_stops("BTCUSDT", 69000.0)
-        open_pos = btc_api.db_get_positions(status="open")
-        closed_pos = btc_api.db_get_positions(status="closed")
+        open_pos = _tx_get_positions(status="open")
+        closed_pos = _tx_get_positions(status="closed")
         assert len(open_pos) == 1
         assert len(closed_pos) == 1
         assert closed_pos[0]["entry_price"] == 60000.0  # second one hit TP
@@ -1251,7 +1297,7 @@ class TestPositionsCRUD:
     def test_check_stops_already_closed_not_affected(self):
         """Already-closed positions are not re-checked."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
@@ -1263,14 +1309,14 @@ class TestPositionsCRUD:
             c.execute()
         # Now check stops with price below SL -- should NOT re-close
         btc_api.check_position_stops("BTCUSDT", 60000.0)
-        closed_pos = btc_api.db_get_positions(status="closed")
+        closed_pos = _tx_get_positions(status="closed")
         assert len(closed_pos) == 1
         assert closed_pos[0]["exit_reason"] == "MANUAL"  # original reason
 
     def test_trailing_ratchet_moves_sl_to_breakeven(self):
         """When price rises >= 1.5x ATR above entry, SL moves to entry (breakeven)."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 60000.0,
             "sl_price": 59000.0,
@@ -1280,14 +1326,14 @@ class TestPositionsCRUD:
         })
         # Price rises to entry + 1.5*ATR = 60000 + 1000 = 61000
         btc_api.check_position_stops("BTCUSDT", 61000.0)
-        updated = btc_api.db_get_positions(status="open")
+        updated = _tx_get_positions(status="open")
         assert len(updated) == 1
         assert updated[0]["sl_price"] == 60000.0  # moved to entry price
 
     def test_trailing_ratchet_never_lowers_sl(self):
         """SL should only go up (tighten), never down."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 60000.0,
             "sl_price": 60000.0,  # already at breakeven
@@ -1296,14 +1342,14 @@ class TestPositionsCRUD:
             "atr_entry": 666.67,
         })
         btc_api.check_position_stops("BTCUSDT", 60500.0)
-        updated = btc_api.db_get_positions(status="open")
+        updated = _tx_get_positions(status="open")
         assert len(updated) == 1
         assert updated[0]["sl_price"] == 60000.0  # unchanged
 
     def test_trailing_ratchet_uses_custom_be_mult(self):
         """be_mult from position overrides the default 1.5."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "DOGEUSDT",
             "entry_price": 0.10,
             "sl_price": 0.09,
@@ -1314,20 +1360,20 @@ class TestPositionsCRUD:
         })
         # Price at 0.108 — above 1.5x ATR (0.1075) but below 2.0x ATR (0.11)
         btc_api.check_position_stops("DOGEUSDT", 0.108)
-        updated = btc_api.db_get_positions(status="open")
+        updated = _tx_get_positions(status="open")
         assert len(updated) == 1
         assert updated[0]["sl_price"] == 0.09  # NOT at breakeven yet (be_mult=2.0)
 
         # Price at 0.111 — above 2.0x ATR threshold
         btc_api.check_position_stops("DOGEUSDT", 0.111)
-        updated = btc_api.db_get_positions(status="open")
+        updated = _tx_get_positions(status="open")
         assert len(updated) == 1
         assert updated[0]["sl_price"] == 0.10  # NOW at breakeven
 
     def test_position_without_atr_skips_trailing(self):
         """Legacy positions without atr_entry skip trailing logic."""
         import btc_api
-        pos = btc_api.db_create_position({
+        pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 60000.0,
             "sl_price": 58800.0,
@@ -1335,7 +1381,7 @@ class TestPositionsCRUD:
             "direction": "LONG",
         })
         btc_api.check_position_stops("BTCUSDT", 61500.0)
-        updated = btc_api.db_get_positions(status="open")
+        updated = _tx_get_positions(status="open")
         assert len(updated) == 1
         assert updated[0]["sl_price"] == 58800.0  # unchanged, no trailing
 

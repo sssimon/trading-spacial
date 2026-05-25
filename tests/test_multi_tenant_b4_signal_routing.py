@@ -34,7 +34,8 @@ def seeded_db(tmp_path, monkeypatch):
     from db.schema import init_db
     from db.transaction import transaction
     init_db()
-    init_auth_db()
+    with transaction() as con:
+        init_auth_db(con)
     # Note: notifier.dedupe is DB-backed (queries notifications_sent table),
     # so a fresh tmp_path DB per test gives us clean dedupe state automatically.
 
@@ -77,11 +78,13 @@ def _base_cfg():
 
 class TestDispatchPerUser:
     def test_two_users_different_filters(self, seeded_db):
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
         from notifier.dispatch_per_user import dispatch_signal_to_users
 
-        db_upsert_user_preferences(1, symbol_filter=["BTCUSDT"], min_score=5)
-        db_upsert_user_preferences(2, symbol_filter=None, min_score=2)
+        with transaction() as con:
+            db_upsert_user_preferences(con, 1, symbol_filter=["BTCUSDT"], min_score=5)
+            db_upsert_user_preferences(con, 2, symbol_filter=None, min_score=2)
 
         # BTC sc=6 → both
         out = dispatch_signal_to_users(_make_signal("BTCUSDT", 6), _base_cfg())
@@ -123,13 +126,15 @@ class TestDispatchPerUser:
 
     def test_per_user_telegram_chat_routing(self, seeded_db, monkeypatch):
         """User's notify_channels.telegram_chat_id overrides global."""
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
         from notifier.dispatch_per_user import dispatch_signal_to_users
 
-        db_upsert_user_preferences(
-            1, notify_channels={"telegram_chat_id": "USER_A_CHAT"},
-        )
-        db_upsert_user_preferences(2, notify_channels=None)
+        with transaction() as con:
+            db_upsert_user_preferences(
+                con, 1, notify_channels={"telegram_chat_id": "USER_A_CHAT"},
+            )
+            db_upsert_user_preferences(con, 2, notify_channels=None)
 
         # Patch TelegramChannel.__init__ to capture chat_id per-call
         seen_chats: list[str] = []
@@ -200,8 +205,10 @@ class TestDispatchPerUser:
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
         from db.schema import init_db
         from db.auth_schema import init_auth_db
+        from db.transaction import transaction
         init_db()
-        init_auth_db()
+        with transaction() as con:
+            init_auth_db(con)
 
         from notifier.dispatch_per_user import dispatch_signal_to_users
         out = dispatch_signal_to_users(_make_signal("BTCUSDT", 9), _base_cfg())
@@ -209,10 +216,12 @@ class TestDispatchPerUser:
 
     def test_symbol_filter_empty_list_means_none(self, seeded_db):
         """symbol_filter=[] (explicit empty whitelist) → user skipped."""
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
         from notifier.dispatch_per_user import dispatch_signal_to_users
 
-        db_upsert_user_preferences(1, symbol_filter=[], min_score=0)
+        with transaction() as con:
+            db_upsert_user_preferences(con, 1, symbol_filter=[], min_score=0)
         # User 2 has no prefs → defaults
 
         out = dispatch_signal_to_users(_make_signal("BTCUSDT", 9), _base_cfg())

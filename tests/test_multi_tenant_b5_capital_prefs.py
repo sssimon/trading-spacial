@@ -118,12 +118,16 @@ class TestCapitalDB:
 
 class TestUserPreferencesDB:
     def test_get_returns_none_when_missing(self, initialized_db):
+        from db.transaction import transaction
         from db.user_preferences import db_get_user_preferences
-        assert db_get_user_preferences(tenant_id=1) is None
+        with transaction() as con:
+            assert db_get_user_preferences(con, tenant_id=1) is None
 
     def test_upsert_creates_with_defaults(self, initialized_db):
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
-        row = db_upsert_user_preferences(tenant_id=1)
+        with transaction() as con:
+            row = db_upsert_user_preferences(con, tenant_id=1)
         assert row["tenant_id"] == 1
         # min_score defaults to 4 per schema
         assert row["min_score"] == 4
@@ -131,25 +135,31 @@ class TestUserPreferencesDB:
         assert row["notify_channels"] is None
 
     def test_upsert_with_all_fields(self, initialized_db):
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
-        row = db_upsert_user_preferences(
-            tenant_id=1,
-            symbol_filter=["BTCUSDT", "ETHUSDT"],
-            min_score=5,
-            notify_channels={"telegram_chat_id": "12345"},
-        )
+        with transaction() as con:
+            row = db_upsert_user_preferences(
+                con,
+                tenant_id=1,
+                symbol_filter=["BTCUSDT", "ETHUSDT"],
+                min_score=5,
+                notify_channels={"telegram_chat_id": "12345"},
+            )
         assert row["symbol_filter"] == ["BTCUSDT", "ETHUSDT"]
         assert row["min_score"] == 5
         assert row["notify_channels"] == {"telegram_chat_id": "12345"}
 
     def test_upsert_preserves_fields_when_none_passed(self, initialized_db):
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
-        db_upsert_user_preferences(
-            tenant_id=1, symbol_filter=["BTC"], min_score=6,
-            notify_channels={"email": "a@b.c"},
-        )
-        # Update only min_score, others preserved
-        updated = db_upsert_user_preferences(tenant_id=1, min_score=7)
+        with transaction() as con:
+            db_upsert_user_preferences(
+                con,
+                tenant_id=1, symbol_filter=["BTC"], min_score=6,
+                notify_channels={"email": "a@b.c"},
+            )
+            # Update only min_score, others preserved
+            updated = db_upsert_user_preferences(con, tenant_id=1, min_score=7)
         assert updated["min_score"] == 7
         assert updated["symbol_filter"] == ["BTC"]
         assert updated["notify_channels"] == {"email": "a@b.c"}

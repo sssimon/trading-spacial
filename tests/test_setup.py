@@ -330,7 +330,8 @@ def test_11_reset_password_cli_revokes_all_refreshes(tmp_path, monkeypatch):
     from auth.tokens import _hash_refresh, revoke_all_for_user
 
     init_db()
-    init_auth_db()
+    with transaction() as con:
+        init_auth_db(con)
     now = datetime.now(timezone.utc).isoformat()
     with transaction() as con:
         cur = con.execute(

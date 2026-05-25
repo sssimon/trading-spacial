@@ -119,12 +119,15 @@ class TestCloseHookIntegration:
         from api.positions import close_position
         from db.capital import db_get_capital, INITIAL_CAPITAL_DEFAULT
         from db.positions import db_create_position
+        from db.transaction import transaction
 
-        pos = db_create_position(
-            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-             "direction": "LONG"},
-            tenant_id=1,
-        )
+        with transaction() as con:
+            pos = db_create_position(
+                con,
+                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+                 "direction": "LONG"},
+                tenant_id=1,
+            )
         close_position(
             pos_id=pos["id"],
             body={"exit_price": 125.0, "exit_reason": "MANUAL"},
@@ -140,12 +143,15 @@ class TestCloseHookIntegration:
         from api.positions import close_position
         from db.capital import db_get_capital, INITIAL_CAPITAL_DEFAULT
         from db.positions import db_create_position
+        from db.transaction import transaction
 
-        pos = db_create_position(
-            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-             "direction": "LONG"},
-            tenant_id=1,
-        )
+        with transaction() as con:
+            pos = db_create_position(
+                con,
+                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+                 "direction": "LONG"},
+                tenant_id=1,
+            )
         close_position(
             pos_id=pos["id"],
             body={"exit_price": 90.0, "exit_reason": "MANUAL"},
@@ -169,11 +175,14 @@ class TestCloseHookIntegration:
         monkeypatch.setattr(_pos, "load_config", lambda: {"symbol_overrides": {}})
         monkeypatch.setattr(_pos, "update_positions_json", lambda: None)
 
-        db_create_position(
-            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-             "direction": "LONG", "sl_price": 95.0, "tp_price": 120.0},
-            tenant_id=3,
-        )
+        from db.transaction import transaction
+        with transaction() as con:
+            db_create_position(
+                con,
+                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+                 "direction": "LONG", "sl_price": 95.0, "tp_price": 120.0},
+                tenant_id=3,
+            )
         # Price tags SL → SL_HIT triggers db_close_position + capital hook
         check_position_stops("BTCUSDT", 94.0, now=datetime.now(timezone.utc))
         from db.transaction import transaction
@@ -198,14 +207,18 @@ class TestCloseHookIntegration:
         from db.capital import db_get_capital
         from db.positions import db_create_position
 
-        db_create_position(
-            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-             "direction": "LONG"},
-            tenant_id=9,
-        )
+        from db.transaction import transaction
+        with transaction() as con:
+            db_create_position(
+                con,
+                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+                 "direction": "LONG"},
+                tenant_id=9,
+            )
         # Pull pos_id (we just created it)
         from db.positions import db_get_positions
-        pos = db_get_positions(tenant_id=9)[0]
+        with transaction() as con:
+            pos = db_get_positions(con, tenant_id=9)[0]
         # Stub update_positions_json
         import api.positions as _pos
         _orig = _pos.update_positions_json

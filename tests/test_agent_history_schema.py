@@ -299,8 +299,11 @@ class TestIdempotency:
 
     def test_migrate_agent_history_directly_twice(self, initialized_db):
         from db.schema import _migrate_agent_history
-        _migrate_agent_history()
-        _migrate_agent_history()  # must not raise
+        from db.transaction import transaction
+        with transaction() as con:
+            _migrate_agent_history(con)
+        with transaction() as con:
+            _migrate_agent_history(con)  # must not raise
         cols = _get_columns(initialized_db, "agent_conversation_meta")
         assert "conversation_id" in cols
 

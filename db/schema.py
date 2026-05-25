@@ -32,10 +32,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Optional
-
 from db.connection import _open_configured_connection, _resolve_db_file
-from db.transaction import transaction, _tx_or_use
+from db.transaction import transaction
 
 log = logging.getLogger("db.schema")
 
@@ -298,13 +296,15 @@ def init_db() -> None:
     # Multi-tenant B.1 migration (Epic B #253, issue #254) — 2026-05-15.
     # Adds nullable tenant_id to per-user tables + new capital + user_preferences.
     # Pre-reg: docs/superpowers/plans/2026-05-15-multi-tenant-b1-schema-pre-reg.md
-    _migrate_multi_tenant_b1()
+    with transaction() as con_b1:
+        _migrate_multi_tenant_b1(con_b1)
 
     # Agent (copilot) audit + budget tables — epic #400 Phase 1.
     # Pre-reg §9 / §10.1: every turn is audited, every side-effect carries
     # an idempotency key, every tenant has a daily/monthly USD budget that
     # resets computed-on-read (no cron).
-    _migrate_agent_audit()
+    with transaction() as con_audit:
+        _migrate_agent_audit(con_audit)
 
     # Agent (copilot) per-tenant conversation history — epic #428 H.1.
     # Persists raw user/assistant text + reasoning + tool chips + proposals
@@ -312,7 +312,8 @@ def init_db() -> None:
     # (which stays as audit ledger) so the retention policies are
     # independent. Pre-reg D.1 in
     # docs/superpowers/specs/es/2026-05-22-conversation-history-pre-reg.md.
-    _migrate_agent_history()
+    with transaction() as con_hist:
+        _migrate_agent_history(con_hist)
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -326,236 +327,229 @@ PER_USER_TABLES: tuple[str, ...] = (
 )
 
 
-def _migrate_multi_tenant_b1(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> None:
+def _migrate_multi_tenant_b1(con: sqlite3.Connection) -> None:
     """Idempotent multi-tenant B.1 migration: add tenant_id to per-user tables
     + new capital + user_preferences tables + indexes.
 
     Pre-reg §3.1-§3.2: ALTER TABLE in try/except (column-exists handling); new
     tables via CREATE TABLE IF NOT EXISTS; new indexes via CREATE INDEX IF NOT
     EXISTS. Safe to call repeatedly.
+
+    Task 8 (#446): `con` is now mandatory positional.
     """
-    with _tx_or_use(con) as con:
-        # Step 1: Add nullable tenant_id to each per-user table
-        for table in PER_USER_TABLES:
-            try:
-                con.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER")
-                log.info(f"DB migration B.1: added tenant_id column to {table}")
-            except sqlite3.OperationalError:
-                pass  # column already exists
+    # Step 1: Add nullable tenant_id to each per-user table
+    for table in PER_USER_TABLES:
+        try:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER")
+            log.info(f"DB migration B.1: added tenant_id column to {table}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
-        # Step 2: Create capital table (single row per user)
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS capital (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id         INTEGER NOT NULL,
-                balance           REAL NOT NULL,
-                peak_balance      REAL NOT NULL,
-                max_drawdown_pct  REAL,
-                updated_at        TEXT NOT NULL
-            )
-            """
+    # Step 2: Create capital table (single row per user)
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS capital (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id         INTEGER NOT NULL,
+            balance           REAL NOT NULL,
+            peak_balance      REAL NOT NULL,
+            max_drawdown_pct  REAL,
+            updated_at        TEXT NOT NULL
         )
-        con.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_capital_tenant "
-            "ON capital(tenant_id)"
-        )
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_capital_tenant "
+        "ON capital(tenant_id)"
+    )
 
-        # Step 3: Create user_preferences table (single row per user)
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_preferences (
-                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id            INTEGER NOT NULL,
-                symbol_filter_json   TEXT,
-                min_score            INTEGER DEFAULT 4,
-                notify_channels_json TEXT,
-                updated_at           TEXT NOT NULL
-            )
-            """
+    # Step 3: Create user_preferences table (single row per user)
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id            INTEGER NOT NULL,
+            symbol_filter_json   TEXT,
+            min_score            INTEGER DEFAULT 4,
+            notify_channels_json TEXT,
+            updated_at           TEXT NOT NULL
         )
-        con.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prefs_tenant "
-            "ON user_preferences(tenant_id)"
-        )
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prefs_tenant "
+        "ON user_preferences(tenant_id)"
+    )
 
-        # Step 4: Tenant-scoped indexes on per-user tables
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_positions_tenant "
-            "ON positions(tenant_id)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_signal_outcomes_tenant "
-            "ON signal_outcomes(tenant_id)"
-        )
-        # New tenant-aware unread index (does NOT drop the existing global one;
-        # both can coexist — SQLite picks the more selective for each query)
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_notif_tenant_unread "
-            "ON notifications_sent(tenant_id, sent_at DESC) WHERE read_at IS NULL"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_portfolio_events_tenant_ts "
-            "ON portfolio_health_events(tenant_id, ts DESC)"
-        )
+    # Step 4: Tenant-scoped indexes on per-user tables
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_positions_tenant "
+        "ON positions(tenant_id)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_signal_outcomes_tenant "
+        "ON signal_outcomes(tenant_id)"
+    )
+    # New tenant-aware unread index (does NOT drop the existing global one;
+    # both can coexist — SQLite picks the more selective for each query)
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notif_tenant_unread "
+        "ON notifications_sent(tenant_id, sent_at DESC) WHERE read_at IS NULL"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_events_tenant_ts "
+        "ON portfolio_health_events(tenant_id, ts DESC)"
+    )
 
 
-def _migrate_agent_audit(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> None:
+def _migrate_agent_audit(con: sqlite3.Connection) -> None:
     """Idempotent Phase 1 migration for the copilot audit + budget surface.
 
     Creates three tables and their indexes. Safe to call repeatedly:
     CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
 
     Schema source: docs/superpowers/specs/es/2026-05-19-trading-copilot-production-grade-pre-reg.md §9.1.
+
+    Task 8 (#446): `con` is now mandatory positional.
     """
     try:
-        with _tx_or_use(con) as con:
-            # agent_conversations: every turn (user / assistant / tool_result)
-            # written by the server-side loop. content_json is the redacted
-            # payload — full tool_use input/output is NOT persisted here; the
-            # tool side-effect surface lives in agent_side_effects below.
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_conversations (
-                    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id                   INTEGER NOT NULL,
-                    surface                     TEXT    NOT NULL,
-                    conversation_id             TEXT    NOT NULL,
-                    ts                          TEXT    NOT NULL,
-                    role                        TEXT,
-                    model                       TEXT,
-                    input_tokens                INTEGER,
-                    output_tokens               INTEGER,
-                    cache_read_input_tokens     INTEGER,
-                    cache_creation_input_tokens INTEGER,
-                    latency_ms                  INTEGER,
-                    cost_usd                    REAL,
-                    content_json                TEXT,
-                    refused                     INTEGER NOT NULL DEFAULT 0
-                )
-                """
+        # agent_conversations: every turn (user / assistant / tool_result)
+        # written by the server-side loop. content_json is the redacted
+        # payload — full tool_use input/output is NOT persisted here; the
+        # tool side-effect surface lives in agent_side_effects below.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id                   INTEGER NOT NULL,
+                surface                     TEXT    NOT NULL,
+                conversation_id             TEXT    NOT NULL,
+                ts                          TEXT    NOT NULL,
+                role                        TEXT,
+                model                       TEXT,
+                input_tokens                INTEGER,
+                output_tokens               INTEGER,
+                cache_read_input_tokens     INTEGER,
+                cache_creation_input_tokens INTEGER,
+                latency_ms                  INTEGER,
+                cost_usd                    REAL,
+                content_json                TEXT,
+                refused                     INTEGER NOT NULL DEFAULT 0
             )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_conv_tenant_ts "
-                "ON agent_conversations(tenant_id, ts DESC)"
-            )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_conv_conversation "
-                "ON agent_conversations(conversation_id, ts ASC)"
-            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_tenant_ts "
+            "ON agent_conversations(tenant_id, ts DESC)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_conversation "
+            "ON agent_conversations(conversation_id, ts ASC)"
+        )
 
-            # agent_side_effects: the propose/confirm ledger. idempotency_key
-            # is UNIQUE so a double-click confirm cannot execute twice. action
-            # is one of: close_position | reactivate_symbol | apply_tune.
-            # result: ok | error | conflict | expired.
+        # agent_side_effects: the propose/confirm ledger. idempotency_key
+        # is UNIQUE so a double-click confirm cannot execute twice. action
+        # is one of: close_position | reactivate_symbol | apply_tune.
+        # result: ok | error | conflict | expired.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_side_effects (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id       INTEGER NOT NULL,
+                conversation_id TEXT,
+                ts              TEXT    NOT NULL,
+                action          TEXT    NOT NULL,
+                args_json       TEXT,
+                idempotency_key TEXT    NOT NULL UNIQUE,
+                result          TEXT,
+                http_status     INTEGER
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_side_effects_tenant_ts "
+            "ON agent_side_effects(tenant_id, ts DESC)"
+        )
+
+        # agent_quotas: one row per tenant. daily_window_start and
+        # monthly_window_start drive the computed-on-read reset (pre-reg
+        # §9.1) — no cron needed. UNIQUE on tenant_id so upserts via
+        # ON CONFLICT(tenant_id) DO UPDATE work.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_quotas (
+                tenant_id            INTEGER PRIMARY KEY,
+                daily_usd_used       REAL    NOT NULL DEFAULT 0,
+                daily_usd_cap        REAL    NOT NULL DEFAULT 1.0,
+                daily_window_start   TEXT    NOT NULL,
+                monthly_usd_used     REAL    NOT NULL DEFAULT 0,
+                monthly_window_start TEXT    NOT NULL
+            )
+            """
+        )
+
+        # Phase 3 (#400): agent_side_effects gains `expires_at` so the
+        # confirm endpoint can short-circuit expired proposals without
+        # re-deriving the TTL from the signed payload. Idempotent ADD
+        # COLUMN (the existing rows have NULL — they predate the column,
+        # and a NULL expires_at is treated as "no TTL enforcement" for
+        # rows seeded before this migration).
+        try:
+            con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
+            log.info("DB migration: added expires_at column to agent_side_effects")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+        # Fase 4 of the multi-provider epic: agent_conversations gains
+        # `provider` + `reasoning_tokens` columns so /agent/metrics can
+        # report per-provider spend + R1 reasoning telemetry.
+        #   - provider: closed enum 'anthropic' | 'deepseek' | ... (the
+        #     vendor name from PROVIDER_NAME_BY_PREFIX). NULL for rows
+        #     pre-Fase-4 if backfill skipped them (it shouldn't — the
+        #     UPDATE below covers every known prefix).
+        #   - reasoning_tokens: only DS-reasoner populates this today
+        #     (DS's usage.completion_tokens_details.reasoning_tokens
+        #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
+        # Both ALTERs are idempotent (try/except on OperationalError).
+        # The backfill is also idempotent because it only touches rows
+        # WHERE provider IS NULL — running it twice is a no-op.
+        try:
+            con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
+            log.info("DB migration: added provider column to agent_conversations")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        try:
+            con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
+            log.info("DB migration: added reasoning_tokens column to agent_conversations")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+        # Backfill provider from model. Only touches rows where provider
+        # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
+        # uses model-prefix matching that mirrors PROVIDER_NAME_BY_PREFIX
+        # in api/agent/providers/registry.py; if a future provider adds
+        # a new prefix, mirror it HERE too (single source of truth would
+        # be ideal but importing the registry from db.schema introduces
+        # a circular at startup).
+        try:
             con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_side_effects (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id       INTEGER NOT NULL,
-                    conversation_id TEXT,
-                    ts              TEXT    NOT NULL,
-                    action          TEXT    NOT NULL,
-                    args_json       TEXT,
-                    idempotency_key TEXT    NOT NULL UNIQUE,
-                    result          TEXT,
-                    http_status     INTEGER
-                )
-                """
+                "UPDATE agent_conversations SET provider = 'anthropic' "
+                "WHERE provider IS NULL AND model LIKE 'claude-%'"
             )
             con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_side_effects_tenant_ts "
-                "ON agent_side_effects(tenant_id, ts DESC)"
+                "UPDATE agent_conversations SET provider = 'deepseek' "
+                "WHERE provider IS NULL AND model LIKE 'deepseek-%'"
             )
-
-            # agent_quotas: one row per tenant. daily_window_start and
-            # monthly_window_start drive the computed-on-read reset (pre-reg
-            # §9.1) — no cron needed. UNIQUE on tenant_id so upserts via
-            # ON CONFLICT(tenant_id) DO UPDATE work.
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_quotas (
-                    tenant_id            INTEGER PRIMARY KEY,
-                    daily_usd_used       REAL    NOT NULL DEFAULT 0,
-                    daily_usd_cap        REAL    NOT NULL DEFAULT 1.0,
-                    daily_window_start   TEXT    NOT NULL,
-                    monthly_usd_used     REAL    NOT NULL DEFAULT 0,
-                    monthly_window_start TEXT    NOT NULL
-                )
-                """
-            )
-
-            # Phase 3 (#400): agent_side_effects gains `expires_at` so the
-            # confirm endpoint can short-circuit expired proposals without
-            # re-deriving the TTL from the signed payload. Idempotent ADD
-            # COLUMN (the existing rows have NULL — they predate the column,
-            # and a NULL expires_at is treated as "no TTL enforcement" for
-            # rows seeded before this migration).
-            try:
-                con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
-                log.info("DB migration: added expires_at column to agent_side_effects")
-            except sqlite3.OperationalError:
-                pass  # column already exists
-
-            # Fase 4 of the multi-provider epic: agent_conversations gains
-            # `provider` + `reasoning_tokens` columns so /agent/metrics can
-            # report per-provider spend + R1 reasoning telemetry.
-            #   - provider: closed enum 'anthropic' | 'deepseek' | ... (the
-            #     vendor name from PROVIDER_NAME_BY_PREFIX). NULL for rows
-            #     pre-Fase-4 if backfill skipped them (it shouldn't — the
-            #     UPDATE below covers every known prefix).
-            #   - reasoning_tokens: only DS-reasoner populates this today
-            #     (DS's usage.completion_tokens_details.reasoning_tokens
-            #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
-            # Both ALTERs are idempotent (try/except on OperationalError).
-            # The backfill is also idempotent because it only touches rows
-            # WHERE provider IS NULL — running it twice is a no-op.
-            try:
-                con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
-                log.info("DB migration: added provider column to agent_conversations")
-            except sqlite3.OperationalError:
-                pass  # column already exists
-            try:
-                con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
-                log.info("DB migration: added reasoning_tokens column to agent_conversations")
-            except sqlite3.OperationalError:
-                pass  # column already exists
-
-            # Backfill provider from model. Only touches rows where provider
-            # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
-            # uses model-prefix matching that mirrors PROVIDER_NAME_BY_PREFIX
-            # in api/agent/providers/registry.py; if a future provider adds
-            # a new prefix, mirror it HERE too (single source of truth would
-            # be ideal but importing the registry from db.schema introduces
-            # a circular at startup).
-            try:
-                con.execute(
-                    "UPDATE agent_conversations SET provider = 'anthropic' "
-                    "WHERE provider IS NULL AND model LIKE 'claude-%'"
-                )
-                con.execute(
-                    "UPDATE agent_conversations SET provider = 'deepseek' "
-                    "WHERE provider IS NULL AND model LIKE 'deepseek-%'"
-                )
-                log.info("DB migration: backfilled provider column from model prefix")
-            except sqlite3.OperationalError as e:
-                log.warning("DB migration: provider backfill failed: %s", e)
+            log.info("DB migration: backfilled provider column from model prefix")
+        except sqlite3.OperationalError as e:
+            log.warning("DB migration: provider backfill failed: %s", e)
 
         log.info("DB migration: agent_conversations + agent_side_effects + agent_quotas ready")
     except Exception as e:  # noqa: BLE001
         log.warning("DB migration agent audit: %s", e)
 
 
-def _migrate_agent_history(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> None:
+def _migrate_agent_history(con: sqlite3.Connection) -> None:
     """Idempotent H.1 migration for the per-tenant conversation history.
 
     Creates two tables and their indexes. Safe to call repeatedly:
@@ -575,71 +569,72 @@ def _migrate_agent_history(
     NOT touched by this migration: agent_conversations (audit ledger),
     agent_side_effects (proposals execution log), agent_quotas (cost
     budget). Those keep their own lifecycle and retention.
+
+    Task 8 (#446): `con` is now mandatory positional.
     """
     try:
-        with _tx_or_use(con) as con:
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_messages (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id       INTEGER NOT NULL,
-                    conversation_id TEXT    NOT NULL,
-                    ts              TEXT    NOT NULL,
-                    role            TEXT    NOT NULL,
-                    content         TEXT    NOT NULL,
-                    reasoning       TEXT,
-                    tool_chips_json TEXT,
-                    proposals_json  TEXT,
-                    expires_at      TEXT    NOT NULL
-                )
-                """
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_messages (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id       INTEGER NOT NULL,
+                conversation_id TEXT    NOT NULL,
+                ts              TEXT    NOT NULL,
+                role            TEXT    NOT NULL,
+                content         TEXT    NOT NULL,
+                reasoning       TEXT,
+                tool_chips_json TEXT,
+                proposals_json  TEXT,
+                expires_at      TEXT    NOT NULL
             )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_conv_ts "
-                "ON agent_messages(tenant_id, conversation_id, ts ASC)"
-            )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_ts "
-                "ON agent_messages(tenant_id, ts DESC)"
-            )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_messages_expires "
-                "ON agent_messages(expires_at)"
-            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_conv_ts "
+            "ON agent_messages(tenant_id, conversation_id, ts ASC)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_messages_tenant_ts "
+            "ON agent_messages(tenant_id, ts DESC)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_messages_expires "
+            "ON agent_messages(expires_at)"
+        )
 
-            # conversation_id is the natural PK — UUID generated by the
-            # frontend (newConversationId() in frontend/src/agent/client.ts).
-            # The explicit NOT NULL is required: SQLite enforces NOT NULL
-            # implicitly only on `INTEGER PRIMARY KEY` (the rowid alias),
-            # not on TEXT PRIMARY KEY — without it, NULL would slip past
-            # the PK check and corrupt the index.
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_conversation_meta (
-                    conversation_id TEXT    NOT NULL PRIMARY KEY,
-                    tenant_id       INTEGER NOT NULL,
-                    title           TEXT,
-                    surface         TEXT    NOT NULL,
-                    first_ts        TEXT    NOT NULL,
-                    last_ts         TEXT    NOT NULL,
-                    message_count   INTEGER NOT NULL DEFAULT 0,
-                    pinned          INTEGER NOT NULL DEFAULT 0,
-                    expires_at      TEXT    NOT NULL
-                )
-                """
+        # conversation_id is the natural PK — UUID generated by the
+        # frontend (newConversationId() in frontend/src/agent/client.ts).
+        # The explicit NOT NULL is required: SQLite enforces NOT NULL
+        # implicitly only on `INTEGER PRIMARY KEY` (the rowid alias),
+        # not on TEXT PRIMARY KEY — without it, NULL would slip past
+        # the PK check and corrupt the index.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_conversation_meta (
+                conversation_id TEXT    NOT NULL PRIMARY KEY,
+                tenant_id       INTEGER NOT NULL,
+                title           TEXT,
+                surface         TEXT    NOT NULL,
+                first_ts        TEXT    NOT NULL,
+                last_ts         TEXT    NOT NULL,
+                message_count   INTEGER NOT NULL DEFAULT 0,
+                pinned          INTEGER NOT NULL DEFAULT 0,
+                expires_at      TEXT    NOT NULL
             )
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_last "
-                "ON agent_conversation_meta(tenant_id, last_ts DESC)"
-            )
-            # Pinned conversations float to the top of the sidebar; the
-            # secondary key on last_ts DESC keeps non-pinned ordered by
-            # recency within their bucket. Index ordering matters: SQLite
-            # uses leading columns for filtering and trailing for ordering.
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_pinned "
-                "ON agent_conversation_meta(tenant_id, pinned DESC, last_ts DESC)"
-            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_last "
+            "ON agent_conversation_meta(tenant_id, last_ts DESC)"
+        )
+        # Pinned conversations float to the top of the sidebar; the
+        # secondary key on last_ts DESC keeps non-pinned ordered by
+        # recency within their bucket. Index ordering matters: SQLite
+        # uses leading columns for filtering and trailing for ordering.
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_conv_meta_tenant_pinned "
+            "ON agent_conversation_meta(tenant_id, pinned DESC, last_ts DESC)"
+        )
 
         log.info("DB migration: agent_messages + agent_conversation_meta ready")
     except Exception as e:  # noqa: BLE001
@@ -647,9 +642,8 @@ def _migrate_agent_history(
 
 
 def backfill_tenant(
+    con: sqlite3.Connection,
     user_id: int,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> dict[str, int]:
     """Set `tenant_id = user_id` for all rows where tenant_id IS NULL.
 
@@ -659,22 +653,26 @@ def backfill_tenant(
     NOT called from init_db(). Caller (B.8 migration script or test setup)
     invokes explicitly. Typical usage:
 
+      from db.transaction import transaction
       from db.schema import backfill_tenant
-      counts = backfill_tenant(samuel_user_id)
+      with transaction() as con:
+          counts = backfill_tenant(con, samuel_user_id)
       log.info(f"Backfill complete: {counts}")
 
+    Task 8 (#446): `con` is now mandatory positional first arg.
+
     Args:
+        con: open sqlite3 Connection from a surrounding transaction.
         user_id: target user ID to receive ownership of pre-multi-tenant rows.
 
     Returns:
         Dict mapping table name to count of rows updated.
     """
     affected: dict[str, int] = {}
-    with _tx_or_use(con) as con:
-        for table in PER_USER_TABLES:
-            cursor = con.execute(
-                f"UPDATE {table} SET tenant_id = ? WHERE tenant_id IS NULL",
-                (user_id,),
-            )
-            affected[table] = cursor.rowcount
+    for table in PER_USER_TABLES:
+        cursor = con.execute(
+            f"UPDATE {table} SET tenant_id = ? WHERE tenant_id IS NULL",
+            (user_id,),
+        )
+        affected[table] = cursor.rowcount
     return affected

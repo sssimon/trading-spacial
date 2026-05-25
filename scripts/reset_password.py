@@ -90,7 +90,9 @@ def main() -> None:
     parser.add_argument("--email", default=None, help="User email")
     args = parser.parse_args()
 
-    init_auth_db()
+    from db.transaction import transaction  # noqa: PLC0415
+    with transaction() as con:
+        init_auth_db(con)
     email = _prompt_email(args.email)
     found = _find_user(email)
     if found is None:

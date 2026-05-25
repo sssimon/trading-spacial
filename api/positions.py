@@ -77,7 +77,8 @@ def update_positions_json():
     """Escribe data/positions_summary.json con estado de posiciones."""
     try:
         _ensure_dirs()
-        all_pos   = db_get_positions()
+        with transaction() as con:
+            all_pos   = db_get_positions(con)
         open_pos  = [p for p in all_pos if p["status"] == "open"]
         closed_pos = [p for p in all_pos if p["status"] == "closed"]
         realized  = sum((p["pnl_usd"] or 0) for p in closed_pos)
@@ -269,7 +270,8 @@ def list_positions(
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     # B.5 #258: tenant_id from JWT, never from request param/header/body
-    positions = db_get_positions(status, tenant_id=tenant_id)
+    with transaction() as con:
+        positions = db_get_positions(con, status, tenant_id=tenant_id)
     return {"total": len(positions), "positions": positions}
 
 
@@ -289,7 +291,8 @@ def open_position(
         raise HTTPException(status_code=422, detail=f"Faltan campos: {missing}")
     try:
         # B.5 #258: tenant_id from JWT — body's tenant_id (if any) silently dropped
-        pos = db_create_position(body, tenant_id=tenant_id)
+        with transaction() as con:
+            pos = db_create_position(con, body, tenant_id=tenant_id)
         update_positions_json()
         return {"ok": True, "position": pos}
     except Exception as e:
@@ -308,7 +311,8 @@ def edit_position(
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     # B.5 #258: ownership-enforced. Returns None if pos doesn't belong to tenant.
-    pos = db_update_position(pos_id, body, tenant_id=tenant_id)
+    with transaction() as con:
+        pos = db_update_position(con, pos_id, body, tenant_id=tenant_id)
     if not pos:
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     update_positions_json()

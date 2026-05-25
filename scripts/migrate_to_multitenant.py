@@ -162,7 +162,8 @@ def run(args: argparse.Namespace) -> int:
 
     # 4. Real migration
     log.info("Running backfill_tenant(user_id=%s)…", args.user_id)
-    affected = backfill_tenant(args.user_id)
+    with transaction() as con_bf:
+        affected = backfill_tenant(con_bf, args.user_id)
     log.info(
         "backfill_tenant results: %s",
         ", ".join(f"{t}={n}" for t, n in affected.items()),

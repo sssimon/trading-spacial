@@ -149,7 +149,9 @@ def _build_e5_cooldown(symbol: str, cfg: dict) -> dict:
 
     try:
         from db.positions import db_last_exit_ts  # noqa: PLC0415
-        last_exit_dt = db_last_exit_ts(symbol)
+        from db.transaction import transaction  # noqa: PLC0415
+        with transaction() as con:
+            last_exit_dt = db_last_exit_ts(con, symbol)
     except Exception as e:  # noqa: BLE001
         # Throttle: one log line per (symbol, exc-type) per process.
         # SQLite Operational/Database errors surface as `error` (real bug

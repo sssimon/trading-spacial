@@ -263,7 +263,9 @@ class TestBackfillTenant:
         con.commit()
         con.close()
 
-        affected = backfill_tenant(user_id=99)
+        from db.transaction import transaction
+        with transaction() as _con:
+            affected = backfill_tenant(_con, user_id=99)
         assert affected["positions"] == 3
         # Other tables had 0 NULL rows
         assert affected["signal_outcomes"] == 0
@@ -289,9 +291,12 @@ class TestBackfillTenant:
         con.commit()
         con.close()
 
-        first = backfill_tenant(user_id=42)
+        from db.transaction import transaction
+        with transaction() as _con:
+            first = backfill_tenant(_con, user_id=42)
         assert first["positions"] == 1
-        second = backfill_tenant(user_id=42)
+        with transaction() as _con:
+            second = backfill_tenant(_con, user_id=42)
         assert second["positions"] == 0  # idempotent
 
     def test_backfill_preserves_existing_tenant_ids(self, initialized_db):
@@ -311,7 +316,9 @@ class TestBackfillTenant:
         con.commit()
         con.close()
 
-        affected = backfill_tenant(user_id=99)
+        from db.transaction import transaction
+        with transaction() as _con:
+            affected = backfill_tenant(_con, user_id=99)
         assert affected["positions"] == 1  # only the NULL one updated
 
         con = sqlite3.connect(initialized_db)

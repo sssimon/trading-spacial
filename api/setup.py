@@ -56,7 +56,8 @@ def _setup_done() -> bool:
     /setup if there's still a user; you'd also need to delete that user.
     Conversely, if the user gets deleted but setup_completed_at remains,
     /setup stays dead — by design (recovery is via CLI per the README)."""
-    return has_any_user() or is_setup_completed()
+    with transaction() as con:
+        return has_any_user(con) or is_setup_completed(con)
 
 
 def _check_rate_limit_or_404(request: Request) -> None:
@@ -156,8 +157,8 @@ def setup_post(
             (email_clean, pwd_hash, now, now),
         )
         user_id = int(cur.lastrowid or 0)
+        mark_setup_completed(con, ip=ip, method="web")
 
-    mark_setup_completed(ip=ip, method="web")
     consume_token()
 
     log_auth_event(

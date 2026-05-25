@@ -53,9 +53,22 @@ def setup_db_and_cfg(tmp_path, monkeypatch):
     yield set_cfg
 
 
-def _open_btc_position(entry_ts_iso: str, *, sl: float = 50000.0, tp: float = 80000.0):
+def _tx_create_position(data: dict):
     import btc_api
-    return btc_api.db_create_position({
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.db_create_position(con, data)
+
+
+def _tx_get_positions(status=None):
+    import btc_api
+    from db.transaction import transaction
+    with transaction() as con:
+        return btc_api.db_get_positions(con, status=status)
+
+
+def _open_btc_position(entry_ts_iso: str, *, sl: float = 50000.0, tp: float = 80000.0):
+    return _tx_create_position({
         "symbol": "BTCUSDT",
         "entry_price": 65000.0,
         "sl_price": sl,
@@ -84,7 +97,7 @@ def test_check_position_stops_time_limit_fires(setup_db_and_cfg):
     now = entry_dt + timedelta(hours=14)
     btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT"
     assert closed[0]["exit_price"] == 65500.0
@@ -104,7 +117,7 @@ def test_check_position_stops_time_limit_does_not_fire_before(setup_db_and_cfg):
     now = entry_dt + timedelta(hours=13, minutes=59)
     btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
 
 
@@ -122,7 +135,7 @@ def test_check_position_stops_sl_wins_over_time_limit(setup_db_and_cfg):
     now = entry_dt + timedelta(hours=20)  # well past TL
     btc_api.check_position_stops("BTCUSDT", 62000.0, now=now)  # below SL
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "SL_HIT"
 
@@ -139,7 +152,7 @@ def test_check_position_stops_no_time_limit_in_config(setup_db_and_cfg):
     now = entry_dt + timedelta(hours=100)
     btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
 
 
@@ -167,7 +180,7 @@ def test_check_position_stops_retroactive_trigger_logs_warning(
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT"
 
@@ -207,7 +220,7 @@ def test_check_position_stops_no_now_arg_uses_utcnow(setup_db_and_cfg):
 
     btc_api.check_position_stops("BTCUSDT", 65500.0)
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT"
 
@@ -227,13 +240,13 @@ def test_check_position_stops_non_aligned_entry_ts_boundary(setup_db_and_cfg):
 
     now_just_before = datetime(2025, 1, 1, 17, 0, 0, 0, tzinfo=timezone.utc)
     btc_api.check_position_stops("BTCUSDT", 65500.0, now=now_just_before)
-    assert len(btc_api.db_get_positions(status="open")) == 1, (
+    assert len(_tx_get_positions(status="open")) == 1, (
         "hours_open=4.9999...h must not trigger TL=5h"
     )
 
     now_just_after = datetime(2025, 1, 1, 17, 0, 0, 600_000, tzinfo=timezone.utc)
     btc_api.check_position_stops("BTCUSDT", 65500.0, now=now_just_after)
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT"
 
@@ -286,7 +299,7 @@ def test_check_position_stops_malformed_entry_ts_skips_position(
     # Position 1: malformed entry_ts, SL/TP set far from price so neither
     # fires (forces the call to reach the time-limit block where the bad
     # entry_ts will be parsed).
-    btc_api.db_create_position({
+    _tx_create_position({
         "symbol": "BTCUSDT",
         "entry_price": 65000.0,
         "sl_price": 50000.0,
@@ -295,7 +308,7 @@ def test_check_position_stops_malformed_entry_ts_skips_position(
         "entry_ts": "not-an-iso-timestamp",
     })
     # Position 2: valid entry_ts, far SL/TP, 30h old (beyond TL=14h).
-    btc_api.db_create_position({
+    _tx_create_position({
         "symbol": "BTCUSDT",
         "entry_price": 65000.0,
         "sl_price": 50000.0,
@@ -307,12 +320,12 @@ def test_check_position_stops_malformed_entry_ts_skips_position(
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0)  # neither SL nor TP
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT"
     assert closed[0]["entry_ts"] != "not-an-iso-timestamp"
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert open_pos[0]["entry_ts"] == "not-an-iso-timestamp"
 
@@ -337,7 +350,7 @@ def test_check_position_stops_invalid_type_rejected(setup_db_and_cfg, caplog):
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -357,7 +370,7 @@ def test_check_position_stops_negative_value_rejected(setup_db_and_cfg, caplog):
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -377,7 +390,7 @@ def test_check_position_stops_zero_value_rejected(setup_db_and_cfg, caplog):
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -434,7 +447,7 @@ def test_check_position_stops_time_limit_bool_rejected(setup_db_and_cfg, caplog)
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1, "bool value must not collapse to 1.0 and close every position"
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -455,7 +468,7 @@ def test_check_position_stops_time_limit_nan_rejected(setup_db_and_cfg, caplog):
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -475,7 +488,7 @@ def test_check_position_stops_time_limit_inf_rejected(setup_db_and_cfg, caplog):
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    open_pos = btc_api.db_get_positions(status="open")
+    open_pos = _tx_get_positions(status="open")
     assert len(open_pos) == 1
     assert any("time_limit_hours" in r.getMessage() for r in caplog.records)
 
@@ -505,7 +518,7 @@ def test_check_position_stops_invalid_scan_interval_falls_back(
     with caplog.at_level(logging.WARNING, logger="api.positions"):
         btc_api.check_position_stops("BTCUSDT", 65500.0, now=now)
 
-    closed = btc_api.db_get_positions(status="closed")
+    closed = _tx_get_positions(status="closed")
     assert len(closed) == 1
     assert closed[0]["exit_reason"] == "TIME_LIMIT_HIT", (
         "string scan_interval must fall back to 300, not crash the close"

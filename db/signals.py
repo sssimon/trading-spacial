@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from db.transaction import transaction, _tx_or_use
+from db.transaction import transaction
 
 log = logging.getLogger("db.signals")
 
@@ -62,11 +62,15 @@ def save_scan(rep: dict) -> int:
     return scan_id
 
 
-def get_scans(limit=50, only_signals=False, only_setups=False,
-              since_hours: Optional[float] = None,
-              symbol: Optional[str] = None,
-              *,
-              con: Optional[sqlite3.Connection] = None) -> list:
+def get_scans(
+    con: sqlite3.Connection,
+    limit=50,
+    only_signals=False,
+    only_setups=False,
+    since_hours: Optional[float] = None,
+    symbol: Optional[str] = None,
+) -> list:
+    """Task 8 (#446): `con` is now mandatory positional first arg."""
     conds  = []
     params = []
     if symbol:
@@ -82,19 +86,17 @@ def get_scans(limit=50, only_signals=False, only_setups=False,
         params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params.append(limit)
-    with _tx_or_use(con) as con:
-        rows  = con.execute(
-            f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", params
-        ).fetchall()
+    rows  = con.execute(
+        f"SELECT * FROM scans {where} ORDER BY id DESC LIMIT ?", params
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_latest_scan_per_symbol(
+    con: sqlite3.Connection,
     limit: int = 10,
     only_signals: bool = False,
     since_hours: Optional[float] = None,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> list:
     """Return the latest scan per symbol, newest-first, capped at `limit`.
 
@@ -111,6 +113,8 @@ def get_latest_scan_per_symbol(
     is INSERT-only with monotonically increasing ids = newest), then
     project rows by that id set and order by ts DESC. Identical
     filtering semantics to `get_scans()`.
+
+    Task 8 (#446): `con` is now mandatory positional first arg.
     """
     conds: list[str] = []
     params: list = []
@@ -122,65 +126,61 @@ def get_latest_scan_per_symbol(
         params.append(cutoff)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     params.append(limit)
-    with _tx_or_use(con) as con:
-        rows = con.execute(
-            f"""SELECT * FROM scans
-                WHERE id IN (
-                    SELECT MAX(id) FROM scans {where}
-                    GROUP BY symbol
-                )
-                ORDER BY ts DESC
-                LIMIT ?""",
-            params,
-        ).fetchall()
+    rows = con.execute(
+        f"""SELECT * FROM scans
+            WHERE id IN (
+                SELECT MAX(id) FROM scans {where}
+                GROUP BY symbol
+            )
+            ORDER BY ts DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_latest_signal(
+    con: sqlite3.Connection,
     symbol: Optional[str] = None,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    with _tx_or_use(con) as con:
-        if symbol:
-            row = con.execute(
-                "SELECT * FROM scans WHERE señal=1 AND symbol=? ORDER BY id DESC LIMIT 1",
-                (symbol.upper(),)
-            ).fetchone()
-        else:
-            row = con.execute(
-                "SELECT * FROM scans WHERE señal=1 ORDER BY id DESC LIMIT 1"
-            ).fetchone()
+    """Task 8 (#446): `con` is now mandatory positional first arg."""
+    if symbol:
+        row = con.execute(
+            "SELECT * FROM scans WHERE señal=1 AND symbol=? ORDER BY id DESC LIMIT 1",
+            (symbol.upper(),)
+        ).fetchone()
+    else:
+        row = con.execute(
+            "SELECT * FROM scans WHERE señal=1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     return dict(row) if row else None
 
 
 def get_latest_scan(
+    con: sqlite3.Connection,
     symbol: Optional[str] = None,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    with _tx_or_use(con) as con:
-        if symbol:
-            row = con.execute(
-                "SELECT * FROM scans WHERE symbol=? ORDER BY id DESC LIMIT 1",
-                (symbol.upper(),)
-            ).fetchone()
-        else:
-            row = con.execute("SELECT * FROM scans ORDER BY id DESC LIMIT 1").fetchone()
+    """Task 8 (#446): `con` is now mandatory positional first arg."""
+    if symbol:
+        row = con.execute(
+            "SELECT * FROM scans WHERE symbol=? ORDER BY id DESC LIMIT 1",
+            (symbol.upper(),)
+        ).fetchone()
+    else:
+        row = con.execute("SELECT * FROM scans ORDER BY id DESC LIMIT 1").fetchone()
     return dict(row) if row else None
 
 
-def get_signals_summary(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> list:
-    """Último escaneo de cada símbolo activo, ordenado por señal y score."""
-    with _tx_or_use(con) as con:
-        rows = con.execute("""
-            SELECT s.* FROM scans s
-            INNER JOIN (
-                SELECT symbol, MAX(id) as max_id FROM scans GROUP BY symbol
-            ) latest ON s.id = latest.max_id
-            ORDER BY s.señal DESC, s.score DESC
-        """).fetchall()
+def get_signals_summary(con: sqlite3.Connection) -> list:
+    """Último escaneo de cada símbolo activo, ordenado por señal y score.
+
+    Task 8 (#446): `con` is now mandatory positional.
+    """
+    rows = con.execute("""
+        SELECT s.* FROM scans s
+        INNER JOIN (
+            SELECT symbol, MAX(id) as max_id FROM scans GROUP BY symbol
+        ) latest ON s.id = latest.max_id
+        ORDER BY s.señal DESC, s.score DESC
+    """).fetchall()
     return [dict(r) for r in rows]

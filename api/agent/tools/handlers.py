@@ -91,7 +91,8 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
     from health import get_dashboard_state
     from api.config import load_config
 
-    open_positions = db_get_positions(status="open", tenant_id=tenant_id)
+    with transaction() as con:
+        open_positions = db_get_positions(con, status="open", tenant_id=tenant_id)
     open_count = len(open_positions)
     total_notional = sum(float(p.get("size_usd") or 0) for p in open_positions)
 
@@ -120,7 +121,8 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
 def get_positions(*, tenant_id: int) -> dict:
     """Currently open positions, summarized."""
     from db.positions import db_get_positions
-    rows = db_get_positions(status="open", tenant_id=tenant_id)
+    with transaction() as con:
+        rows = db_get_positions(con, status="open", tenant_id=tenant_id)
     return {"positions": [_position_to_summary(p) for p in rows]}
 
 
@@ -152,7 +154,8 @@ def get_symbols_with_signals(*, tenant_id: int, limit: int = 10) -> dict:  # noq
     than `limit` raw scan rows that may all be the same symbol.
     """
     from db.signals import get_latest_scan_per_symbol
-    rows = get_latest_scan_per_symbol(limit=limit, only_signals=False)
+    with transaction() as con:
+        rows = get_latest_scan_per_symbol(con, limit=limit, only_signals=False)
     return {
         "symbols": [
             {
@@ -173,7 +176,8 @@ def get_symbol_setup(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
     """
     from db.signals import get_scans
     norm = _normalize_symbol(symbol)
-    rows = get_scans(limit=1, symbol=norm)
+    with transaction() as con:
+        rows = get_scans(con, limit=1, symbol=norm)
     if not rows:
         return {"error": "not_found"}
     r = rows[0]
@@ -221,7 +225,8 @@ def get_recent_signals(*, tenant_id: int, limit: int = 10, since_hours: int = 24
     signal for every tenant; the per-user split lives in the dispatcher
     layer added in B.4 #257)."""
     from db.signals import get_scans
-    rows = get_scans(limit=limit, only_signals=True, since_hours=since_hours)
+    with transaction() as con:
+        rows = get_scans(con, limit=limit, only_signals=True, since_hours=since_hours)
     return {
         "signals": [
             {
@@ -246,14 +251,15 @@ def get_closed_trades(*, tenant_id: int, window: str = "30d") -> dict:
     from datetime import datetime, timedelta, timezone
     from db.positions import db_get_positions
 
-    if window == "all":
-        rows = db_get_positions(status="closed", tenant_id=tenant_id)
-    else:
-        days = {"7d": 7, "30d": 30, "90d": 90}.get(window, 30)
-        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        rows = db_get_positions(
-            status="closed", tenant_id=tenant_id, since=cutoff_iso,
-        )
+    with transaction() as con:
+        if window == "all":
+            rows = db_get_positions(con, status="closed", tenant_id=tenant_id)
+        else:
+            days = {"7d": 7, "30d": 30, "90d": 90}.get(window, 30)
+            cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            rows = db_get_positions(
+                con, status="closed", tenant_id=tenant_id, since=cutoff_iso,
+            )
     return {"trades": [_position_to_summary(r) for r in rows]}
 
 

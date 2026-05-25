@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
+from db.transaction import transaction
 from db.user_preferences import (
     db_get_user_preferences,
     db_upsert_user_preferences,
@@ -68,7 +69,8 @@ def _mask_token(token: str) -> str:
 
 @router.get("", summary="Get preferences for current tenant (defaults if unset)")
 def get_preferences(tenant_id: int = Depends(get_current_tenant_id)):
-    row = db_get_user_preferences(tenant_id)
+    with transaction() as con:
+        row = db_get_user_preferences(con, tenant_id)
     if row is None:
         # Return sensible defaults — per pre-reg §3.2
         return {
@@ -101,18 +103,21 @@ def put_preferences(
     # types something new". See spec §Security note.
     notify_channels = body.notify_channels
     if notify_channels and _MASK_MARKER in (notify_channels.get("telegram_bot_token") or ""):
-        existing = db_get_user_preferences(tenant_id)
+        with transaction() as con:
+            existing = db_get_user_preferences(con, tenant_id)
         existing_token = (
             (existing or {}).get("notify_channels") or {}
         ).get("telegram_bot_token", "")
         notify_channels = {**notify_channels, "telegram_bot_token": existing_token}
 
-    row = db_upsert_user_preferences(
-        tenant_id,
-        symbol_filter=body.symbol_filter,
-        min_score=body.min_score,
-        notify_channels=notify_channels,
-    )
+    with transaction() as con:
+        row = db_upsert_user_preferences(
+            con,
+            tenant_id,
+            symbol_filter=body.symbol_filter,
+            min_score=body.min_score,
+            notify_channels=notify_channels,
+        )
     # Mask the bot_token in the response for consistency with GET.
     if row and (row.get("notify_channels") or {}).get("telegram_bot_token"):
         nc = row["notify_channels"]
@@ -145,7 +150,8 @@ def post_preferences_test(tenant_id: int = Depends(get_current_tenant_id)):
     """
     from notifier.channels.telegram import TelegramChannel  # noqa: PLC0415
 
-    prefs = db_get_user_preferences(tenant_id) or {}
+    with transaction() as con:
+        prefs = db_get_user_preferences(con, tenant_id) or {}
     notify_channels = prefs.get("notify_channels") or {}
 
     token = (notify_channels.get("telegram_bot_token") or "").strip()

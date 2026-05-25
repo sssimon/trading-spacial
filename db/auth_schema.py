@@ -13,95 +13,88 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Optional
-
-from db.transaction import _tx_or_use
 
 log = logging.getLogger("db.auth_schema")
 
 
-def init_auth_db(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> None:
+def init_auth_db(con: sqlite3.Connection) -> None:
     """Create auth tables if missing. Safe to call repeatedly.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 8 (#446): `con` is now mandatory positional. Callers must pass an
+    open `sqlite3.Connection` from a surrounding `transaction()` block.
     """
-    with _tx_or_use(con) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                email               TEXT NOT NULL UNIQUE,
-                password_hash       TEXT NOT NULL,
-                role                TEXT NOT NULL DEFAULT 'viewer'
-                                          CHECK (role IN ('admin', 'viewer')),
-                is_active           INTEGER NOT NULL DEFAULT 1,
-                totp_secret         TEXT,
-                oauth_provider      TEXT,
-                created_at          TEXT NOT NULL,
-                last_login_at       TEXT,
-                password_changed_at TEXT NOT NULL
-            )
-            """
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            email               TEXT NOT NULL UNIQUE,
+            password_hash       TEXT NOT NULL,
+            role                TEXT NOT NULL DEFAULT 'viewer'
+                                      CHECK (role IN ('admin', 'viewer')),
+            is_active           INTEGER NOT NULL DEFAULT 1,
+            totp_secret         TEXT,
+            oauth_provider      TEXT,
+            created_at          TEXT NOT NULL,
+            last_login_at       TEXT,
+            password_changed_at TEXT NOT NULL
         )
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS refresh_tokens (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                token_hash   TEXT NOT NULL UNIQUE,
-                user_id      INTEGER NOT NULL REFERENCES users(id),
-                family_id    TEXT NOT NULL,
-                parent_hash  TEXT,
-                expires_at   TEXT NOT NULL,
-                revoked_at   TEXT,
-                created_at   TEXT NOT NULL,
-                user_agent   TEXT,
-                ip           TEXT
-            )
-            """
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_hash   TEXT NOT NULL UNIQUE,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            family_id    TEXT NOT NULL,
+            parent_hash  TEXT,
+            expires_at   TEXT NOT NULL,
+            revoked_at   TEXT,
+            created_at   TEXT NOT NULL,
+            user_agent   TEXT,
+            ip           TEXT
         )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_refresh_user "
-            "ON refresh_tokens(user_id, revoked_at)"
+        """
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_refresh_user "
+        "ON refresh_tokens(user_id, revoked_at)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_refresh_family "
+        "ON refresh_tokens(family_id)"
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_events (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER REFERENCES users(id),
+            event_type    TEXT NOT NULL,
+            ip            TEXT,
+            user_agent    TEXT,
+            ts            TEXT NOT NULL,
+            success       INTEGER NOT NULL,
+            metadata_json TEXT
         )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_refresh_family "
-            "ON refresh_tokens(family_id)"
-        )
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS auth_events (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id       INTEGER REFERENCES users(id),
-                event_type    TEXT NOT NULL,
-                ip            TEXT,
-                user_agent    TEXT,
-                ts            TEXT NOT NULL,
-                success       INTEGER NOT NULL,
-                metadata_json TEXT
-            )
-            """
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_auth_events_user_ts "
-            "ON auth_events(user_id, ts DESC)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_auth_events_ts "
-            "ON auth_events(ts DESC)"
-        )
+        """
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_events_user_ts "
+        "ON auth_events(user_id, ts DESC)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_events_ts "
+        "ON auth_events(ts DESC)"
+    )
 
 
-def has_any_user(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> bool:
+def has_any_user(con: sqlite3.Connection) -> bool:
     """True if at least one user exists. Used by app boot to print a hint
-    when the DB is fresh and nobody has run scripts/create_user.py yet."""
-    with _tx_or_use(con) as con:
-        row = con.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+    when the DB is fresh and nobody has run scripts/create_user.py yet.
+
+    Task 8 (#446): `con` is now mandatory positional.
+    """
+    row = con.execute("SELECT 1 FROM users LIMIT 1").fetchone()
     return row is not None
 
 
@@ -114,69 +107,67 @@ def has_any_user(
 # place without schema churn.
 
 
-def init_system_state(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> None:
-    """Idempotent — create system_state if missing."""
-    with _tx_or_use(con) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS system_state (
-                key        TEXT PRIMARY KEY,
-                value      TEXT,
-                updated_at TEXT NOT NULL
-            )
-            """
+def init_system_state(con: sqlite3.Connection) -> None:
+    """Idempotent — create system_state if missing.
+
+    Task 8 (#446): `con` is now mandatory positional.
+    """
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS system_state (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at TEXT NOT NULL
         )
+        """
+    )
 
 
-def is_setup_completed(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> bool:
+def is_setup_completed(con: sqlite3.Connection) -> bool:
     """True if setup_completed_at row exists.
 
     We deliberately do NOT also infer "completed" from has_any_user(): the
     spec is explicit that if the admin row gets deleted accidentally, the
     system stays inaccessible via web. Recovery requires CLI or a manual
     DELETE on this row (documented in README).
+
+    Task 8 (#446): `con` is now mandatory positional.
     """
-    with _tx_or_use(con) as con:
-        row = con.execute(
-            "SELECT 1 FROM system_state WHERE key = 'setup_completed_at'"
-        ).fetchone()
+    row = con.execute(
+        "SELECT 1 FROM system_state WHERE key = 'setup_completed_at'"
+    ).fetchone()
     return row is not None
 
 
 def mark_setup_completed(
+    con: sqlite3.Connection,
     *,
     ip: str | None,
     method: str,
-    con: Optional[sqlite3.Connection] = None,
 ) -> None:
     """Persist that initial setup ran. method ∈ {web, cli, env_vars}.
 
     Stored as two separate rows so a SELECT * shows both fields. Uses
     INSERT OR REPLACE so a manual rerun (after deleting the rows for
     recovery) doesn't blow up.
+
+    Task 8 (#446): `con` is now mandatory positional first arg.
     """
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
-    with _tx_or_use(con) as con:
-        con.execute(
-            "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
-            "VALUES ('setup_completed_at', ?, ?)",
-            (now, now),
-        )
-        con.execute(
-            "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
-            "VALUES ('setup_completed_ip', ?, ?)",
-            (ip or "", now),
-        )
-        con.execute(
-            "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
-            "VALUES ('setup_completed_method', ?, ?)",
-            (method, now),
-        )
+    con.execute(
+        "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
+        "VALUES ('setup_completed_at', ?, ?)",
+        (now, now),
+    )
+    con.execute(
+        "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
+        "VALUES ('setup_completed_ip', ?, ?)",
+        (ip or "", now),
+    )
+    con.execute(
+        "INSERT OR REPLACE INTO system_state(key, value, updated_at) "
+        "VALUES ('setup_completed_method', ?, ?)",
+        (method, now),
+    )

@@ -53,20 +53,26 @@ def client(tmp_path, monkeypatch):
 def _seed_other_user_position(symbol: str = "BTCUSDT") -> int:
     """Insert position owned by OTHER_USER_ID. Returns pos_id."""
     from db.positions import db_create_position
-    pos = db_create_position(
-        {"symbol": symbol, "entry_price": 80000, "size_usd": 500, "direction": "LONG"},
-        tenant_id=OTHER_USER_ID,
-    )
+    from db.transaction import transaction
+    with transaction() as con:
+        pos = db_create_position(
+            con,
+            {"symbol": symbol, "entry_price": 80000, "size_usd": 500, "direction": "LONG"},
+            tenant_id=OTHER_USER_ID,
+        )
     return pos["id"]
 
 
 def _seed_own_position(symbol: str = "ETHUSDT") -> int:
     """Insert position owned by TestClient (user_id=99)."""
     from db.positions import db_create_position
-    pos = db_create_position(
-        {"symbol": symbol, "entry_price": 2300, "size_usd": 300, "direction": "LONG"},
-        tenant_id=99,
-    )
+    from db.transaction import transaction
+    with transaction() as con:
+        pos = db_create_position(
+            con,
+            {"symbol": symbol, "entry_price": 2300, "size_usd": 300, "direction": "LONG"},
+            tenant_id=99,
+        )
     return pos["id"]
 
 
@@ -141,8 +147,10 @@ class TestPositionsIDOR:
         assert resp.status_code == 200
         # Verify the position was created under user 99, not 999
         from db.positions import db_get_positions
-        own_positions = db_get_positions(tenant_id=99)
-        other_positions = db_get_positions(tenant_id=OTHER_USER_ID)
+        from db.transaction import transaction
+        with transaction() as con:
+            own_positions = db_get_positions(con, tenant_id=99)
+            other_positions = db_get_positions(con, tenant_id=OTHER_USER_ID)
         assert len(own_positions) == 1
         assert len(other_positions) == 0
 
@@ -286,11 +294,14 @@ class TestCapitalIDOR:
 class TestPreferencesIDOR:
     def test_get_other_user_prefs_invisible(self, client):
         """GET /preferences returns DEFAULTS (not other user's prefs)."""
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences
-        db_upsert_user_preferences(
-            tenant_id=OTHER_USER_ID, symbol_filter=["XAUTUSDT"], min_score=8,
-            notify_channels={"telegram_chat_id": "OTHER"},
-        )
+        with transaction() as con:
+            db_upsert_user_preferences(
+                con,
+                tenant_id=OTHER_USER_ID, symbol_filter=["XAUTUSDT"], min_score=8,
+                notify_channels={"telegram_chat_id": "OTHER"},
+            )
         resp = client.get("/preferences")
         assert resp.status_code == 200
         body = resp.json()
@@ -300,8 +311,10 @@ class TestPreferencesIDOR:
         assert body["notify_channels"] is None
 
     def test_put_does_not_overwrite_other_user_prefs(self, client):
+        from db.transaction import transaction
         from db.user_preferences import db_upsert_user_preferences, db_get_user_preferences
-        db_upsert_user_preferences(tenant_id=OTHER_USER_ID, min_score=8)
+        with transaction() as con:
+            db_upsert_user_preferences(con, tenant_id=OTHER_USER_ID, min_score=8)
         # Current user PUTs their own
         resp = client.put(
             "/preferences",
@@ -310,7 +323,8 @@ class TestPreferencesIDOR:
         )
         assert resp.status_code == 200
         # Other user's prefs unchanged
-        other = db_get_user_preferences(OTHER_USER_ID)
+        with transaction() as con:
+            other = db_get_user_preferences(con, OTHER_USER_ID)
         assert other["min_score"] == 8
 
 
