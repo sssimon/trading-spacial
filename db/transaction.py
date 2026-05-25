@@ -64,14 +64,14 @@ def read_only_connection() -> Iterator[sqlite3.Connection]:
     existence check) that must NOT hold a writer lock. The connection
     closes on exit; no BEGIN/COMMIT is issued.
 
-    Caller contract:
+    Caller contract — ENFORCED AT RUNTIME via PRAGMA query_only=1:
     - MAY use con.execute for SELECT.
-    - MUST NOT issue INSERT/UPDATE/DELETE — if SQLite's autocommit triggers,
-      the write happens without the operator's atomicity guarantee.
-    - MUST NOT escape the connection past the `with` block.
+    - INSERT/UPDATE/DELETE raise sqlite3.OperationalError.
+    - MUST NOT escape the connection past the `with` block (lifecycle).
     """
     con = _open_configured_connection()
     try:
+        con.execute("PRAGMA query_only = 1")
         yield con
     finally:
         con.close()
