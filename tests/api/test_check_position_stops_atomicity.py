@@ -21,15 +21,20 @@ def db_with_position(tmp_path, monkeypatch):
     import btc_api
     monkeypatch.setattr(btc_api, "DB_FILE", str(db_path))
     init_db()
-    # Seed an open position with sl_price = 100. The real schema requires
-    # entry_ts (TEXT NOT NULL) and uses status='open' (lowercase) per
-    # db/schema.py::positions table.
+    # Seed an open position so the trailing-SL ratchet actually fires under
+    # price=108. Math: be_threshold = entry + round(atr * be_mult, 2)
+    #                              = 98 + round(2.0 * 1.5, 2) = 101.
+    # Trailing fires when price >= be_threshold AND sl_price < entry:
+    #   108 >= 101 (True) AND 97 < 98 (True) → scanner writes new_sl = 101.
+    # Previous fixture (entry=100, sl=100) had be_threshold=103 and
+    # sl_price<entry was False (100<100 = False), so trailing was a no-op
+    # for the scanner and the test was vacuous (Serrano F-13).
     with transaction() as con:
         con.execute(
             """INSERT INTO positions
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
                 status, entry_ts, atr_entry, be_mult)
-               VALUES (1, 'BTCUSDT', 'LONG', 100.0, 1.0, 100.0, 110.0,
+               VALUES (1, 'BTCUSDT', 'LONG', 98.0, 1.0, 97.0, 120.0,
                        'open', '2026-05-24T00:00:00+00:00', 2.0, 1.5)"""
         )
     return str(db_path)
@@ -74,11 +79,11 @@ def test_trailing_ratchet_atomic_under_concurrent_operator_edit(db_with_position
     assert "error" not in operator_result, operator_result["error"]
     assert operator_result.get("ok") is True
 
-    # Final state must reflect exactly one of the two writers; never an
-    # interleaved partial state.
+    # Final state must be exactly one of the two writers' values; never an
+    # interleaved partial state. The atomicity invariant predicts winner-
+    # takes-all: either the operator wrote last (105.0) OR the scanner wrote
+    # last (computed trailing-SL = 101.0). Any other value indicates a torn
+    # write or a stale read (would mean the invariant is broken).
     with transaction() as con:
         row = con.execute("SELECT sl_price FROM positions WHERE id = 1").fetchone()
-    assert row["sl_price"] in {105.0, 100.0, 104.0, 108.0}, row["sl_price"]
-    # Acceptable values: 105.0 (operator wrote last), or any trailing-SL
-    # value produced by the scanner. The point is that there is no half-
-    # applied combination.
+    assert row["sl_price"] in {105.0, 101.0}, row["sl_price"]
