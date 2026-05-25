@@ -278,21 +278,42 @@ with transaction() as con:
     sig = get_latest_signal(con, "BTCUSDT")
 ```
 
-### 4. Read-only pre-validation outside any transaction (`read_only_connection()`)
+### 4a. Precheck reads that feed a write transaction (`precheck_connection()`)
 
-When an operator needs to read state BEFORE deciding whether to open a write transaction (e.g., ownership check that should not acquire a writer lock), use `read_only_connection()` from `db.transaction`:
+When an operator needs to read state BEFORE deciding whether to open a write transaction (e.g., ownership check, idempotency check), use `precheck_connection()` from `db.transaction`. The contract requires the caller to extract any field the write-tx will need into an **immutable snapshot value** (see `operators.precheck.PositionSnapshot`) BEFORE the block exits — the connection MUST NOT escape.
 
 ```python
-from db.transaction import read_only_connection
+from db.transaction import precheck_connection
+from operators.precheck import PositionSnapshot
 
-with read_only_connection() as con:
+with precheck_connection() as con:
     row = db_get_position_by_id(con, pos_id)
-# no transaction was opened; no lock held.
+snapshot = PositionSnapshot(pos_id=row["id"], tenant_id=row["tenant_id"], ...)
+# Later: open transaction() and re-validate snapshot's mutable fields.
 ```
 
-The contract is **enforced at runtime** via `PRAGMA query_only=1`: any INSERT/UPDATE/DELETE inside `read_only_connection()` raises `sqlite3.OperationalError`. Pure SQL helpers receive `con` from their caller; they never call `read_only_connection` themselves.
+The write-tx that follows MUST re-validate the snapshot's mutable fields (e.g., `tenant_id`, `status`) against a fresh re-SELECT inside `BEGIN IMMEDIATE`. Immutable fields (e.g., `entry_price`, `qty`) are trusted from the snapshot directly. See `operators/position_closure.py` for the canonical implementation.
 
-Used by `PositionClosure.__enter__` (pre-validation read) and by `update_positions_json` (snapshot generation). New call sites: prefer `read_only_connection` over `transaction` whenever the unit-of-work contains zero writes.
+### 4b. Terminal reads (`snapshot_connection()`)
+
+When a read is **terminal** — its result is serialized to an output (JSON file, HTTP response, log) and NOT used to drive a subsequent mutation — use `snapshot_connection()`:
+
+```python
+from db.transaction import snapshot_connection
+
+with snapshot_connection() as con:
+    all_pos = db_get_positions(con)
+```
+
+No follow-up write-tx, no re-validation obligation. Used today by `update_positions_json` (snapshot to JSON file).
+
+### Threat model (applies to both 4a and 4b)
+
+Both helpers set `PRAGMA query_only = 1` on the connection. INSERT/UPDATE/DELETE raise `sqlite3.OperationalError`. **This is a cooperative latch, not a sandbox:** callers can re-enable writes via `PRAGMA query_only = 0`, `executescript` with embedded PRAGMA, or writes to `temp.*` tables. SQLite does not provide an ontologically read-only connection.
+
+The mechanism is a **detector**, not a defense. Its value is converting bugs of "helper mistakenly mutates when contract says read-only" into LOUD errors at test time. The semantic invariant "this phase does not mutate the world" lives at the CALL SITE (extract → snapshot → terminate or write-tx), not in the primitive. Pure SQL helpers receive `con` from their caller; they never call `precheck_connection` or `snapshot_connection` themselves.
+
+The two helpers share implementation but bear distinct call-site contracts. Mixing them (using `snapshot_connection` for a precheck that will feed a write-tx, or `precheck_connection` for a terminal read) is a documentation error that future contributors should reject in code review.
 
 New business operators emerge from evidence (caller composes >1 helper + side-effect with conditional behavior), not preemptively. See `docs/superpowers/analysis/2026-05-25-446-tx-or-use-analysis-and-direction.md` for the rationale (Voronov, 2026-05-25).
 
