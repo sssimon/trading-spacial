@@ -81,3 +81,24 @@ def _tx_or_use(con: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
             yield new_con
     else:
         yield con
+
+
+@contextmanager
+def read_only_connection() -> Iterator[sqlite3.Connection]:
+    """Open a configured connection for read-only work outside any transaction.
+
+    Use when an operator needs pre-validation reads (ownership check,
+    existence check) that must NOT hold a writer lock. The connection
+    closes on exit; no BEGIN/COMMIT is issued.
+
+    Caller contract:
+    - MAY use con.execute for SELECT.
+    - MUST NOT issue INSERT/UPDATE/DELETE — if SQLite's autocommit triggers,
+      the write happens without the operator's atomicity guarantee.
+    - MUST NOT escape the connection past the `with` block.
+    """
+    con = _open_configured_connection()
+    try:
+        yield con
+    finally:
+        con.close()
