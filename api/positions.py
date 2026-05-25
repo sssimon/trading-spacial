@@ -22,7 +22,7 @@ from db.positions import (
     db_get_positions,
     db_update_position,
 )
-from db.transaction import transaction, read_only_connection
+from db.transaction import transaction, snapshot_connection
 
 log = logging.getLogger("api.positions")
 
@@ -77,7 +77,7 @@ def update_positions_json():
     """Escribe data/positions_summary.json con estado de posiciones."""
     try:
         _ensure_dirs()
-        with read_only_connection() as con:
+        with snapshot_connection() as con:
             all_pos   = db_get_positions(con)
         open_pos  = [p for p in all_pos if p["status"] == "open"]
         closed_pos = [p for p in all_pos if p["status"] == "closed"]
