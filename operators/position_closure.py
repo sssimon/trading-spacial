@@ -183,8 +183,11 @@ class PositionClosure:
                 )
 
             # Snapshot's immutable fields trusted; consume directly.
+            # qty may be NULL in legacy rows (schema allows; some fixtures set
+            # only size_usd). Match the previous behavior of defaulting to 0.
+            qty = snapshot.qty or 0
             pnl_usd, pnl_pct = _calc_pnl(
-                snapshot.direction, snapshot.entry_price, self._exit_price, snapshot.qty,
+                snapshot.direction, snapshot.entry_price, self._exit_price, qty,
             )
             exit_ts = self._now.isoformat()
             closed_row = db_close_position_sql(
