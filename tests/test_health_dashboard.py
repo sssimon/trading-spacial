@@ -378,7 +378,8 @@ def test_get_health_dashboard_uses_tenant_capital_when_present(client):
     """
     from db.capital import db_upsert_capital
     # tenant_id=1 matches the override in the client fixture above.
-    db_upsert_capital(1, balance=10_000.0, peak_balance=12_000.0)
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=10_000.0, peak_balance=12_000.0)
     resp = client.get("/health/dashboard")
     assert resp.status_code == 200
     portfolio = resp.json()["portfolio"]
@@ -416,7 +417,8 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
     pnl_sequence = [200.0, 200.0, -300.0, 200.0, -100.0]
     # Stamp each trade into the capital ledger.
     for pnl in pnl_sequence:
-        apply_pnl_to_capital(1, pnl)
+        with transaction() as _cap_con:
+            apply_pnl_to_capital(_cap_con, 1, pnl)
 
     # Also insert the closed positions so the (now-removed) equity-curve
     # path would see them — if regression returns, the curve would double-
@@ -470,10 +472,12 @@ def test_get_health_dashboard_isolates_tenants(client):
     import btc_api
 
     # Tenant 1 (active in fixture): balance $10K, no closed trades.
-    db_upsert_capital(1, balance=10_000.0, peak_balance=10_000.0)
+    with transaction() as _cap_con:
+        db_upsert_capital(_cap_con, 1, balance=10_000.0, peak_balance=10_000.0)
 
     # Tenant 2 (NOT the request tenant): seed a -$1000 loss → balance $9K, peak $10K.
-    apply_pnl_to_capital(2, -1_000.0)
+    with transaction() as _cap_con:
+        apply_pnl_to_capital(_cap_con, 2, -1_000.0)
     with transaction() as conn:
         # (a) Tenant 2 has a closed losing trade for ETH.
         conn.execute(

@@ -12,8 +12,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from db.transaction import _tx_or_use
-
 log = logging.getLogger("db.capital")
 
 # Default starting balance for a tenant whose first position closes before
@@ -23,24 +21,22 @@ INITIAL_CAPITAL_DEFAULT = 10_000.0
 
 
 def db_get_capital(
+    con: sqlite3.Connection,
     tenant_id: int,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """Return current capital row for tenant, or None if uninitialized.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 5 (#446): `con` is now mandatory positional. Callers must pass an
+    open `sqlite3.Connection` from a surrounding `transaction()` block.
     """
-    with _tx_or_use(con) as con:
-        row = con.execute(
-            "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
-        ).fetchone()
+    row = con.execute(
+        "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
     return dict(row) if row else None
 
 
 def db_list_active_tenant_ids(
-    *,
-    con: Optional[sqlite3.Connection] = None,
+    con: sqlite3.Connection,
 ) -> list[int]:
     """Return tenant ids with an existing capital row, sorted ascending.
 
@@ -50,20 +46,18 @@ def db_list_active_tenant_ids(
     onboarded tenants" and callers should treat that as a no-op rather
     than computing implicit single-system aggregates.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 5 (#446): `con` is now mandatory positional.
     """
-    with _tx_or_use(con) as con:
-        rows = con.execute(
-            "SELECT tenant_id FROM capital ORDER BY tenant_id ASC"
-        ).fetchall()
+    rows = con.execute(
+        "SELECT tenant_id FROM capital ORDER BY tenant_id ASC"
+    ).fetchall()
     return [int(r[0]) for r in rows]
 
 
 def apply_pnl_to_capital(
+    con: sqlite3.Connection,
     tenant_id: int,
     pnl_usd: float,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """B.2 hook: a position closed for `tenant_id` with realized `pnl_usd`.
 
@@ -74,44 +68,42 @@ def apply_pnl_to_capital(
     Returns the resulting capital row. Locks are documented in
     docs/superpowers/plans/2026-05-16-multi-tenant-b2-capital-tracker-pre-reg.md §2.3.
 
-    Per Task 8.5: single-tx refactor. Previously this opened two separate
-    transactions (db_get_capital + db_upsert_capital), giving a small read-
-    then-write race window. We now wrap both inside one `_tx_or_use(con)`
-    block so the get→compute→upsert sequence is atomic on whichever
-    connection the caller owns (or a fresh one if `con is None`).
+    Task 5 (#446): `con` is now mandatory positional first arg. The helper
+    is pure Cat. 1 SQL — get → compute → upsert all run inline on the
+    caller's connection. Atomicity is the caller's responsibility (open
+    one `transaction()` around the close + capital roll-in).
     """
-    with _tx_or_use(con) as inner_con:
-        row = db_get_capital(tenant_id, con=inner_con)
-        if row is None:
-            prior_balance = INITIAL_CAPITAL_DEFAULT
-            prior_peak = INITIAL_CAPITAL_DEFAULT
-        else:
-            prior_balance = float(row["balance"])
-            prior_peak = float(row["peak_balance"])
+    row = db_get_capital(con, tenant_id)
+    if row is None:
+        prior_balance = INITIAL_CAPITAL_DEFAULT
+        prior_peak = INITIAL_CAPITAL_DEFAULT
+    else:
+        prior_balance = float(row["balance"])
+        prior_peak = float(row["peak_balance"])
 
-        new_balance = prior_balance + float(pnl_usd)
-        new_peak = max(prior_peak, new_balance)  # monotonic — never decreases
-        if new_peak > 0:
-            new_dd_pct = (new_peak - new_balance) / new_peak * 100.0
-        else:
-            new_dd_pct = None  # peak ≤ 0 leaves drawdown undefined
+    new_balance = prior_balance + float(pnl_usd)
+    new_peak = max(prior_peak, new_balance)  # monotonic — never decreases
+    if new_peak > 0:
+        new_dd_pct = (new_peak - new_balance) / new_peak * 100.0
+    else:
+        new_dd_pct = None  # peak ≤ 0 leaves drawdown undefined
 
-        return db_upsert_capital(
-            tenant_id,
-            balance=new_balance,
-            peak_balance=new_peak,
-            max_drawdown_pct=new_dd_pct,
-            con=inner_con,
-        )
+    return db_upsert_capital(
+        con,
+        tenant_id,
+        balance=new_balance,
+        peak_balance=new_peak,
+        max_drawdown_pct=new_dd_pct,
+    )
 
 
 def db_upsert_capital(
+    con: sqlite3.Connection,
     tenant_id: int,
     *,
     balance: float,
     peak_balance: Optional[float] = None,
     max_drawdown_pct: Optional[float] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Insert or replace capital row for tenant.
 
@@ -122,38 +114,37 @@ def db_upsert_capital(
 
     Returns the resulting row.
 
-    Per Task 8.5: optional `con` for caller-controlled transaction composition.
+    Task 5 (#446): `con` is now mandatory positional first arg.
     """
     now = datetime.now(timezone.utc).isoformat()
-    with _tx_or_use(con) as con:
-        existing = con.execute(
-            "SELECT id, peak_balance, max_drawdown_pct FROM capital WHERE tenant_id = ?",
-            (tenant_id,),
-        ).fetchone()
+    existing = con.execute(
+        "SELECT id, peak_balance, max_drawdown_pct FROM capital WHERE tenant_id = ?",
+        (tenant_id,),
+    ).fetchone()
 
-        if existing is None:
-            effective_peak = peak_balance if peak_balance is not None else balance
-            effective_dd = max_drawdown_pct
-            con.execute(
-                """INSERT INTO capital (tenant_id, balance, peak_balance,
-                                        max_drawdown_pct, updated_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (tenant_id, balance, effective_peak, effective_dd, now),
-            )
-        else:
-            effective_peak = peak_balance if peak_balance is not None else existing["peak_balance"]
-            effective_dd = (
-                max_drawdown_pct if max_drawdown_pct is not None
-                else existing["max_drawdown_pct"]
-            )
-            con.execute(
-                """UPDATE capital
-                   SET balance = ?, peak_balance = ?, max_drawdown_pct = ?,
-                       updated_at = ?
-                   WHERE tenant_id = ?""",
-                (balance, effective_peak, effective_dd, now, tenant_id),
-            )
-        row = con.execute(
-            "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
-        ).fetchone()
+    if existing is None:
+        effective_peak = peak_balance if peak_balance is not None else balance
+        effective_dd = max_drawdown_pct
+        con.execute(
+            """INSERT INTO capital (tenant_id, balance, peak_balance,
+                                    max_drawdown_pct, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (tenant_id, balance, effective_peak, effective_dd, now),
+        )
+    else:
+        effective_peak = peak_balance if peak_balance is not None else existing["peak_balance"]
+        effective_dd = (
+            max_drawdown_pct if max_drawdown_pct is not None
+            else existing["max_drawdown_pct"]
+        )
+        con.execute(
+            """UPDATE capital
+               SET balance = ?, peak_balance = ?, max_drawdown_pct = ?,
+                   updated_at = ?
+               WHERE tenant_id = ?""",
+            (balance, effective_peak, effective_dd, now, tenant_id),
+        )
+    row = con.execute(
+        "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
     return dict(row)

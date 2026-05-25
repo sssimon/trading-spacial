@@ -125,7 +125,9 @@ def run(args: argparse.Namespace) -> int:
     # 2. Pre-snapshot
     pre = _snapshot_counts()
     log.info("Pre-migration row counts:\n%s", _format_snapshot(pre))
-    pre_capital = db_get_capital(args.user_id)
+    # Task 5 (#446): db_get_capital requires `con` positional.
+    with transaction() as con:
+        pre_capital = db_get_capital(con, args.user_id)
     log.info(
         "Pre-migration capital row: %s",
         "EXISTS" if pre_capital else "absent",
@@ -167,12 +169,15 @@ def run(args: argparse.Namespace) -> int:
     )
 
     log.info("Upserting capital row…")
-    capital_row = db_upsert_capital(
-        args.user_id,
-        balance=args.initial_balance,
-        peak_balance=args.initial_balance,
-        max_drawdown_pct=None,
-    )
+    # Task 5 (#446): db_upsert_capital requires `con` positional.
+    with transaction() as con:
+        capital_row = db_upsert_capital(
+            con,
+            args.user_id,
+            balance=args.initial_balance,
+            peak_balance=args.initial_balance,
+            max_drawdown_pct=None,
+        )
     log.info(
         "Capital row: balance=%s, peak=%s",
         capital_row["balance"], capital_row["peak_balance"],

@@ -51,11 +51,15 @@ def client(tmp_path, monkeypatch):
 class TestCapitalDB:
     def test_get_returns_none_when_missing(self, initialized_db):
         from db.capital import db_get_capital
-        assert db_get_capital(tenant_id=1) is None
+        from db.transaction import transaction
+        with transaction() as con:
+            assert db_get_capital(con, 1) is None
 
     def test_upsert_creates_row(self, initialized_db):
         from db.capital import db_upsert_capital, db_get_capital
-        row = db_upsert_capital(tenant_id=1, balance=10000.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            row = db_upsert_capital(con, 1, balance=10000.0)
         assert row["tenant_id"] == 1
         assert row["balance"] == 10000.0
         # peak_balance defaulted to balance when not provided + row new
@@ -63,35 +67,48 @@ class TestCapitalDB:
         # max_drawdown_pct None for new row
         assert row["max_drawdown_pct"] is None
         # Persists
-        assert db_get_capital(tenant_id=1)["balance"] == 10000.0
+        with transaction() as con:
+            assert db_get_capital(con, 1)["balance"] == 10000.0
 
     def test_upsert_replaces_existing(self, initialized_db):
         from db.capital import db_upsert_capital
-        db_upsert_capital(tenant_id=1, balance=10000.0)
-        updated = db_upsert_capital(tenant_id=1, balance=11000.0, peak_balance=12000.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=10000.0)
+        with transaction() as con:
+            updated = db_upsert_capital(con, 1, balance=11000.0, peak_balance=12000.0)
         assert updated["balance"] == 11000.0
         assert updated["peak_balance"] == 12000.0
 
     def test_upsert_preserves_peak_when_omitted(self, initialized_db):
         from db.capital import db_upsert_capital
-        db_upsert_capital(tenant_id=1, balance=10000.0, peak_balance=15000.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=10000.0, peak_balance=15000.0)
         # Update balance only, peak should stay
-        updated = db_upsert_capital(tenant_id=1, balance=9500.0)
+        with transaction() as con:
+            updated = db_upsert_capital(con, 1, balance=9500.0)
         assert updated["balance"] == 9500.0
         assert updated["peak_balance"] == 15000.0  # preserved
 
     def test_upsert_preserves_max_drawdown_when_omitted(self, initialized_db):
         from db.capital import db_upsert_capital
-        db_upsert_capital(tenant_id=1, balance=10000.0, max_drawdown_pct=-15.0)
-        updated = db_upsert_capital(tenant_id=1, balance=11000.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=10000.0, max_drawdown_pct=-15.0)
+        with transaction() as con:
+            updated = db_upsert_capital(con, 1, balance=11000.0)
         assert updated["max_drawdown_pct"] == -15.0  # preserved
 
     def test_tenant_isolation(self, initialized_db):
         from db.capital import db_upsert_capital, db_get_capital
-        db_upsert_capital(tenant_id=1, balance=10000.0)
-        db_upsert_capital(tenant_id=2, balance=20000.0)
-        assert db_get_capital(tenant_id=1)["balance"] == 10000.0
-        assert db_get_capital(tenant_id=2)["balance"] == 20000.0
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=10000.0)
+            db_upsert_capital(con, 2, balance=20000.0)
+        with transaction() as con:
+            assert db_get_capital(con, 1)["balance"] == 10000.0
+            assert db_get_capital(con, 2)["balance"] == 20000.0
 
 
 # ---------------------------------------------------------------------------

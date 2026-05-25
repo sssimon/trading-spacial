@@ -252,13 +252,17 @@ class TestCapitalIDOR:
     def test_get_other_user_capital_invisible(self, client):
         """GET /capital with other user's data seeded must 404 for current user."""
         from db.capital import db_upsert_capital
-        db_upsert_capital(tenant_id=OTHER_USER_ID, balance=999999.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, OTHER_USER_ID, balance=999999.0)
         resp = client.get("/capital")
         assert resp.status_code == 404  # current user (id=0) has no capital
 
     def test_put_does_not_overwrite_other_user_capital(self, client):
         from db.capital import db_upsert_capital, db_get_capital
-        db_upsert_capital(tenant_id=OTHER_USER_ID, balance=999999.0)
+        from db.transaction import transaction
+        with transaction() as con:
+            db_upsert_capital(con, OTHER_USER_ID, balance=999999.0)
         # Current user PUTs their own
         resp = client.put(
             "/capital",
@@ -267,7 +271,8 @@ class TestCapitalIDOR:
         )
         assert resp.status_code == 200
         # Other user's capital unchanged
-        other = db_get_capital(OTHER_USER_ID)
+        with transaction() as con:
+            other = db_get_capital(con, OTHER_USER_ID)
         assert other["balance"] == 999999.0
 
 

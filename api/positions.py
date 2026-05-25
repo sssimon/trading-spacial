@@ -49,17 +49,16 @@ _EVENT_LOG_LABELS = {
 }
 
 
-def _apply_close_to_capital(closed_pos: dict, *, con=None) -> None:
+def _apply_close_to_capital(closed_pos: dict, *, con) -> None:
     """B.2 #255: roll realized P&L from a just-closed position into the
     owner's capital ledger.
 
     Skips positions with tenant_id=NULL (legacy/scanner pre-multi-tenant) or
     pnl_usd=None (no quantified outcome — e.g. qty=0). Locks: pre-reg §2.1, §2.2.
 
-    Per Task 8.5: optional `con` threads the capital update into the caller's
-    open transaction (e.g. `check_position_stops` folding close + capital
-    into one unit of work). Standalone callers (manual /positions/{id}/close)
-    leave `con=None` and let `apply_pnl_to_capital` open its own tx.
+    Task 5 (#446): `con` is now mandatory keyword-only. The caller owns the
+    surrounding `transaction()` block so the close + capital roll-in serialize
+    atomically with the read.
     """
     tenant_id = closed_pos.get("tenant_id")
     pnl_usd = closed_pos.get("pnl_usd")
@@ -70,7 +69,7 @@ def _apply_close_to_capital(closed_pos: dict, *, con=None) -> None:
         )
         return
     try:
-        apply_pnl_to_capital(int(tenant_id), float(pnl_usd), con=con)
+        apply_pnl_to_capital(con, int(tenant_id), float(pnl_usd))
     except Exception as e:
         # Capital update is best-effort: a ledger failure must NOT block the
         # position-close lifecycle. Operator reconciles via separate audit.
@@ -407,8 +406,11 @@ def close_position(
     if not pos:
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     _write_position_event_log(pos, exit_reason, float(exit_price))
-    # B.2 #255: roll realized P&L into the JWT-authenticated owner's capital
-    _apply_close_to_capital(pos)
+    # B.2 #255: roll realized P&L into the JWT-authenticated owner's capital.
+    # Task 5 (#446): `_apply_close_to_capital` now requires `con` — open a
+    # short tx just for the ledger write.
+    with transaction() as con:
+        _apply_close_to_capital(pos, con=con)
     update_positions_json()
     return {"ok": True, "position": pos}
 

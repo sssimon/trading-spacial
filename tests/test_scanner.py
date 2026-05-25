@@ -1489,6 +1489,7 @@ class TestScanEmitsV2ShadowDecision:
         """scan() writes BOTH engine='v1' AND engine='v2_shadow' rows to the log."""
         import btc_api, btc_scanner, observability
         from db.capital import db_upsert_capital
+        from db.transaction import transaction
         db_path = str(tmp_path / "signals.db")
         monkeypatch.setattr(btc_api, "DB_FILE", db_path)
         if hasattr(btc_api, "_db_conn"):
@@ -1497,7 +1498,8 @@ class TestScanEmitsV2ShadowDecision:
         # Multi-tenant: scanner iterates db_list_active_tenant_ids() to emit
         # shadow decisions; without a capital row the loop is empty and no
         # v2_shadow row is written. Seed a tenant so the assertion can fire.
-        db_upsert_capital(1, balance=10_000.0, peak_balance=10_000.0)
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=10_000.0, peak_balance=10_000.0)
 
         # Mock market data fetch (Task 3 A6 pattern)
         import pandas as pd

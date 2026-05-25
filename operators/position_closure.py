@@ -164,14 +164,14 @@ class PositionClosure:
             if tenant_id is not None and pnl_usd is not None:
                 # Invariant 1 / 2: capital roll-in joins the same tx. Any
                 # raise inside aborts the close via context-manager rollback.
-                # Pass all args as kwargs — the real signature is
-                # (tenant_id, pnl_usd, *, con=None), but tests mock with a
-                # 3-positional `boom(con, tenant_id, pnl_usd)`. Using kwargs
-                # satisfies both bindings.
+                # Task 5 (#446): `apply_pnl_to_capital` now has
+                # `con` as mandatory positional first arg — matches the
+                # 3-positional mock `boom(con, tenant_id, pnl_usd)` used in
+                # tests.
                 _capital_module.apply_pnl_to_capital(
-                    tenant_id=int(tenant_id),
-                    pnl_usd=float(pnl_usd),
-                    con=con,
+                    con,
+                    int(tenant_id),
+                    float(pnl_usd),
                 )
             elif tenant_id is None:
                 log.warning(

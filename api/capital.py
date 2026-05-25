@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
 from db.capital import db_get_capital, db_upsert_capital
+from db.transaction import transaction
 
 log = logging.getLogger("api.capital")
 
@@ -29,7 +30,8 @@ class CapitalPutBody(BaseModel):
 
 @router.get("", summary="Get current capital state for current tenant")
 def get_capital(tenant_id: int = Depends(get_current_tenant_id)):
-    row = db_get_capital(tenant_id)
+    with transaction() as con:
+        row = db_get_capital(con, tenant_id)
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -50,10 +52,12 @@ def put_capital(
     body: CapitalPutBody,
     tenant_id: int = Depends(get_current_tenant_id),
 ):
-    row = db_upsert_capital(
-        tenant_id,
-        balance=body.balance,
-        peak_balance=body.peak_balance,
-        max_drawdown_pct=body.max_drawdown_pct,
-    )
+    with transaction() as con:
+        row = db_upsert_capital(
+            con,
+            tenant_id,
+            balance=body.balance,
+            peak_balance=body.peak_balance,
+            max_drawdown_pct=body.max_drawdown_pct,
+        )
     return {"ok": True, "capital": row}

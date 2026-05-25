@@ -132,7 +132,8 @@ class TestMigrationLogic:
                 "SELECT COUNT(*) FROM positions WHERE tenant_id IS NULL"
             ).fetchone()[0]
         assert null_pos == 2
-        assert db_get_capital(1) is None  # no capital row created
+        with transaction() as con:
+            assert db_get_capital(con, 1) is None  # no capital row created
 
     def test_execute_stamps_tenant_id(self, seeded_db):
         """Pre-reg §2.3: --execute backfills tenant_id on NULL rows."""
@@ -175,7 +176,9 @@ class TestMigrationLogic:
         from db.capital import db_get_capital
 
         assert run(self._make_args(execute=True, initial_balance=12500.0)) == 0
-        row = db_get_capital(1)
+        from db.transaction import transaction
+        with transaction() as con:
+            row = db_get_capital(con, 1)
         assert row is not None
         assert row["balance"] == 12500.0
         assert row["peak_balance"] == 12500.0
@@ -185,9 +188,11 @@ class TestMigrationLogic:
         """Pre-reg §2.3 step 4: existing capital row + no --force → exit 1."""
         from scripts.migrate_to_multitenant import run
         from db.capital import db_upsert_capital
+        from db.transaction import transaction
 
         # Pre-create capital row
-        db_upsert_capital(1, balance=5000.0, peak_balance=5000.0)
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=5000.0, peak_balance=5000.0)
         # Need backfill_tenant to not be a no-op too — let it run normally
         # The script should refuse the capital overwrite specifically.
         exit_code = run(self._make_args(execute=True, force=False))
@@ -197,12 +202,15 @@ class TestMigrationLogic:
         """Pre-reg §2.3 step 4: --force replaces existing capital row."""
         from scripts.migrate_to_multitenant import run
         from db.capital import db_get_capital, db_upsert_capital
+        from db.transaction import transaction
 
-        db_upsert_capital(1, balance=5000.0, peak_balance=5000.0)
+        with transaction() as con:
+            db_upsert_capital(con, 1, balance=5000.0, peak_balance=5000.0)
         exit_code = run(self._make_args(execute=True, force=True,
                                          initial_balance=20_000.0))
         assert exit_code == 0
-        row = db_get_capital(1)
+        with transaction() as con:
+            row = db_get_capital(con, 1)
         assert row["balance"] == 20_000.0
         assert row["peak_balance"] == 20_000.0
 

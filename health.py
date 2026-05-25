@@ -414,14 +414,15 @@ def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
         from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
         from db.capital import db_list_active_tenant_ids
 
-        tenant_ids = db_list_active_tenant_ids()
-        if not tenant_ids:
-            # No onboarded tenants yet — treat as NORMAL (no portfolio to gate).
-            return True
-
         # Concurrent failures: a property of symbol_health (system-wide), so
         # we read it once and reuse it across the per-tenant loop.
+        # Task 5 (#446): `db_list_active_tenant_ids` now takes mandatory
+        # `con` — fold the read into the same transaction.
         with transaction() as conn:
+            tenant_ids = db_list_active_tenant_ids(conn)
+            if not tenant_ids:
+                # No onboarded tenants yet — treat as NORMAL (no portfolio to gate).
+                return True
             n_failures = conn.execute(
                 """SELECT COUNT(*) FROM symbol_health
                    WHERE state IN ('ALERT', 'REDUCED', 'PAUSED', 'PROBATION')"""
@@ -1060,7 +1061,7 @@ def get_dashboard_state(
     # serializes against any concurrent capital write.
     with transaction() as conn:
         from db.capital import db_get_capital
-        capital = db_get_capital(tenant_id, con=conn)
+        capital = db_get_capital(conn, tenant_id)
         # Build symbol list: union of DEFAULT_SYMBOLS + any DB rows. This way
         # the dashboard always shows the curated 10 (as NORMAL placeholders if
         # not yet evaluated) AND any historical/legacy rows in symbol_health.

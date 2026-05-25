@@ -433,7 +433,10 @@ def emit_shadow_decision(
         # but emit_shadow is a write-side observer and historical curve
         # consumers expect the same shape across the run.)
         from db.capital import db_get_capital
-        _capital_row = db_get_capital(tenant_id)
+        from db.transaction import transaction as _tx_for_cap
+        # Task 5 (#446): `db_get_capital` now requires `con` positional.
+        with _tx_for_cap() as _cap_con:
+            _capital_row = db_get_capital(_cap_con, tenant_id)
         if _capital_row and _capital_row.get("balance") is not None:
             capital_base = float(_capital_row["balance"])
         else:

@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from db.capital import db_get_capital, db_upsert_capital  # noqa: E402
+from db.transaction import transaction  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backfill_capital")
@@ -44,7 +45,9 @@ def main() -> int:
         log.error("--initial-balance must be >= 0 (got %s)", args.initial_balance)
         return 2
 
-    existing = db_get_capital(args.user_id)
+    # Task 5 (#446): both helpers require `con` positional.
+    with transaction() as con:
+        existing = db_get_capital(con, args.user_id)
     if existing is not None and not args.force:
         log.error(
             "Capital row already exists for user_id=%s (balance=%s, peak=%s). "
@@ -53,12 +56,14 @@ def main() -> int:
         )
         return 1
 
-    row = db_upsert_capital(
-        args.user_id,
-        balance=args.initial_balance,
-        peak_balance=args.initial_balance,
-        max_drawdown_pct=None,
-    )
+    with transaction() as con:
+        row = db_upsert_capital(
+            con,
+            args.user_id,
+            balance=args.initial_balance,
+            peak_balance=args.initial_balance,
+            max_drawdown_pct=None,
+        )
     log.info(
         "Backfilled capital for user_id=%s: balance=%s, peak=%s (force=%s)",
         args.user_id, row["balance"], row["peak_balance"], args.force,
