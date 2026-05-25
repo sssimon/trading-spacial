@@ -356,6 +356,15 @@ def close_position(
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
     if outcome.status == "already_closed":
         return {"ok": True, "position": outcome.position, "already_closed": True}
+    if outcome.status == "rejected_unexpected_state":
+        # F2 (Voronov): position in a state neither 'open' nor 'closed'
+        # (e.g., 'cancelled' set by DELETE endpoint). 409 Conflict — caller
+        # must reconcile state before retrying.
+        real_status = outcome.position.get("status") if outcome.position else "unknown"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Posicion #{pos_id} en estado '{real_status}', no se puede cerrar",
+        )
     return {"ok": True, "position": outcome.position}
 
 
