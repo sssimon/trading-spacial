@@ -35,12 +35,13 @@ def client(monkeypatch, tmp_path):
             "INSERT INTO scans (id, ts, symbol, estado, señal, setup, price, lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo, payload) "
             "VALUES (2, '2026-01-15T10:05:00Z', 'BTCUSDT', 'LONG', 1, 0, 50000.0, 20.0, 40.0, 5, 'premium', 1, 1, '{}')"
         )
-        # B.5 #258: include tenant_id matching synthetic test user (id=0 per
-        # auth.middleware._synthetic_test_user). Without this, the post-B.5
+        # B.5 #258: include tenant_id matching synthetic test user (id=99 per
+        # auth.middleware._synthetic_test_user; bumped from 0 → 99 by #446
+        # Task 6 fix). Without this, the post-B.5
         # tenant filter on GET /positions excludes NULL-tenant rows.
         con.execute(
             "INSERT INTO positions (id, scan_id, symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, size_usd, qty, tenant_id) "
-            "VALUES (1, 2, 'BTCUSDT', 'LONG', 'open', 50000.0, '2026-01-15T10:05:00Z', 49000.0, 54000.0, 100.0, 0.002, 0)"
+            "VALUES (1, 2, 'BTCUSDT', 'LONG', 'open', 50000.0, '2026-01-15T10:05:00Z', 49000.0, 54000.0, 100.0, 0.002, 99)"
         )
 
     # Test config (api_key="test-key")

@@ -231,10 +231,16 @@ class PositionClosure:
 
         # 3) notify
         try:
+            # Preserve pre-migration external event semantics: scanner
+            # used to map SL_HIT→SL, TP_HIT→TP, TIME_LIMIT_HIT→TIME_LIMIT
+            # before constructing PositionExitEvent. Internal
+            # self._exit_reason stays as the DB-canonical *_HIT form;
+            # only the event payload carries the stripped tier code.
+            event_reason = self._exit_reason.replace("_HIT", "")
             event = PositionExitEvent(
                 symbol=pos_row.get("symbol", ""),
                 direction=str(pos_row.get("direction", "LONG")).upper(),
-                exit_reason=self._exit_reason,
+                exit_reason=event_reason,
                 entry_price=float(pos_row.get("entry_price") or 0.0),
                 exit_price=float(self._exit_price),
                 pnl_usd=float(pnl_usd) if pnl_usd is not None else 0.0,

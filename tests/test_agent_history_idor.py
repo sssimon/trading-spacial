@@ -1,7 +1,8 @@
 """IDOR suite for #428 H.3 conversation-history endpoints.
 
 Mirrors the B.7 #260 pattern. TestClient operates as synthetic user
-(id=0). Cross-tenant data is seeded for OTHER_USER_ID via the
+(id=99 post-#446 Task 6; was id=0 pre-fix). Cross-tenant data is
+seeded for OTHER_USER_ID via the
 production write path. Every endpoint must:
 
 - Hide other users' conversations from the list.
@@ -20,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-OTHER_USER_ID = 999  # synthetic "other tenant" — distinct from TestClient (id=0)
+OTHER_USER_ID = 999  # synthetic "other tenant" — distinct from TestClient (id=99)
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def _seed(tenant_id: int, conversation_id: str, user_msg: str = "msg",
 class TestListIDOR:
     def test_list_excludes_other_tenants(self, client):
         _seed(OTHER_USER_ID, "victim-conv", "secreto de la victima")
-        _seed(0, "my-conv", "mi pregunta")
+        _seed(99, "my-conv", "mi pregunta")
 
         body = client.get("/agent/conversations").json()
         ids = [c["conversation_id"] for c in body["conversations"]]
@@ -83,7 +84,7 @@ class TestListIDOR:
         _seed(OTHER_USER_ID, "v-conv",
               user_msg="contraseña super secreta xyz",
               assistant_text="otro secreto")
-        _seed(0, "my-conv", user_msg="hola", assistant_text="qué tal")
+        _seed(99, "my-conv", user_msg="hola", assistant_text="qué tal")
 
         body = client.get("/agent/conversations?q=secreta").json()
         ids = [c["conversation_id"] for c in body["conversations"]]
@@ -107,7 +108,7 @@ class TestGetMessagesIDOR:
 
     def test_own_conversation_visible_other_invisible(self, client):
         _seed(OTHER_USER_ID, "victim-id", "secret")
-        _seed(0, "mine", "hola")
+        _seed(99, "mine", "hola")
 
         ok = client.get("/agent/conversations/mine/messages")
         assert ok.status_code == 200
@@ -245,18 +246,18 @@ class TestSameConversationIdAcrossTenants:
         # Victim creates the conversation legitimately
         _seed(OTHER_USER_ID, "shared-id", "secreto de la victima")
 
-        # Simulate pre-fix orphan rows: attacker's tenant_id=0 rows
+        # Simulate pre-fix orphan rows: attacker's tenant_id=99 rows
         # exist under the same conversation_id.
         with transaction() as con:
             con.execute(
                 """INSERT INTO agent_messages
                    (tenant_id, conversation_id, ts, role, content, expires_at)
                    VALUES (?, ?, ?, 'user', ?, ?)""",
-                (0, "shared-id", "2026-05-22T08:00:00Z",
+                (99, "shared-id", "2026-05-22T08:00:00Z",
                  "attacker injected", "2099-01-01T00:00:00Z"),
             )
 
-        # Attacker (id=0) probing the conversation: meta row is owned by
+        # Attacker (id=99) probing the conversation: meta row is owned by
         # OTHER_USER_ID, so the 404 fires before any message read can
         # happen.
         resp = client.get("/agent/conversations/shared-id/messages")
@@ -274,7 +275,7 @@ class TestSameConversationIdAcrossTenants:
                 """INSERT INTO agent_messages
                    (tenant_id, conversation_id, ts, role, content, expires_at)
                    VALUES (?, ?, ?, 'user', ?, ?)""",
-                (0, "shared-id", "2026-05-22T08:00:00Z",
+                (99, "shared-id", "2026-05-22T08:00:00Z",
                  "match-this-keyword", "2099-01-01T00:00:00Z"),
             )
 

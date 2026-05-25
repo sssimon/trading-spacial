@@ -9,7 +9,11 @@ Locked test list (§4):
 - test_auto_close_via_check_position_stops
 - test_two_users_independent
 - test_cancel_does_not_touch_capital
-- test_legacy_tenant_null_skipped
+- test_legacy_tenant_null_skipped (DELETED post-#446 Task 6 — the
+  `_apply_close_to_capital` shim it tested was removed; the
+  "tenant_id=NULL → skip capital" semantic is covered at the operator
+  level by tests/operators/test_position_closure.py invariant 9
+  `test_legacy_null_tenant_position_close_skips_capital`)
 - test_first_close_auto_inits_capital
 - test_drawdown_undefined_when_peak_zero
 """
@@ -178,28 +182,15 @@ class TestCloseHookIntegration:
         # SL_HIT exit_price = sl_price (95.0) → pnl = (95-100)*10 = -50
         assert row["balance"] == pytest.approx(INITIAL_CAPITAL_DEFAULT - 50.0, abs=0.01)
 
-    def test_legacy_tenant_null_skipped(self, initialized_db):
-        """Position with tenant_id=NULL closes → no capital row created."""
-        from api.positions import close_position
-        from db.capital import db_get_capital
-        from db.positions import db_create_position
-
-        # tenant_id NOT passed → NULL on row
-        pos = db_create_position(
-            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 5.0,
-             "direction": "LONG"},
-        )
-        assert pos["tenant_id"] is None
-        # Close without tenant_id (matches scanner-style internal close)
-        from db.positions import db_close_position
-        from api.positions import _apply_close_to_capital
-        from db.transaction import transaction
-        closed = db_close_position(pos["id"], 110.0, "MANUAL")
-        with transaction() as con:
-            _apply_close_to_capital(closed, con=con)
-        # No capital row created for tenant 1 (or anyone)
-        with transaction() as con:
-            assert db_get_capital(con, 1) is None
+    # test_legacy_tenant_null_skipped — DELETED post-#446 Task 6.
+    # The `api.positions._apply_close_to_capital` shim it imported was
+    # removed when `close_position` migrated to PositionClosure. The
+    # "tenant_id=NULL → skip capital" semantic is now covered at the
+    # operator level by
+    # tests/operators/test_position_closure.py::test_legacy_null_tenant_position_close_skips_capital
+    # (invariant 9). Retaining this test here would duplicate the
+    # operator invariant and require re-implementing the shim purely to
+    # back the test.
 
     def test_cancel_does_not_touch_capital(self, initialized_db):
         """DELETE /positions/{id} (cancel) leaves capital untouched."""

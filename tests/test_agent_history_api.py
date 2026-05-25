@@ -19,7 +19,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """TestClient with fresh DB + bypass-auth. Mirror of the B.7 fixture
-    so the TestClient operates as the synthetic test user (id=0)."""
+    so the TestClient operates as the synthetic test user (id=99
+    post-#446 Task 6; was id=0 pre-fix)."""
     import btc_api
     db_path = str(tmp_path / "test.db")
     monkeypatch.setattr(btc_api, "DB_FILE", db_path)
@@ -81,7 +82,7 @@ class TestListConversations:
         assert body == {"conversations": [], "total": 0, "limit": 20, "offset": 0}
 
     def test_returns_own_conversations_only(self, client):
-        _seed(0, "conv-mine", "mi pregunta")
+        _seed(99, "conv-mine", "mi pregunta")
         resp = client.get("/agent/conversations")
         assert resp.status_code == 200
         body = resp.json()
@@ -92,9 +93,9 @@ class TestListConversations:
         assert body["conversations"][0]["message_count"] == 2
 
     def test_pinned_floats_to_top(self, client):
-        _seed(0, "old", "viejo", surface="dock")
+        _seed(99, "old", "viejo", surface="dock")
         time.sleep(0.01)
-        _seed(0, "new", "nuevo", surface="dock")
+        _seed(99, "new", "nuevo", surface="dock")
         # Pin the OLD one
         from db.transaction import transaction
         with transaction() as con:
@@ -108,8 +109,8 @@ class TestListConversations:
         assert ids == ["old", "new"]
 
     def test_excludes_expired_conversations(self, client):
-        _seed(0, "expired", "expirado")
-        _seed(0, "fresh", "vigente")
+        _seed(99, "expired", "expirado")
+        _seed(99, "fresh", "vigente")
         _expire_meta("expired")
 
         resp = client.get("/agent/conversations")
@@ -118,16 +119,16 @@ class TestListConversations:
         assert resp.json()["total"] == 1
 
     def test_filter_by_surface(self, client):
-        _seed(0, "from-dock", "del dock", surface="dock")
-        _seed(0, "from-detail", "del symbol detail", surface="symbol_detail")
+        _seed(99, "from-dock", "del dock", surface="dock")
+        _seed(99, "from-detail", "del symbol detail", surface="symbol_detail")
 
         resp = client.get("/agent/conversations?surface=symbol_detail")
         ids = [c["conversation_id"] for c in resp.json()["conversations"]]
         assert ids == ["from-detail"]
 
     def test_search_q_matches_title(self, client):
-        _seed(0, "a", "que opinas de PENDLE?")
-        _seed(0, "b", "que tal BTC?")
+        _seed(99, "a", "que opinas de PENDLE?")
+        _seed(99, "b", "que tal BTC?")
 
         resp = client.get("/agent/conversations?q=PENDLE")
         ids = [c["conversation_id"] for c in resp.json()["conversations"]]
@@ -136,8 +137,8 @@ class TestListConversations:
     def test_search_q_matches_message_content(self, client):
         """The user message includes 'BTC' in its title (and content), but
         the SEARCH key 'ZONA LRC' lives only in the assistant body."""
-        _seed(0, "a", "que opinas?", assistant_text="BTC está en ZONA LRC baja")
-        _seed(0, "b", "otra cosa", assistant_text="respuesta cualquiera")
+        _seed(99, "a", "que opinas?", assistant_text="BTC está en ZONA LRC baja")
+        _seed(99, "b", "otra cosa", assistant_text="respuesta cualquiera")
 
         resp = client.get("/agent/conversations?q=ZONA LRC")
         ids = [c["conversation_id"] for c in resp.json()["conversations"]]
@@ -145,8 +146,8 @@ class TestListConversations:
 
     def test_search_escapes_like_wildcards(self, client):
         """A user searching for '%' must match literal '%', not 'anything'."""
-        _seed(0, "a", "100% rentable")
-        _seed(0, "b", "perdida total")
+        _seed(99, "a", "100% rentable")
+        _seed(99, "b", "perdida total")
 
         resp = client.get("/agent/conversations?q=%25")  # URL-encoded %
         ids = [c["conversation_id"] for c in resp.json()["conversations"]]
@@ -154,7 +155,7 @@ class TestListConversations:
 
     def test_pagination_limit_offset(self, client):
         for i in range(5):
-            _seed(0, f"c{i}", f"msg {i}")
+            _seed(99, f"c{i}", f"msg {i}")
             time.sleep(0.005)
         resp = client.get("/agent/conversations?limit=2&offset=1")
         body = resp.json()
@@ -175,9 +176,9 @@ class TestListConversations:
 
 class TestGetMessages:
     def test_returns_ordered_transcript(self, client):
-        _seed(0, "conv-X", "primera", assistant_text="A1")
+        _seed(99, "conv-X", "primera", assistant_text="A1")
         time.sleep(0.01)
-        _seed(0, "conv-X", "segunda", assistant_text="A2")
+        _seed(99, "conv-X", "segunda", assistant_text="A2")
 
         resp = client.get("/agent/conversations/conv-X/messages")
         assert resp.status_code == 200
@@ -191,7 +192,7 @@ class TestGetMessages:
 
     def test_includes_reasoning_and_chips(self, client):
         _seed(
-            0, "conv-Y", "usa tools",
+            99, "conv-Y", "usa tools",
             assistant_text="respuesta",
             reasoning="<think>razonamiento</think>",
             tool_chips=[{"tool": "get_positions", "status": "ok"}],
@@ -209,7 +210,7 @@ class TestGetMessages:
         review issue #6."""
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
-            0, "conv-P1", "cerra mi BTC",
+            99, "conv-P1", "cerra mi BTC",
             assistant_text="propongo cerrar",
             proposals=[{
                 "proposal_id": "prop-p1",
@@ -228,7 +229,7 @@ class TestGetMessages:
     def test_proposal_state_expired_when_ttl_passed(self, client):
         past = "2020-01-01T00:00:00+00:00"
         _seed(
-            0, "conv-P2", "cerra ya",
+            99, "conv-P2", "cerra ya",
             proposals=[{
                 "proposal_id": "prop-p2",
                 "action":      "close_position",
@@ -246,7 +247,7 @@ class TestGetMessages:
         from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
-            0, "conv-Perr", "cerra",
+            99, "conv-Perr", "cerra",
             proposals=[{
                 "proposal_id": "prop-perr",
                 "action":      "close_position",
@@ -261,7 +262,7 @@ class TestGetMessages:
                    (tenant_id, conversation_id, ts, action, args_json,
                     idempotency_key, result, http_status, expires_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (0, "conv-Perr", "2026-05-22T10:00:00Z", "close_position",
+                (99, "conv-Perr", "2026-05-22T10:00:00Z", "close_position",
                  "{}", "prop-perr", "error", 500, future),
             )
 
@@ -274,7 +275,7 @@ class TestGetMessages:
         from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
-            0, "conv-Pconf", "cerra",
+            99, "conv-Pconf", "cerra",
             proposals=[{
                 "proposal_id": "prop-pconf",
                 "action":      "close_position",
@@ -289,7 +290,7 @@ class TestGetMessages:
                    (tenant_id, conversation_id, ts, action, args_json,
                     idempotency_key, result, http_status, expires_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (0, "conv-Pconf", "2026-05-22T10:00:00Z", "close_position",
+                (99, "conv-Pconf", "2026-05-22T10:00:00Z", "close_position",
                  "{}", "prop-pconf", "conflict", 409, future),
             )
 
@@ -305,7 +306,7 @@ class TestGetMessages:
         result — defense in depth.
 
         Simulate: tenant 999 has a side_effect row for 'prop-shared'
-        marked 'ok'. Tenant 0 (TestClient) has a message with the
+        marked 'ok'. Tenant 99 (TestClient) has a message with the
         same proposal_id but no side_effect of their own. The state
         derivation MUST return 'stale' (no row found for this tenant)
         — NOT 'ok' (which would leak the other tenant's outcome).
@@ -313,7 +314,7 @@ class TestGetMessages:
         from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
-            0, "conv-Pscope", "x",
+            99, "conv-Pscope", "x",
             proposals=[{
                 "proposal_id": "prop-shared",
                 "action":      "close_position",
@@ -351,7 +352,7 @@ class TestGetMessages:
         empty chips. PR #434 review issue #2."""
         import logging
         from db.transaction import transaction
-        _seed(0, "conv-Mal", "hola", assistant_text="ok")
+        _seed(99, "conv-Mal", "hola", assistant_text="ok")
         # Corrupt the assistant row's tool_chips_json directly
         with transaction() as con:
             con.execute(
@@ -372,7 +373,7 @@ class TestGetMessages:
     def test_malformed_proposals_json_falls_back_gracefully(self, client, caplog):
         import logging
         from db.transaction import transaction
-        _seed(0, "conv-MalP", "hola", assistant_text="ok")
+        _seed(99, "conv-MalP", "hola", assistant_text="ok")
         with transaction() as con:
             con.execute(
                 "UPDATE agent_messages SET proposals_json = ? "
@@ -395,7 +396,7 @@ class TestGetMessages:
         from db.transaction import transaction
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         _seed(
-            0, "conv-P3", "cerra",
+            99, "conv-P3", "cerra",
             proposals=[{
                 "proposal_id": "prop-p3",
                 "action":      "close_position",
@@ -411,7 +412,7 @@ class TestGetMessages:
                    (tenant_id, conversation_id, ts, action, args_json,
                     idempotency_key, result, http_status, expires_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (0, "conv-P3", "2026-05-22T10:00:00Z", "close_position",
+                (99, "conv-P3", "2026-05-22T10:00:00Z", "close_position",
                  "{}", "prop-p3", "ok", 200, future),
             )
 
@@ -424,7 +425,7 @@ class TestGetMessages:
         assert resp.status_code == 404
 
     def test_404_for_expired_conversation(self, client):
-        _seed(0, "conv-expired", "viejo")
+        _seed(99, "conv-expired", "viejo")
         _expire_meta("conv-expired")
         resp = client.get("/agent/conversations/conv-expired/messages")
         assert resp.status_code == 404
@@ -443,7 +444,7 @@ class TestGetMessages:
 
 class TestDeleteConversation:
     def test_soft_delete_removes_from_list_and_messages(self, client):
-        _seed(0, "conv-D1", "borrame")
+        _seed(99, "conv-D1", "borrame")
         # Sanity: visible before delete
         assert len(client.get("/agent/conversations").json()["conversations"]) == 1
 
@@ -467,7 +468,7 @@ class TestDeleteConversation:
         assert resp.status_code == 404
 
     def test_404_for_already_deleted_conversation(self, client):
-        _seed(0, "conv-D2", "hola")
+        _seed(99, "conv-D2", "hola")
         client.delete("/agent/conversations/conv-D2",
                       headers={"X-API-Key": "test-key"})
         # Second delete on the same conversation
@@ -483,7 +484,7 @@ class TestDeleteConversation:
 
 class TestTogglePin:
     def test_pin_then_unpin(self, client):
-        _seed(0, "conv-PN1", "fijame")
+        _seed(99, "conv-PN1", "fijame")
 
         # Pin
         resp1 = client.post(
@@ -513,7 +514,7 @@ class TestTogglePin:
         assert resp.status_code == 404
 
     def test_404_on_expired(self, client):
-        _seed(0, "conv-PN2", "viejo")
+        _seed(99, "conv-PN2", "viejo")
         _expire_meta("conv-PN2")
         resp = client.post(
             "/agent/conversations/conv-PN2/pin",

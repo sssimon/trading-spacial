@@ -3,9 +3,11 @@
 Pre-reg: docs/superpowers/specs/es/2026-05-16-multi-tenant-threat-model.md
 
 Strategy:
-- TestClient operates as synthetic test user (id=0 per auth.middleware._synthetic_test_user)
+- TestClient operates as synthetic test user (id=99 per auth.middleware._synthetic_test_user;
+  updated from 0 → 99 by #446 Task 6 fix — PositionClosure USER mode requires
+  caller_tenant_id > 0 to match production semantics)
 - Cross-tenant data is seeded directly via DB (user_id=999 = "other user")
-- Verify TestClient (acting as user 0) cannot see / mutate user 999's data
+- Verify TestClient (acting as user 99) cannot see / mutate user 999's data
 - Verify tampering vectors (query/header/body manipulation) are silently dropped
 
 Coverage:
@@ -25,7 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-OTHER_USER_ID = 999  # synthetic "other user" — not the TestClient's identity (0)
+OTHER_USER_ID = 999  # synthetic "other user" — not the TestClient's identity (99)
 
 
 @pytest.fixture
@@ -59,11 +61,11 @@ def _seed_other_user_position(symbol: str = "BTCUSDT") -> int:
 
 
 def _seed_own_position(symbol: str = "ETHUSDT") -> int:
-    """Insert position owned by TestClient (user_id=0)."""
+    """Insert position owned by TestClient (user_id=99)."""
     from db.positions import db_create_position
     pos = db_create_position(
         {"symbol": symbol, "entry_price": 2300, "size_usd": 300, "direction": "LONG"},
-        tenant_id=0,
+        tenant_id=99,
     )
     return pos["id"]
 
@@ -137,9 +139,9 @@ class TestPositionsIDOR:
             headers={"X-API-Key": "test-key"},
         )
         assert resp.status_code == 200
-        # Verify the position was created under user 0, not 999
+        # Verify the position was created under user 99, not 999
         from db.positions import db_get_positions
-        own_positions = db_get_positions(tenant_id=0)
+        own_positions = db_get_positions(tenant_id=99)
         other_positions = db_get_positions(tenant_id=OTHER_USER_ID)
         assert len(own_positions) == 1
         assert len(other_positions) == 0
@@ -174,7 +176,7 @@ class TestNotificationsIDOR:
 
     def test_list_excludes_other_user_notifications(self, client):
         self._seed_notif(OTHER_USER_ID, "other:1")
-        self._seed_notif(0, "own:1")
+        self._seed_notif(99, "own:1")
         # GET /notifications uses verify_api_key — pass header
         resp = client.get("/notifications", headers={"X-API-Key": "test-key"})
         assert resp.status_code == 200
@@ -194,7 +196,7 @@ class TestNotificationsIDOR:
         # Seed unread for both
         self._seed_notif(OTHER_USER_ID, "other:1")
         self._seed_notif(OTHER_USER_ID, "other:2")
-        own_id = self._seed_notif(0, "own:1")
+        own_id = self._seed_notif(99, "own:1")
 
         resp = client.post(
             "/notifications/read-all",
@@ -234,7 +236,7 @@ class TestSignalsPerformanceIDOR:
         for i in range(10):
             self._seed_signal_outcome(OTHER_USER_ID, score=5, price_24h_higher=True)
         # Own user has 1 losing outcome
-        self._seed_signal_outcome(0, score=3, price_24h_higher=False)
+        self._seed_signal_outcome(99, score=3, price_24h_higher=False)
 
         resp = client.get("/signals/performance")
         assert resp.status_code == 200
@@ -256,7 +258,7 @@ class TestCapitalIDOR:
         with transaction() as con:
             db_upsert_capital(con, OTHER_USER_ID, balance=999999.0)
         resp = client.get("/capital")
-        assert resp.status_code == 404  # current user (id=0) has no capital
+        assert resp.status_code == 404  # current user (id=99) has no capital
 
     def test_put_does_not_overwrite_other_user_capital(self, client):
         from db.capital import db_upsert_capital, db_get_capital

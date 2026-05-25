@@ -249,9 +249,14 @@ def test_check_position_stops_time_limit_notifier_event_payload(
     })
 
     captured = []
+    # Mock signature must accept tenant_id kwarg — PositionClosure
+    # (post-#446 Task 6) calls notify(event, cfg, tenant_id=...).
+    # Patch operator's notify reference (it's `from notifier import
+    # notify` at module-load, so patching `notifier.notify` won't
+    # intercept the operator's local binding).
     monkeypatch.setattr(
-        "notifier.notify",
-        lambda event, cfg: captured.append(event),
+        "operators.position_closure.notify",
+        lambda event, cfg, *, tenant_id=None: captured.append(event),
     )
 
     entry_dt = datetime.now(timezone.utc) - timedelta(hours=20)

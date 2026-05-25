@@ -163,12 +163,17 @@ def _hydrate_user_from_db(user_id: int) -> User | None:
 def _synthetic_test_user(role: str) -> User:
     """Return a fake User used only when AUTH_TEST_BYPASS_ROLE is set.
 
-    id=0 by convention (no real user has id=0 since AUTOINCREMENT starts
-    at 1). Email is unique-ish so audit logs don't collide if tests
+    id=99 by convention. Originally id=0 (chosen because AUTOINCREMENT
+    starts at 1), but #446 Task 6 surfaced that PositionClosure's USER
+    mode enforces `caller_tenant_id > 0` to match production semantics
+    (real tenants start at 1). Using id=99 keeps the test identity
+    distinct from production tenant id=1 (Samuel) and from common
+    cross-tenant fixtures like OTHER_USER_ID=999 in the IDOR suite.
+    Email is unique-ish so audit logs don't collide if tests
     deliberately log events.
     """
     return User(
-        id=0,
+        id=99,
         email=f"test-{role}@bypass.local",
         role=role,
         is_active=True,
