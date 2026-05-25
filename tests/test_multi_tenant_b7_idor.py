@@ -176,11 +176,14 @@ class TestPositionsIDOR:
 class TestNotificationsIDOR:
     def _seed_notif(self, tenant_id: int, event_key: str = "test:1"):
         from notifier._storage import record_delivery
-        return record_delivery(
-            event_type="signal", event_key=event_key, priority="info",
-            payload={"x": 1}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=tenant_id,
-        )
+        from db.transaction import transaction
+        with transaction() as con:
+            return record_delivery(
+                con,
+                event_type="signal", event_key=event_key, priority="info",
+                payload={"x": 1}, channels_sent=["telegram"], delivery_status="ok",
+                tenant_id=tenant_id,
+            )
 
     def test_list_excludes_other_user_notifications(self, client):
         self._seed_notif(OTHER_USER_ID, "other:1")
@@ -215,7 +218,9 @@ class TestNotificationsIDOR:
 
         # Verify other user's notifications still unread
         from notifier._storage import list_unread
-        other_still_unread = list_unread(tenant_id=OTHER_USER_ID)
+        from db.transaction import transaction
+        with transaction() as con:
+            other_still_unread = list_unread(con, tenant_id=OTHER_USER_ID)
         assert len(other_still_unread) == 2
 
 

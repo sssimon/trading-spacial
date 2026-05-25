@@ -148,7 +148,10 @@ def push_telegram_direct(rep: dict, cfg: dict):
     # to the legacy broadcast so the signal isn't silently dropped during
     # the bootstrap window.
     from notifier.dispatch_per_user import dispatch_signal_to_users, _list_active_users
-    if _list_active_users():
+    from db.transaction import transaction as _tx_for_users
+    with _tx_for_users() as _users_con:
+        _has_users = bool(_list_active_users(_users_con))
+    if _has_users:
         per_user = dispatch_signal_to_users(event, cfg)
         # "ok" = at least one user received via at least one channel.
         return any(

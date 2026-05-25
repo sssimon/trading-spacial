@@ -25,7 +25,6 @@ from typing import Any, Optional
 import jwt
 
 from auth.models import RefreshTokenRecord, User
-from db.transaction import _tx_or_use
 
 
 # ─── Configuration helpers ──────────────────────────────────────────────────
@@ -110,6 +109,7 @@ def _hash_refresh(token: str) -> str:
 
 
 def create_refresh_token(
+    con: sqlite3.Connection,
     user: User,
     *,
     user_agent: Optional[str] = None,
@@ -117,7 +117,6 @@ def create_refresh_token(
     family_id: Optional[str] = None,
     parent_hash: Optional[str] = None,
     now: Optional[datetime] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> str:
     """Mint a new refresh token, persist its hash, return the plaintext.
 
@@ -132,46 +131,43 @@ def create_refresh_token(
     fid = family_id or uuid.uuid4().hex
     expires = now + timedelta(days=_refresh_days())
 
-    with _tx_or_use(con) as con:
-        con.execute(
-            """
-            INSERT INTO refresh_tokens
-                (token_hash, user_id, family_id, parent_hash,
-                 expires_at, revoked_at, created_at, user_agent, ip)
-            VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
-            """,
-            (
-                token_hash,
-                user.id,
-                fid,
-                parent_hash,
-                expires.isoformat(),
-                now.isoformat(),
-                user_agent,
-                ip,
-            ),
-        )
+    con.execute(
+        """
+        INSERT INTO refresh_tokens
+            (token_hash, user_id, family_id, parent_hash,
+             expires_at, revoked_at, created_at, user_agent, ip)
+        VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        """,
+        (
+            token_hash,
+            user.id,
+            fid,
+            parent_hash,
+            expires.isoformat(),
+            now.isoformat(),
+            user_agent,
+            ip,
+        ),
+    )
     return token
 
 
 def lookup_refresh(
+    con: sqlite3.Connection,
     token: str,
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> Optional[RefreshTokenRecord]:
     """Find a refresh token row by hash. Returns None if not found."""
     if not token:
         return None
     h = _hash_refresh(token)
-    with _tx_or_use(con) as con:
-        row = con.execute(
-            """
-            SELECT id, token_hash, user_id, family_id, parent_hash,
-                   expires_at, revoked_at, created_at, user_agent, ip
-            FROM refresh_tokens WHERE token_hash = ?
-            """,
-            (h,),
-        ).fetchone()
+    row = con.execute(
+        """
+        SELECT id, token_hash, user_id, family_id, parent_hash,
+               expires_at, revoked_at, created_at, user_agent, ip
+        FROM refresh_tokens WHERE token_hash = ?
+        """,
+        (h,),
+    ).fetchone()
     if not row:
         return None
     return RefreshTokenRecord(
@@ -189,27 +185,26 @@ def lookup_refresh(
 
 
 def revoke_refresh(
+    con: sqlite3.Connection,
     token_hash: str,
     *,
     now: Optional[datetime] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> None:
     """Mark one refresh token as revoked (does not DELETE — audit trail)."""
     if now is None:
         now = datetime.now(timezone.utc)
-    with _tx_or_use(con) as con:
-        con.execute(
-            "UPDATE refresh_tokens SET revoked_at = ? "
-            "WHERE token_hash = ? AND revoked_at IS NULL",
-            (now.isoformat(), token_hash),
-        )
+    con.execute(
+        "UPDATE refresh_tokens SET revoked_at = ? "
+        "WHERE token_hash = ? AND revoked_at IS NULL",
+        (now.isoformat(), token_hash),
+    )
 
 
 def revoke_family(
+    con: sqlite3.Connection,
     family_id: str,
     *,
     now: Optional[datetime] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> int:
     """Mark every still-active token in this family as revoked.
 
@@ -218,20 +213,19 @@ def revoke_family(
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    with _tx_or_use(con) as con:
-        cur = con.execute(
-            "UPDATE refresh_tokens SET revoked_at = ? "
-            "WHERE family_id = ? AND revoked_at IS NULL",
-            (now.isoformat(), family_id),
-        )
-        return cur.rowcount or 0
+    cur = con.execute(
+        "UPDATE refresh_tokens SET revoked_at = ? "
+        "WHERE family_id = ? AND revoked_at IS NULL",
+        (now.isoformat(), family_id),
+    )
+    return cur.rowcount or 0
 
 
 def revoke_all_for_user(
+    con: sqlite3.Connection,
     user_id: int,
     *,
     now: Optional[datetime] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> int:
     """Revoke every active refresh token belonging to this user.
 
@@ -239,10 +233,9 @@ def revoke_all_for_user(
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    with _tx_or_use(con) as con:
-        cur = con.execute(
-            "UPDATE refresh_tokens SET revoked_at = ? "
-            "WHERE user_id = ? AND revoked_at IS NULL",
-            (now.isoformat(), user_id),
-        )
-        return cur.rowcount or 0
+    cur = con.execute(
+        "UPDATE refresh_tokens SET revoked_at = ? "
+        "WHERE user_id = ? AND revoked_at IS NULL",
+        (now.isoformat(), user_id),
+    )
+    return cur.rowcount or 0

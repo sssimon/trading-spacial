@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from db.transaction import transaction
 from notifier import dedupe, ratelimit
 from notifier._storage import record_delivery
 from notifier._templates import render
@@ -91,9 +92,13 @@ def notify(
         if tenant_id is not None else event.dedupe_key
     )
     window_seconds = _resolve_dedupe_window(event, cfg)
-    if not dedupe.should_send(event.event_type, dedupe_key,
-                                window_seconds=window_seconds,
-                                priority=event.priority):
+    with transaction() as con:
+        _should_send = dedupe.should_send(
+            con, event.event_type, dedupe_key,
+            window_seconds=window_seconds,
+            priority=event.priority,
+        )
+    if not _should_send:
         log.debug("notify deduped: %s %s", event.event_type, dedupe_key)
         return []
 
@@ -160,16 +165,18 @@ def notify(
         delivery_status = "partial"
 
     try:
-        record_delivery(
-            event_type=event.event_type,
-            event_key=event.dedupe_key,
-            priority=event.priority,
-            payload=event.to_dict(),
-            channels_sent=channels_sent or ["none"],
-            delivery_status=delivery_status,
-            error_log=any_error,
-            tenant_id=tenant_id,  # B.4: NULL for broadcasts, int for per-user fan-out
-        )
+        with transaction() as con:
+            record_delivery(
+                con,
+                event_type=event.event_type,
+                event_key=event.dedupe_key,
+                priority=event.priority,
+                payload=event.to_dict(),
+                channels_sent=channels_sent or ["none"],
+                delivery_status=delivery_status,
+                error_log=any_error,
+                tenant_id=tenant_id,  # B.4: NULL for broadcasts, int for per-user fan-out
+            )
     except Exception:
         log.exception("notifier failed to persist delivery record")
 

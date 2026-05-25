@@ -357,7 +357,8 @@ def test_11_reset_password_cli_revokes_all_refreshes(tmp_path, monkeypatch):
             "WHERE id = ?",
             (new_hash, datetime.now(timezone.utc).isoformat(), uid),
         )
-    revoked = revoke_all_for_user(uid)
+    with transaction() as con:
+        revoked = revoke_all_for_user(con, uid)
     assert revoked == 2
 
     # Verify in DB: hash changed, both refreshes revoked_at IS NOT NULL.

@@ -40,48 +40,39 @@ def _snapshot_prices() -> dict[str, float]:
     return dict(_PRICE_CACHE)
 
 
-def _load_closed_trades(*, tenant_id: int, conn=None) -> list[dict[str, Any]]:
+def _load_closed_trades(conn, *, tenant_id: int) -> list[dict[str, Any]]:
     """Load closed positions for `tenant_id` from DB for portfolio equity computation.
 
     Per the multi-tenant policy (epic B #253), `tenant_id` is required:
     background processes that don't have a user context must iterate via
     `db.capital.db_list_active_tenant_ids()` and call this loader once per
     tenant. Aggregating across tenants implicitly is not allowed.
-
-    Per Task 8.5: optional `conn` for caller-controlled transaction composition.
     """
-    from db.transaction import _tx_or_use
-    with _tx_or_use(conn) as conn:
-        rows = conn.execute(
-            """SELECT symbol, exit_ts, pnl_usd
-               FROM positions
-               WHERE status = 'closed' AND exit_ts IS NOT NULL
-                 AND tenant_id = ?
-               ORDER BY exit_ts""",
-            (tenant_id,),
-        ).fetchall()
+    rows = conn.execute(
+        """SELECT symbol, exit_ts, pnl_usd
+           FROM positions
+           WHERE status = 'closed' AND exit_ts IS NOT NULL
+             AND tenant_id = ?
+           ORDER BY exit_ts""",
+        (tenant_id,),
+    ).fetchall()
     return [
         {"symbol": r[0], "exit_ts": r[1], "pnl_usd": r[2] or 0.0}
         for r in rows
     ]
 
 
-def _load_open_positions(*, tenant_id: int, conn=None) -> list[dict[str, Any]]:
+def _load_open_positions(conn, *, tenant_id: int) -> list[dict[str, Any]]:
     """Load open positions for `tenant_id` from DB for MTM.
 
     See `_load_closed_trades` for the multi-tenant policy rationale.
-
-    Per Task 8.5: optional `conn` for caller-controlled transaction composition
-    (e.g. get_dashboard_state).
     """
-    from db.transaction import _tx_or_use
-    with _tx_or_use(conn) as conn:
-        rows = conn.execute(
-            """SELECT symbol, entry_price, qty, direction
-               FROM positions
-               WHERE status = 'open' AND tenant_id = ?""",
-            (tenant_id,),
-        ).fetchall()
+    rows = conn.execute(
+        """SELECT symbol, entry_price, qty, direction
+           FROM positions
+           WHERE status = 'open' AND tenant_id = ?""",
+        (tenant_id,),
+    ).fetchall()
     return [
         {
             "symbol": r[0],
@@ -442,8 +433,10 @@ def emit_shadow_decision(
         else:
             capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
 
-        closed = _load_closed_trades(tenant_id=tenant_id)
-        opens = _load_open_positions(tenant_id=tenant_id)
+        from db.transaction import transaction as _tx_for_loads
+        with _tx_for_loads() as _loads_con:
+            closed = _load_closed_trades(_loads_con, tenant_id=tenant_id)
+            opens = _load_open_positions(_loads_con, tenant_id=tenant_id)
         prices = _snapshot_prices()
         if now_price_by_symbol:
             prices.update(now_price_by_symbol)
@@ -466,16 +459,20 @@ def emit_shadow_decision(
         # B6: record portfolio-tier transitions for the dashboard
         try:
             from health import recent_portfolio_transitions, record_portfolio_transition
-            recent = recent_portfolio_transitions(limit=1)
+            from db.transaction import transaction as _tx_for_pt
+            with _tx_for_pt() as _pt_con:
+                recent = recent_portfolio_transitions(_pt_con, limit=1)
             prev_tier = recent[0]["to_tier"] if recent else "NORMAL"
             if prev_tier != portfolio["tier"]:
-                record_portfolio_transition(
-                    from_tier=prev_tier,
-                    to_tier=portfolio["tier"],
-                    reason=f"shadow_eval_dd_{portfolio_dd:.4f}",
-                    dd_pct=float(portfolio_dd),
-                    concurrent=int(concurrent),
-                )
+                with _tx_for_pt() as _pt_con:
+                    record_portfolio_transition(
+                        _pt_con,
+                        from_tier=prev_tier,
+                        to_tier=portfolio["tier"],
+                        reason=f"shadow_eval_dd_{portfolio_dd:.4f}",
+                        dd_pct=float(portfolio_dd),
+                        concurrent=int(concurrent),
+                    )
         except Exception:
             log.warning("record_portfolio_transition (shadow) failed", exc_info=True)
 

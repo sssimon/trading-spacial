@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from db.transaction import transaction
+
 
 @pytest.fixture
 def tmp_db_and_reset(tmp_path, monkeypatch):
@@ -49,7 +51,8 @@ def test_notify_signal_sends_to_telegram_and_records(tmp_db_and_reset, ok_telegr
     assert mock_post.call_count == 1
 
     from notifier._storage import list_unread
-    rows = list_unread(limit=5)
+    with transaction() as con:
+        rows = list_unread(con, limit=5)
     assert len(rows) == 1
     assert rows[0]["event_type"] == "signal"
 
@@ -113,7 +116,8 @@ def test_notify_render_failure_produces_failed_receipt(tmp_db_and_reset):
     assert "boom" in receipts[0].error
 
     from notifier._storage import list_unread
-    rows = list_unread(limit=5)
+    with transaction() as con:
+        rows = list_unread(con, limit=5)
     assert len(rows) == 1
     assert rows[0]["delivery_status"] == "failed"
 

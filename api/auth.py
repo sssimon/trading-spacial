@@ -344,7 +344,8 @@ def login(request: Request, response: Response, body: LoginRequest):
     _update_last_login(user.id)
 
     access_token = create_access_token(user)
-    refresh_token = create_refresh_token(user, user_agent=ua, ip=ip)
+    with transaction() as con:
+        refresh_token = create_refresh_token(con, user, user_agent=ua, ip=ip)
     csrf_token = secrets.token_urlsafe(32)
 
     _set_auth_cookies(
@@ -374,7 +375,8 @@ def refresh(request: Request, response: Response):
             detail="refresh token missing",
         )
 
-    record = lookup_refresh(presented)
+    with transaction() as con:
+        record = lookup_refresh(con, presented)
     if record is None:
         # Token has never existed (or is malformed). Either bot or stale cookie.
         log_auth_event(
@@ -407,7 +409,8 @@ def refresh(request: Request, response: Response):
     if record.is_revoked():
         # Token theft signal — RFC 6819 §5.2.2.3. Revoke entire family so any
         # legitimate device that's still active also has to re-login.
-        revoked_count = revoke_family(record.family_id, now=now)
+        with transaction() as con:
+            revoked_count = revoke_family(con, record.family_id, now=now)
         log_auth_event(
             event_type="refresh_reuse_detected",
             success=False,
@@ -427,7 +430,8 @@ def refresh(request: Request, response: Response):
     # ── Rotate ───────────────────────────────────────────────────────────
     user = _hydrate_user(record.user_id)
     if user is None or not user.is_active:
-        revoke_refresh(record.token_hash, now=now)
+        with transaction() as con:
+            revoke_refresh(con, record.token_hash, now=now)
         log_auth_event(
             event_type="refresh",
             success=False,
@@ -441,15 +445,17 @@ def refresh(request: Request, response: Response):
             detail="invalid refresh token",
         )
 
-    revoke_refresh(record.token_hash, now=now)
-    new_refresh = create_refresh_token(
-        user,
-        user_agent=ua,
-        ip=ip,
-        family_id=record.family_id,
-        parent_hash=record.token_hash,
-        now=now,
-    )
+    with transaction() as con:
+        revoke_refresh(con, record.token_hash, now=now)
+        new_refresh = create_refresh_token(
+            con,
+            user,
+            user_agent=ua,
+            ip=ip,
+            family_id=record.family_id,
+            parent_hash=record.token_hash,
+            now=now,
+        )
     new_access = create_access_token(user, now=now)
     new_csrf = secrets.token_urlsafe(32)
 
@@ -482,11 +488,12 @@ def logout(request: Request, response: Response):
     user_id = None
 
     if presented:
-        record = lookup_refresh(presented)
-        if record is not None:
-            user_id = record.user_id
-            if not record.is_revoked():
-                revoke_refresh(record.token_hash)
+        with transaction() as con:
+            record = lookup_refresh(con, presented)
+            if record is not None:
+                user_id = record.user_id
+                if not record.is_revoked():
+                    revoke_refresh(con, record.token_hash)
 
     _clear_auth_cookies(response)
     log_auth_event(
@@ -557,7 +564,8 @@ def change_password(
     # Revoke ALL refresh tokens for this user — forces re-login on every
     # device they have. Spec compliance: a password change should invalidate
     # other sessions.
-    revoke_all_for_user(user.id)
+    with transaction() as con:
+        revoke_all_for_user(con, user.id)
     _clear_auth_cookies(response)
 
     log_auth_event(

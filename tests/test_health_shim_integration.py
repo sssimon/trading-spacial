@@ -4,6 +4,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from db.transaction import transaction
+
 
 @pytest.fixture
 def tmp_db(tmp_path, monkeypatch):
@@ -94,7 +96,8 @@ def test_shim_propagates_lrc_pct_from_rep_to_signal_event(tmp_db):
         btc_api.push_telegram_direct(rep, _cfg())
 
     # The notifier persists the SignalEvent payload to notifications_sent.
-    rows = storage.list_unread(tenant_id=None)
+    with transaction() as con:
+        rows = storage.list_unread(con, tenant_id=None)
     signal_rows = [r for r in rows if r["event_type"] == "signal"]
     assert signal_rows, "no signal notification persisted"
     payload = json.loads(signal_rows[0]["payload_json"])
@@ -123,7 +126,8 @@ def test_shim_handles_missing_lrc_gracefully(tmp_db):
     with patch("notifier.channels.telegram.requests.post", return_value=fake_resp):
         btc_api.push_telegram_direct(rep, _cfg())
 
-    rows = storage.list_unread(tenant_id=None)
+    with transaction() as con:
+        rows = storage.list_unread(con, tenant_id=None)
     signal_rows = [r for r in rows if r["event_type"] == "signal"]
     assert signal_rows, "no signal notification persisted"
     payload = json.loads(signal_rows[0]["payload_json"])

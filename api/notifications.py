@@ -52,7 +52,8 @@ def get_notifications(
         cols = ("id", "event_type", "event_key", "priority", "payload_json",
                 "channels_sent", "delivery_status", "sent_at", "read_at", "error_log")
         return {"notifications": [dict(zip(cols, r)) for r in rows]}
-    return {"notifications": list_unread(limit=limit, tenant_id=tenant_id)}
+    with transaction() as con:
+        return {"notifications": list_unread(con, limit=limit, tenant_id=tenant_id)}
 
 
 @router.post("/{notif_id}/read", dependencies=[Depends(verify_api_key)])
@@ -66,7 +67,8 @@ def post_notification_read(
     protection — same response as 'not found').
     """
     from notifier._storage import mark_read
-    updated = mark_read(notif_id, tenant_id=tenant_id)
+    with transaction() as con:
+        updated = mark_read(con, notif_id, tenant_id=tenant_id)
     if not updated:
         raise HTTPException(
             status_code=404, detail=f"Notification #{notif_id} not found",
@@ -83,5 +85,6 @@ def post_notifications_read_all(
     B.5 #258: scope-limited to tenant_id — affects only current user's queue.
     """
     from notifier._storage import mark_all_read
-    n = mark_all_read(tenant_id=tenant_id)
+    with transaction() as con:
+        n = mark_all_read(con, tenant_id=tenant_id)
     return {"ok": True, "marked": n}

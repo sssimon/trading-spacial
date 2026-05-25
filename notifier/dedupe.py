@@ -13,18 +13,14 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-
-from db.transaction import _tx_or_use
 
 
 def should_send(
+    con: sqlite3.Connection,
     event_type: str,
     event_key: str,
     window_seconds: int,
     priority: str = "info",
-    *,
-    con: Optional[sqlite3.Connection] = None,
 ) -> bool:
     """Return True if this event should be sent (no recent duplicate found).
 
@@ -42,11 +38,10 @@ def should_send(
         return True
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
-    with _tx_or_use(con) as conn:
-        row = conn.execute(
-            """SELECT 1 FROM notifications_sent
-               WHERE event_type = ? AND event_key = ? AND sent_at >= ?
-               LIMIT 1""",
-            (event_type, event_key, cutoff.isoformat()),
-        ).fetchone()
+    row = con.execute(
+        """SELECT 1 FROM notifications_sent
+           WHERE event_type = ? AND event_key = ? AND sent_at >= ?
+           LIMIT 1""",
+        (event_type, event_key, cutoff.isoformat()),
+    ).fetchone()
     return row is None

@@ -29,10 +29,7 @@ _DEFAULT_MIN_SCORE = 4
 _DEFAULT_SYMBOL_FILTER: list[str] | None = None  # None = all symbols allowed
 
 
-def _list_active_users(
-    *,
-    con: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
+def _list_active_users(con: sqlite3.Connection) -> list[dict]:
     """Return active users (id + email) for fan-out.
 
     Pre-bootstrap case: if the `users` table doesn't exist yet (auth schema
@@ -40,10 +37,9 @@ def _list_active_users(
     so callers fall back to the legacy broadcast path.
     """
     try:
-        with _tx_or_use(con) as con:
-            rows = con.execute(
-                "SELECT id, email FROM users WHERE is_active = 1 ORDER BY id"
-            ).fetchall()
+        rows = con.execute(
+            "SELECT id, email FROM users WHERE is_active = 1 ORDER BY id"
+        ).fetchall()
     except sqlite3.OperationalError as e:
         if "no such table" in str(e).lower():
             return []
@@ -83,7 +79,8 @@ def dispatch_signal_to_users(
     and `db_get_user_preferences`. The downstream `notify()` call still owns
     its own transactions (file/network I/O — must not extend the DB lock).
     """
-    users = _list_active_users(con=con)
+    with _tx_or_use(con) as _users_con:
+        users = _list_active_users(_users_con)
     if not users:
         log.debug("dispatch_signal_to_users: no active users — broadcast skipped")
         return {}

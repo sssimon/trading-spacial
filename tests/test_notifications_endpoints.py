@@ -2,6 +2,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from db.transaction import transaction
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -25,21 +27,24 @@ def _seed(n_unread=3, n_read=2, tenant_id: int = 99):
     """
     from notifier._storage import record_delivery, mark_read
     ids = []
-    for i in range(n_unread):
-        ids.append(record_delivery(
-            event_type="signal", event_key=f"signal:SYM{i}", priority="info",
-            payload={"symbol": f"SYM{i}"}, channels_sent=["telegram"],
-            delivery_status="ok",
-            tenant_id=tenant_id,
-        ))
-    for i in range(n_read):
-        nid = record_delivery(
-            event_type="health", event_key=f"health:R{i}", priority="warning",
-            payload={"symbol": f"R{i}"}, channels_sent=["telegram"],
-            delivery_status="ok",
-            tenant_id=tenant_id,
-        )
-        mark_read(nid, tenant_id=tenant_id)
+    with transaction() as con:
+        for i in range(n_unread):
+            ids.append(record_delivery(
+                con,
+                event_type="signal", event_key=f"signal:SYM{i}", priority="info",
+                payload={"symbol": f"SYM{i}"}, channels_sent=["telegram"],
+                delivery_status="ok",
+                tenant_id=tenant_id,
+            ))
+        for i in range(n_read):
+            nid = record_delivery(
+                con,
+                event_type="health", event_key=f"health:R{i}", priority="warning",
+                payload={"symbol": f"R{i}"}, channels_sent=["telegram"],
+                delivery_status="ok",
+                tenant_id=tenant_id,
+            )
+            mark_read(con, nid, tenant_id=tenant_id)
     return ids
 
 

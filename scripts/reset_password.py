@@ -105,7 +105,8 @@ def main() -> None:
     new_pwd = _prompt_new_password()
     pwd_hash = hash_password(new_pwd)
     _update_password(user_id, pwd_hash)
-    revoked = revoke_all_for_user(user_id)
+    with transaction() as con:
+        revoked = revoke_all_for_user(con, user_id)
 
     log_auth_event(
         event_type="password_reset_via_cli",

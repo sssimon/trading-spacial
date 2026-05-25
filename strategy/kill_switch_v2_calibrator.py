@@ -592,9 +592,17 @@ def _compute_current_portfolio_dd(
             capital_base = float(cap_row["balance"])
         else:
             capital_base = float(cfg.get("capital_usd", 1000.0))
+        if conn is not None:
+            _closed = _load_closed_trades(conn, tenant_id=tenant_id)
+            _opens = _load_open_positions(conn, tenant_id=tenant_id)
+        else:
+            from db.transaction import transaction as _tx_for_loads
+            with _tx_for_loads() as _loads_con:
+                _closed = _load_closed_trades(_loads_con, tenant_id=tenant_id)
+                _opens = _load_open_positions(_loads_con, tenant_id=tenant_id)
         equity_curve = compute_portfolio_equity_curve(
-            closed_trades=_load_closed_trades(tenant_id=tenant_id, conn=conn),
-            open_positions=_load_open_positions(tenant_id=tenant_id, conn=conn),
+            closed_trades=_closed,
+            open_positions=_opens,
             capital_base=capital_base,
             now_price_by_symbol=_snapshot_prices(),
         )

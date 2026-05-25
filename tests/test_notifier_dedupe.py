@@ -18,25 +18,30 @@ def tmp_db(tmp_path, monkeypatch):
 
 def test_first_send_always_allowed(tmp_db):
     from notifier.dedupe import should_send
-    assert should_send("health", "health:BTC:PAUSED", window_seconds=60) is True
+    with transaction() as con:
+        assert should_send(con, "health", "health:BTC:PAUSED", window_seconds=60) is True
 
 
 def test_repeat_within_window_blocked(tmp_db):
     from notifier.dedupe import should_send
     from notifier._storage import record_delivery
 
-    record_delivery("health", "health:BTC:PAUSED", "warning",
-                    {"symbol": "BTC"}, ["telegram"], "ok")
-    assert should_send("health", "health:BTC:PAUSED", window_seconds=60) is False
+    with transaction() as con:
+        record_delivery(con, "health", "health:BTC:PAUSED", "warning",
+                        {"symbol": "BTC"}, ["telegram"], "ok")
+    with transaction() as con:
+        assert should_send(con, "health", "health:BTC:PAUSED", window_seconds=60) is False
 
 
 def test_zero_window_never_dedupes(tmp_db):
     from notifier.dedupe import should_send
     from notifier._storage import record_delivery
 
-    record_delivery("signal", "signal:BTC", "info",
-                    {"symbol": "BTC"}, ["telegram"], "ok")
-    assert should_send("signal", "signal:BTC", window_seconds=0) is True
+    with transaction() as con:
+        record_delivery(con, "signal", "signal:BTC", "info",
+                        {"symbol": "BTC"}, ["telegram"], "ok")
+    with transaction() as con:
+        assert should_send(con, "signal", "signal:BTC", window_seconds=0) is True
 
 
 def test_critical_priority_bypasses_dedupe(tmp_db):
@@ -44,12 +49,15 @@ def test_critical_priority_bypasses_dedupe(tmp_db):
     from notifier.dedupe import should_send
     from notifier._storage import record_delivery
 
-    record_delivery("infra", "infra:scanner", "critical",
-                    {"component": "scanner"}, ["telegram"], "ok")
-    assert should_send("infra", "infra:scanner", window_seconds=60,
-                        priority="critical") is True
-    assert should_send("infra", "infra:scanner", window_seconds=60,
-                        priority="warning") is False
+    with transaction() as con:
+        record_delivery(con, "infra", "infra:scanner", "critical",
+                        {"component": "scanner"}, ["telegram"], "ok")
+    with transaction() as con:
+        assert should_send(con, "infra", "infra:scanner", window_seconds=60,
+                            priority="critical") is True
+    with transaction() as con:
+        assert should_send(con, "infra", "infra:scanner", window_seconds=60,
+                            priority="warning") is False
 
 
 def test_record_older_than_window_allows_resend(tmp_db):
@@ -69,4 +77,5 @@ def test_record_older_than_window_allows_resend(tmp_db):
             ("health", "health:BTC:PAUSED", "warning", "{}", "telegram", "ok", past, None),
         )
 
-    assert should_send("health", "health:BTC:PAUSED", window_seconds=60) is True
+    with transaction() as con:
+        assert should_send(con, "health", "health:BTC:PAUSED", window_seconds=60) is True

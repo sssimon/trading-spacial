@@ -361,12 +361,15 @@ class TestBackfillRestoresVisibility:
 class TestNotifierStorageTenantEnforcement:
     def test_record_delivery_persists_tenant_id(self, initialized_db):
         from notifier._storage import record_delivery
+        from db.transaction import transaction
         import sqlite3
-        nid = record_delivery(
-            event_type="signal", event_key="signal:BTC", priority="info",
-            payload={"symbol": "BTC"}, channels_sent=["telegram"],
-            delivery_status="ok", tenant_id=42,
-        )
+        with transaction() as con:
+            nid = record_delivery(
+                con,
+                event_type="signal", event_key="signal:BTC", priority="info",
+                payload={"symbol": "BTC"}, channels_sent=["telegram"],
+                delivery_status="ok", tenant_id=42,
+            )
         con = sqlite3.connect(initialized_db)
         row = con.execute(
             "SELECT tenant_id FROM notifications_sent WHERE id=?", (nid,)
@@ -376,18 +379,23 @@ class TestNotifierStorageTenantEnforcement:
 
     def test_list_unread_filters_by_tenant(self, initialized_db):
         from notifier._storage import list_unread, record_delivery
-        record_delivery(
-            event_type="signal", event_key="signal:BTC", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=1,
-        )
-        record_delivery(
-            event_type="signal", event_key="signal:ETH", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=2,
-        )
-        user1_notifs = list_unread(tenant_id=1)
-        user2_notifs = list_unread(tenant_id=2)
+        from db.transaction import transaction
+        with transaction() as con:
+            record_delivery(
+                con,
+                event_type="signal", event_key="signal:BTC", priority="info",
+                payload={}, channels_sent=["telegram"], delivery_status="ok",
+                tenant_id=1,
+            )
+            record_delivery(
+                con,
+                event_type="signal", event_key="signal:ETH", priority="info",
+                payload={}, channels_sent=["telegram"], delivery_status="ok",
+                tenant_id=2,
+            )
+        with transaction() as con:
+            user1_notifs = list_unread(con, tenant_id=1)
+            user2_notifs = list_unread(con, tenant_id=2)
         assert len(user1_notifs) == 1
         assert user1_notifs[0]["event_key"] == "signal:BTC"
         assert len(user2_notifs) == 1
@@ -396,64 +404,84 @@ class TestNotifierStorageTenantEnforcement:
     def test_mark_read_idor_returns_false(self, initialized_db):
         """User 2 cannot mark user 1's notification as read."""
         from notifier._storage import mark_read, record_delivery, list_unread
-        nid = record_delivery(
-            event_type="signal", event_key="signal:BTC", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=1,
-        )
+        from db.transaction import transaction
+        with transaction() as con:
+            nid = record_delivery(
+                con,
+                event_type="signal", event_key="signal:BTC", priority="info",
+                payload={}, channels_sent=["telegram"], delivery_status="ok",
+                tenant_id=1,
+            )
         # User 2 tries to mark user 1's notification
-        ok = mark_read(nid, tenant_id=2)
+        with transaction() as con:
+            ok = mark_read(con, nid, tenant_id=2)
         assert ok is False
         # Verify notif is still unread for user 1
-        user1_unread = list_unread(tenant_id=1)
+        with transaction() as con:
+            user1_unread = list_unread(con, tenant_id=1)
         assert len(user1_unread) == 1
 
     def test_mark_read_owner_succeeds(self, initialized_db):
         from notifier._storage import mark_read, record_delivery
-        nid = record_delivery(
-            event_type="signal", event_key="signal:BTC", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=1,
-        )
-        ok = mark_read(nid, tenant_id=1)
+        from db.transaction import transaction
+        with transaction() as con:
+            nid = record_delivery(
+                con,
+                event_type="signal", event_key="signal:BTC", priority="info",
+                payload={}, channels_sent=["telegram"], delivery_status="ok",
+                tenant_id=1,
+            )
+        with transaction() as con:
+            ok = mark_read(con, nid, tenant_id=1)
         assert ok is True
 
     def test_mark_all_read_scope_limited_to_tenant(self, initialized_db):
         """mark_all_read affects only current tenant's notifications."""
         from notifier._storage import mark_all_read, record_delivery, list_unread
+        from db.transaction import transaction
         # 2 unread for user 1
-        for i in range(2):
+        with transaction() as con:
+            for i in range(2):
+                record_delivery(
+                    con,
+                    event_type="signal", event_key=f"signal:U1_{i}", priority="info",
+                    payload={}, channels_sent=["telegram"], delivery_status="ok",
+                    tenant_id=1,
+                )
+            # 1 unread for user 2
             record_delivery(
-                event_type="signal", event_key=f"signal:U1_{i}", priority="info",
+                con,
+                event_type="signal", event_key="signal:U2", priority="info",
                 payload={}, channels_sent=["telegram"], delivery_status="ok",
-                tenant_id=1,
+                tenant_id=2,
             )
-        # 1 unread for user 2
-        record_delivery(
-            event_type="signal", event_key="signal:U2", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            tenant_id=2,
-        )
 
-        marked_for_user1 = mark_all_read(tenant_id=1)
+        with transaction() as con:
+            marked_for_user1 = mark_all_read(con, tenant_id=1)
         assert marked_for_user1 == 2
 
         # User 2's notification still unread
-        user2_unread = list_unread(tenant_id=2)
+        with transaction() as con:
+            user2_unread = list_unread(con, tenant_id=2)
         assert len(user2_unread) == 1
         assert user2_unread[0]["event_key"] == "signal:U2"
 
     def test_legacy_null_tenant_invisible_to_filter(self, initialized_db):
         """Notifications without tenant_id (system broadcasts) invisible to per-user filter."""
         from notifier._storage import list_unread, record_delivery
-        record_delivery(
-            event_type="signal", event_key="system:broadcast", priority="info",
-            payload={}, channels_sent=["telegram"], delivery_status="ok",
-            # No tenant_id → NULL
-        )
+        from db.transaction import transaction
+        with transaction() as con:
+            record_delivery(
+                con,
+                event_type="signal", event_key="system:broadcast", priority="info",
+                payload={}, channels_sent=["telegram"], delivery_status="ok",
+                # No tenant_id → NULL
+            )
         # User 1 sees nothing (strict filter)
-        user1_unread = list_unread(tenant_id=1)
+        with transaction() as con:
+            user1_unread = list_unread(con, tenant_id=1)
         assert user1_unread == []
         # Legacy unfiltered listing sees it
-        all_unread = list_unread()
+        with transaction() as con:
+            all_unread = list_unread(con)
         assert len(all_unread) == 1
