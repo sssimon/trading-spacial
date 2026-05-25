@@ -73,3 +73,19 @@ def test_precheck_not_found_carries_no_snapshot():
     a = PrecheckNotFound()
     b = PrecheckNotFound()
     assert a == b  # All instances equal — no per-instance state
+
+
+def test_precheck_rejected_state_carries_snapshot():
+    """PrecheckRejectedState carries the snapshot so caller can inspect
+    the real status."""
+    from operators.precheck import PositionSnapshot, PrecheckRejectedState
+
+    snap = PositionSnapshot(
+        pos_id=1, tenant_id=42, status="cancelled",
+        symbol="BTCUSDT", direction="long",
+        entry_price=100.0, qty=1.0,
+    )
+
+    rs = PrecheckRejectedState(snapshot=snap)
+    assert rs.snapshot == snap
+    assert rs.snapshot.status == "cancelled"

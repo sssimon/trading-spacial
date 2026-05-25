@@ -32,6 +32,7 @@ from operators.precheck import (
     PrecheckNotFound,
     PrecheckAlreadyClosed,
     PrecheckOkToProceed,
+    PrecheckRejectedState,
     PrecheckResult,
 )
 from db import capital as _capital_module  # imported as module so tests can
@@ -48,7 +49,7 @@ _VALID_EXIT_REASONS = frozenset({"MANUAL", "MANUAL_AGENT", "SL_HIT", "TP_HIT", "
 
 @dataclass(frozen=True)
 class CloseOutcome:
-    status: Literal["closed", "not_found", "already_closed"]
+    status: Literal["closed", "not_found", "already_closed", "rejected_unexpected_state"]
     position: Optional[dict]
     pnl_usd: Optional[float]
     pnl_pct: Optional[float]
@@ -128,8 +129,12 @@ class PositionClosure:
             if snapshot.tenant_id != self._caller_tenant_id:
                 return PrecheckNotFound()  # IDOR-safe collapse
 
-        if snapshot.status != "open":
+        if snapshot.status == "closed":
             return PrecheckAlreadyClosed(snapshot=snapshot)
+        if snapshot.status != "open":
+            # F2 fix per Voronov: status not in {open, closed} (e.g., "cancelled")
+            # MUST be reported distinctly, not collapsed to already_closed.
+            return PrecheckRejectedState(snapshot=snapshot)
 
         return PrecheckOkToProceed(snapshot=snapshot)
 
@@ -165,6 +170,14 @@ class PositionClosure:
                 pnl_pct=None,
             )
 
+        if isinstance(result, PrecheckRejectedState):
+            return CloseOutcome(
+                status="rejected_unexpected_state",
+                position=self._snapshot_to_dict(result.snapshot),
+                pnl_usd=None,
+                pnl_pct=None,
+            )
+
         # PrecheckOkToProceed: write-tx must re-validate snapshot's mutable fields.
         snapshot = result.snapshot
         with _tx_module.transaction() as con:
@@ -175,11 +188,45 @@ class PositionClosure:
             if row["tenant_id"] != snapshot.tenant_id:
                 # Tenant reassigned between precheck and write-tx. IDOR-safe collapse.
                 return CloseOutcome(status="not_found", position=None, pnl_usd=None, pnl_pct=None)
-            if row["status"] != "open":
+            if row["status"] == "closed":
                 # Race: another caller closed this position between precheck and BEGIN IMMEDIATE.
                 # Do NOT set self._result_row — the other caller already fired side-effects.
+                # F1 fix per Voronov: normalize CloseOutcome.position shape to snapshot
+                # shape (same as precheck-detected already_closed branch). Consumers
+                # needing exit_* fields must read the row directly via a separate query.
+                race_snapshot = PositionSnapshot(
+                    pos_id=row["id"],
+                    tenant_id=row["tenant_id"],
+                    status=row["status"],
+                    symbol=row["symbol"],
+                    direction=row["direction"],
+                    entry_price=row["entry_price"],
+                    qty=row["qty"],
+                )
                 return CloseOutcome(
-                    status="already_closed", position=row, pnl_usd=None, pnl_pct=None,
+                    status="already_closed",
+                    position=self._snapshot_to_dict(race_snapshot),
+                    pnl_usd=None,
+                    pnl_pct=None,
+                )
+            if row["status"] != "open":
+                # F2 fix per Voronov: status != "open" AND != "closed" (e.g., "cancelled")
+                # MUST NOT collapse to already_closed. The consumer needs to know the real
+                # state to decide retry vs notify vs log-skip.
+                rejected_snapshot = PositionSnapshot(
+                    pos_id=row["id"],
+                    tenant_id=row["tenant_id"],
+                    status=row["status"],
+                    symbol=row["symbol"],
+                    direction=row["direction"],
+                    entry_price=row["entry_price"],
+                    qty=row["qty"],
+                )
+                return CloseOutcome(
+                    status="rejected_unexpected_state",
+                    position=self._snapshot_to_dict(rejected_snapshot),
+                    pnl_usd=None,
+                    pnl_pct=None,
                 )
 
             # Snapshot's immutable fields trusted; consume directly.

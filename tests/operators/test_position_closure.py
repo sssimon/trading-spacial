@@ -451,3 +451,124 @@ def test_tenant_reassignment_between_precheck_and_write_rejects_close(fresh_db_w
         pos = con.execute("SELECT status, tenant_id FROM positions WHERE id=1").fetchone()
     assert pos["status"] == "open"
     assert pos["tenant_id"] == 2  # The reassignment is unchanged (we wrote it, operator did not touch it)
+
+
+# ---- F1 fix: CloseOutcome.position shape uniform across already_closed paths ----
+
+def test_close_outcome_position_shape_uniform_for_already_closed(fresh_db_with_two_tenants):
+    """Both already_closed paths (precheck-detected and in-tx-race-detected)
+    must return CloseOutcome.position with the SAME set of keys (F1 fix per
+    Voronov). The position field is the snapshot shape — no exit_price /
+    exit_reason / exit_ts / pnl_usd / pnl_pct."""
+    from operators.position_closure import PositionClosure
+
+    # Path A: precheck-detected already_closed
+    # Setup: close position 1 first via direct UPDATE
+    with transaction() as con:
+        con.execute(
+            "UPDATE positions SET status='closed', exit_price=109.0, "
+            "exit_reason='TP_HIT', exit_ts=? WHERE id=1",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+    closure_a = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure_a.__enter__()
+    outcome_a = closure_a.execute()
+    closure_a.__exit__(None, None, None)
+
+    # Path B: in-tx-race-detected already_closed
+    # Setup: open position 2 still, precheck sees open, then someone else closes
+    closure_b = PositionClosure(
+        pos_id=2, exit_price=220.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=2,
+    )
+    closure_b.__enter__()  # precheck reads status=open
+    with transaction() as con:
+        con.execute(
+            "UPDATE positions SET status='closed', exit_price=219.0, "
+            "exit_reason='TP_HIT', exit_ts=? WHERE id=2",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+    outcome_b = closure_b.execute()
+    closure_b.__exit__(None, None, None)
+
+    assert outcome_a.status == "already_closed"
+    assert outcome_b.status == "already_closed"
+    # F1 invariant: both position dicts have the same set of keys.
+    assert set(outcome_a.position.keys()) == set(outcome_b.position.keys()), (
+        f"position shapes differ: {set(outcome_a.position.keys())} vs {set(outcome_b.position.keys())}"
+    )
+    # Neither path exposes exit_* fields.
+    assert "exit_price" not in outcome_a.position
+    assert "exit_price" not in outcome_b.position
+
+
+# ---- F2 fix: cancelled status returns rejected_unexpected_state, not already_closed ----
+
+def test_cancelled_position_returns_rejected_unexpected_state(fresh_db_with_two_tenants):
+    """A position in status='cancelled' (set by DELETE /positions/{id} endpoint)
+    must return CloseOutcome.status='rejected_unexpected_state' with the real
+    status in position.status, NOT collapsed to 'already_closed' (F2 fix per
+    Voronov). Tests both precheck-detected and in-tx-race-detected paths."""
+    from operators.position_closure import PositionClosure
+
+    # Path A: precheck-detected cancelled
+    with transaction() as con:
+        con.execute("UPDATE positions SET status='cancelled' WHERE id=1")
+
+    closure_a = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure_a.__enter__()
+    outcome_a = closure_a.execute()
+    closure_a.__exit__(None, None, None)
+
+    assert outcome_a.status == "rejected_unexpected_state"
+    assert outcome_a.position["status"] == "cancelled"
+
+    # Path B: in-tx-race-detected cancelled
+    closure_b = PositionClosure(
+        pos_id=2, exit_price=220.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=2,
+    )
+    closure_b.__enter__()  # precheck reads status=open
+    with transaction() as con:
+        con.execute("UPDATE positions SET status='cancelled' WHERE id=2")
+    outcome_b = closure_b.execute()
+    closure_b.__exit__(None, None, None)
+
+    assert outcome_b.status == "rejected_unexpected_state"
+    assert outcome_b.position["status"] == "cancelled"
+
+
+# ---- PrecheckRejectedState variant test ----
+
+def test_precheck_rejected_state_distinct_from_already_closed():
+    """PrecheckRejectedState is a distinct PrecheckResult variant. Verifies
+    pattern matching can distinguish them."""
+    from operators.precheck import (
+        PositionSnapshot, PrecheckAlreadyClosed, PrecheckRejectedState,
+    )
+
+    snap_closed = PositionSnapshot(
+        pos_id=1, tenant_id=42, status="closed",
+        symbol="BTCUSDT", direction="long",
+        entry_price=100.0, qty=1.0,
+    )
+    snap_cancelled = PositionSnapshot(
+        pos_id=1, tenant_id=42, status="cancelled",
+        symbol="BTCUSDT", direction="long",
+        entry_price=100.0, qty=1.0,
+    )
+
+    ac = PrecheckAlreadyClosed(snapshot=snap_closed)
+    rs = PrecheckRejectedState(snapshot=snap_cancelled)
+
+    assert isinstance(ac, PrecheckAlreadyClosed)
+    assert not isinstance(ac, PrecheckRejectedState)
+    assert isinstance(rs, PrecheckRejectedState)
+    assert not isinstance(rs, PrecheckAlreadyClosed)
+    assert rs.snapshot.status == "cancelled"

@@ -56,4 +56,13 @@ class PrecheckOkToProceed:
     snapshot: PositionSnapshot
 
 
-PrecheckResult = Union[PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProceed]
+@dataclass(frozen=True)
+class PrecheckRejectedState:
+    """Position exists but is in a status neither 'open' nor 'closed' (e.g.,
+    'cancelled', 'liquidated', etc.). Caller must inspect snapshot.status to
+    decide handling. Distinct from PrecheckAlreadyClosed to avoid semantic
+    collapse (F2 finding from Serrano, Voronov reframe — PR #466)."""
+    snapshot: PositionSnapshot
+
+
+PrecheckResult = Union[PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProceed, PrecheckRejectedState]
