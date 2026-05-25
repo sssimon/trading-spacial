@@ -290,7 +290,9 @@ with read_only_connection() as con:
 # no transaction was opened; no lock held.
 ```
 
-Only used by operators today (`PositionClosure.__enter__`). Pure SQL helpers never call this — they receive `con` from their caller.
+The contract is **enforced at runtime** via `PRAGMA query_only=1`: any INSERT/UPDATE/DELETE inside `read_only_connection()` raises `sqlite3.OperationalError`. Pure SQL helpers receive `con` from their caller; they never call `read_only_connection` themselves.
+
+Used by `PositionClosure.__enter__` (pre-validation read) and by `update_positions_json` (snapshot generation). New call sites: prefer `read_only_connection` over `transaction` whenever the unit-of-work contains zero writes.
 
 New business operators emerge from evidence (caller composes >1 helper + side-effect with conditional behavior), not preemptively. See `docs/superpowers/analysis/2026-05-25-446-tx-or-use-analysis-and-direction.md` for the rationale (Voronov, 2026-05-25).
 
