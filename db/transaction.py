@@ -58,16 +58,24 @@ def transaction() -> Iterator[sqlite3.Connection]:
 
 @contextmanager
 def read_only_connection() -> Iterator[sqlite3.Connection]:
-    """Open a configured connection for read-only work outside any transaction.
+    """Open a configured connection for read-only work (DEPRECATED in this PR).
 
-    Use when an operator needs pre-validation reads (ownership check,
-    existence check) that must NOT hold a writer lock. The connection
-    closes on exit; no BEGIN/COMMIT is issued.
+    This helper carries two semantic contracts under one name (precheck +
+    snapshot) — see PR #463 review (Voronov, 2026-05-25). It will be removed
+    later in this plan, replaced by precheck_connection and snapshot_connection.
 
-    Caller contract — ENFORCED AT RUNTIME via PRAGMA query_only=1:
+    Threat model (cooperative latch — NOT a sandbox):
+    - Detects accidental writes from helpers contracted as read-only.
+      A SQL helper that mistakenly mutates state inside this block fails loudly.
+    - Does NOT protect against PRAGMA query_only=0, executescript with embedded
+      PRAGMA, writes to temp.* tables, or AFTER triggers.
+    - The semantic invariant "this phase does not mutate the world" lives at
+      the CALL SITE, not in this primitive.
+
+    Caller contract:
     - MAY use con.execute for SELECT.
-    - INSERT/UPDATE/DELETE raise sqlite3.OperationalError.
-    - MUST NOT escape the connection past the `with` block (lifecycle).
+    - INSERT/UPDATE/DELETE raise sqlite3.OperationalError (cooperative).
+    - MUST NOT escape the connection past the `with` block.
     """
     con = _open_configured_connection()
     try:
