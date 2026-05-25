@@ -415,20 +415,20 @@ def test_audit_failure_does_not_break_login(unauthed_client, monkeypatch, capsys
     """The auth.audit module is failure-tolerant — even if the DB INSERT
     raises, log_auth_event must NOT propagate the error.
 
-    We simulate this by patching _tx_or_use inside auth.audit so its
+    We simulate this by patching transaction inside auth.audit so its
     connection blows up. Login still has to return 200 and the error must
     surface on stderr (so an operator can later notice the audit gap).
 
-    (Task 8.5 rename: auth.audit now uses `_tx_or_use(con)` instead of
-    `transaction()` so it can be composed into a caller-owned tx.)
+    (Task 10 migration: auth.audit is a Cat. 2 hidden operator and now
+    calls transaction() directly instead of _tx_or_use.)
     """
     _create_user_directly(unauthed_client, "jane@example.com", "long_pass_phrase_j", role="viewer")
 
-    def _broken_transaction(_con=None):
+    def _broken_transaction():
         raise RuntimeError("simulated audit DB failure")
 
     import auth.audit as audit_mod
-    monkeypatch.setattr(audit_mod, "_tx_or_use", _broken_transaction)
+    monkeypatch.setattr(audit_mod, "transaction", _broken_transaction)
 
     resp = _login(unauthed_client, "jane@example.com", "long_pass_phrase_j")
     assert resp.status_code == 200, (

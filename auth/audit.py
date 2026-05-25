@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db.transaction import _tx_or_use
+from db.transaction import transaction
 
 log = logging.getLogger("auth.audit")
 
@@ -39,13 +38,14 @@ def log_auth_event(
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
     metadata: Optional[dict[str, Any]] = None,
-    con: Optional[sqlite3.Connection] = None,
 ) -> None:
     """Insert one row into auth_events. Never raises.
 
     Sensitive fields (passwords, tokens — even hashed) MUST NOT appear in
     `metadata`. Callers are responsible. Common metadata keys: 'reason',
     'family_id', 'rotation_count', 'old_role'/'new_role'.
+
+    Cat. 2 hidden operator: owns its own transaction() directly.
     """
     if event_type not in VALID_EVENT_TYPES:
         # Defensive: unknown event types still get logged but flagged.
@@ -55,7 +55,7 @@ def log_auth_event(
     ts = datetime.now(timezone.utc).isoformat()
 
     try:
-        with _tx_or_use(con) as con:
+        with transaction() as con:
             con.execute(
                 """
                 INSERT INTO auth_events
