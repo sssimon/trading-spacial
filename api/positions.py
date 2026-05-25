@@ -16,10 +16,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
-from db.capital import apply_pnl_to_capital
 from db.positions import (
     _calc_pnl,
-    db_close_position,
     db_create_position,
     db_get_positions,
     db_update_position,
@@ -47,36 +45,6 @@ _EVENT_LOG_LABELS = {
     "TIME_LIMIT_HIT": "TIME LIMIT",
     "SL_HIT": "STOP LOSS",
 }
-
-
-def _apply_close_to_capital(closed_pos: dict, *, con) -> None:
-    """B.2 #255: roll realized P&L from a just-closed position into the
-    owner's capital ledger.
-
-    Skips positions with tenant_id=NULL (legacy/scanner pre-multi-tenant) or
-    pnl_usd=None (no quantified outcome — e.g. qty=0). Locks: pre-reg §2.1, §2.2.
-
-    Task 5 (#446): `con` is now mandatory keyword-only. The caller owns the
-    surrounding `transaction()` block so the close + capital roll-in serialize
-    atomically with the read.
-    """
-    tenant_id = closed_pos.get("tenant_id")
-    pnl_usd = closed_pos.get("pnl_usd")
-    if tenant_id is None or pnl_usd is None:
-        log.debug(
-            "skip capital update for position #%s (tenant_id=%s, pnl_usd=%s)",
-            closed_pos.get("id"), tenant_id, pnl_usd,
-        )
-        return
-    try:
-        apply_pnl_to_capital(con, int(tenant_id), float(pnl_usd))
-    except Exception as e:
-        # Capital update is best-effort: a ledger failure must NOT block the
-        # position-close lifecycle. Operator reconciles via separate audit.
-        log.warning(
-            "apply_pnl_to_capital failed for position #%s (tenant_id=%s): %s",
-            closed_pos.get("id"), tenant_id, e,
-        )
 
 
 def _validated_time_limit_hours(value, symbol: str) -> float | None:
@@ -138,18 +106,23 @@ def check_position_stops(
     *,
     symbol_price_overrides: dict[str, float] | None = None,
 ):
-    """Auto-cierra posiciones abiertas si el precio toca TP, SL o time-limit. Sends notifications.
+    """Auto-cierra posiciones abiertas si el precio toca TP, SL o time-limit.
 
-    One transaction per (symbol, price) tick covers BOTH the SELECT of open
-    positions AND the per-position trailing-SL UPDATE. This names the trading
-    invariant (plan 2026-05-24-transaction-unit-of-work, F-05): every mutation
-    derived from one tick of price decision belongs to one serializable
-    transaction. Concurrent operator edits serialize via BEGIN IMMEDIATE.
+    Per-tick decision flow split into two phases (Task 6 of #446):
 
-    Position-close mutations are delegated to `db_close_position` (which owns
-    its own connection today — migration deferred to Tasks 6-9 of the plan).
-    Notifications and event-log writes are side effects kept OUTSIDE the
-    transaction by design (file I/O + network must not extend the DB lock).
+      Phase 1 (one tx) — read open positions for this symbol AND apply
+      trailing-SL ratchet writes. This names the trading invariant from plan
+      2026-05-24-transaction-unit-of-work F-05: every mutation derived from
+      one tick of price decision belongs to one serializable transaction.
+      Concurrent operator edits serialize via BEGIN IMMEDIATE. Trailing-SL
+      is per-tick mutation, NOT part of the close-flow.
+
+      Phase 2 (per-position) — for each position marked to close, run
+      `PositionClosure(mode="SYSTEM")` outside the trailing-SL tx. Each
+      closure owns its own atomic close + capital roll-in tx, then fires
+      post-commit side-effects (event log, health trigger, notify, snapshot)
+      via __exit__. Failures are logged and the loop continues so one bad
+      position cannot stall the scanner.
 
     `now` is injectable for deterministic testing; defaults to current UTC time.
 
@@ -174,16 +147,10 @@ def check_position_stops(
 
     cfg = load_config()
 
-    # Task 8.5: ONE unit of work now covers read + trail-SL + close +
-    # capital ledger update. Previously the close + capital lived in their
-    # own transactions, so a crash between them left a closed position
-    # whose P&L was never folded into the tenant's balance. Now the close
-    # and capital roll-in serialize atomically with the read.
-    #
-    # Side effects (event-log file write + Telegram notify) stay OUTSIDE
-    # the transaction by design — file I/O / network must not extend the
-    # DB lock. We collect them in `post_tx_actions` and run after commit.
-    post_tx_actions: list[dict] = []
+    # Phase 1: read open positions + apply trailing-SL writes in one tx.
+    # Collect (pos_id, exit_price, reason) tuples for positions that should
+    # close; the close-flow itself runs in Phase 2 via PositionClosure.
+    pos_list_to_close: list[tuple[int, float, str]] = []
 
     with transaction() as con:
         rows = con.execute(
@@ -270,68 +237,30 @@ def check_position_stops(
                         reason, exit_price = "TIME_LIMIT_HIT", price
 
             if reason:
-                # Task 8.5: pass `con=con` so the close write joins this tx.
-                closed = db_close_position(pos["id"], exit_price, reason, con=con)
-                log.info(f"POSICION #{pos['id']} {symbol} {reason} @ ${exit_price}")
-                # B.2 #255: roll realized P&L into owner's capital, in the
-                # same tx (close + capital atomic together).
-                if closed:
-                    _apply_close_to_capital(closed, con=con)
+                pos_list_to_close.append((int(pos["id"]), float(exit_price), reason))
+    # Trailing-SL writes are now durable.
 
-                # Defer file-log + Telegram notify to AFTER commit. These are
-                # slow I/O (file / HTTP) and must not extend the DB writer lock.
-                post_tx_actions.append({
-                    "pos": pos,
-                    "reason": reason,
-                    "exit_price": exit_price,
-                })
-
-    # Out-of-transaction side effects: event log + health trigger + exit
-    # notification. db_close_position skipped the health trigger because we
-    # passed `con=con` (it would deadlock on the still-open writer lock),
-    # so we fire it here post-commit.
-    for action in post_tx_actions:
-        pos = action["pos"]
-        reason = action["reason"]
-        exit_price = action["exit_price"]
-
-        _write_position_event_log(pos, reason, exit_price)
-
-        # Kill switch #138: deferred health trigger (Task 8.5).
+    # Phase 2: close each marked position via PositionClosure in SYSTEM mode.
+    # Each closure owns its own atomic close + capital tx and fires
+    # post-commit side-effects (event log, health, notify, snapshot) via
+    # __exit__. Wrap each in try/except so a single failure cannot stall
+    # the scanner across the remaining positions for this tick.
+    from operators.position_closure import PositionClosure  # noqa: PLC0415
+    for pos_id, exit_price, reason in pos_list_to_close:
         try:
-            from health import trigger_health_evaluation  # noqa: PLC0415
-            trigger_health_evaluation(pos["symbol"], cfg)
-        except Exception as e:
-            log.warning("health trigger skipped for position close: %s", e)
-
-        # Send exit notification via the centralized notifier (#162 PR B).
-        entry = pos.get("entry_price", 0)
-        qty = pos.get("qty", 0)
-        pnl_usd, pnl_pct = _calc_pnl(pos["direction"], entry, exit_price, qty)
-
-        try:
-            from notifier import notify, PositionExitEvent  # noqa: PLC0415
-            # Map legacy reason strings ("SL_HIT"/"TP_HIT"/"TIME_LIMIT_HIT")
-            # to tier codes used by the notifier templates.
-            exit_reason_code = "SL" if reason == "SL_HIT" else (
-                "TP" if reason == "TP_HIT" else (
-                    "TIME_LIMIT" if reason == "TIME_LIMIT_HIT" else reason
-                )
-            )
-            notify(
-                PositionExitEvent(
-                    symbol=symbol,
-                    direction=pos.get("direction", "LONG"),
-                    exit_reason=exit_reason_code,
-                    entry_price=float(entry or 0.0),
-                    exit_price=float(exit_price or 0.0),
-                    pnl_usd=float(pnl_usd or 0.0),
-                    pnl_pct=float(pnl_pct or 0.0),
-                ),
+            with PositionClosure(
+                pos_id=pos_id,
+                exit_price=exit_price,
+                exit_reason=reason,
+                mode="SYSTEM",
                 cfg=cfg,
-            )
-        except Exception as e:
-            log.warning(f"Failed to notify {reason} for {symbol}: {e}")
+                now=now,
+            ) as closure:
+                closure.execute()
+            log.info(f"POSICION #{pos_id} {symbol} {reason} @ ${exit_price}")
+        except Exception:
+            log.exception("PositionClosure failed for pos_id=%s", pos_id)
+            continue
 
 
 @router.get("", summary="Listar posiciones")
@@ -397,22 +326,33 @@ def close_position(
     body: dict = Body(...),
     tenant_id: int = Depends(get_current_tenant_id),
 ):
-    exit_price  = body.get("exit_price")
+    """Close a position. USER-mode PositionClosure handles all the choreography
+    (atomicity, ownership enforcement via IDOR-safe NOT_FOUND collapse,
+    capital roll-in, post-commit side-effects: event log + health trigger +
+    notify + snapshot)."""
+    from operators.position_closure import PositionClosure  # noqa: PLC0415
+
+    exit_price = body.get("exit_price")
     exit_reason = body.get("exit_reason", "MANUAL")
     if exit_price is None:
         raise HTTPException(status_code=422, detail="Falta exit_price")
-    # B.5 #258: ownership-enforced
-    pos = db_close_position(pos_id, float(exit_price), exit_reason, tenant_id=tenant_id)
-    if not pos:
+
+    with PositionClosure(
+        pos_id=pos_id,
+        exit_price=float(exit_price),
+        exit_reason=exit_reason,
+        mode="USER",
+        caller_tenant_id=tenant_id,
+    ) as closure:
+        outcome = closure.execute()
+
+    # IDOR-safe: NOT_FOUND collapses ownership-mismatch and truly-missing
+    # into one indistinguishable 404 (PositionClosure.__enter__ contract).
+    if outcome.status == "not_found":
         raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
-    _write_position_event_log(pos, exit_reason, float(exit_price))
-    # B.2 #255: roll realized P&L into the JWT-authenticated owner's capital.
-    # Task 5 (#446): `_apply_close_to_capital` now requires `con` — open a
-    # short tx just for the ledger write.
-    with transaction() as con:
-        _apply_close_to_capital(pos, con=con)
-    update_positions_json()
-    return {"ok": True, "position": pos}
+    if outcome.status == "already_closed":
+        return {"ok": True, "position": outcome.position, "already_closed": True}
+    return {"ok": True, "position": outcome.position}
 
 
 @router.delete(
