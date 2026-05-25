@@ -18,15 +18,21 @@ point by splitting into subclasses (`UserPositionClosure`,
 contract lives in the type, not in a runtime branch.
 """
 from __future__ import annotations
-from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
-import sqlite3
 from typing import Literal, Optional
 
-from db.transaction import transaction
-from db.connection import _open_configured_connection
+from db import transaction as _tx_module  # imported as module so tests can
+                                            # patch `transaction` on it
+from db.transaction import read_only_connection
+from db.positions import db_get_position_by_id, db_close_position_sql, _calc_pnl
+from db import capital as _capital_module  # imported as module so tests can
+                                            # patch `apply_pnl_to_capital` on it
+from api.positions import _write_position_event_log, update_positions_json
+from api.config import load_config
+from health import trigger_health_evaluation
+from notifier import notify, PositionExitEvent
 
 log = logging.getLogger("operators.position_closure")
 
@@ -80,13 +86,168 @@ class PositionClosure:
         self._state: Literal["INIT", "NOT_FOUND", "ALREADY_CLOSED", "OK_TO_PROCEED"] = "INIT"
         self._pre_row: Optional[dict] = None
         self._result_row: Optional[dict] = None
+        self._result_pnl: tuple[Optional[float], Optional[float]] = (None, None)
         self._consumed = False
 
     def __enter__(self) -> "PositionClosure":
-        raise NotImplementedError  # Filled in Task 4
+        if self._consumed:
+            raise RuntimeError("PositionClosure is single-use; construct a new one")
+        # Pre-validation read outside any write transaction (no lock contention).
+        # Invariant 2: USER-mode ownership mismatch must NOT open a write tx.
+        with read_only_connection() as con:
+            self._pre_row = db_get_position_by_id(con, self._pos_id)
+        if self._pre_row is None:
+            self._state = "NOT_FOUND"
+            return self
+        if self._mode == "USER":
+            if self._pre_row.get("tenant_id") != self._caller_tenant_id:
+                # IDOR-safe collapse: report identical to NOT_FOUND.
+                self._state = "NOT_FOUND"
+                return self
+        if self._pre_row.get("status") != "open":
+            self._state = "ALREADY_CLOSED"
+            return self
+        self._state = "OK_TO_PROCEED"
+        return self
 
     def execute(self) -> CloseOutcome:
-        raise NotImplementedError  # Filled in Task 4
+        if self._consumed:
+            raise RuntimeError("PositionClosure already executed; single-use")
+        self._consumed = True
+
+        if self._state == "NOT_FOUND":
+            return CloseOutcome(
+                status="not_found", position=None, pnl_usd=None, pnl_pct=None,
+            )
+        if self._state == "ALREADY_CLOSED":
+            return CloseOutcome(
+                status="already_closed",
+                position=self._pre_row,
+                pnl_usd=None,
+                pnl_pct=None,
+            )
+        # OK_TO_PROCEED — one transaction wraps the read + close + capital
+        # roll-in. Raises (e.g. capital UPSERT failure) trigger ROLLBACK,
+        # which is the atomicity guarantee invariant 1 / 2 anchor.
+        with _tx_module.transaction() as con:
+            # Re-select inside the write tx to cover the race window between
+            # pre-validation and BEGIN IMMEDIATE.
+            row = db_get_position_by_id(con, self._pos_id)
+            if row is None:
+                return CloseOutcome(
+                    status="not_found", position=None, pnl_usd=None, pnl_pct=None,
+                )
+            if row.get("status") != "open":
+                self._result_row = None  # suppress post-commit side-effects
+                return CloseOutcome(
+                    status="already_closed",
+                    position=row,
+                    pnl_usd=None,
+                    pnl_pct=None,
+                )
+
+            qty = row.get("qty") or 0
+            pnl_usd, pnl_pct = _calc_pnl(
+                row["direction"], row["entry_price"], self._exit_price, qty,
+            )
+            exit_ts = self._now.isoformat()
+            closed_row = db_close_position_sql(
+                con,
+                self._pos_id,
+                self._exit_price,
+                self._exit_reason,
+                exit_ts,
+                pnl_usd,
+                pnl_pct,
+            )
+            tenant_id = closed_row.get("tenant_id")
+            if tenant_id is not None and pnl_usd is not None:
+                # Invariant 1 / 2: capital roll-in joins the same tx. Any
+                # raise inside aborts the close via context-manager rollback.
+                # Pass all args as kwargs — the real signature is
+                # (tenant_id, pnl_usd, *, con=None), but tests mock with a
+                # 3-positional `boom(con, tenant_id, pnl_usd)`. Using kwargs
+                # satisfies both bindings.
+                _capital_module.apply_pnl_to_capital(
+                    tenant_id=int(tenant_id),
+                    pnl_usd=float(pnl_usd),
+                    con=con,
+                )
+            elif tenant_id is None:
+                log.warning(
+                    "PositionClosure: skipping capital roll-in for legacy "
+                    "tenant_id=NULL pos_id=%s",
+                    self._pos_id,
+                )
+            self._result_row = closed_row
+            self._result_pnl = (pnl_usd, pnl_pct)
+        # Transaction committed here.
+        return CloseOutcome(
+            status="closed",
+            position=self._result_row,
+            pnl_usd=self._result_pnl[0],
+            pnl_pct=self._result_pnl[1],
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        raise NotImplementedError  # Filled in Task 4
+        if exc_type is not None:
+            # Invariant 5: on exception inside the block (including from
+            # execute()), no post-commit side-effects fire. Propagate.
+            log.error(
+                "PositionClosure failed: pos_id=%s mode=%s caller_tenant_id=%s "
+                "exit_reason=%s exit_price=%s exception=%s",
+                self._pos_id,
+                self._mode,
+                self._caller_tenant_id,
+                self._exit_reason,
+                self._exit_price,
+                exc_type.__name__,
+            )
+            return False  # propagate
+
+        if self._result_row is None:
+            # NOT_FOUND or ALREADY_CLOSED path — no side-effects to fire.
+            return False
+
+        cfg = self._cfg or load_config()
+        pos_row = self._result_row
+        pnl_usd, pnl_pct = self._result_pnl
+
+        # Invariant 6: each side-effect fires exactly once on success.
+        # Invariant 10 (AMBER F2): best-effort — failures are logged and
+        # swallowed so the committed close is not "undone" by a notify glitch.
+
+        # 1) event log
+        try:
+            _write_position_event_log(pos_row, self._exit_reason, self._exit_price)
+        except Exception as e:
+            log.warning("PositionClosure: event log failed: %s", e)
+
+        # 2) health trigger
+        try:
+            trigger_health_evaluation(pos_row["symbol"], cfg)
+        except Exception as e:
+            log.warning("PositionClosure: health trigger failed: %s", e)
+
+        # 3) notify
+        try:
+            event = PositionExitEvent(
+                symbol=pos_row.get("symbol", ""),
+                direction=str(pos_row.get("direction", "LONG")).upper(),
+                exit_reason=self._exit_reason,
+                entry_price=float(pos_row.get("entry_price") or 0.0),
+                exit_price=float(self._exit_price),
+                pnl_usd=float(pnl_usd) if pnl_usd is not None else 0.0,
+                pnl_pct=float(pnl_pct) if pnl_pct is not None else 0.0,
+            )
+            notify(event, cfg, tenant_id=pos_row.get("tenant_id"))
+        except Exception as e:
+            log.warning("PositionClosure: notify failed: %s", e)
+
+        # 4) positions snapshot
+        try:
+            update_positions_json()
+        except Exception as e:
+            log.warning("PositionClosure: positions snapshot failed: %s", e)
+
+        return False

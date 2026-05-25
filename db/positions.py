@@ -226,6 +226,52 @@ def db_close_position(
     return closed
 
 
+def db_get_position_by_id(
+    con: sqlite3.Connection, pos_id: int,
+) -> Optional[dict]:
+    """Read a single position by id. Pure SQL — no tenant filter.
+
+    Caller is responsible for tenant ownership check (per Task 8.5 design
+    where helpers are pure SQL operators; ownership lives in the business
+    operator).
+    """
+    row = con.execute(
+        "SELECT * FROM positions WHERE id = ?", (pos_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def db_close_position_sql(
+    con: sqlite3.Connection,
+    pos_id: int,
+    exit_price: float,
+    exit_reason: str,
+    exit_ts: str,
+    pnl_usd: float,
+    pnl_pct: float,
+) -> dict:
+    """Pure SQL: UPDATE the position to closed. Returns the updated row.
+
+    No health trigger, no notify, no logging beyond ERROR. Caller (operator)
+    owns lifecycle, transaction, and side-effects.
+    """
+    con.execute(
+        """UPDATE positions
+           SET status = 'closed',
+               exit_price = ?,
+               exit_ts = ?,
+               exit_reason = ?,
+               pnl_usd = ?,
+               pnl_pct = ?
+           WHERE id = ?""",
+        (exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, pos_id),
+    )
+    row = con.execute(
+        "SELECT * FROM positions WHERE id = ?", (pos_id,),
+    ).fetchone()
+    return dict(row)
+
+
 def db_update_position(
     pos_id: int,
     data: dict,
