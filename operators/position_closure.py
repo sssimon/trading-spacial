@@ -91,7 +91,6 @@ class PositionClosure:
         self._now = now or datetime.now(timezone.utc)
 
         self._state: Literal["INIT", "NOT_FOUND", "ALREADY_CLOSED", "OK_TO_PROCEED"] = "INIT"
-        self._pre_row: Optional[dict] = None
         self._result_row: Optional[dict] = None
         self._result_pnl: tuple[Optional[float], Optional[float]] = (None, None)
         self._consumed = False
