@@ -201,3 +201,31 @@ def test_read_only_connection_allows_select_and_does_not_leak_query_only(fresh_d
     with transaction() as con:
         rows = con.execute("SELECT x FROM ro_test ORDER BY x").fetchall()
     assert [r["x"] for r in rows] == [42, 99]
+
+
+# ---- precheck_connection + snapshot_connection enforcement (closes #464 #465) ----
+
+def test_precheck_connection_rejects_writes_same_as_read_only(fresh_db):
+    """precheck_connection shares the mechanism of read_only_connection;
+    INSERT must raise OperationalError."""
+    from db.transaction import precheck_connection, transaction
+
+    with transaction() as con:
+        con.execute("CREATE TABLE pc_test (x INTEGER)")
+
+    with pytest.raises(sqlite3.OperationalError, match="(?i)read-only|query_only|attempt to write"):
+        with precheck_connection() as con:
+            con.execute("INSERT INTO pc_test (x) VALUES (1)")
+
+
+def test_snapshot_connection_rejects_writes_same_as_read_only(fresh_db):
+    """snapshot_connection shares the mechanism; INSERT must raise OperationalError.
+    Distinct contract from precheck (terminal read vs feed-write) but same enforcement."""
+    from db.transaction import snapshot_connection, transaction
+
+    with transaction() as con:
+        con.execute("CREATE TABLE sc_test (x INTEGER)")
+
+    with pytest.raises(sqlite3.OperationalError, match="(?i)read-only|query_only|attempt to write"):
+        with snapshot_connection() as con:
+            con.execute("INSERT INTO sc_test (x) VALUES (1)")

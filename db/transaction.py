@@ -83,3 +83,60 @@ def read_only_connection() -> Iterator[sqlite3.Connection]:
         yield con
     finally:
         con.close()
+
+
+@contextmanager
+def precheck_connection() -> Iterator[sqlite3.Connection]:
+    """Open a configured connection for a PRECHECK READ that will feed a
+    follow-up write transaction.
+
+    Use when an operator needs to read state to decide whether (and how) to
+    open a write transaction in a later step. The connection closes on exit;
+    no BEGIN/COMMIT is issued.
+
+    Contract (cooperative — see threat model below):
+    - MAY use con.execute for SELECT.
+    - INSERT/UPDATE/DELETE raise sqlite3.OperationalError via PRAGMA query_only=1.
+    - MUST extract any field the write-tx will need into an immutable snapshot
+      value (see operators.precheck.PositionSnapshot) BEFORE this block exits.
+    - MUST NOT escape the connection past the `with` block.
+
+    Threat model:
+    - Detects accidental writes from helpers contracted as read-only.
+      A SQL helper that mistakenly mutates state inside this block fails LOUDLY.
+    - NOT a sandbox: callers can re-enable writes via PRAGMA query_only=0,
+      executescript, or writes to temp.* tables. SQLite does not provide an
+      ontologically read-only connection; this is a cooperative latch.
+    - The semantic invariant "this phase does not mutate the world" lives at
+      the CALL SITE (extract → snapshot → terminate), not in this primitive.
+    """
+    con = _open_configured_connection()
+    try:
+        con.execute("PRAGMA query_only = 1")
+        yield con
+    finally:
+        con.close()
+
+
+@contextmanager
+def snapshot_connection() -> Iterator[sqlite3.Connection]:
+    """Open a configured connection for a TERMINAL READ (no follow-up write).
+
+    Use for snapshot generation, dashboard queries, audit reads — operations
+    whose result is serialized to an output (JSON file, HTTP response, log)
+    and NOT used to drive a subsequent mutation.
+
+    Contract: same mechanism as precheck_connection, same threat model
+    (cooperative latch, detector-not-sandbox). The distinct name encodes a
+    distinct CALL SITE OBLIGATION: terminal reads do not need to produce a
+    snapshot for hand-off to a write-tx, so there is no follow-up re-validation
+    contract.
+
+    See precheck_connection for the threat model and mechanism details.
+    """
+    con = _open_configured_connection()
+    try:
+        con.execute("PRAGMA query_only = 1")
+        yield con
+    finally:
+        con.close()
