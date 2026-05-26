@@ -26,10 +26,39 @@ the drift before it lands on `upstream/main`.
 Phase 1 (this commit): declaration + test. The migrations still own the
 schema by construction; this file is the verifier.
 
-Phase 2 (deferred, separate work): refactor the four migration helpers
-to REFERENCE this declaration instead of duplicating its column list.
-The TARGET_COLS list appears four times today; collapsing it to one
-reference is its own PR.
+Phase 2 (deferred, separate WORK — not a PR, a project):
+    The declaration in this file is **observational, not constructive**.
+    It is a witness to the schema encoded in the vocabulary of the
+    verifier — PRAGMA table_info shape, sqlite_master.sql substring
+    matching, PRAGMA index_list flags. It does NOT carry the SQL the
+    migrations need: `INTEGER PRIMARY KEY AUTOINCREMENT`, `REFERENCES
+    scans(id)`, the literal default string with its quotes intact.
+
+    Making the migrations REFERENCE this declaration (so the
+    `CREATE TABLE positions_new (...)` block in each helper is generated
+    rather than hand-written) therefore requires one of:
+
+      (a) Code-gen path. Grow `ColumnSpec` until it can emit a DDL line:
+          re-introduce `AUTOINCREMENT`, foreign-key clauses, literal
+          defaults, NOT NULL keywords. A function
+          `render_create_table_sql(columns, checks_active_at_step) -> str`
+          emits the DDL. Migrations call it instead of copy-pasting.
+
+      (b) Inversion path. The declaration becomes the source, and the
+          migrations become *transformations on a schema object* rather
+          than copy-pasted DDL. The migration's job becomes "advance the
+          schema object from state N to state N+1," not "write a new
+          CREATE TABLE that happens to differ by one CHECK."
+
+    Neither (a) nor (b) is "another PR." Both are projects. The
+    structural duplication is deeper than `TARGET_COLS` — the full
+    `CREATE TABLE positions_new` block appears in each of the four
+    migration helpers, not just the column list.
+
+    Until Phase 2 lands, `CANONICAL_POSITIONS_COLUMNS` is a test fixture
+    that names the schema, not a source of truth the schema is built
+    from. The distinction matters and should not erode in language.
+    (Per Voronov 2026-05-26 second meta-review.)
 
 Closes #501 Phase 1.
 """
@@ -121,13 +150,38 @@ CANONICAL_POSITIONS_COLUMNS: tuple[ColumnSpec, ...] = (
 # case-folded). The test asserts each fragment appears in the live
 # sqlite_master.sql, normalized the same way.
 #
-# Note on the quarantine drift Voronov flagged (PR #500 review): the three
-# CHECKs do NOT share an identical quarantine clause -- the tenant CHECK
-# exempts both 'legacy_unmeasurable' AND 'legacy_no_tenant', while qty and
-# direction CHECKs exempt only 'legacy_unmeasurable'. This canonical
-# declaration accepts that drift as the current state; resolving the
-# drift (either unifying the exemption set or explicitly justifying the
-# asymmetry) is its own work (out of scope for #501 Phase 1).
+# ---------------------------------------------------------------------------
+# On the quarantine-exemption asymmetry across the three CHECKs:
+# ---------------------------------------------------------------------------
+# The three CHECKs do NOT share an identical quarantine clause:
+#   - the `tenant_id` CHECK exempts BOTH 'legacy_unmeasurable' AND 'legacy_no_tenant'
+#   - the `qty` and `direction` CHECKs exempt ONLY 'legacy_unmeasurable'
+#
+# This is a PRINCIPLED DISTINCTION, not accidental drift. The "why" lives in
+# `_migrate_tenant_id_not_null` (`db/schema.py`):
+#
+#   > "Production measurement (2026-05-26): 2018/2018 positions had
+#   >  tenant_id IS NULL. Of those, 670 are already in legacy_unmeasurable
+#   >  from C2 — the new CHECK exempts them via the OR (no double-quarantine).
+#   >  The remaining ~1348 get re-statused to 'legacy_no_tenant'."
+#
+# `legacy_no_tenant` is a distinct ontological category from
+# `legacy_unmeasurable`: it labels "this row has a known qty and a known
+# direction, but predates multi-tenancy" — a structurally different defect
+# from "this row has unmeasurable economics."
+#
+# Qty and direction do NOT need a parallel `legacy_no_qty` or
+# `legacy_no_direction` bucket because their failure mode is already what
+# `legacy_unmeasurable` means. There is no third population that has the
+# economic facts but lacks the categorical fact, the way the ~1348
+# pre-multi-tenancy rows did.
+#
+# So the asymmetry is correct. The declaration records it here because the
+# declaration is where the three CHECK fragments stand next to each other —
+# this is the only place a future reader can compare them at once.
+# (Per Voronov 2026-05-26 second meta-review: "the declaration is where
+# the asymmetry is visible, therefore the declaration is where the
+# asymmetry needs explanation.")
 
 CANONICAL_POSITIONS_CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
