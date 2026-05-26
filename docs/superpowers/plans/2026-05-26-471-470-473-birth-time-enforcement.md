@@ -1957,7 +1957,9 @@ This module owns rung (b). Rung (a) lives in db/schema.py (CHECK constraints +
 partial UNIQUE index, all installed by _migrate_qty_positive,
 _migrate_tenant_id_not_null, _migrate_unique_open_scan).
 
-Closes #471 F5/F6/F7/F9, #470, #473.
+Closes #471 F5/F6/F7/F9, #470. Advances #473 (F10 rate-limiting deferred
+to #483 per the PR body's "Known scope gap" section — the endpoint is
+authenticated + idempotency-cached but lacks per-tenant throttle).
 """
 from __future__ import annotations
 
