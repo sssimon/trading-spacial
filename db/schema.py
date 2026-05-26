@@ -714,25 +714,56 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         )
         return
 
-    # 1. Backfill aggressively.
-    con.execute(
-        """UPDATE positions
-           SET qty = size_usd / entry_price
-           WHERE qty IS NULL
-             AND size_usd IS NOT NULL
-             AND entry_price IS NOT NULL
-             AND entry_price > 0"""
-    )
-    backfilled = con.execute("SELECT changes()").fetchone()[0]
-    log.info("_migrate_qty_not_null: backfilled qty for %d rows.", backfilled)
+    # Column-aware migration: an old/stub positions table may not yet have
+    # size_usd or qty columns (the earlier _migrate_* helpers are tolerant
+    # of missing columns; this one must be too). Query the live schema and
+    # gate each step on which columns actually exist.
+    existing_cols = {
+        row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    has_size_usd = "size_usd" in existing_cols
+    has_qty = "qty" in existing_cols
+    has_entry_price = "entry_price" in existing_cols
 
-    # 2. Quarantine remaining NULL rows.
-    con.execute(
-        """UPDATE positions
-           SET status = 'legacy_unmeasurable'
-           WHERE qty IS NULL
-             AND status != 'legacy_unmeasurable'"""
-    )
+    # 1. Backfill aggressively — only when both source and target columns exist.
+    if has_qty and has_size_usd and has_entry_price:
+        con.execute(
+            """UPDATE positions
+               SET qty = size_usd / entry_price
+               WHERE qty IS NULL
+                 AND size_usd IS NOT NULL
+                 AND entry_price IS NOT NULL
+                 AND entry_price > 0"""
+        )
+        backfilled = con.execute("SELECT changes()").fetchone()[0]
+        log.info("_migrate_qty_not_null: backfilled qty for %d rows.", backfilled)
+    else:
+        log.info(
+            "_migrate_qty_not_null: skipping backfill — columns not yet present "
+            "(has_qty=%s, has_size_usd=%s, has_entry_price=%s).",
+            has_qty,
+            has_size_usd,
+            has_entry_price,
+        )
+
+    # 2. Quarantine rows that will fail the CHECK constraint after recreation.
+    if has_qty:
+        # Standard path: only rows whose qty is actually NULL need quarantine.
+        con.execute(
+            """UPDATE positions
+               SET status = 'legacy_unmeasurable'
+               WHERE qty IS NULL
+                 AND status != 'legacy_unmeasurable'"""
+        )
+    else:
+        # No qty column at all — after recreation every existing row will land
+        # with qty=NULL in the new schema, so all of them must be quarantined
+        # up-front or the CHECK constraint would reject the INSERT.
+        con.execute(
+            """UPDATE positions
+               SET status = 'legacy_unmeasurable'
+               WHERE status != 'legacy_unmeasurable'"""
+        )
     quarantined = con.execute("SELECT changes()").fetchone()[0]
     log.info(
         "_migrate_qty_not_null: quarantined %d rows as status='legacy_unmeasurable'.",
@@ -775,15 +806,23 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         )
         """
     )
-    con.execute(
-        """
-        INSERT INTO positions_new SELECT
-            id, scan_id, symbol, direction, status, entry_price, entry_ts,
-            sl_price, tp_price, size_usd, qty, exit_price, exit_ts, exit_reason,
-            pnl_usd, pnl_pct, notes, atr_entry, be_mult, tenant_id
-        FROM positions
-        """
+    # Build the SELECT dynamically: missing source columns land as NULL in the
+    # new table. Order MUST mirror TARGET_COLS so positional INSERT lines up.
+    TARGET_COLS = [
+        "id", "scan_id", "symbol", "direction", "status", "entry_price",
+        "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
+        "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
+        "notes", "atr_entry", "be_mult", "tenant_id",
+    ]
+    select_expressions = [
+        col if col in existing_cols else "NULL"
+        for col in TARGET_COLS
+    ]
+    insert_sql = (
+        f"INSERT INTO positions_new ({', '.join(TARGET_COLS)}) "
+        f"SELECT {', '.join(select_expressions)} FROM positions"
     )
+    con.execute(insert_sql)
     con.execute("DROP TABLE positions")
     con.execute("ALTER TABLE positions_new RENAME TO positions")
     con.execute("CREATE INDEX idx_positions_tenant ON positions(tenant_id)")

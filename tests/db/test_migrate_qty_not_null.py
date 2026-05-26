@@ -143,6 +143,52 @@ def test_check_constraint_rejects_null_qty_for_active_status(tmp_path):
     assert row[1] == "legacy_unmeasurable"
 
 
+def test_migration_tolerates_stub_positions_table(tmp_path):
+    """Migration must not crash when positions table predates size_usd/qty.
+
+    Simulates a very old DB schema (pre-B.1 stub) — earlier _migrate_* helpers
+    add tenant_id incrementally, but _migrate_qty_not_null must not reference
+    size_usd/qty in raw SQL if those columns don't yet exist.
+    """
+    import sqlite3
+    from db.schema import _migrate_qty_not_null
+
+    db = tmp_path / "stub.db"
+    con = sqlite3.connect(db)
+    con.executescript('''
+        CREATE TABLE positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL DEFAULT 'LONG',
+            status TEXT NOT NULL DEFAULT 'open',
+            entry_price REAL NOT NULL,
+            entry_ts TEXT NOT NULL
+        );
+        INSERT INTO positions (symbol, direction, status, entry_price, entry_ts)
+        VALUES ('BTCUSDT', 'LONG', 'open', 50000.0, '2024-01-01T00:00:00');
+    ''')
+    con.commit()
+
+    # Should not raise.
+    _migrate_qty_not_null(con)
+    con.commit()
+
+    # Row preserved.
+    row = con.execute("SELECT symbol, status, qty FROM positions").fetchone()
+    assert row[0] == 'BTCUSDT'
+    # qty column now exists (recreated), value is NULL.
+    assert row[2] is None
+    # Status quarantined since qty is NULL.
+    assert row[1] == 'legacy_unmeasurable'
+
+    # CHECK constraint is in place.
+    schema = con.execute(
+        "SELECT sql FROM sqlite_master WHERE name='positions'"
+    ).fetchone()[0]
+    assert "legacy_unmeasurable" in schema
+    con.close()
+
+
 def test_idempotent_on_already_migrated_table(tmp_path):
     """Running _migrate_qty_not_null twice is a no-op the second time."""
     from db.schema import _migrate_qty_not_null
