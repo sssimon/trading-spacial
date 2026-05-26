@@ -40,7 +40,7 @@ from db.auth_schema import (
     has_any_user, init_auth_db, init_system_state,
     is_setup_completed, mark_setup_completed,
 )
-from db.transaction import transaction
+from db.transaction import transaction, snapshot_connection
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -457,7 +457,7 @@ def list_symbols():
 @app.get("/status", summary="Estado detallado del scanner",
          dependencies=[Depends(verify_api_key)])
 def status():
-    with transaction() as con:
+    with snapshot_connection() as con:
         latest = get_latest_scan(con)
     return {
         "scanner_state": _scanner_state,

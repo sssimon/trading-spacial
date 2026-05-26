@@ -21,7 +21,7 @@ from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
 from api.telegram import build_telegram_message
-from db.transaction import transaction
+from db.transaction import transaction, snapshot_connection
 from db.signals import (
     get_latest_signal, get_latest_scan, get_scans, get_signals_summary, save_scan,
 )
@@ -203,7 +203,7 @@ def list_signals(
     since_hours:  Optional[float] = Query(None,  description="Ultimas N horas"),
     symbol:       Optional[str]   = Query(None,  description="Filtrar por par (ej: ETHUSDT)"),
 ):
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = get_scans(con, limit=limit, only_signals=only_signals,
                          only_setups=only_setups, since_hours=since_hours,
                          symbol=symbol)
