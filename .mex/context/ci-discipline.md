@@ -70,7 +70,7 @@ For each entry in the orthogonal-flake list below, count the admin merges since 
 
 A hard-stop is lifted by ONE of:
 - The tracking issue is closed (the flake is fixed; the entry is removed from the list).
-- The tracking issue receives a substantive comment naming progress toward closure (a planned fix, a PR opened against it, a measurement that scopes the problem) — restarts the counter at 0.
+- The tracking issue receives a substantive comment naming progress toward closure: a **merged** PR against the issue, a measurement/scoping comment that names a concrete next step, or an authored fix in the codebase (commit on main referencing the issue). **An unmerged PR opened against the issue is NOT enough** — it is a leading signal of intention, not a lagging signal of progress, and using it as a reset would let a single PR authorize its own admin merge via a recursive promise (the case that PR #507's rule failed to prevent until Voronov's reframe in PR #509 made the clause lagging). Restarts the counter at 0.
 - An explicit operator override is logged via `mex log` naming why the counter is being bypassed and committing to a specific next step that addresses the root cause.
 
 The counter is arithmetic, not virtue. The decision is the *number*, not the reviewer's judgment about whether this specific PR is innocent enough.
@@ -125,6 +125,22 @@ PR #502's CI surfaced the regression because it rebased onto post-#500 `upstream
 > *"The first time a real bug reaches main through an admin merge, the post-mortem will reconstruct: 'we admin-merged three times before for the same reason, the practice was normalized, the reviewer didn't look closely because they'd seen the flake before, the bug was structural and unrelated to the flake but adjacent in the diff.'"*
 
 The post-mortem reconstructed exactly that shape. This file is the corrective.
+
+### Reset clause tightened from leading to lagging (2026-05-26)
+
+After the rate-predicate counter landed in PR #507 (Step 4 of this discipline), PR #508 (`PRAGMA busy_timeout` in init_db — advances #495) hit the same `test_setup.py` flake on its CI run. The agent surfaced the recursive case to Voronov:
+
+> *"The PR is both the evidence and the act being authorized by the evidence. The recursive case exposes this cleanly. PR #508 opening against #495 is a promise of progress. The admin-merge of #508 would be consuming that promise to authorize itself. That is not gaming in bad faith — it is the rule eating its own tail because the tense was never specified."*
+
+Voronov named the precise loophole:
+
+> *"PR opened is a leading signal of progress. PR merged is a lagging one. You wrote a leading-signal clause into a rule whose purpose is to gate a lagging act. That mismatch is the loophole — not the recursion. The rule was written in present tense. Discipline lives in past tense."*
+
+The reset clause's tense was tightened from "a PR opened against it" to "a merged PR against the issue." This PR (#509) is the tightening.
+
+Concrete resolution for #508: it was NOT admin-merged. CI was re-run (`gh run rerun --failed`) and the rerun passed clean — the flake is intermittent enough that a second run often succeeds. PR #508 then landed through normal review. Once merged, it became the lagging-signal qualifying event that resets the counter from 4 → 0.
+
+This is the second tightening of this discipline in the same session (the first was PR #507 adding the counter at all). Each tightening came after a real incident exposed a missing rule. The pattern: write the rule, the next instance surfaces what the rule didn't say, tighten.
 
 ### PR #506 blocked by rate predicate (2026-05-26)
 
