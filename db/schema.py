@@ -1154,18 +1154,40 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
     future eager sweeper if lazy cleanup proves insufficient (NOT used by
     the current `get` path; included for forward compatibility).
 
-    Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    `body_sha256` carries the SHA-256 of the canonical-JSON request body
+    that produced `result_json`. BirthRegistrar compares fingerprints on
+    cache hit; a mismatch raises DuplicateIdempotencyKeyError (409) per
+    RFC 9457 idempotency semantics. The column is added via idempotent
+    ALTER TABLE so installations created before the fingerprint guard
+    pick it up on next boot (Serrano BLOCKER 1).
+
+    Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS +
+    try/except ALTER for the body_sha256 column.
     """
     con.execute(
         """CREATE TABLE IF NOT EXISTS idempotency_keys (
                tenant_id      INTEGER NOT NULL,
                key            TEXT    NOT NULL,
                result_json    TEXT    NOT NULL,
+               body_sha256    TEXT,
                created_at     TEXT    NOT NULL,
                expires_at     TEXT    NOT NULL,
                PRIMARY KEY (tenant_id, key)
            )"""
     )
+    # ALTER TABLE for installations that created the table BEFORE the
+    # body_sha256 column existed. Idempotent via try/except on the
+    # "duplicate column" OperationalError.
+    try:
+        con.execute(
+            "ALTER TABLE idempotency_keys ADD COLUMN body_sha256 TEXT"
+        )
+        log.info(
+            "_migrate_idempotency_keys: added body_sha256 column to "
+            "idempotency_keys."
+        )
+    except sqlite3.OperationalError:
+        pass  # column already exists (fresh CREATE TABLE above OR prior run)
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_idempotency_expires "
         "ON idempotency_keys(expires_at)"

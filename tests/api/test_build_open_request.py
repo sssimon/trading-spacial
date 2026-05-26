@@ -100,3 +100,62 @@ def test_factory_carries_idempotency_key_when_supplied():
     }
     v = _build_open_request(body, tenant_id=1, idempotency_key="req-uuid-xyz")
     assert v.idempotency_key == "req-uuid-xyz"
+
+
+# ---------------- Runtime órgano de rechazo on tenant_id (Serrano HIGH 6) ----------------
+
+
+def _ok_body():
+    return {
+        "symbol": "BTCUSDT", "entry_price": 100.0,
+        "direction": "LONG", "qty": 10.0,
+    }
+
+
+def test_factory_rejects_string_tenant_id():
+    """Regla de coherencia: the type annotation `tenant_id: int` is only
+    enforced when the factory rejects non-conforming inputs at runtime."""
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError) as exc:
+        _build_open_request(_ok_body(), tenant_id="1", idempotency_key=None)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["field"] == "tenant_id"
+
+
+def test_factory_rejects_none_tenant_id():
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError):
+        _build_open_request(_ok_body(), tenant_id=None, idempotency_key=None)
+
+
+def test_factory_rejects_zero_tenant_id():
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError):
+        _build_open_request(_ok_body(), tenant_id=0, idempotency_key=None)
+
+
+def test_factory_rejects_negative_tenant_id():
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError):
+        _build_open_request(_ok_body(), tenant_id=-1, idempotency_key=None)
+
+
+def test_factory_rejects_boolean_tenant_id():
+    """`True` is an int in Python (isinstance(True, int) is True) — explicitly
+    reject so a caller cannot smuggle bool past the gate."""
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError):
+        _build_open_request(_ok_body(), tenant_id=True, idempotency_key=None)
+
+
+def test_factory_rejects_float_tenant_id():
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError):
+        _build_open_request(_ok_body(), tenant_id=1.5, idempotency_key=None)
+
+
+def test_factory_rejects_non_string_idempotency_key():
+    from api.positions_birth import _build_open_request, BodyValidationError
+    with pytest.raises(BodyValidationError) as exc:
+        _build_open_request(_ok_body(), tenant_id=1, idempotency_key=123)
+    assert exc.value.detail["field"] == "idempotency_key"
