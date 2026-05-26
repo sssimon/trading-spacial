@@ -337,6 +337,12 @@ def init_db() -> None:
     with transaction() as con_tenant:
         _migrate_tenant_id_not_null(con_tenant)
 
+    # Idempotency partial-UNIQUE index — #470 (Voronov D-schema rung,
+    # operational invariant). MUST run AFTER _migrate_tenant_id_not_null so
+    # the recreated table is the target of the index.
+    with transaction() as con_idx:
+        _migrate_unique_open_scan(con_idx)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -1072,4 +1078,52 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
     log.info(
         "_migrate_tenant_id_not_null: migration complete. positions enforces "
         "tenant_id IS NOT NULL or quarantine."
+    )
+
+
+def _migrate_unique_open_scan(con: sqlite3.Connection) -> None:
+    """Partial unique index on (tenant_id, scan_id) WHERE status='open' AND
+    scan_id IS NOT NULL — #470 idempotency race closure.
+
+    Closes the race window of two concurrent POST /positions with the same
+    scan_id: the second INSERT fires sqlite3.IntegrityError, which
+    BirthRegistrar maps to a 409 UniqueViolationError. Combined with the
+    Idempotency-Key cache (Task 17), a retried client request is replayed
+    safely; a duplicate client request hits the schema fence.
+
+    Production measurement (2026-05-26): only 2 rows share scan_id=42, both
+    closed. No open rows currently violate this index — migration is safe
+    at-rest.
+
+    Column-aware: if `positions` is missing OR either `tenant_id` / `scan_id`
+    column is absent (pre-B.1 stub schema), skip — there is nothing to index
+    against.
+
+    Idempotent: CREATE INDEX IF NOT EXISTS.
+    """
+    schema_row = con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone()
+    if not schema_row:
+        log.warning(
+            "_migrate_unique_open_scan: positions table not found; skipping."
+        )
+        return
+    existing_cols = {
+        row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    if "tenant_id" not in existing_cols or "scan_id" not in existing_cols:
+        log.info(
+            "_migrate_unique_open_scan: tenant_id and/or scan_id column "
+            "missing; skipping (pre-B.1 stub schema)."
+        )
+        return
+    con.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_open_scan_unique
+              ON positions (tenant_id, scan_id)
+              WHERE status = 'open' AND scan_id IS NOT NULL"""
+    )
+    log.info(
+        "_migrate_unique_open_scan: partial UNIQUE index ensured "
+        "(tenant_id, scan_id) WHERE status='open' AND scan_id IS NOT NULL."
     )
