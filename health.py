@@ -1170,8 +1170,18 @@ def get_dashboard_state(
                     sym = pos.get("symbol")
                     if not sym or sym not in prices:
                         continue
+                    raw_qty = pos.get("qty")
+                    if raw_qty is None:
+                        # Quarantined legacy_unmeasurable position (#467) —
+                        # explicitly excluded from open-MTM. Surfacing rather
+                        # than silently coercing to 0 (Serrano BLOCKER 2).
+                        log.warning(
+                            "get_dashboard_state: skipping legacy_unmeasurable "
+                            "position from open_mtm sym=%s", sym,
+                        )
+                        continue
                     entry = float(pos.get("entry_price") or 0)
-                    qty = float(pos.get("qty") or 0)
+                    qty = float(raw_qty)
                     direction = pos.get("direction", "LONG")
                     price_now = float(prices[sym])
                     if direction == "SHORT":

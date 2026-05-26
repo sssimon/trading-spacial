@@ -142,8 +142,18 @@ def compute_portfolio_equity_curve(
         sym = pos.get("symbol")
         if sym not in now_price_by_symbol:
             continue
+        raw_qty = pos.get("qty")
+        if raw_qty is None:
+            # Quarantined legacy_unmeasurable position (#467) — skipping rather
+            # than silently coercing to 0 in the MTM/risk-threshold roll-up.
+            # Under-counting exposure on these rows was Serrano BLOCKER 2.
+            log.warning(
+                "kill_switch_v2: skipping legacy_unmeasurable position from "
+                "MTM sym=%s", sym,
+            )
+            continue
         entry = float(pos.get("entry_price") or 0)
-        qty = float(pos.get("qty") or 0)
+        qty = float(raw_qty)
         direction = pos.get("direction", "LONG")
         current_price = now_price_by_symbol[sym]
         if direction == "SHORT":

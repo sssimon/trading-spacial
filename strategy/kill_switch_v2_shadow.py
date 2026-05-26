@@ -73,11 +73,15 @@ def _load_open_positions(conn, *, tenant_id: int) -> list[dict[str, Any]]:
            WHERE status = 'open' AND tenant_id = ?""",
         (tenant_id,),
     ).fetchall()
+    # NOTE: qty is intentionally NOT coerced to 0.0 here. Legacy unmeasurable
+    # positions (#467) carry qty=None; the membrane that hid this got removed
+    # in the post-Serrano correction. Consumers (health.py, kill_switch_v2)
+    # must skip None explicitly — see CLAUDE.md "Capas de enforcement".
     return [
         {
             "symbol": r[0],
             "entry_price": r[1] or 0.0,
-            "qty": r[2] or 0.0,
+            "qty": r[2],
             "direction": r[3] or "LONG",
         }
         for r in rows
