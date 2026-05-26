@@ -351,6 +351,31 @@ Tres consecuencias para esta codebase:
 | `precheck_connection` y `snapshot_connection` son contratos distintos | **Tipo** | `NewType("PrecheckConn", sqlite3.Connection)` y `NewType("SnapshotConn", sqlite3.Connection)` en `db/transaction.py` — mypy detecta mis-uso | #468 |
 | Los campos del snapshot consumidos por el write-tx no cambian entre precheck y BEGIN IMMEDIATE | **Tipo + runtime check** | `OwnershipValidatedSnapshot` (factory privada en `operators/precheck.py`) + field-by-field re-validation en `PositionClosure.execute()` cubre los 6 campos del `PositionSnapshot` | #469 + F6 |
 
+### Invariantes registradas — estado tras Cluster D (Voronov 2026-05-26, post-#471 #470 #473)
+
+| Invariante de dominio | Capa enforced | Mecanismo | Issue cerrado |
+|---|---|---|---|
+| `qty` siempre tiene valor numérico para positions activas (o quarantine) | **Schema** | `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')` en `positions` (via `_migrate_qty_not_null`) | #467 |
+| `precheck_connection` y `snapshot_connection` son contratos distintos | **Tipo** | `NewType("PrecheckConn", sqlite3.Connection)` y `NewType("SnapshotConn", sqlite3.Connection)` en `db/transaction.py` | #468 |
+| Los campos del snapshot consumidos por el write-tx no cambian entre precheck y BEGIN IMMEDIATE | **Tipo + runtime check** | `OwnershipValidatedSnapshot` (factory privada en `operators/precheck.py`) + field-by-field re-validation en `PositionClosure.execute()` | #469 + F6 |
+| `qty > 0` para positions activas (cierra el 0.0-bypass) | **Schema** | `CHECK ((qty IS NOT NULL AND qty > 0) OR status='legacy_unmeasurable')` (via `_migrate_qty_positive`) | #471 (parcial) |
+| `tenant_id IS NOT NULL` para positions activas | **Schema** | `CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable','legacy_no_tenant'))` (via `_migrate_tenant_id_not_null`) | #471 (parcial) |
+| Idempotencia estructural: no dos open rows con el mismo `(tenant_id, scan_id)` | **Schema** | `CREATE UNIQUE INDEX ... WHERE status='open' AND scan_id IS NOT NULL` (via `_migrate_unique_open_scan`) | #470 (parcial) |
+| Input externo → `Position` legítima (allowlist symbol, direction enum, qty>0, SL/TP relacional, entry_ts window) | **Tipo + runtime órgano de rechazo** | Pydantic `OpenPositionRequest` (extra='forbid') + factory privada `_build_open_request` con `_OPEN_REQUEST_SENTINEL` en `api/positions_birth.py` | #473 (parcial), #471 F5/F6/F7/F9 |
+| Idempotencia operacional (cliente retry-safe) | **Tipo (HTTP)** | `Idempotency-Key` header + tabla `idempotency_keys` con 24h TTL | #470 (parcial) |
+| Error taxonomy 422/409 vs 500 | **Tipo** | `BirthError` hierarchy (`BodyValidationError`, `DuplicateIdempotencyKeyError`, `UniqueViolationError`, …) en `api/positions_birth.py`; route handler mapea `status_code` | #473 |
+| Post-commit atomicidad de `update_positions_json` | **Operador-ligero** | `BirthRegistrar.register` posee `with transaction()` + post-commit | #473 F8 |
+
+### Principio dual de la frontera Cluster D (Voronov 2026-05-26)
+
+> Una `Position` existe si y solo si su acto de nominación satisfizo simultáneamente: (a) el contrato existencial del schema (qué la convierte ontológicamente en Position), y (b) el contrato de nominación de la frontera de entrada (qué valida que el input externo intentaba declararla legítimamente). Schema es la frontera que ningún caller evade; nominación es donde el error toma forma semántica.
+
+> `close()` valida una transición entre dos estados conocidos del mismo objeto. `open()` no valida transición — valida un acto de nominación. Son primos, no hermanos. Cluster D NO introduce un `PositionOpen` operador simétrico a `PositionClosure` — eso sería "falsa simetría — imitación visual; no comparte contrato". `BirthRegistrar` es un op-ligero: validación ocurrió arriba (Pydantic + `_build_open_request`); el registrar solo posee la atomicidad transacción + post-commit.
+
+### Documented status: `legacy_no_tenant`
+
+Status especial usado por `_migrate_tenant_id_not_null` (#471) para reconocer rows históricas pre-multi-tenant cuya `tenant_id` no es recuperable. El schema CHECK exempta `legacy_unmeasurable` Y `legacy_no_tenant`. Rows ya marcadas `legacy_unmeasurable` (de la migración C2) NO se re-clasifican — el OR del CHECK las exempta directamente. Convierte 2018 mentiras silenciosas (tenant_id=NULL implícito) en reconocimientos explícitos.
+
 ### Patrón nombrado: "invariantes de dominio sin contraparte estructural"
 
 Cada futuro issue de la familia `or X`, "código de revisor", "trust-and-document" debería compararse contra este registro. Si la invariante pertenece a una capa más fuerte que `convención`, moverla es la fix correcta.
@@ -367,11 +392,11 @@ Implicación: hasta que `create_position` exija lo que `close_position` asume, t
 
 Status especial usado por `_migrate_qty_not_null` (#467) para reconocer 670 rows históricas cuya `qty` nunca fue medida y no es derivable. El schema CHECK constraint exempta este status: `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')`. Convierte 670 mentiras silenciosas en 670 reconocimientos explícitos.
 
-### Known scope gap (Voronov 2026-05-26)
+### Known scope gap (post-D)
 
-> El sistema enforza invariantes en el momento de cruce (precheck→snapshot, snapshot→write) pero **no enforza invariantes en el momento de origen** (creación de la position). Toda la cadena de defensa de C2 asume que la position fue creada correctamente. Si en `position_open` se crea una row con `tenant_id` mal asignado, los 3 mecanismos de C2 la sostendrán correctamente *con el tenant equivocado*. C2 endurece el ciclo de vida; no endurece el nacimiento.
-
-Esta deuda NO está cubierta por este PR. Tratamiento futuro: auditar `db_create_position` y los endpoints que invocan creación (`POST /positions`, paths del scanner) bajo la misma lente del registro de capas.
+- **Rate limiting (#473 F10)** — el endpoint `POST /positions` no tiene throttle. Un cliente legítimo con la `Idempotency-Key` correcta puede inundar el endpoint creando rows distintas (cada body único pasa). El sistema confía en autenticación + JWT para acotar abuso. Issue separado pendiente.
+- **Direction enum sólo en boundary** — el schema acepta cualquier TEXT en `positions.direction`; el `Literal["LONG","SHORT"]` vive sólo en la frontera Pydantic. Una migración manual o cliente legacy podría escribir `"long"` en lowercase. Mover a `CHECK (direction IN ('LONG','SHORT'))` es follow-up trivial pero NO está en este PR.
+- **`scan_id` FK** — `scan_id` es nullable y referencia una tabla que no existe (no hay `scans` con esa semántica de signal_id). El UNIQUE parcial cierra la race condition (#470) pero NO la integridad referencial. Es follow-up separado.
 
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
