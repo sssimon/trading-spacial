@@ -1,10 +1,26 @@
 """Tests for _build_open_request + ValidatedOpenRequest sentinel protection.
 
-Mirrors the PrecheckOriginatedSnapshot pattern from C2: the type marks
-provenance (the request came through the validating factory) — its runtime
-órgano refuses the wrong sentinel. Per Voronov 2026-05-26 4th meta-review
-(#477), this pattern carries a provenance claim, not a safety claim. The
-safety claims live downstream at the consumer's re-validation.
+`ValidatedOpenRequest` shares an aesthetic with `PrecheckOriginatedSnapshot`
+(sentinel + single-underscore factory) but is structurally a DIFFERENT
+pattern (Voronov 2026-05-26 5th meta-review C1).
+
+`PrecheckOriginatedSnapshot` is a provenance-marker: the factory marks
+origin, the safety lives downstream in `PositionClosure.execute()`'s
+re-derivation. An attacker who bypasses the factory still gets caught
+downstream.
+
+`ValidatedOpenRequest` is a **factory-as-safety-organ**: the factory IS
+the safety check (Pydantic + tenant_id type/range + entry_ts window). The
+downstream consumer (`BirthRegistrar.register`) trusts the validated
+fields and enforces SEPARATE invariants (idempotency + uniqueness).
+Bypassing the factory = bypassing safety, because the downstream does NOT
+re-derive Pydantic shape or tenant_id type.
+
+See `.mex/context/conventions.md` "Pattern: factory-as-safety-organ" for
+the structural distinction and the open follow-up about whether the
+sentinel-as-convention rung is acceptable for this pattern (it is NOT, in
+general — but the current state works because no caller bypasses; tracked
+as separate sub-task to #477's closure).
 """
 import pytest
 

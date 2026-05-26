@@ -80,9 +80,9 @@ class PrecheckOkToProceed:
 
     The sentinel check in PrecheckOriginatedSnapshot.__post_init__ verifies
     the snapshot was produced by the precheck factory. It does NOT enforce
-    that ownership was validated — `PositionClosure.execute()`'s
-    field-by-field re-validation against a fresh re-SELECT inside
-    BEGIN IMMEDIATE is the safety organ. Per Voronov #477 4th meta-review:
+    ownership safety — `PositionClosure.execute()`'s field-by-field
+    re-derivation against a fresh re-SELECT inside BEGIN IMMEDIATE is the
+    safety organ. Per Voronov #477 4th meta-review:
     *"The sentinel is not load-bearing. The field-by-field re-validation is."*
 
     Runtime organ at THIS layer: __post_init__ rejects construction with a
@@ -141,12 +141,15 @@ class PrecheckOriginatedSnapshot:
     Previously named `OwnershipValidatedSnapshot`. The old name overclaimed:
     the runtime check (`_sentinel is _ORIGINATION_SENTINEL`) verifies that
     construction went through `_build_originated_snapshot`, not that the
-    snapshot's ownership was validated. Ownership validation happens during
-    the precheck itself (the `tenant_id` comparison the precheck makes) and
-    is then RE-VALIDATED — independently — by `PositionClosure.execute()`
-    via field-by-field comparison against a fresh re-SELECT inside
-    `BEGIN IMMEDIATE`. The re-validation is the safety organ. This type is
-    the provenance marker.
+    snapshot carries any safety guarantee. The precheck logic makes an
+    ownership DECISION against possibly-stale state (the `tenant_id`
+    comparison that collapses to `PrecheckNotFound` for IDOR-safety); that
+    decision is advisory. Safety binds only when `PositionClosure.execute()`
+    re-derives the comparison against a fresh re-SELECT inside
+    `BEGIN IMMEDIATE`. The word "validated" applies to exactly one frontier
+    — the write-tx re-derivation — not redistributed across the read-side
+    and the write-side (Voronov 2026-05-26 5th meta-review B1).
+    The re-derivation is the safety organ. This type is the provenance marker.
 
     Per Voronov 2026-05-26 4th meta-review (closes #477):
 
@@ -201,11 +204,16 @@ def _build_originated_snapshot(snapshot: PositionSnapshot) -> PrecheckOriginated
     module will succeed at runtime — the rung is convención, not tipo.
 
     Previously named `_build_validated_snapshot`. The old name overclaimed:
-    the factory does not validate ownership; it marks provenance. Ownership
-    is validated by the precheck logic BEFORE this factory is called, and
-    re-validated by `PositionClosure.execute()` AFTER this factory is
-    called. The factory's job is the marker, not the check.
+    the factory does not validate ownership; it marks provenance. The
+    precheck logic makes an ownership DECISION against possibly-stale state
+    (the read-side `tenant_id` comparison that collapses to `PrecheckNotFound`
+    for an IDOR-safe response). That decision is advisory. Safety binds only
+    when `PositionClosure.execute()`'s field-by-field re-validation against
+    a fresh re-SELECT inside `BEGIN IMMEDIATE` passes — that is the single
+    place in the lineage where the word "validated" applies.
 
-    Per Voronov 2026-05-26 4th meta-review (#477 closed via Path 6).
+    Per Voronov 2026-05-26 4th meta-review (#477 closed via Path 6) +
+    5th meta-review B1: "validated" appears in exactly one frontier — the
+    write-tx — not redistributed across the read-side and the write-side.
     """
     return PrecheckOriginatedSnapshot(inner=snapshot, _sentinel=_ORIGINATION_SENTINEL)

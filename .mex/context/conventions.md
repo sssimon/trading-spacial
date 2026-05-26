@@ -154,19 +154,28 @@ Patrón anti-fila: agrupar predicados distintos bajo el mismo artifact porque "c
 
 ### Pattern: provenance markers vs safety claims (Voronov 2026-05-26 4th meta-review, #477)
 
-Un tipo cuyo constructor está acotado por convención (single-underscore factory + sentinel importable) carga una **provenance claim**, NO una **safety claim**. La safety claim debe vivir en el consumer's re-validation, no en este tipo.
+Un tipo cuyo constructor está acotado por convención (single-underscore factory + sentinel importable) puede cargar una **provenance claim**, NO una **safety claim** — **iff** el safety está enforced downstream por un órgano independiente del tipo. La safety claim vive en ese órgano downstream, no en este tipo.
 
-**Cómo reconocer el pattern:**
+**El diagnostic (Voronov 2026-05-26 5th meta-review B2 — load-bearing, no opcional):**
+
+> *"Can an attacker who imports the sentinel still be caught downstream by an independent organ?"*
+
+- **Si la respuesta es SÍ** → el tipo es un provenance-marker; el sentinel es para legibilidad, no para safety; el rename + registry split de Path 6 aplica.
+- **Si la respuesta es NO** → el tipo NO es un provenance-marker. Es algo más — un factory-as-safety-organ (ver pattern de abajo), un half-built lock, u otra cosa. NO aplica este pattern.
+
+El diagnostic es load-bearing porque sin él, los aesthetic signs (sentinel + single-underscore + un downstream que parece chequear) pueden hacer match con tipos que estructuralmente NO son provenance-markers. Voronov: *"Visual similarity is not structural identity."*
+
+**Aesthetic signs (descriptivos, no diagnósticos — usar SOLO después de pasar el diagnostic de arriba):**
 
 - El tipo tiene un `__post_init__` que rechaza construcción "incorrecta" (e.g., `_sentinel is not _MODULE_SENTINEL`).
 - El sentinel y el factory son single-underscore-prefix (importables — Python no enforza la barrera).
-- El consumer del tipo (downstream) hace su propia re-validación de los fields antes de actuar.
+- El consumer del tipo (downstream) hace su propio chequeo de los fields antes de actuar.
 
 **Cuál es la verdad estructural:**
 
 - El check del sentinel NO es load-bearing para safety. Es load-bearing para LEGIBILIDAD: hace que el type signature lea como un contrato ("este snapshot vino del precheck factory") sin que el reader tenga que walk el código.
 - El check de safety vive en el consumer (e.g., `PositionClosure.execute()` re-SELECT + field-by-field comparison inside BEGIN IMMEDIATE).
-- Un attacker que importe el sentinel y fabrique el tipo se cuela del provenance check, pero se cae en la re-validation downstream.
+- Un attacker que importe el sentinel y fabrique el tipo se cuela del provenance check, pero se cae en la re-validation downstream **— este es el sí del diagnostic**.
 
 **Cómo registrar esto en este file:**
 
@@ -179,12 +188,56 @@ Un tipo cuyo constructor está acotado por convención (single-underscore factor
 - El nombre debe describir la provenance, no la safety. `OwnershipValidatedSnapshot` overclaims; `PrecheckOriginatedSnapshot` honest naming.
 - El error message del sentinel-rejection debe nombrar: (a) el factory, (b) el rung convención explícitamente, (c) "provenance" como el semantic real, (d) dónde vive el safety organ downstream.
 
-**Instancias actuales del pattern:**
+**Instancias actuales del pattern (sólo las que pasaron el diagnostic):**
 
-- `PrecheckOriginatedSnapshot` (`operators/precheck.py`) — provenance: "snapshot came from precheck factory." Safety: `PositionClosure.execute()` field-by-field re-validation.
-- `ValidatedOpenRequest` (`api/positions_birth.py`) — provenance: "request came through `_build_open_request` validator." Safety: `BirthRegistrar.register`'s INSERT + idempotency-key probe inside the same transaction.
+- `PrecheckOriginatedSnapshot` (`operators/precheck.py`) — provenance: "snapshot came from precheck factory." Safety: `PositionClosure.execute()` field-by-field re-derivation against fresh re-SELECT inside `BEGIN IMMEDIATE`. **Diagnostic: SÍ** — un attacker que importe `_ORIGINATION_SENTINEL` fabricando un snapshot con `tenant_id` forjado se cae en la re-derivation downstream (el downstream NO trusts el tipo; lo re-checkea contra DB).
 
 Voronov cita load-bearing (4th meta-review): *"The issue is asking which lock to install on a door that opens into a corridor where every visitor is searched. The search is the security. The lock is theatre. The honest move is to stop calling it a lock."*
+
+### Pattern: factory-as-safety-organ (sister pattern, Voronov 2026-05-26 5th meta-review C1)
+
+Distinct del pattern de arriba. Aquí el factory **es** el safety organ — la validation happens INSIDE el factory, no en un downstream re-derivation. El tipo's `__post_init__` sentinel check sigue siendo provenance-only (verifica que el caller pasó por el factory), pero esa provenance es load-bearing porque solo pasando por el factory el caller obtuvo safety.
+
+**El diagnostic discriminatorio (mismo question, respuesta opuesta):**
+
+> *"Can an attacker who imports the sentinel still be caught downstream by an independent organ?"*
+
+- **Si la respuesta es NO** → factory-as-safety-organ. El downstream consumer trusts el tipo y NO re-deriva las claims que el factory enforzó. Bypass del factory = bypass de safety. El sentinel check del tipo es la única barrera entre el caller y la safety claim.
+
+**Cuál es la verdad estructural:**
+
+- El factory contiene los actual safety checks (Pydantic shape + range + type checks).
+- El downstream consumer trusts el resultado del factory para esos campos. Puede enforzar OTROS invariantes (idempotency, uniqueness) — pero NO re-deriva los del factory.
+- Si un attacker bypassea el factory, esos safety checks NO se rerun. El sentinel check es load-bearing.
+
+**Diferencias clave vs el provenance-marker pattern:**
+
+| | Provenance-marker | Factory-as-safety-organ |
+|---|---|---|
+| ¿El factory hace safety checks? | NO (solo marca origen) | SÍ (Pydantic + ranges + types) |
+| ¿El downstream re-deriva esos checks? | SÍ (el safety organ vive allí) | NO (trusts el tipo) |
+| ¿Bypass del factory = bypass de safety? | NO (downstream catches) | SÍ (sentinel es la única barrera) |
+| Rung del provenance check | Convención (acceptable — safety está downstream) | Convención (problema — safety NO está downstream) |
+| ¿Path 6 (honest acceptance) aplica? | SÍ | **NO** — el sentinel ES load-bearing aquí |
+
+**Tratamiento honesto de este pattern:**
+
+- **NO** aceptar la convention rung como "good enough" — el sentinel es la safety barrier, y rung convención significa que un import bypassea la safety.
+- Considerar paths estructurales reales (closure pattern para el sentinel, name-mangling, frame inspection). El issue #477's 5 paths aplican aquí, no al provenance-marker pattern.
+- En este codebase: `ValidatedOpenRequest` (`api/positions_birth.py`) — su `_build_open_request` corre Pydantic validation, rechaza `tenant_id` no-int / ≤ 0 / bool / None, raises `BodyValidationError` y `StaleEntryTsError`. El `BirthRegistrar.register` consume el tipo trusting esos checks (re-validates idempotency + uniqueness, que son SEPARATE invariantes). Bypass del factory = los Pydantic checks no corren = silent safety failure.
+
+**Status para `ValidatedOpenRequest`:** open structural follow-up. Voronov 5th meta-review C1 surfaced this — el current state aún funciona porque ningún caller actual bypassea el factory, pero el rung at the safety frontier es convención single-underscore (el patrón que el provenance-marker pattern fue capaz de aceptar honest porque safety vivía downstream — aquí no vive downstream). Sub-task: decide between (a) closure pattern para encerrar el sentinel + factory, (b) name-mangling, (c) accept con escalation a un downstream check independiente, o (d) accept con documentation explícita del bypass risk + monitoring. **Out of scope of this PR; tracked separately.**
+
+### Naming-mapping nota (Voronov 2026-05-26 5th meta-review C2)
+
+Para futuro reader que busca el nombre viejo en el repo:
+
+- `OwnershipValidatedSnapshot` (pre-#477) ↔ `PrecheckOriginatedSnapshot` (post-#477)
+- `_build_validated_snapshot` (pre-#477) ↔ `_build_originated_snapshot` (post-#477)
+- `_VALIDATION_SENTINEL` (pre-#477) ↔ `_ORIGINATION_SENTINEL` (post-#477)
+- `tests/operators/test_ownership_validated_snapshot.py` (pre-#477) ↔ `tests/operators/test_precheck_originated_snapshot.py` (post-#477)
+
+Los archivos en `docs/superpowers/plans/2026-05-26-*.md` retienen los nombres viejos por diseño — son event records que documentan la closure de #469+F6 bajo el state of understanding pre-#477 reframe. Rewriting them sería retroactive falsification del trajectory.
 
 ### Invariantes registradas — estado tras Cluster D (post-#471 #470 #473, post-convergencia Serrano/Aurelius)
 
