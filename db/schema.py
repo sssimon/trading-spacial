@@ -330,6 +330,13 @@ def init_db() -> None:
     with transaction() as con_qty_pos:
         _migrate_qty_positive(con_qty_pos)
 
+    # tenant_id NOT NULL enforcement migration — #471 (Voronov D-schema rung).
+    # MUST run AFTER _migrate_qty_positive. Quarantines NULL-tenant rows as
+    # 'legacy_no_tenant'; rows already in 'legacy_unmeasurable' are exempted
+    # by the OR clause directly (no double-quarantine).
+    with transaction() as con_tenant:
+        _migrate_tenant_id_not_null(con_tenant)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -951,4 +958,118 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
     con.execute("CREATE INDEX IF NOT EXISTS idx_positions_tenant ON positions(tenant_id)")
     log.info(
         "_migrate_qty_positive: migration complete. positions enforces qty > 0."
+    )
+
+
+def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
+    """Schema CHECK: tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable',
+    'legacy_no_tenant') — #471 (Voronov D-schema rung, tenant invariant).
+
+    Production measurement (2026-05-26): 2018/2018 positions had
+    tenant_id IS NULL. Of those, 670 are already in legacy_unmeasurable from
+    C2 — the new CHECK exempts them via the OR (no double-quarantine).
+    The remaining ~1348 get re-statused to 'legacy_no_tenant'.
+
+    Idempotent: detects the 'legacy_no_tenant' literal in the live CHECK
+    fragment and skips.
+    """
+    schema_row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone()
+    if not schema_row or not schema_row[0]:
+        log.warning(
+            "_migrate_tenant_id_not_null: positions table not found; skipping."
+        )
+        return
+    if "legacy_no_tenant" in schema_row[0]:
+        log.info(
+            "_migrate_tenant_id_not_null: positions already exempts "
+            "'legacy_no_tenant'; skipping."
+        )
+        return
+
+    # Column-aware: if tenant_id column missing (pre-B.1 stub schema), skip
+    # the backfill UPDATE — there is nothing to re-status — but still recreate
+    # the table with the CHECK so the invariant is anchored at the schema.
+    existing_cols = {
+        row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    if "tenant_id" in existing_cols:
+        # 1. Quarantine NULL-tenant rows that are NOT already in legacy_unmeasurable.
+        #    Rows already in legacy_unmeasurable keep that status — the OR in the new
+        #    CHECK will exempt them directly.
+        con.execute(
+            """UPDATE positions
+                  SET status = 'legacy_no_tenant'
+                WHERE tenant_id IS NULL
+                  AND status != 'legacy_unmeasurable'"""
+        )
+        quarantined = con.execute("SELECT changes()").fetchone()[0]
+        log.info(
+            "_migrate_tenant_id_not_null: re-statused %d NULL-tenant rows as "
+            "'legacy_no_tenant'.",
+            quarantined,
+        )
+    else:
+        log.info(
+            "_migrate_tenant_id_not_null: skipping backfill — tenant_id column "
+            "not yet present (pre-B.1 stub schema)."
+        )
+
+    # 2. Recreate the table with the strengthened CHECK. Both CHECKs (qty>0
+    #    from Task 4 + tenant_id from this migration) must coexist on the
+    #    new table — they compose.
+    log.info(
+        "_migrate_tenant_id_not_null: recreating positions with CHECK "
+        "(tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable','legacy_no_tenant'))."
+    )
+    con.execute(
+        """
+        CREATE TABLE positions_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id     INTEGER REFERENCES scans(id),
+            symbol      TEXT    NOT NULL,
+            direction   TEXT    NOT NULL DEFAULT 'LONG',
+            status      TEXT    NOT NULL DEFAULT 'open',
+            entry_price REAL    NOT NULL,
+            entry_ts    TEXT    NOT NULL,
+            sl_price    REAL,
+            tp_price    REAL,
+            size_usd    REAL,
+            qty         REAL,
+            exit_price  REAL,
+            exit_ts     TEXT,
+            exit_reason TEXT,
+            pnl_usd     REAL,
+            pnl_pct     REAL,
+            notes       TEXT,
+            atr_entry   REAL,
+            be_mult     REAL,
+            tenant_id   INTEGER,
+            CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
+            CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant'))
+        )
+        """
+    )
+    TARGET_COLS = [
+        "id", "scan_id", "symbol", "direction", "status", "entry_price",
+        "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
+        "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
+        "notes", "atr_entry", "be_mult", "tenant_id",
+    ]
+    select_expressions = [
+        col if col in existing_cols else "NULL"
+        for col in TARGET_COLS
+    ]
+    insert_sql = (
+        f"INSERT INTO positions_new ({', '.join(TARGET_COLS)}) "
+        f"SELECT {', '.join(select_expressions)} FROM positions"
+    )
+    con.execute(insert_sql)
+    con.execute("DROP TABLE positions")
+    con.execute("ALTER TABLE positions_new RENAME TO positions")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_positions_tenant ON positions(tenant_id)")
+    log.info(
+        "_migrate_tenant_id_not_null: migration complete. positions enforces "
+        "tenant_id IS NOT NULL or quarantine."
     )
