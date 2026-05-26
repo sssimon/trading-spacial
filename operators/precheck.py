@@ -56,9 +56,10 @@ class PrecheckOkToProceed:
 
     The sentinel check in OwnershipValidatedSnapshot.__post_init__ is the
     runtime órgano (rung: tipo); the factory's single call site is
-    convention only (rung: convención — see #477). The sentinel itself is
-    module-attribute-accessible, which widens the convención surface
-    beyond the factory — see #487 for the open wider-asymmetry follow-up.
+    convention only (rung: convención). The sentinel itself is module-
+    attribute-accessible, which widens the convención surface beyond the
+    factory — both surfaces (factory name and sentinel name) of the
+    convention bound are tracked in #477.
 
     The write-tx MUST STILL re-validate the snapshot's mutable fields
     against a fresh re-SELECT inside BEGIN IMMEDIATE (immutable fields
@@ -69,7 +70,7 @@ class PrecheckOkToProceed:
     CLAUDE.md is real only because this check exists (mypy is not in CI;
     annotation alone does not refuse). Anyone who imports
     _VALIDATION_SENTINEL can construct directly without going through the
-    factory — see #487.
+    factory — see #477.
     """
     snapshot: "OwnershipValidatedSnapshot"
 
@@ -97,7 +98,8 @@ PrecheckResult = Union[PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProc
 # NOT prevent `from operators.precheck import _VALIDATION_SENTINEL`. The
 # __post_init__ check is by `is` identity, so any caller who imports this
 # name can construct an OwnershipValidatedSnapshot for any PositionSnapshot.
-# Tracked in #487 (sentinel-import surface — wider asymmetry beyond #477).
+# This is one of two surfaces of the convention bound tracked in #477
+# (factory name + sentinel name both single-underscore-convention only).
 _VALIDATION_SENTINEL = object()
 
 
@@ -126,9 +128,9 @@ class OwnershipValidatedSnapshot:
     Voronov registry-coherence rule (post-Serrano) qualifies this: the
     guarantee is bounded by the weakest organ that enforces it. #469's
     closure is rung tipo (sentinel `is` check) PLUS rung convención
-    (factory single-call-site by underscore; sentinel module-importable).
-    See #477 (factory side, advanced by PR #486) and #487 (sentinel side,
-    open) for the live coherence follow-ups.
+    (factory name + sentinel name both single-underscore-convention only).
+    The wider invariant (both surfaces of the convention bound) is tracked
+    in #477, advanced by PR #486 (Path 3 honest narrowing).
     """
     inner: PositionSnapshot
     _sentinel: object  # must be _VALIDATION_SENTINEL at construction

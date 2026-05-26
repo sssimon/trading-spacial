@@ -41,8 +41,9 @@ def test_cannot_construct_with_none_sentinel():
 def test_internal_factory_builds_validated_snapshot():
     """_build_validated_snapshot is the INTENDED constructor by single-
     underscore convention. Python does not prevent direct construction
-    via importing _VALIDATION_SENTINEL — that wider asymmetry is tracked
-    in #487. This test only asserts the factory path itself works."""
+    via importing _VALIDATION_SENTINEL — that wider asymmetry (both
+    factory and sentinel surfaces of the convention bound) is tracked in
+    #477. This test only asserts the factory path itself works."""
     from operators.precheck import (
         _build_validated_snapshot,
         OwnershipValidatedSnapshot,

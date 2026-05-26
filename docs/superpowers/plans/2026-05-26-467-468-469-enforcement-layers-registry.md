@@ -1055,9 +1055,10 @@ snapshot, not the raw PositionSnapshot."
 
 ### Task 9: Implement OwnershipValidatedSnapshot + update PrecheckOkToProceed in operators/precheck.py
 
-> **Footnote (post-implementation, post-Serrano review of PR #486 — 2026-05-26):** The error message, sentinel comment, and `Closes #469 + F6` framing in the Step 1 code block below were softened/qualified after this plan executed. Specifically:
-> - PR #486 closes **#481** (doc honesty — the `"callable only from operators.position_closure._run_precheck"` wording was a documentation lie) and advances **#477** (registry coherence — Path 3 honest narrowing of the factory's single-call-site rung).
-> - Issue **#487** (post-Serrano F2) tracks the wider asymmetry: `_VALIDATION_SENTINEL` is module-attribute-accessible, so any caller importing the sentinel name can construct `OwnershipValidatedSnapshot` directly, bypassing the factory. The narrowing in PR #486 named the factory side only; the sentinel side is still open.
+> **Footnote (post-implementation, post-Serrano + post-Voronov review of PR #486 — 2026-05-26):** The error message, sentinel comment, and `Closes #469 + F6` framing in the Step 1 code block below were softened/qualified after this plan executed. Specifically:
+> - PR #486 closes **#481** (doc honesty — the `"callable only from operators.position_closure._run_precheck"` wording was a documentation lie) and advances **#477** (registry coherence — Path 3 honest narrowing).
+> - Issue **#477** (originally Serrano F8 — factory single-underscore framing) was widened 2026-05-26 to encompass post-Serrano F2 — the sentinel itself is module-attribute-accessible. Both surfaces (factory name + sentinel name) of the convention bound are now tracked under #477 as one invariant with two surfaces (Voronov reframe: *"two surfaces of one bound do not deserve two issue numbers"*). PR #486 applies Path 3 (honest narrowing) for the docstring + error-message language; structural fix paths (closure pattern / name-mangling / frame inspection / accept-permanently) remain open.
+> - Issue **#488** (post-Voronov meta-architectural) tracks three structural next-moves for the registry itself: schema disambiguation (per-invariant rows vs. closure-scope column), registry-coherence test/CI organ, and verb taxonomy (`Closes` vs `Advances`).
 >
 > **For the current source-of-truth wording, read `operators/precheck.py` on `upstream/main`.** This plan document is a historical snapshot of the original implementation directive and intentionally preserves the original phrasing for archaeological fidelity.
 
