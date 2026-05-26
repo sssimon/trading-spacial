@@ -211,6 +211,30 @@ class DuplicateIdempotencyKeyError(BirthError):
     status_code = 409
 
 
+class IdempotencyCacheUnavailableError(BirthError):
+    """Idempotency-Key was supplied but the cache table is unreachable.
+
+    Fail-closed (Serrano HIGH 2): when a client sends Idempotency-Key and
+    we cannot durably honor it (cache table missing / locked / OperationalError),
+    we MUST NOT silently INSERT the position. The previous behavior was a
+    silent duplicate window: the INSERT commits, the cache write no-ops, a
+    retry with the same key + body finds no cached row, runs the INSERT
+    again — two positions under one Idempotency-Key. The partial UNIQUE
+    index does not catch it (the rows may have different scan_ids or NULL
+    scan_ids).
+
+    The structured `IDEMPOTENCY_CACHE_UNREACHABLE` log line is the
+    operator-side signal; this typed error makes the failure observable
+    to the client too (503 with retry guidance — the cache is a transient
+    dependency, not a permanent rejection).
+
+    NOT raised when Idempotency-Key is absent: a request without the
+    header bypasses the cache path entirely and proceeds as a non-idempotent
+    INSERT (the caller has not asked for retry-safety).
+    """
+    status_code = 503
+
+
 class UniqueViolationError(BirthError):
     """Schema rejected: (tenant_id, scan_id) UNIQUE WHERE status='open' conflict."""
     status_code = 409
@@ -341,6 +365,21 @@ def _canonical_body_fingerprint(payload: "OpenPositionRequest") -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class _CacheUnavailable(Exception):
+    """Internal marker — the cache backing table is missing / unreachable
+    (sqlite3.OperationalError). Surfaced by IdempotencyCache.{get,set}.
+
+    BirthRegistrar catches this and re-raises it as the public
+    IdempotencyCacheUnavailableError (503) when, and only when, the request
+    that triggered the lookup carried an Idempotency-Key. A request without
+    a key never enters the cache path and therefore never sees this
+    exception.
+
+    Private to the module — callers outside positions_birth must NOT
+    pattern-match on it. The public contract is IdempotencyCacheUnavailableError.
+    """
+
+
 class IdempotencyCache:
     """SQLite-backed cache for Idempotency-Key results keyed by (tenant_id, key).
 
@@ -352,12 +391,20 @@ class IdempotencyCache:
     against the cached value to detect Idempotency-Key reuse with a different
     body (RFC 9457 "Same Idempotency-Key, different body" is a client bug).
 
-    OperationalError handling: if the table is missing or unreachable, both
-    paths emit a structured log.error before returning the conservative
-    default (cache-miss on get, no-op on set). The cache is a performance/UX
-    layer, not the structural correctness boundary — that is owned by the
-    partial UNIQUE index at the schema. Silent degradation was Serrano
-    MEDIUM 11.
+    OperationalError handling (Serrano HIGH 2 — fail-closed):
+      When the table is missing or unreachable, both paths emit a structured
+      `IDEMPOTENCY_CACHE_UNREACHABLE` log.error and RAISE `_CacheUnavailable`.
+      Previously they returned None / no-op, opening a silent duplicate-INSERT
+      window: a degraded cache + a request with Idempotency-Key would commit
+      the position, fail to cache, and re-INSERT on retry (two rows under one
+      key). Fail-closed at this layer; the registrar decides whether to
+      surface 503 (key supplied) or proceed (no key in the request).
+
+      Behavior contract for the caller (BirthRegistrar):
+        - If the request carries Idempotency-Key, _CacheUnavailable propagates
+          as IdempotencyCacheUnavailableError (503).
+        - If the request has no Idempotency-Key, the cache path is bypassed
+          entirely — `_CacheUnavailable` is never reached.
     """
 
     @staticmethod
@@ -365,12 +412,17 @@ class IdempotencyCache:
         con: sqlite3.Connection, tenant_id: int, key: str,
     ) -> Optional[dict]:
         """Return the cached entry `{"result": ..., "body_sha256": ...}` or
-        None on miss / expired / unreachable.
+        None on miss / expired.
 
         Lazy cleanup: deletes expired rows for THIS (tenant, key) on every
         call. The eager sweeper (using `idx_idempotency_expires`) is a
         deferred follow-up — kept off the hot path for now (Tier 3 / Serrano
         MEDIUM 4).
+
+        Raises:
+          _CacheUnavailable: when sqlite3.OperationalError fires (table
+            missing / unreachable). Caller (BirthRegistrar) translates this
+            to IdempotencyCacheUnavailableError (503).
         """
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -386,14 +438,14 @@ class IdempotencyCache:
                 (tenant_id, key),
             ).fetchone()
         except sqlite3.OperationalError as e:
-            # Table missing or unreachable. Structured error before falling
-            # back to cache-miss semantics — degraded path must be loud
-            # (Serrano MEDIUM 11).
+            # Table missing or unreachable. Structured error before raising
+            # — the degraded path must be loud to the operator AND the
+            # client (Serrano HIGH 2 / MEDIUM 11).
             log.error(
                 "IDEMPOTENCY_CACHE_UNREACHABLE op=get tenant=%s key=%s sqlite_error=%s",
                 tenant_id, key, e,
             )
-            return None
+            raise _CacheUnavailable(str(e)) from e
         if row is None:
             return None
         # body_sha256 may be NULL on rows written before the fingerprint
@@ -420,6 +472,13 @@ class IdempotencyCache:
         (raises DuplicateIdempotencyKeyError on mismatch), so set is only
         ever called with a fingerprint that matches the row it overwrites
         OR with a brand-new key.
+
+        Raises:
+          _CacheUnavailable: when sqlite3.OperationalError fires. The
+            enclosing tx (still open at this point — see
+            BirthRegistrar.register) rolls back on the way out, taking the
+            position INSERT with it. The caller translates this to
+            IdempotencyCacheUnavailableError (503).
         """
         try:
             now = datetime.now(timezone.utc)
@@ -436,16 +495,17 @@ class IdempotencyCache:
                 ),
             )
         except sqlite3.OperationalError as e:
-            # Table missing or unreachable. The position INSERT has either
-            # already committed (the caller wraps both in one tx — see
-            # BirthRegistrar.register) or rolls back together. Logging here
-            # makes the degradation observable; silent no-op was Serrano
-            # MEDIUM 11.
+            # Same fail-closed contract as get. The enclosing transaction()
+            # in BirthRegistrar.register has NOT committed yet at this point
+            # (set is the last write inside the with-block); raising rolls
+            # back the position INSERT in the same tx, so no orphan row
+            # survives — the client gets 503 and can safely retry once the
+            # cache is reachable (Serrano HIGH 2 / MEDIUM 11).
             log.error(
                 "IDEMPOTENCY_CACHE_UNREACHABLE op=set tenant=%s key=%s sqlite_error=%s",
                 tenant_id, key, e,
             )
-            return
+            raise _CacheUnavailable(str(e)) from e
 
 
 # ---------------- BirthRegistrar (Op-ligero) ----------------
@@ -508,9 +568,29 @@ class BirthRegistrar:
             with transaction() as con:
                 # --- Step 1: idempotency probe inside the write tx.
                 if validated.idempotency_key:
-                    cached = IdempotencyCache.get(
-                        con, validated.tenant_id, validated.idempotency_key,
-                    )
+                    try:
+                        cached = IdempotencyCache.get(
+                            con,
+                            validated.tenant_id,
+                            validated.idempotency_key,
+                        )
+                    except _CacheUnavailable as ce:
+                        # Fail-closed (Serrano HIGH 2): the client asked
+                        # for idempotency-key replay-safety and we cannot
+                        # honor it. Refuse BEFORE the INSERT so no orphan
+                        # position is created. The tx rolls back on
+                        # re-raise.
+                        raise IdempotencyCacheUnavailableError(
+                            "Idempotency cache is unreachable; client retry "
+                            "with the same key+body is the safe path once "
+                            "the cache is reachable again.",
+                            detail={
+                                "tenant_id": validated.tenant_id,
+                                "idempotency_key": validated.idempotency_key,
+                                "cache_error": str(ce),
+                                "op": "get",
+                            },
+                        ) from ce
                     if cached is not None:
                         existing_fp = cached.get("body_sha256")
                         # Mismatch → reject (Serrano BLOCKER 1). A NULL
@@ -556,21 +636,41 @@ class BirthRegistrar:
 
                 # --- Step 3: cache write (same tx — idempotent retry safe).
                 if validated.idempotency_key:
-                    IdempotencyCache.set(
-                        con,
-                        validated.tenant_id,
-                        validated.idempotency_key,
-                        pos,
-                        body_fingerprint,
-                    )
+                    try:
+                        IdempotencyCache.set(
+                            con,
+                            validated.tenant_id,
+                            validated.idempotency_key,
+                            pos,
+                            body_fingerprint,
+                        )
+                    except _CacheUnavailable as ce:
+                        # Same fail-closed contract as Step 1 (Serrano
+                        # HIGH 2). The INSERT in Step 2 has NOT committed
+                        # yet — raising here unwinds the with-block and
+                        # rolls back the position INSERT. The client
+                        # receives 503 with retry guidance; no row exists
+                        # in the DB.
+                        raise IdempotencyCacheUnavailableError(
+                            "Idempotency cache is unreachable; the position "
+                            "was rolled back. Retry once the cache is "
+                            "reachable again.",
+                            detail={
+                                "tenant_id": validated.tenant_id,
+                                "idempotency_key": validated.idempotency_key,
+                                "cache_error": str(ce),
+                                "op": "set",
+                            },
+                        ) from ce
         except sqlite3.IntegrityError as e:
             # Translate by sqlite_errorcode, not by substring match on prose
             # (Serrano BLOCKER 3 / Aurelius reframe). The extended error
             # code is stable across SQLite versions; English wording is not.
             raise _translate_integrity_error(e, validated) from e
-        # DuplicateIdempotencyKeyError is a BirthError, not an IntegrityError
-        # — the except above does not swallow it; it propagates from the
-        # `with transaction()` block (which rolled back on the way out).
+        # DuplicateIdempotencyKeyError and IdempotencyCacheUnavailableError
+        # are BirthError, not IntegrityError — the except above does not
+        # swallow them; they propagate from the `with transaction()` block
+        # (which rolled back on the way out).
 
         # --- Step 4: post-commit snapshot regeneration (F8).
         # Cannot fold into the SQL tx — the JSON file is filesystem state.

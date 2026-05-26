@@ -121,33 +121,43 @@ def test_legacy_row_without_fingerprint_returns_none_fp(fresh_db_con):
     assert got["body_sha256"] is None
 
 
-def test_cache_get_unreachable_table_logs_error(fresh_db_con, caplog):
-    """Serrano MEDIUM 11: when the table is unreachable, get must log an
-    error and fall back to cache-miss — not silently return None."""
-    from api.positions_birth import IdempotencyCache
+def test_cache_get_unreachable_table_raises_and_logs(fresh_db_con, caplog):
+    """Serrano HIGH 2 (post-convergence): when the table is unreachable,
+    get must log a structured error AND raise the internal _CacheUnavailable
+    marker. Previously this returned None (silent degrade) which opened
+    a duplicate-INSERT window at the registrar layer. Failing closed at
+    the cache means the registrar can decide whether to surface 503 (when
+    Idempotency-Key was supplied) or proceed (when no key was supplied —
+    the cache path is bypassed entirely and this raise is never reached)."""
+    from api.positions_birth import IdempotencyCache, _CacheUnavailable
     import logging
 
     # Drop the table to force OperationalError.
     fresh_db_con.execute("DROP TABLE idempotency_keys")
     with caplog.at_level(logging.ERROR, logger="api.positions_birth"):
-        result = IdempotencyCache.get(fresh_db_con, tenant_id=1, key="k")
-    assert result is None
+        with pytest.raises(_CacheUnavailable):
+            IdempotencyCache.get(fresh_db_con, tenant_id=1, key="k")
     assert any(
         "IDEMPOTENCY_CACHE_UNREACHABLE" in record.message
         for record in caplog.records
     )
 
 
-def test_cache_set_unreachable_table_logs_error(fresh_db_con, caplog):
-    from api.positions_birth import IdempotencyCache
+def test_cache_set_unreachable_table_raises_and_logs(fresh_db_con, caplog):
+    """Mirror of the get-side fail-closed contract (Serrano HIGH 2). The
+    enclosing tx in BirthRegistrar.register has not committed at the
+    moment set is called; raising rolls back the position INSERT in the
+    same tx, so no orphan row survives."""
+    from api.positions_birth import IdempotencyCache, _CacheUnavailable
     import logging
 
     fresh_db_con.execute("DROP TABLE idempotency_keys")
     with caplog.at_level(logging.ERROR, logger="api.positions_birth"):
-        IdempotencyCache.set(
-            fresh_db_con, tenant_id=1, key="k",
-            result={"id": 1}, body_sha256=_FP,
-        )
+        with pytest.raises(_CacheUnavailable):
+            IdempotencyCache.set(
+                fresh_db_con, tenant_id=1, key="k",
+                result={"id": 1}, body_sha256=_FP,
+            )
     assert any(
         "IDEMPOTENCY_CACHE_UNREACHABLE" in record.message
         for record in caplog.records
