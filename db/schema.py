@@ -324,6 +324,12 @@ def init_db() -> None:
     with transaction() as con_qty:
         _migrate_qty_not_null(con_qty)
 
+    # qty > 0 enforcement migration — #471 (Voronov D-schema rung).
+    # MUST run AFTER _migrate_qty_not_null (which created the C2 CHECK).
+    # Quarantines the 72 zero-qty rows the C2 NULL check missed.
+    with transaction() as con_qty_pos:
+        _migrate_qty_positive(con_qty_pos)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -829,4 +835,120 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
     log.info(
         "_migrate_qty_not_null: migration complete. "
         "positions enforces qty IS NOT NULL OR status='legacy_unmeasurable'."
+    )
+
+
+def _migrate_qty_positive(con: sqlite3.Connection) -> None:
+    """Extend the qty CHECK from 'NOT NULL' to '> 0' (#471 closure of qty=0 bypass).
+
+    Production measurement (2026-05-26): 72 rows with qty=0.0 exactly (68
+    closed, 2 open, 2 cancelled). These bypassed the C2 NULL check.
+
+    Policy (Voronov dual-rung): re-status the 72 zero-qty rows as
+    'legacy_unmeasurable' (admit the absence; don't invent a value), then
+    extend the CHECK to require qty > 0 on non-quarantine rows.
+
+    Idempotent: detects the qty>0 fragment in the live schema and skips.
+    """
+    schema_row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone()
+    if not schema_row or not schema_row[0]:
+        log.warning(
+            "_migrate_qty_positive: positions table not found; skipping."
+        )
+        return
+    # Normalize whitespace for the idempotency probe. Look for "qty > 0" or
+    # "qty>0" anywhere in the CHECK fragment.
+    normalized = "".join(schema_row[0].split()).lower()
+    if "qty>0" in normalized:
+        log.info(
+            "_migrate_qty_positive: positions already enforces qty > 0; skipping."
+        )
+        return
+
+    # 1. Quarantine zero-qty rows (any status). The C2 CHECK allowed them; the
+    #    new CHECK will reject them on non-quarantine status. Re-status to
+    #    legacy_unmeasurable (same quarantine bucket used by C2).
+    con.execute(
+        """UPDATE positions
+              SET status = 'legacy_unmeasurable'
+            WHERE qty = 0
+              AND status != 'legacy_unmeasurable'"""
+    )
+    quarantined = con.execute("SELECT changes()").fetchone()[0]
+    log.info(
+        "_migrate_qty_positive: quarantined %d zero-qty rows as 'legacy_unmeasurable'.",
+        quarantined,
+    )
+
+    # 2. Defensive sanity: any qty < 0 in legacy data also goes to quarantine.
+    con.execute(
+        """UPDATE positions
+              SET status = 'legacy_unmeasurable'
+            WHERE qty < 0
+              AND status != 'legacy_unmeasurable'"""
+    )
+    neg_quarantined = con.execute("SELECT changes()").fetchone()[0]
+    if neg_quarantined:
+        log.warning(
+            "_migrate_qty_positive: quarantined %d NEGATIVE-qty rows (unexpected).",
+            neg_quarantined,
+        )
+
+    # 3. Recreate the table with the strengthened CHECK.
+    log.info(
+        "_migrate_qty_positive: recreating positions table with "
+        "CHECK ((qty IS NOT NULL AND qty > 0) OR status='legacy_unmeasurable')."
+    )
+    existing_cols = {
+        row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    con.execute(
+        """
+        CREATE TABLE positions_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id     INTEGER REFERENCES scans(id),
+            symbol      TEXT    NOT NULL,
+            direction   TEXT    NOT NULL DEFAULT 'LONG',
+            status      TEXT    NOT NULL DEFAULT 'open',
+            entry_price REAL    NOT NULL,
+            entry_ts    TEXT    NOT NULL,
+            sl_price    REAL,
+            tp_price    REAL,
+            size_usd    REAL,
+            qty         REAL,
+            exit_price  REAL,
+            exit_ts     TEXT,
+            exit_reason TEXT,
+            pnl_usd     REAL,
+            pnl_pct     REAL,
+            notes       TEXT,
+            atr_entry   REAL,
+            be_mult     REAL,
+            tenant_id   INTEGER,
+            CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable')
+        )
+        """
+    )
+    TARGET_COLS = [
+        "id", "scan_id", "symbol", "direction", "status", "entry_price",
+        "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
+        "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
+        "notes", "atr_entry", "be_mult", "tenant_id",
+    ]
+    select_expressions = [
+        col if col in existing_cols else "NULL"
+        for col in TARGET_COLS
+    ]
+    insert_sql = (
+        f"INSERT INTO positions_new ({', '.join(TARGET_COLS)}) "
+        f"SELECT {', '.join(select_expressions)} FROM positions"
+    )
+    con.execute(insert_sql)
+    con.execute("DROP TABLE positions")
+    con.execute("ALTER TABLE positions_new RENAME TO positions")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_positions_tenant ON positions(tenant_id)")
+    log.info(
+        "_migrate_qty_positive: migration complete. positions enforces qty > 0."
     )
