@@ -315,6 +315,15 @@ def init_db() -> None:
     with transaction() as con_hist:
         _migrate_agent_history(con_hist)
 
+    # qty NOT NULL enforcement migration — #467 (Voronov amended).
+    # MUST run LAST: depends on positions having atr_entry/be_mult/tenant_id
+    # columns from earlier migrations. Backfills qty where possible, quarantines
+    # the residue as status='legacy_unmeasurable', recreates positions with
+    # CHECK (qty IS NOT NULL OR status='legacy_unmeasurable').
+    # See `Capas de enforcement de invariantes` in CLAUDE.md.
+    with transaction() as con_qty:
+        _migrate_qty_not_null(con_qty)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -676,3 +685,109 @@ def backfill_tenant(
         )
         affected[table] = cursor.rowcount
     return affected
+
+
+def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
+    """Move 'qty != NULL' from convención to schema (#467, Voronov amended).
+
+    Per Voronov post-Task-1 measurement: original Path D (abort on
+    unbackfillable) was unrealizable in production (670 unbackfillable rows
+    of 2018). Revised policy (C) — quarantine:
+
+    1. Backfill: for rows where qty IS NULL AND size_usd IS NOT NULL AND
+       entry_price > 0, set qty = size_usd / entry_price.
+    2. For remaining NULL rows (legacy bug residue + test fixture debris):
+       UPDATE status = 'legacy_unmeasurable'. Keep qty NULL. Status admits
+       the absence; the schema CHECK below exempts this status.
+    3. Recreate the positions table with:
+       CHECK (qty IS NOT NULL OR status = 'legacy_unmeasurable')
+
+    Idempotent: detects existing CHECK constraint and skips.
+    """
+    # Idempotency check: SQLite stores CREATE TABLE in sqlite_master.
+    schema_row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone()
+    if schema_row and schema_row[0] and "legacy_unmeasurable" in schema_row[0]:
+        log.info(
+            "_migrate_qty_not_null: positions table already has the quarantine CHECK; skipping."
+        )
+        return
+
+    # 1. Backfill aggressively.
+    con.execute(
+        """UPDATE positions
+           SET qty = size_usd / entry_price
+           WHERE qty IS NULL
+             AND size_usd IS NOT NULL
+             AND entry_price IS NOT NULL
+             AND entry_price > 0"""
+    )
+    backfilled = con.execute("SELECT changes()").fetchone()[0]
+    log.info("_migrate_qty_not_null: backfilled qty for %d rows.", backfilled)
+
+    # 2. Quarantine remaining NULL rows.
+    con.execute(
+        """UPDATE positions
+           SET status = 'legacy_unmeasurable'
+           WHERE qty IS NULL
+             AND status != 'legacy_unmeasurable'"""
+    )
+    quarantined = con.execute("SELECT changes()").fetchone()[0]
+    log.info(
+        "_migrate_qty_not_null: quarantined %d rows as status='legacy_unmeasurable'.",
+        quarantined,
+    )
+
+    # 3. Recreate positions table with CHECK constraint.
+    # SQLite pattern: CREATE TABLE positions_new (...); INSERT ...; DROP; RENAME.
+    # NOTE: use individual con.execute() — executescript() issues an implicit
+    # COMMIT that would close the surrounding transaction(). DDL inside
+    # transaction() is safe in SQLite (DDL participates in the active tx).
+    log.info(
+        "_migrate_qty_not_null: recreating positions table with CHECK constraint "
+        "(qty IS NOT NULL OR status = 'legacy_unmeasurable')."
+    )
+    con.execute(
+        """
+        CREATE TABLE positions_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id     INTEGER REFERENCES scans(id),
+            symbol      TEXT    NOT NULL,
+            direction   TEXT    NOT NULL DEFAULT 'LONG',
+            status      TEXT    NOT NULL DEFAULT 'open',
+            entry_price REAL    NOT NULL,
+            entry_ts    TEXT    NOT NULL,
+            sl_price    REAL,
+            tp_price    REAL,
+            size_usd    REAL,
+            qty         REAL,
+            exit_price  REAL,
+            exit_ts     TEXT,
+            exit_reason TEXT,
+            pnl_usd     REAL,
+            pnl_pct     REAL,
+            notes       TEXT,
+            atr_entry   REAL,
+            be_mult     REAL,
+            tenant_id   INTEGER,
+            CHECK (qty IS NOT NULL OR status = 'legacy_unmeasurable')
+        )
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO positions_new SELECT
+            id, scan_id, symbol, direction, status, entry_price, entry_ts,
+            sl_price, tp_price, size_usd, qty, exit_price, exit_ts, exit_reason,
+            pnl_usd, pnl_pct, notes, atr_entry, be_mult, tenant_id
+        FROM positions
+        """
+    )
+    con.execute("DROP TABLE positions")
+    con.execute("ALTER TABLE positions_new RENAME TO positions")
+    con.execute("CREATE INDEX idx_positions_tenant ON positions(tenant_id)")
+    log.info(
+        "_migrate_qty_not_null: migration complete. "
+        "positions enforces qty IS NOT NULL OR status='legacy_unmeasurable'."
+    )
