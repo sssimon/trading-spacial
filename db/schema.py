@@ -355,6 +355,7 @@ def init_db() -> None:
     with transaction() as con_d:
         _migrate_qty_positive(con_d)
         _migrate_tenant_id_not_null(con_d)
+        _migrate_direction_enum(con_d)
         _migrate_unique_open_scan(con_d)
         _migrate_idempotency_keys(con_d)
 
@@ -1167,6 +1168,142 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
     log.info(
         "_migrate_tenant_id_not_null: migration complete. positions enforces "
         "tenant_id IS NOT NULL or quarantine."
+    )
+
+
+def _migrate_direction_enum(con: sqlite3.Connection) -> None:
+    """Schema CHECK: direction IN ('LONG', 'SHORT') OR status='legacy_unmeasurable'
+    — #484 (move direction enum from Pydantic-boundary to schema rung).
+
+    The Pydantic Literal["LONG", "SHORT"] on OpenPositionRequest catches
+    malformed input at the HTTP boundary. But manual UPDATEs, legacy
+    clients, and ad-hoc shell access bypass that boundary entirely. The
+    CHECK constraint enforces the invariant at the schema rung — the
+    strongest rung available.
+
+    Existing rows are migrated as follows:
+      1. SQL UPPER(direction) normalizes case-variants ('long' → 'LONG',
+         'Short' → 'SHORT'). ASCII-only enums; UPPER() is safe.
+      2. Anything that still doesn't match {'LONG', 'SHORT'} (NULL, empty,
+         'NEUTRAL', garbage) is quarantined to status='legacy_unmeasurable'
+         — consistent with the other CHECKs' OR exemption.
+
+    Idempotent: detects `directionin('long','short')` in the whitespace-
+    normalized + case-folded DDL and skips. Anchored on the exact CHECK
+    fragment (not bare "long") to avoid false-positives — same pattern
+    as _migrate_qty_not_null after the #476 fix.
+    """
+    schema_row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone()
+    if not schema_row or not schema_row[0]:
+        log.warning(
+            "_migrate_direction_enum: positions table not found; skipping."
+        )
+        return
+    normalized = "".join(schema_row[0].split()).lower()
+    if "directionin('long','short')" in normalized:
+        log.info(
+            "_migrate_direction_enum: positions already enforces direction enum; "
+            "skipping."
+        )
+        return
+
+    # 1. Normalize case: 'long'/'Long' → 'LONG', etc.
+    con.execute(
+        """UPDATE positions
+              SET direction = UPPER(direction)
+            WHERE direction != UPPER(direction)"""
+    )
+    normalized_count = con.execute("SELECT changes()").fetchone()[0]
+    log.info(
+        "_migrate_direction_enum: normalized %d rows from mixed-case direction.",
+        normalized_count,
+    )
+
+    # 2. Quarantine anything that doesn't normalize to LONG/SHORT. Common
+    #    candidates: NULL (no DEFAULT applied — old INSERT without column),
+    #    empty string, 'NEUTRAL', typos. They are NOT recoverable to a
+    #    real direction so admit the absence rather than invent a value.
+    con.execute(
+        """UPDATE positions
+              SET status = 'legacy_unmeasurable'
+            WHERE (direction IS NULL OR direction NOT IN ('LONG', 'SHORT'))
+              AND status != 'legacy_unmeasurable'"""
+    )
+    quarantined = con.execute("SELECT changes()").fetchone()[0]
+    if quarantined:
+        log.warning(
+            "_migrate_direction_enum: quarantined %d rows with non-LONG/SHORT "
+            "direction as 'legacy_unmeasurable'.",
+            quarantined,
+        )
+
+    # 3. Recreate the table with the strengthened CHECK. All three CHECKs
+    #    (qty + tenant_id + direction) compose; each was added incrementally
+    #    by its own migration. The partial UNIQUE index from
+    #    _migrate_unique_open_scan is re-created by that migration's own
+    #    CREATE INDEX IF NOT EXISTS, which runs after this in init_db.
+    log.info(
+        "_migrate_direction_enum: recreating positions with CHECK "
+        "(direction IN ('LONG', 'SHORT') OR status='legacy_unmeasurable')."
+    )
+    existing_cols = {
+        row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    # Defensive cleanup of any orphan positions_new from a prior interrupted
+    # run (same pattern as _migrate_qty_not_null per #480).
+    con.execute("DROP TABLE IF EXISTS positions_new")
+    con.execute(
+        """
+        CREATE TABLE positions_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id     INTEGER REFERENCES scans(id),
+            symbol      TEXT    NOT NULL,
+            direction   TEXT    NOT NULL DEFAULT 'LONG',
+            status      TEXT    NOT NULL DEFAULT 'open',
+            entry_price REAL    NOT NULL,
+            entry_ts    TEXT    NOT NULL,
+            sl_price    REAL,
+            tp_price    REAL,
+            size_usd    REAL,
+            qty         REAL,
+            exit_price  REAL,
+            exit_ts     TEXT,
+            exit_reason TEXT,
+            pnl_usd     REAL,
+            pnl_pct     REAL,
+            notes       TEXT,
+            atr_entry   REAL,
+            be_mult     REAL,
+            tenant_id   INTEGER,
+            CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
+            CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant')),
+            CHECK (direction IN ('LONG', 'SHORT') OR status = 'legacy_unmeasurable')
+        )
+        """
+    )
+    TARGET_COLS = [
+        "id", "scan_id", "symbol", "direction", "status", "entry_price",
+        "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
+        "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
+        "notes", "atr_entry", "be_mult", "tenant_id",
+    ]
+    select_expressions = [
+        col if col in existing_cols else "NULL"
+        for col in TARGET_COLS
+    ]
+    insert_sql = (
+        f"INSERT INTO positions_new ({', '.join(TARGET_COLS)}) "
+        f"SELECT {', '.join(select_expressions)} FROM positions"
+    )
+    con.execute(insert_sql)
+    con.execute("DROP TABLE positions")
+    con.execute("ALTER TABLE positions_new RENAME TO positions")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_positions_tenant ON positions(tenant_id)")
+    log.info(
+        "_migrate_direction_enum: migration complete. positions enforces "
+        "direction IN ('LONG', 'SHORT') or quarantine."
     )
 
 
