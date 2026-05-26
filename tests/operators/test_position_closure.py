@@ -572,3 +572,38 @@ def test_precheck_rejected_state_distinct_from_already_closed():
     assert isinstance(rs, PrecheckRejectedState)
     assert not isinstance(rs, PrecheckAlreadyClosed)
     assert rs.snapshot.status == "cancelled"
+
+
+# ---- Invariant 14: cross-mutation race rejects close when snapshot field drifts ----
+
+def test_cross_mutation_race_entry_price_rejects_close(fresh_db_with_two_tenants):
+    """If a snapshot field that is NOT tenant_id/status changes between precheck
+    and BEGIN IMMEDIATE (e.g., entry_price is updated by a migration or ad-hoc
+    UPDATE), the operator must detect the drift and return not_found.
+
+    Closes #469 + F6: validation lives in the type (OwnershipValidatedSnapshot)
+    and the runtime field-by-field comparison in execute()."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads entry_price (whatever the fixture set)
+
+    # Simulate an entry_price drift between precheck and write-tx.
+    with transaction() as con:
+        con.execute("UPDATE positions SET entry_price = 999.99 WHERE id = 1")
+
+    outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    # The snapshot held the old entry_price; the row now has 999.99.
+    # The mismatch must collapse to NOT_FOUND.
+    assert outcome.status == "not_found"
+
+    # The row was not closed.
+    with transaction() as con:
+        pos = con.execute("SELECT status, entry_price FROM positions WHERE id=1").fetchone()
+    assert pos["status"] == "open"
+    assert pos["entry_price"] == 999.99  # our UPDATE remains
