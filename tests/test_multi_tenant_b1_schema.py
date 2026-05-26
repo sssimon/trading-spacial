@@ -336,11 +336,20 @@ class TestBackfillTenant:
 
 
 class TestMigrationOnExistingDB:
-    def test_migration_adds_tenant_id_without_breaking_rows(self, tmp_db):
+    def test_migration_adds_tenant_id_without_breaking_rows(self, tmp_db, monkeypatch):
         """Simulate pre-B.1 DB (positions table without tenant_id), run init_db().
 
         Existing rows should remain accessible; tenant_id column added as NULL.
+
+        Note: this fixture exercises the no-qty-column branch of
+        _migrate_qty_not_null (the stub schema has no qty column). Per #474,
+        that branch refuses to bulk-quarantine non-empty tables unless the
+        operator explicitly opts in via env flag. The test sets the flag
+        because the stub-schema scenario is legitimate (this is what the
+        flag was designed for: pre-qty DBs being upgraded).
         """
+        monkeypatch.setenv("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", "1")
+
         # Step 1: Create OLD-style positions table (without tenant_id)
         con = sqlite3.connect(tmp_db)
         con.execute("""
