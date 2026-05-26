@@ -72,12 +72,21 @@ def init_db() -> None:
                 payload     TEXT
             )
         """)
-        # Migración: agregar columna symbol si la tabla ya existía sin ella
-        try:
-            con.execute("ALTER TABLE scans ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
+        # Migración: agregar columna symbol si la tabla ya existía sin ella.
+        # PRAGMA-guarded (NOT try/except) so the enclosing BEGIN IMMEDIATE tx
+        # remains in a clean state when the column is already present — a
+        # failed ALTER inside a write-tx marks it as abortable and the
+        # subsequent COMMIT silently rolls back unrelated DDL in the same tx
+        # (Serrano HIGH 1, propagation of the 75b3789 pattern).
+        scans_cols = {
+            row[1]
+            for row in con.execute("PRAGMA table_info(scans)").fetchall()
+        }
+        if "symbol" not in scans_cols:
+            con.execute(
+                "ALTER TABLE scans ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'"
+            )
             log.info("DB migrada: columna 'symbol' añadida.")
-        except sqlite3.OperationalError:
-            pass  # columna ya existe
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS webhooks_sent (
@@ -370,13 +379,18 @@ def _migrate_multi_tenant_b1(con: sqlite3.Connection) -> None:
 
     Task 8 (#446): `con` is now mandatory positional.
     """
-    # Step 1: Add nullable tenant_id to each per-user table
+    # Step 1: Add nullable tenant_id to each per-user table.
+    # PRAGMA-guarded (NOT try/except) so the enclosing BEGIN IMMEDIATE tx
+    # stays clean when the column already exists — Serrano HIGH 1, same
+    # pathology as 75b3789 on _migrate_idempotency_keys.
     for table in PER_USER_TABLES:
-        try:
+        existing_cols = {
+            row[1]
+            for row in con.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if "tenant_id" not in existing_cols:
             con.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER")
             log.info(f"DB migration B.1: added tenant_id column to {table}")
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
     # Step 2: Create capital table (single row per user)
     con.execute(
@@ -526,12 +540,20 @@ def _migrate_agent_audit(con: sqlite3.Connection) -> None:
         # re-deriving the TTL from the signed payload. Idempotent ADD
         # COLUMN (the existing rows have NULL — they predate the column,
         # and a NULL expires_at is treated as "no TTL enforcement" for
-        # rows seeded before this migration).
-        try:
-            con.execute("ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT")
+        # rows seeded before this migration). PRAGMA-guarded (NOT
+        # try/except) so the enclosing BEGIN IMMEDIATE tx stays clean
+        # when the column is already present — Serrano HIGH 1.
+        side_effects_cols = {
+            row[1]
+            for row in con.execute(
+                "PRAGMA table_info(agent_side_effects)"
+            ).fetchall()
+        }
+        if "expires_at" not in side_effects_cols:
+            con.execute(
+                "ALTER TABLE agent_side_effects ADD COLUMN expires_at TEXT"
+            )
             log.info("DB migration: added expires_at column to agent_side_effects")
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
         # Fase 4 of the multi-provider epic: agent_conversations gains
         # `provider` + `reasoning_tokens` columns so /agent/metrics can
@@ -543,19 +565,31 @@ def _migrate_agent_audit(con: sqlite3.Connection) -> None:
         #   - reasoning_tokens: only DS-reasoner populates this today
         #     (DS's usage.completion_tokens_details.reasoning_tokens
         #     field). NULL or 0 elsewhere; metrics treat NULL as 0.
-        # Both ALTERs are idempotent (try/except on OperationalError).
+        # Both ALTERs are idempotent via a single PRAGMA table_info probe
+        # (NOT try/except — a failed ALTER inside the enclosing BEGIN
+        # IMMEDIATE tx would mark it abortable and silently roll back the
+        # rest of the audit migration on COMMIT; Serrano HIGH 1, same
+        # pathology as 75b3789 on _migrate_idempotency_keys).
         # The backfill is also idempotent because it only touches rows
         # WHERE provider IS NULL — running it twice is a no-op.
-        try:
-            con.execute("ALTER TABLE agent_conversations ADD COLUMN provider TEXT")
+        conv_cols = {
+            row[1]
+            for row in con.execute(
+                "PRAGMA table_info(agent_conversations)"
+            ).fetchall()
+        }
+        if "provider" not in conv_cols:
+            con.execute(
+                "ALTER TABLE agent_conversations ADD COLUMN provider TEXT"
+            )
             log.info("DB migration: added provider column to agent_conversations")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        try:
-            con.execute("ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER")
-            log.info("DB migration: added reasoning_tokens column to agent_conversations")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        if "reasoning_tokens" not in conv_cols:
+            con.execute(
+                "ALTER TABLE agent_conversations ADD COLUMN reasoning_tokens INTEGER"
+            )
+            log.info(
+                "DB migration: added reasoning_tokens column to agent_conversations"
+            )
 
         # Backfill provider from model. Only touches rows where provider
         # IS NULL (i.e. pre-Fase-4 rows) — safe to re-run. The mapping
