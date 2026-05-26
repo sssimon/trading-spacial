@@ -50,7 +50,7 @@ def fresh_db_with_two_tenants(tmp_path, monkeypatch):
             """INSERT INTO positions
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
                 status, entry_ts, tenant_id, atr_entry, be_mult)
-               VALUES (1, 'BTCUSDT', 'long', 100.0, 1.0, 95.0, 110.0,
+               VALUES (1, 'BTCUSDT', 'LONG', 100.0, 1.0, 95.0, 110.0,
                        'open', ?, 1, 2.0, 1.5)""",
             (datetime.now(timezone.utc).isoformat(),),
         )
@@ -58,7 +58,7 @@ def fresh_db_with_two_tenants(tmp_path, monkeypatch):
             """INSERT INTO positions
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
                 status, entry_ts, tenant_id, atr_entry, be_mult)
-               VALUES (2, 'ETHUSDT', 'long', 200.0, 0.5, 195.0, 220.0,
+               VALUES (2, 'ETHUSDT', 'LONG', 200.0, 0.5, 195.0, 220.0,
                        'open', ?, 2, 3.0, 1.5)""",
             (datetime.now(timezone.utc).isoformat(),),
         )
@@ -330,7 +330,7 @@ def test_legacy_null_tenant_position_close_skips_capital(fresh_db_with_two_tenan
             """INSERT INTO positions
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
                 status, entry_ts, tenant_id, atr_entry, be_mult)
-               VALUES (99, 'LEGACY', 'long', 100.0, 1.0, 95.0, 110.0,
+               VALUES (99, 'LEGACY', 'LONG', 100.0, 1.0, 95.0, 110.0,
                        'legacy_no_tenant', ?, NULL, 2.0, 1.5)""",
             (datetime.now(timezone.utc).isoformat(),),
         )
