@@ -5,13 +5,32 @@ BEGIN / COMMIT / ROLLBACK and the connection lifecycle. Callers never
 touch commit/rollback/close.
 """
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, NewType
 import logging
 import sqlite3
 
 from db.connection import _open_configured_connection
 
 log = logging.getLogger("db.transaction")
+
+
+# Move 'precheck != snapshot' from convención to tipo (#468, Voronov 2026-05-26).
+#
+# PrecheckConn is a connection authorized for reads that will FEED a follow-up
+# write transaction. The caller is contractually obligated to extract any field
+# the write-tx will need into an immutable snapshot (see
+# operators.precheck.OwnershipValidatedSnapshot) BEFORE the with block exits.
+#
+# SnapshotConn is a connection authorized for TERMINAL reads — results
+# serialize to an output (JSON file, HTTP response, log) and are NOT used to
+# drive a subsequent mutation. No follow-up re-validation obligation.
+#
+# Both NewTypes wrap sqlite3.Connection. mypy treats them as incompatible;
+# at runtime, both are no-ops (the wrapped object is the original Connection).
+# The mechanism is identical (PRAGMA query_only=1); the contract is in the
+# type, not in the docstring.
+PrecheckConn = NewType("PrecheckConn", sqlite3.Connection)
+SnapshotConn = NewType("SnapshotConn", sqlite3.Connection)
 
 
 @contextmanager
@@ -57,7 +76,7 @@ def transaction() -> Iterator[sqlite3.Connection]:
 
 
 @contextmanager
-def precheck_connection() -> Iterator[sqlite3.Connection]:
+def precheck_connection() -> Iterator[PrecheckConn]:
     """Open a configured connection for a PRECHECK READ that will feed a
     follow-up write transaction.
 
@@ -84,13 +103,13 @@ def precheck_connection() -> Iterator[sqlite3.Connection]:
     con = _open_configured_connection()
     try:
         con.execute("PRAGMA query_only = 1")
-        yield con
+        yield PrecheckConn(con)
     finally:
         con.close()
 
 
 @contextmanager
-def snapshot_connection() -> Iterator[sqlite3.Connection]:
+def snapshot_connection() -> Iterator[SnapshotConn]:
     """Open a configured connection for a TERMINAL READ (no follow-up write).
 
     Use for snapshot generation, dashboard queries, audit reads — operations
@@ -108,6 +127,6 @@ def snapshot_connection() -> Iterator[sqlite3.Connection]:
     con = _open_configured_connection()
     try:
         con.execute("PRAGMA query_only = 1")
-        yield con
+        yield SnapshotConn(con)
     finally:
         con.close()
