@@ -1160,7 +1160,11 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
     pick it up on next boot (Serrano BLOCKER 1).
 
     Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS +
-    try/except ALTER for the body_sha256 column.
+    PRAGMA-guarded ALTER for the body_sha256 column (a try/except on the
+    ALTER would mark the enclosing BEGIN IMMEDIATE tx as abortable when
+    the column already exists, which silently rolls back the entire
+    D-cluster on subsequent COMMIT; PRAGMA check avoids contaminating
+    the tx).
     """
     con.execute(
         """CREATE TABLE IF NOT EXISTS idempotency_keys (
@@ -1174,9 +1178,14 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
            )"""
     )
     # ALTER TABLE for installations that created the table BEFORE the
-    # body_sha256 column existed. Idempotent via try/except on the
-    # "duplicate column" OperationalError.
-    try:
+    # body_sha256 column existed. PRAGMA-guarded (NOT try/except) so the
+    # enclosing tx remains in a clean state when the column is already
+    # present.
+    existing_cols = {
+        row[1]
+        for row in con.execute("PRAGMA table_info(idempotency_keys)").fetchall()
+    }
+    if "body_sha256" not in existing_cols:
         con.execute(
             "ALTER TABLE idempotency_keys ADD COLUMN body_sha256 TEXT"
         )
@@ -1184,8 +1193,6 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
             "_migrate_idempotency_keys: added body_sha256 column to "
             "idempotency_keys."
         )
-    except sqlite3.OperationalError:
-        pass  # column already exists (fresh CREATE TABLE above OR prior run)
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_idempotency_expires "
         "ON idempotency_keys(expires_at)"
