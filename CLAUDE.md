@@ -321,6 +321,43 @@ New business operators emerge from evidence (caller composes >1 helper + side-ef
 
 `F-05` (trading invariant "every mutation derived from one tick of price decision belongs to one serializable transaction") **applies per-close** in Phase 2 of `check_position_stops`, **not per-tick**. The Phase 2 loop wraps each `PositionClosure(SYSTEM)` in `try/except: continue`, so partial-failure observability across N positions in the same tick is currently absent. See #453 for the issue tracking the integrity-observational debt (Voronov reframe of Serrano F-NEW Plano 1, 2026-05-25).
 
+## Capas de enforcement de invariantes (Voronov 2026-05-26)
+
+El dominio del repo afirma invariantes que el almacenamiento no garantiza por defecto. Cada vez que esa asimetría no se nombra, el código paga la diferencia en **membranas silenciosas**: `or 0`, "código de revisor", re-validaciones parciales. Este registro lista las invariantes de dominio que tocan el cluster C2 (#467/#468/#469) y la capa que las enforza.
+
+Cuatro capas posibles, de más fuerte a más débil:
+
+| Capa | Cómo enforza | Quién detecta violación |
+|---|---|---|
+| **Schema** | DDL constraint (CHECK, NOT NULL, FK, UNIQUE) | El motor SQLite, en write |
+| **Tipo** | Python typing (NewType, frozen dataclass, factory privada) | mypy en CI / `__post_init__` en runtime |
+| **Test** | Invariant test que falla si la violación ocurre | pytest en CI |
+| **Convención** | Comentario en código / sección de CLAUDE.md / revisión humana | Revisor (si recuerda mirar) |
+
+### Invariantes C2 — estado actual y movimiento de este PR
+
+| Invariante de dominio | Capa actual | Capa objetivo | Issue | Razón del movimiento |
+|---|---|---|---|---|
+| `qty` siempre tiene valor numérico para positions activas | Convención (`or 0` en 2 sitios) | **Schema** (CHECK con exemption por `status='legacy_unmeasurable'` — ver Finding meta) | #467 | El default silencioso a 0 corrompe `pnl_usd=0` aplicado al capital. La fix vive en schema. |
+| `precheck_connection` y `snapshot_connection` son contratos distintos | Convención (docstrings + CLAUDE.md §4) | **Tipo** (NewType `PrecheckConn` / `SnapshotConn`) | #468 | Hoy ambas retornan `sqlite3.Connection`. mypy no detecta el mis-uso. |
+| Los campos del `PositionSnapshot` consumidos por el write-tx no cambian entre precheck y BEGIN IMMEDIATE | Convención (re-validación parcial de tenant_id + status) | **Tipo** (`OwnershipValidatedSnapshot` con factory privada + re-validación de TODOS los campos mutables) | #469 + F6 | El re-validate actual solo cubre 2 de 6 campos. Schema no enforza inmutabilidad. |
+
+### Patrón nombrado: "invariantes de dominio sin contraparte estructural"
+
+Cada futuro issue de la familia `or X`, "código de revisor", "trust-and-document" debería compararse contra este registro. Si la invariante pertenece a una capa más fuerte que `convención`, moverla es la fix correcta.
+
+### Finding meta — asimetría contractual create vs close (Voronov post-medición 2026-05-26)
+
+Medición de `signals.db` reveló 670 de 2018 positions con `qty IS NULL` (33%), **ZERO backfillables** desde `size_usd/entry_price`. La asunción del plan original era que `qty NULL` era deuda de cierre (size_usd existió, se perdió). La realidad: deuda de nacimiento (size_usd nunca prometido).
+
+> **El sistema tiene un `close()` que asume invariantes que `open()` nunca prometió.** `qty NULL` no es el problema — es el síntoma. La membrana de cierre asume un contrato que la membrana de apertura nunca firmó.
+
+Implicación: hasta que `create_position` exija lo que `close_position` asume, todo CHECK en la salida es teatro defensivo. Issue separado: asimetría contractual create vs close (open issue antes del PR merge — Task 13.5 del plan 2026-05-26-467-468-469).
+
+### Documented status: `legacy_unmeasurable`
+
+Status especial usado por `_migrate_qty_not_null` (#467) para reconocer 670 rows históricas cuya `qty` nunca fue medida y no es derivable. El schema CHECK constraint exempta este status: `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')`. Convierte 670 mentiras silenciosas en 670 reconocimientos explícitos.
+
 ## Known Limitations
 - `watchdog.py` uses Windows-specific commands (`tasklist`, `taskkill`, `wmic`, `netstat`) and won't run on Linux/Mac
 - The webhook process itself is not supervised by the watchdog (only btc_api.py is)
