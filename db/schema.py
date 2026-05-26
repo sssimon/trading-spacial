@@ -324,31 +324,29 @@ def init_db() -> None:
     with transaction() as con_qty:
         _migrate_qty_not_null(con_qty)
 
-    # qty > 0 enforcement migration — #471 (Voronov D-schema rung).
-    # MUST run AFTER _migrate_qty_not_null (which created the C2 CHECK).
-    # Quarantines the 72 zero-qty rows the C2 NULL check missed.
-    with transaction() as con_qty_pos:
-        _migrate_qty_positive(con_qty_pos)
-
-    # tenant_id NOT NULL enforcement migration — #471 (Voronov D-schema rung).
-    # MUST run AFTER _migrate_qty_positive. Quarantines NULL-tenant rows as
-    # 'legacy_no_tenant'; rows already in 'legacy_unmeasurable' are exempted
-    # by the OR clause directly (no double-quarantine).
-    with transaction() as con_tenant:
-        _migrate_tenant_id_not_null(con_tenant)
-
-    # Idempotency partial-UNIQUE index — #470 (Voronov D-schema rung,
-    # operational invariant). MUST run AFTER _migrate_tenant_id_not_null so
-    # the recreated table is the target of the index.
-    with transaction() as con_idx:
-        _migrate_unique_open_scan(con_idx)
-
-    # Idempotency-Key cache table — #470 (Voronov D-Tipo HTTP rung).
-    # Backs `api.positions_birth.IdempotencyCache` with a per-tenant keyed
-    # store of POST /positions results (24h TTL, lazy cleanup on read).
-    # Independent of the positions table; safe to run any time. Idempotent.
-    with transaction() as con_idem:
-        _migrate_idempotency_keys(con_idem)
+    # ── D-cluster migrations: ONE transaction (Serrano HIGH 7). ──
+    # All four sub-migrations participate in the same write-tx. Partial
+    # failure of any step rolls the WHOLE cluster back, so the database
+    # never sits in a half-migrated intermediate state. Each sub-step
+    # remains idempotent on its own; the wrapping tx only changes the
+    # group-failure semantics.
+    #
+    # Ordering constraints inside the cluster:
+    #   1. _migrate_qty_positive — depends on the C2 CHECK from
+    #      _migrate_qty_not_null above (already committed in its own tx).
+    #   2. _migrate_tenant_id_not_null — recreates the positions table,
+    #      must run after _migrate_qty_positive so both CHECKs land on
+    #      the new table together.
+    #   3. _migrate_unique_open_scan — installs the partial UNIQUE index
+    #      against the table _migrate_tenant_id_not_null produced.
+    #   4. _migrate_idempotency_keys — independent table; safe to run
+    #      any time but kept in this cluster so D-cluster invariants
+    #      land or roll back together.
+    with transaction() as con_d:
+        _migrate_qty_positive(con_d)
+        _migrate_tenant_id_not_null(con_d)
+        _migrate_unique_open_scan(con_d)
+        _migrate_idempotency_keys(con_d)
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
