@@ -58,6 +58,7 @@ Load the relevant file based on the current task. At the start of every task, ch
 | Re-tuning ATR, reading holdout, changing regime thresholds, inviting a user | `context/decisions.md` |
 | Adding a library, touching config.json, auditing webhook SSRF | `context/stack.md` |
 | Starting services, install issues, watchdog setup | `context/setup.md` |
+| Considering admin-merge / CI bypass / failing tests on a PR | `context/ci-discipline.md` |
 
 ## Behavioural Contract
 

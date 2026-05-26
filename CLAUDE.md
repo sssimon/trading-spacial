@@ -18,6 +18,7 @@ A BTC/USDT automated trading signal system with multi-timeframe technical analys
 4. **`RISK_PER_TRADE = 0.01` is fixed. Do not add multiplicative risk scalers on top.** Per-symbol volatility lives in `symbol_overrides` (epic #121). See [[.mex/context/architecture.md]] §Key Backend Logic.
 5. **Pre-#223/#224 backtest numbers are inflated.** Do not cite the numbers in `docs/superpowers/specs/es/2026-04-17-formula-ganadora-resultados-finales.md` or `2026-04-18-documento-completo-sistema-trading.md` as baseline. See #272 for re-baselining work.
 6. **Authoritative spec docs override CLAUDE.md prose.** When in doubt about sizing / symbol selection / regime detector, read `docs/superpowers/specs/es/2026-04-18-documento-completo-sistema-trading.md` before changing code.
+7. **Admin-merge of a PR requires explicit verification.** Read the FULL CI failure summary, confirm each failure is on the orthogonal-flake list in [[.mex/context/ci-discipline.md]], and `mex log` the bypass with the specific tests + tracking issues. Skipping any of these is how regressions reach main through the gate (the PR #500 → #502 cascade demonstrated this). See [[.mex/context/ci-discipline.md]] for the rule + the orthogonal-flake list.
 
 ## Commands
 
