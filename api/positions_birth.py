@@ -182,8 +182,15 @@ class AmbiguousQtyError(BirthError):
 
 
 class StaleEntryTsError(BirthError):
-    """entry_ts outside the accepted window. (Surfaced via Pydantic for now;
-    reserved here in case a future check fires it from the schema.)"""
+    """entry_ts outside the accepted window (now-7d, now+60s).
+
+    Raised by `_build_open_request` after inspecting the Pydantic
+    ValidationError: when the failure originates from the entry_ts window
+    validator (`OpenPositionRequest._entry_ts_within_window`), the factory
+    re-classifies the error as StaleEntryTsError rather than bundling it
+    under generic BodyValidationError. The HTTP status stays 422; the typed
+    name lets clients branch on the specific failure mode (Serrano MEDIUM 5).
+    """
     status_code = 422
 
 
@@ -320,9 +327,22 @@ def _build_open_request(
     try:
         payload = OpenPositionRequest.model_validate(body)
     except ValidationError as e:
+        # Re-classify entry_ts window failures as StaleEntryTsError so the
+        # 422 carries a typed name distinct from generic BodyValidationError
+        # (Serrano MEDIUM 5). The Pydantic validator (`_entry_ts_within_window`)
+        # produces ValueError with one of two stable wordings — "60s in the
+        # future" or "7 days in the past" — both attached to `loc=("entry_ts",)`.
+        # All other field-shape failures stay under BodyValidationError.
+        errors = e.errors()
+        if _is_entry_ts_window_failure(errors):
+            raise StaleEntryTsError(
+                "entry_ts outside the accepted window "
+                "(now-7d <= entry_ts <= now+60s)",
+                detail=errors,
+            ) from e
         raise BodyValidationError(
             "OpenPositionRequest validation failed",
-            detail=e.errors(),
+            detail=errors,
         ) from e
     return ValidatedOpenRequest(
         payload=payload,
@@ -330,6 +350,32 @@ def _build_open_request(
         idempotency_key=idempotency_key,
         _sentinel=_OPEN_REQUEST_SENTINEL,
     )
+
+
+def _is_entry_ts_window_failure(errors: list[dict]) -> bool:
+    """True if any Pydantic error came from the `entry_ts` window validator.
+
+    A single Pydantic validation pass can surface multiple field errors; we
+    re-classify as StaleEntryTsError only when at least one of them is the
+    entry_ts window check. Discriminate on the stable validator wording
+    ("60s in the future" / "7 days in the past") because Pydantic does not
+    surface the bare validator function name. The validator at
+    `OpenPositionRequest._entry_ts_within_window` owns these strings — keep
+    them in sync if that validator's messages ever change.
+
+    Returns False when the failure surfaces from any other field — those
+    remain under generic BodyValidationError.
+    """
+    for err in errors:
+        loc = err.get("loc") or ()
+        msg = err.get("msg") or ""
+        if (
+            loc
+            and loc[0] == "entry_ts"
+            and ("60s in the future" in msg or "7 days in the past" in msg)
+        ):
+            return True
+    return False
 
 
 # ---------------- Idempotency-Key cache (D-Tipo HTTP rung) ----------------

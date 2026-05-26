@@ -118,6 +118,27 @@ def test_duplicate_open_scan_returns_409(client):
     assert "scan_id" in body_text or "unique" in body_text.lower() or "conflict" in body_text.lower()
 
 
+def test_stale_entry_ts_returns_422_with_typed_name(client):
+    """Serrano MEDIUM 5: an out-of-window `entry_ts` must surface as
+    StaleEntryTsError (typed 422), not bundled under the generic
+    BodyValidationError. The route still returns 422 (StaleEntryTsError
+    has status_code=422), but the `error` discriminator in the response
+    body carries the specific class name so clients can branch on it."""
+    from datetime import datetime, timedelta, timezone
+
+    far_future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    resp = client.post("/positions", json={
+        "symbol": "BTCUSDT", "entry_price": 100.0, "direction": "LONG",
+        "qty": 10.0, "entry_ts": far_future,
+    })
+    assert resp.status_code == 422
+    body = resp.json()
+    detail = body.get("detail") or {}
+    assert detail.get("error") == "StaleEntryTsError", (
+        f"expected StaleEntryTsError discriminator; got: {body!r}"
+    )
+
+
 def test_route_does_not_collapse_server_exceptions_to_500_str(client, monkeypatch):
     """If the underlying write raises an unrelated RuntimeError (e.g. disk
     error), the route must NOT catch it as `except Exception → 500 str(e)`.
