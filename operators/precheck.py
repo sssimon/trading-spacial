@@ -55,8 +55,20 @@ class PrecheckOkToProceed:
     OwnershipValidatedSnapshot — a type-level guarantee that ownership was
     checked at precheck time. The write-tx MUST STILL re-validate the
     snapshot's mutable fields against a fresh re-SELECT inside BEGIN
-    IMMEDIATE (immutable fields trusted directly)."""
+    IMMEDIATE (immutable fields trusted directly).
+
+    Runtime organ: __post_init__ rejects construction with a raw
+    PositionSnapshot. The 'tipo' rung in CLAUDE.md is real only because
+    this check exists (mypy is not in CI; annotation alone does not refuse).
+    """
     snapshot: "OwnershipValidatedSnapshot"
+
+    def __post_init__(self):
+        if not isinstance(self.snapshot, OwnershipValidatedSnapshot):
+            raise TypeError(
+                f"PrecheckOkToProceed.snapshot must be an OwnershipValidatedSnapshot, "
+                f"got {type(self.snapshot).__name__}. Use _build_validated_snapshot."
+            )
 
 
 @dataclass(frozen=True)
