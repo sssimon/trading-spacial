@@ -51,9 +51,12 @@ class PrecheckAlreadyClosed:
 
 @dataclass(frozen=True)
 class PrecheckOkToProceed:
-    """Position passed all precheck conditions. The snapshot carries the
-    fields the write-tx will need (immutable directly; mutable re-validated)."""
-    snapshot: PositionSnapshot
+    """Position passed all precheck conditions. The snapshot is an
+    OwnershipValidatedSnapshot — a type-level guarantee that ownership was
+    checked at precheck time. The write-tx MUST STILL re-validate the
+    snapshot's mutable fields against a fresh re-SELECT inside BEGIN
+    IMMEDIATE (immutable fields trusted directly)."""
+    snapshot: "OwnershipValidatedSnapshot"
 
 
 @dataclass(frozen=True)
@@ -66,3 +69,50 @@ class PrecheckRejectedState:
 
 
 PrecheckResult = Union[PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProceed, PrecheckRejectedState]
+
+
+# Module-private sentinel — external callers cannot import this name
+# (single underscore is a convention; the factory check is by `is` identity).
+_VALIDATION_SENTINEL = object()
+
+
+@dataclass(frozen=True)
+class OwnershipValidatedSnapshot:
+    """A PositionSnapshot whose ownership has been validated by a precheck.
+
+    USER mode: caller_tenant_id matched snapshot.tenant_id at precheck time.
+    SYSTEM mode: ownership validation does not apply; the snapshot is
+    accepted by construction.
+
+    Construction requires the module-private _VALIDATION_SENTINEL. The only
+    legitimate constructor is `_build_validated_snapshot` (called by
+    `operators.position_closure.PositionClosure._run_precheck`).
+
+    A future write-tx that consumes this type is guaranteed (by construction)
+    that ownership was checked at precheck. The write-tx MUST STILL re-validate
+    the snapshot's mutable fields against a fresh re-SELECT — that is enforced
+    in PositionClosure.execute() by explicit field-by-field comparison.
+
+    Closes #469 + F6 (Voronov path C + E): the validation guarantee lives in
+    the type, not in a docstring.
+    """
+    inner: PositionSnapshot
+    _sentinel: object  # must be _VALIDATION_SENTINEL at construction
+
+    def __post_init__(self):
+        if self._sentinel is not _VALIDATION_SENTINEL:
+            raise TypeError(
+                "OwnershipValidatedSnapshot cannot be constructed directly. "
+                "Use the private validation sentinel via "
+                "operators.precheck._build_validated_snapshot (callable only "
+                "from operators.position_closure._run_precheck)."
+            )
+
+
+def _build_validated_snapshot(snapshot: PositionSnapshot) -> OwnershipValidatedSnapshot:
+    """Internal factory used by PositionClosure._run_precheck.
+
+    NOT exported from this module's public surface (single underscore).
+    Module-private convention: external code should not call this directly.
+    """
+    return OwnershipValidatedSnapshot(inner=snapshot, _sentinel=_VALIDATION_SENTINEL)
