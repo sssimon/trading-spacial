@@ -145,24 +145,43 @@ class TestPositionsIDOR:
         assert resp.status_code == 404
 
     def test_open_position_body_tenant_id_tampering_dropped(self, client):
-        """POST body with tenant_id=999 must store under JWT user (0), not 999."""
+        """POST body with tenant_id field must be rejected at the boundary.
+
+        Pre-D behavior (B.5): tampered tenant_id in body was silently dropped;
+        endpoint returned 200, position was stored under JWT user.
+
+        D (#473) behavior — patology closed at the boundary: the Pydantic
+        OpenPositionRequest uses `extra='forbid'`, so any unknown field
+        (including tenant_id) is rejected with 422. The tampering attempt
+        never reaches the storage layer at all; the row is never created.
+        This is structurally stricter than silent-drop."""
         resp = client.post(
             "/positions",
             json={
                 "symbol": "BTCUSDT", "entry_price": 80000,
-                "size_usd": 500, "direction": "LONG",
+                "size_usd": 500, "qty": 0.00625, "direction": "LONG",
                 "tenant_id": OTHER_USER_ID,  # tampering attempt
             },
             headers={"X-API-Key": "test-key"},
         )
-        assert resp.status_code == 200
-        # Verify the position was created under user 99, not 999
+        assert resp.status_code == 422
+        # Verify the tampered tenant_id field is explicitly named in the rejection.
+        # Shape: {"detail": {"error": "BodyValidationError",
+        #                    "message": ..., "detail": [{loc: ["tenant_id"], ...}]}}
+        body = resp.json()
+        outer = body.get("detail")
+        inner_detail = outer.get("detail", []) if isinstance(outer, dict) else (outer or [])
+        assert any(
+            "tenant_id" in str(e.get("loc", ()))
+            for e in (inner_detail if isinstance(inner_detail, list) else [])
+        ), f"expected tenant_id rejection in 422 detail; got {body!r}"
+        # No row should have been created under either tenant.
         from db.positions import db_get_positions
         from db.transaction import transaction
         with transaction() as con:
             own_positions = db_get_positions(con, tenant_id=99)
             other_positions = db_get_positions(con, tenant_id=OTHER_USER_ID)
-        assert len(own_positions) == 1
+        assert len(own_positions) == 0
         assert len(other_positions) == 0
 
     def test_x_user_id_header_tampering_ignored(self, client):

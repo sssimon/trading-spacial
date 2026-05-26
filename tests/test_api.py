@@ -1354,20 +1354,28 @@ class TestPositionsCRUD:
         assert updated[0]["sl_price"] == 60000.0  # moved to entry price
 
     def test_trailing_ratchet_never_lowers_sl(self):
-        """SL should only go up (tighten), never down."""
+        """SL should only go up (tighten), never down.
+
+        D (#473) enforces sl_price < entry_price for LONG, so we can't set
+        sl == entry as the original test did. Equivalent intent: SL just
+        below entry + small price tick (below be_threshold) leaves SL
+        untouched — the ratchet never moves it backward.
+        """
         import btc_api
         pos = _tx_create_position({
             "symbol": "BTCUSDT",
             "entry_price": 60000.0,
-            "sl_price": 60000.0,  # already at breakeven
+            "sl_price": 59950.0,  # very tight, just below entry
             "tp_price": 63000.0,
             "direction": "LONG",
             "atr_entry": 666.67,
         })
+        # Price 60500 is below be_threshold (60000 + 1.5*666.67 ≈ 61000) —
+        # ratchet does not fire, SL stays put.
         btc_api.check_position_stops("BTCUSDT", 60500.0)
         updated = _tx_get_positions(status="open")
         assert len(updated) == 1
-        assert updated[0]["sl_price"] == 60000.0  # unchanged
+        assert updated[0]["sl_price"] == 59950.0  # unchanged
 
     def test_trailing_ratchet_uses_custom_be_mult(self):
         """be_mult from position overrides the default 1.5."""
@@ -1475,6 +1483,8 @@ class TestPositionsAPI:
         r = client.post("/positions", json={
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
         })
         assert r.status_code == 200
         data = r.json()
@@ -1511,6 +1521,7 @@ class TestPositionsAPI:
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "qty": 0.1,
+            "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
 
@@ -1530,6 +1541,8 @@ class TestPositionsAPI:
         r = client.post("/positions", json={
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
         r2 = client.post(f"/positions/{pos_id}/close", json={})
@@ -1548,6 +1561,8 @@ class TestPositionsAPI:
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
             "sl_price": 63000.0,
+            "qty": 0.1,
+            "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
 
@@ -1565,6 +1580,8 @@ class TestPositionsAPI:
         r = client.post("/positions", json={
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
         r2 = client.put(f"/positions/{pos_id}", json={"bad_field": "value"})
@@ -1576,6 +1593,8 @@ class TestPositionsAPI:
         r = client.post("/positions", json={
             "symbol": "BTCUSDT",
             "entry_price": 65000.0,
+            "qty": 0.1,
+            "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
 
@@ -1598,9 +1617,11 @@ class TestPositionsAPI:
         """GET /positions?status=open filters correctly."""
         client.post("/positions", json={
             "symbol": "BTCUSDT", "entry_price": 65000.0,
+            "qty": 0.1, "direction": "LONG",
         })
         r = client.post("/positions", json={
             "symbol": "ETHUSDT", "entry_price": 3500.0,
+            "qty": 0.5, "direction": "LONG",
         })
         pos_id = r.json()["position"]["id"]
         client.post(f"/positions/{pos_id}/close", json={
@@ -1617,10 +1638,10 @@ class TestPositionsAPI:
 
     def test_full_position_lifecycle(self, client):
         """Create -> Edit -> Close lifecycle via API."""
-        # Create
+        # Create — use UNIUSDT (in curated allowlist post-#135)
         r1 = client.post("/positions", json={
-            "symbol": "SOLUSDT",
-            "entry_price": 150.0,
+            "symbol": "UNIUSDT",
+            "entry_price": 15.0,
             "qty": 10.0,
             "direction": "LONG",
         })
@@ -1629,21 +1650,21 @@ class TestPositionsAPI:
 
         # Edit (trail stop loss up)
         r2 = client.put(f"/positions/{pos_id}", json={
-            "sl_price": 145.0,
-            "tp_price": 180.0,
+            "sl_price": 14.5,
+            "tp_price": 18.0,
         })
         assert r2.status_code == 200
-        assert r2.json()["position"]["sl_price"] == 145.0
+        assert r2.json()["position"]["sl_price"] == 14.5
 
         # Close
         r3 = client.post(f"/positions/{pos_id}/close", json={
-            "exit_price": 175.0,
+            "exit_price": 17.5,
             "exit_reason": "MANUAL",
         })
         assert r3.status_code == 200
         pos = r3.json()["position"]
         assert pos["status"] == "closed"
-        assert pos["pnl_usd"] == pytest.approx(250.0, abs=0.01)  # (175-150)*10
+        assert pos["pnl_usd"] == pytest.approx(25.0, abs=0.01)  # (17.5-15)*10
     def test_dedup_window_default(self, tmp_path, monkeypatch):
         import btc_api
         cfg_path = _patch_config_files(monkeypatch, tmp_path)

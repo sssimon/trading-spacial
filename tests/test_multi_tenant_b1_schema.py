@@ -227,12 +227,14 @@ class TestIdempotency:
 
 class TestNullTenantIdAllowed:
     def test_insert_position_with_null_tenant(self, initialized_db):
-        """B.1 explicitly leaves tenant_id nullable; insert NULL is valid."""
+        """B.1 left tenant_id nullable; D (#471) enforces NOT NULL via CHECK
+        except via the documented `legacy_no_tenant` escape hatch. Rows with
+        NULL tenant_id must adopt this status to satisfy the constraint."""
         con = sqlite3.connect(initialized_db)
         con.execute(
             "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
             "VALUES (?, ?, ?, ?, ?, 1.0, NULL)",
-            ("BTCUSDT", "LONG", "open", 80000.0, "2026-05-15T12:00:00Z"),
+            ("BTCUSDT", "LONG", "legacy_no_tenant", 80000.0, "2026-05-15T12:00:00Z"),
         )
         con.commit()
         row = con.execute(
@@ -257,7 +259,7 @@ class TestBackfillTenant:
         for symbol, price in (("BTCUSDT", 80000), ("ETHUSDT", 2300), ("RUNEUSDT", 0.5)):
             con.execute(
                 "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
-                "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
+                "VALUES (?, 'LONG', 'legacy_no_tenant', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
                 (symbol, price),
             )
         con.commit()
@@ -285,7 +287,7 @@ class TestBackfillTenant:
         con = sqlite3.connect(initialized_db)
         con.execute(
             "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
-            "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
+            "VALUES (?, 'LONG', 'legacy_no_tenant', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
             ("BTCUSDT", 80000),
         )
         con.commit()
@@ -311,7 +313,7 @@ class TestBackfillTenant:
         )
         con.execute(
             "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
-            "VALUES ('ETHUSDT', 'LONG', 'open', 2300, '2026-05-15T12:00:00Z', 1.0, NULL)"
+            "VALUES ('ETHUSDT', 'LONG', 'legacy_no_tenant', 2300, '2026-05-15T12:00:00Z', 1.0, NULL)"
         )
         con.commit()
         con.close()

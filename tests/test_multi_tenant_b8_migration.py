@@ -55,16 +55,19 @@ def seeded_db(tmp_path, monkeypatch):
             "(1, 'samuel@example.com', 'hash', 'admin', 1, "
             "'2026-05-16T00:00:00+00:00', '2026-05-16T00:00:00+00:00')"
         )
-        # Pre-multi-tenant rows: tenant_id NULL across each per-user table
+        # Pre-multi-tenant rows: tenant_id NULL across each per-user table.
+        # D (#471) enforces NOT NULL via CHECK except via the legacy_no_tenant
+        # escape hatch — these rows simulate pre-multi-tenant data the
+        # migration will backfill, so the legacy status is appropriate.
         con.execute(
             "INSERT INTO positions (symbol, direction, status, entry_price, "
-            "entry_ts, qty) VALUES ('BTCUSDT', 'LONG', 'closed', 65000, "
-            "'2026-04-01T00:00:00', 1.0)"
+            "entry_ts, qty) VALUES ('BTCUSDT', 'LONG', 'legacy_no_tenant', "
+            "65000, '2026-04-01T00:00:00', 1.0)"
         )
         con.execute(
             "INSERT INTO positions (symbol, direction, status, entry_price, "
-            "entry_ts, qty) VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
-            "'2026-04-02T00:00:00', 1.0)"
+            "entry_ts, qty) VALUES ('ETHUSDT', 'LONG', 'legacy_no_tenant', "
+            "3000, '2026-04-02T00:00:00', 1.0)"
         )
         con.execute(
             "INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, "

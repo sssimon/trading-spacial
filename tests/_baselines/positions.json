@@ -84,7 +84,7 @@
         "pnl_usd": null,
         "qty": 0.033,
         "scan_id": null,
-        "size_usd": 100.0,
+        "size_usd": 99.0,
         "sl_price": 2900.0,
         "status": "open",
         "symbol": "ETHUSDT",

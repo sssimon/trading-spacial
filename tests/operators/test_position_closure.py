@@ -310,7 +310,19 @@ def test_no_writer_lock_held_across_post_commit_side_effects(fresh_db_with_two_t
 # ---- Invariant 9: no-tenant capital skip ----
 
 def test_legacy_null_tenant_position_close_skips_capital(fresh_db_with_two_tenants):
-    """Closing a tenant_id=NULL legacy row commits but skips capital UPSERT."""
+    """A legacy NULL-tenant row living under `status='legacy_no_tenant'` is
+    structurally non-closeable via the normal open→closed transition.
+
+    Pre-D intent: a `status='open' AND tenant_id IS NULL` row could close;
+    PositionClosure would commit the close but skip the capital UPSERT (no
+    tenant to credit). D (#471) made `tenant_id NOT NULL` enforced at the
+    schema except via the `legacy_no_tenant` / `legacy_unmeasurable` escape
+    hatches — so the pre-D scenario is now structurally impossible. Any
+    NULL-tenant row in the table MUST be in a legacy status, and the
+    closure operator's precheck must reject it as PrecheckRejectedState
+    (status != 'open'). The "tampered into 200" silently-skip-capital bug
+    is closed at the boundary: the row never gets to a position where
+    the closure operator can swallow the missing tenant."""
     from operators.position_closure import PositionClosure
 
     with transaction() as con:
@@ -319,7 +331,7 @@ def test_legacy_null_tenant_position_close_skips_capital(fresh_db_with_two_tenan
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
                 status, entry_ts, tenant_id, atr_entry, be_mult)
                VALUES (99, 'LEGACY', 'long', 100.0, 1.0, 95.0, 110.0,
-                       'open', ?, NULL, 2.0, 1.5)""",
+                       'legacy_no_tenant', ?, NULL, 2.0, 1.5)""",
             (datetime.now(timezone.utc).isoformat(),),
         )
 
@@ -329,12 +341,13 @@ def test_legacy_null_tenant_position_close_skips_capital(fresh_db_with_two_tenan
     ) as closure:
         outcome = closure.execute()
 
-    assert outcome.status == "closed"
+    # Precheck classifies the row as rejected (not 'open'); no close happens.
+    assert outcome.status == "rejected_unexpected_state"
     with transaction() as con:
         pos = con.execute("SELECT status FROM positions WHERE id=99").fetchone()
-        # No capital row should exist for tenant=NULL.
         cap_null = con.execute("SELECT * FROM capital WHERE tenant_id IS NULL").fetchall()
-    assert pos["status"] == "closed"
+    # Row unchanged + no capital row written.
+    assert pos["status"] == "legacy_no_tenant"
     assert cap_null == []
 
 

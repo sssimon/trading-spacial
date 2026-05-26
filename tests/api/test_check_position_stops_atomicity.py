@@ -29,13 +29,15 @@ def db_with_position(tmp_path, monkeypatch):
     # Previous fixture (entry=100, sl=100) had be_threshold=103 and
     # sl_price<entry was False (100<100 = False), so trailing was a no-op
     # for the scanner and the test was vacuous (Serrano F-13).
+    # tenant_id=1 satisfies the D (#471) schema CHECK that enforces
+    # tenant_id NOT NULL on active rows.
     with transaction() as con:
         con.execute(
             """INSERT INTO positions
                (id, symbol, direction, entry_price, qty, sl_price, tp_price,
-                status, entry_ts, atr_entry, be_mult)
+                status, entry_ts, atr_entry, be_mult, tenant_id)
                VALUES (1, 'BTCUSDT', 'LONG', 98.0, 1.0, 97.0, 120.0,
-                       'open', '2026-05-24T00:00:00+00:00', 2.0, 1.5)"""
+                       'open', '2026-05-24T00:00:00+00:00', 2.0, 1.5, 1)"""
         )
     return str(db_path)
 

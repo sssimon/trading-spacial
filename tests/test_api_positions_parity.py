@@ -80,9 +80,11 @@ def test_positions_match_baseline(client):
         body = None
 
         if "POST /positions (auth)" in label:
+            # D (#473) enforces qty * entry_price ≈ size_usd (tol 0.01).
+            # 0.033 * 3000 = 99.0 (≠ 100.0), so size_usd must match.
             body = {"symbol": "ETHUSDT", "entry_price": 3000.0,
                     "sl_price": 2900.0, "tp_price": 3300.0,
-                    "size_usd": 100.0, "qty": 0.033, "direction": "LONG"}
+                    "size_usd": 99.0, "qty": 0.033, "direction": "LONG"}
         elif "POST /positions (no auth)" in label:
             body = {"symbol": "ETHUSDT", "entry_price": 3000.0}
         elif "PUT /positions/1" in label:
