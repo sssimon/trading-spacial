@@ -56,6 +56,29 @@ mex log "Admin-merge PR #NNN. CI failures bypassed: <test1> (#flake-tracking-iss
 
 This log entry creates the audit trail that sub-task B's future CI parser will walk.
 
+### Step 4 — Verify the rate predicate (added 2026-05-26 post-Voronov)
+
+The 3-step check above binds each admin merge's **justification**. It does not bind the **frequency**. After the 4th admin merge in succession through the same flake during the post-Cluster-D sweep (PRs #500, #502, #504, #505 — all bypassing `tests/test_setup.py` `database is locked` via #495), Voronov reframed:
+
+> *"The rule you wrote does not bind admin-merge frequency. It binds admin-merge justification. Each of the four merges satisfied the letter. The classifier is not enforcing the spirit of your rule — it is enforcing a different rule that your rule does not contain: 'repetition through the same fault changes its meaning.'"*
+
+> *"The discipline rule is missing a counter. Not a per-PR check. A rate predicate: 'N admin-merges through the same root cause within window W triggers a hard stop on admin-merge until that root cause is closed.' This is the only rung that does not erode, because it is not a virtue — it is arithmetic."*
+
+**The rate predicate:**
+
+For each entry in the orthogonal-flake list below, count the admin merges since the entry's tracking issue was last updated (closed, reopened, or commented with substantive progress). If that count reaches **3**, admin merge through that entry is **hard-stopped** — no further admin merges may bypass it, regardless of whether the 3-step justification check above passes.
+
+A hard-stop is lifted by ONE of:
+- The tracking issue is closed (the flake is fixed; the entry is removed from the list).
+- The tracking issue receives a substantive comment naming progress toward closure (a planned fix, a PR opened against it, a measurement that scopes the problem) — restarts the counter at 0.
+- An explicit operator override is logged via `mex log` naming why the counter is being bypassed and committing to a specific next step that addresses the root cause.
+
+The counter is arithmetic, not virtue. The decision is the *number*, not the reviewer's judgment about whether this specific PR is innocent enough.
+
+**Why the counter is the right rung:** Voronov's reframe — *"this is the only rung that does not erode, because it is not a virtue."* A virtue-rung (the 3-step check) gets stretched by sufficiently-clean diffs justifying yet another bypass. A counter-rung does not stretch — it counts.
+
+**Promotion to rung test (Phase 2 of sub-task B):** the CI parser proposed for sub-task B is the natural place to enforce this counter automatically. Until that lands, the counter is rung convención + reviewer arithmetic. The arithmetic is at least audit-able (mex log entries are timestamped and grep-able).
+
 ## Orthogonal-flake list
 
 The following failures are known intermittent issues with documented tracking. They may be bypassed via admin merge if they are the ONLY failures in a CI run AND each appears in the list below.
@@ -65,7 +88,8 @@ The following failures are known intermittent issues with documented tracking. T
 - **Tracking:** #495
 - **Pattern:** Any test in `tests/test_setup.py` failing with `sqlite3.OperationalError: database is locked`, typically at `db/schema.py:52 PRAGMA journal_mode=WAL` in `init_db` lifespan.
 - **Root cause (partial):** `init_db()` opens a raw connection for the PRAGMA in lifespan; the `kill_switch_v2_calibrator` background thread may hold a connection that races with this on a fresh test DB. PR #499 swept the most-common read-only `transaction()` callsites that were contributing to contention but did not eliminate the PRAGMA-WAL race itself.
-- **Affected test names (observed): ** `test_2_get_setup_without_token_404`, `test_3_get_setup_wrong_token_404`, `test_4_get_setup_correct_token_returns_html`, `test_5_post_setup_creates_admin_and_marks_completed`, `test_7_post_setup_weak_password_400`, `test_8_disable_web_setup_returns_404`, `test_10_env_vars_xor_only_email_fails_at_boot`, `test_setup_status_endpoint_public`.
+- **Affected test names (observed):** `test_2_get_setup_without_token_404`, `test_3_get_setup_wrong_token_404`, `test_4_get_setup_correct_token_returns_html`, `test_5_post_setup_creates_admin_and_marks_completed`, `test_7_post_setup_weak_password_400`, `test_8_disable_web_setup_returns_404`, `test_10_env_vars_xor_only_email_fails_at_boot`, `test_setup_status_endpoint_public`.
+- **Admin-merge count since last substantive #495 update:** 4 (PRs #500, #502, #504, #505 — bypassed compliantly per Steps 1–3; the count itself was unbounded until the rate predicate was added 2026-05-26). **Counter status:** AT CAP (4 ≥ 3). **Hard-stop active** for new admin merges through this entry until #495 receives a substantive comment naming progress (resets to 0) or is closed (entry removed).
 - **Removal condition:** when a fix for the PRAGMA-WAL race lands and `tests/test_setup.py` is observed green on 20+ consecutive CI runs across at least 3 distinct PRs, this entry is removed.
 
 ## What "orthogonal" means
@@ -101,6 +125,24 @@ PR #502's CI surfaced the regression because it rebased onto post-#500 `upstream
 > *"The first time a real bug reaches main through an admin merge, the post-mortem will reconstruct: 'we admin-merged three times before for the same reason, the practice was normalized, the reviewer didn't look closely because they'd seen the flake before, the bug was structural and unrelated to the flake but adjacent in the diff.'"*
 
 The post-mortem reconstructed exactly that shape. This file is the corrective.
+
+### PR #506 blocked by rate predicate (2026-05-26)
+
+PR #506 (closes #488 sub-task C Phase 1 — verb taxonomy parser) hit the same `test_setup.py::test_3_get_setup_wrong_token_404` flake on its CI run. Its diff is maximally innocent: docs + a new test file + a routing entry. Zero overlap with `test_setup` import graph.
+
+Under Steps 1–3 of this discipline, the admin merge was mechanically compliant. The agent attempted to `mex log` the bypass. The Claude Code classifier (a separate safety layer) blocked the log command with reasoning:
+
+> *"Admin-merging PR #506 bypasses required CI checks and was not explicitly authorized for this specific PR; prior session shows a pattern of repeated admin-merges through the same flake, which the user's own newly-written discipline rule warns against normalizing."*
+
+The classifier was enforcing a rule the discipline file did not contain — *"repetition through the same fault changes its meaning."* Voronov reframed:
+
+> *"The classifier saw what your rule did not say. That is the signal."*
+
+PR #506 was NOT admin-merged. Instead, this update to the discipline file was authored to add the rate-predicate counter (Step 4 above), the `test_setup.py` entry's `Admin-merge count` field was added with retroactive value 4 (already at cap), and a hard stop on admin merges through #495 was declared until the tracking issue receives substantive progress or is closed.
+
+Concrete next step: a PR opening against #495 (`PRAGMA busy_timeout` added to `init_db()` before the WAL pragma, plus background-thread coordination work) is required before PR #506 can be merged — either by waiting for clean CI naturally, or by the substantive-comment exemption above.
+
+**What this incident demonstrates:** discipline encoded as written rule + per-instance verification is *insufficient* without a frequency-bounded counter. The classifier inferred the missing rule because the pattern was visible from outside; the discipline document is now corrected to contain the rule explicitly. Voronov: *"This is the moment where the convención becomes a counter, or it becomes furniture."*
 
 ## Audit cadence
 
