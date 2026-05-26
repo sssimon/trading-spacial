@@ -47,9 +47,22 @@ def init_db() -> None:
     notes). We open a one-shot raw connection for the PRAGMA, then drive all
     DDL through the standard transaction() primitive. WAL mode is a persistent
     file-level property so this only matters on first boot for a fresh DB.
+
+    PRAGMA busy_timeout (#495 advances): set BEFORE the WAL pragma so the
+    connection waits up to 5s if another connection holds the DB lock
+    (typical race source: kill_switch_v2_calibrator background thread
+    started by lifespan and still holding a query connection when a fresh
+    test DB triggers re-init). Without busy_timeout, the WAL pragma fails
+    immediately with `sqlite3.OperationalError: database is locked` — the
+    flake that blocked CI on ~50% of post-Cluster-D PRs.
     """
     pragma_con = _open_configured_connection()
     try:
+        # Wait up to 5000ms if another connection holds the lock at the
+        # moment the WAL pragma executes. SQLite's WAL-mode change requires
+        # not-strictly-exclusive but heavy-coordination access; a 5s window
+        # is enough for ordinary background queries to release.
+        pragma_con.execute("PRAGMA busy_timeout = 5000")
         pragma_con.execute("PRAGMA journal_mode=WAL")
     finally:
         pragma_con.close()
