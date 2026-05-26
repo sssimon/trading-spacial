@@ -123,16 +123,18 @@ def test_route_does_not_collapse_server_exceptions_to_500_str(client, monkeypatc
     error), the route must NOT catch it as `except Exception → 500 str(e)`.
     It bubbles to FastAPI's default 500 handler with a generic body.
 
-    Patch target is the route's bound name for db_create_position. Task 15
-    will swap this for BirthRegistrar.register; the contract — no `except
-    Exception` membrane that leaks str(e) — is invariant across that swap.
+    Patch target is BirthRegistrar.register — Task 15 moved the write path
+    into the op-ligero. The contract under test — no `except Exception`
+    membrane that leaks str(e) — is invariant across that move.
     """
-    from api import positions as _pos
+    from api import positions_birth as _birth
 
     def _exploding(*args, **kwargs):
         raise RuntimeError("simulated disk failure: file not found")
 
-    monkeypatch.setattr(_pos, "db_create_position", _exploding)
+    monkeypatch.setattr(
+        _birth.BirthRegistrar, "register", staticmethod(_exploding),
+    )
 
     # TestClient propagates unhandled exceptions by default. Reach into the
     # underlying httpx transport to disable that so we observe the 500

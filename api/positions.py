@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -19,7 +18,6 @@ from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
 from db.positions import (
     _calc_pnl,
-    db_create_position,
     db_get_positions,
     db_update_position,
 )
@@ -304,73 +302,39 @@ def open_position(
         FastAPI's default 500 handler with the traceback logged — never
         leak str(e) to the client (closes Serrano BLOCKER 3 / #473).
 
-    Transitional note (Task 14 of plan 2026-05-26-471-470-473): the write
-    still goes through db_create_position. Task 15 swaps this for
-    BirthRegistrar.register which will own the atomic write + post-commit +
-    structured logging. The route's error taxonomy contract is invariant
-    across that swap.
+    Task 15 wired this to BirthRegistrar.register, which owns:
+      - the write transaction (db_create_position inside `with transaction()`)
+      - same-tx Idempotency-Key cache write (Task 16 lights up the persistence)
+      - post-commit update_positions_json (closes F8)
+      - structured POSICION OPENED log at birth (closes F15)
+      - translation of sqlite3.IntegrityError on the partial UNIQUE index to
+        UniqueViolationError (409)
+
+    The route is now thin: validate → register → return. Errors are typed
+    BirthError subclasses; their status_code is honored. No bare `except
+    Exception` — server faults bubble to FastAPI's default 500 handler with
+    the traceback logged (closes Serrano BLOCKER 3 / #473).
     """
     from api.positions_birth import (  # noqa: PLC0415
-        BirthError, _build_open_request,
+        BirthError, BirthRegistrar, _build_open_request,
     )
     try:
         validated = _build_open_request(body, tenant_id, idempotency_key)
+        pos = BirthRegistrar.register(validated)
+        return {"ok": True, "position": pos}
     except BirthError as e:
         log.warning(
             "open_position rejected: %s detail=%s", e.message, e.detail,
         )
         # Pydantic ValidationError.errors() may embed non-JSON-serializable
         # objects under ctx.* (the original Python exception). Stringify to
-        # a JSON-safe shape before handing to FastAPI. We use json.loads/dumps
-        # with default=str rather than touching api/positions_birth.py.
+        # a JSON-safe shape before handing to FastAPI.
         safe_detail = json.loads(json.dumps(e.detail, default=str)) if e.detail else None
         raise HTTPException(status_code=e.status_code, detail={
             "error": e.__class__.__name__,
             "message": e.message,
             "detail": safe_detail,
         })
-
-    # Transitional shim: hand the validated payload to db_create_position via
-    # model_dump so the body matches the legacy dict contract. Datetimes are
-    # serialized to iso strings so db_create_position's downstream INSERT sees
-    # the same shape it always did.
-    body_for_db = validated.payload.model_dump(mode="json")
-    try:
-        with transaction() as con:
-            pos = db_create_position(con, body_for_db, tenant_id=validated.tenant_id)
-    except sqlite3.IntegrityError as e:
-        # Schema-level partial UNIQUE index fired. Pydantic was supposed to
-        # catch reorderings upstream — log.exception so the gap is visible.
-        log.exception(
-            "open_position: IntegrityError despite Pydantic validation "
-            "tenant=%s scan_id=%s symbol=%s",
-            validated.tenant_id,
-            validated.payload.scan_id,
-            validated.payload.symbol,
-        )
-        msg = str(e).lower()
-        if "unique" in msg and (
-            "idx_positions_open_scan_unique" in msg or "scan_id" in msg
-        ):
-            raise HTTPException(status_code=409, detail={
-                "error": "UniqueViolationError",
-                "message": "An open position already exists for this scan_id",
-                "detail": {
-                    "tenant_id": validated.tenant_id,
-                    "scan_id": validated.payload.scan_id,
-                },
-            })
-        # Any other IntegrityError is a schema CHECK constraint kicking in
-        # (qty>0, tenant_id NOT NULL, …). Same 409 family — the body claimed
-        # something the schema rejected. Surface as a 409 with the raw sqlite
-        # message scrubbed.
-        raise HTTPException(status_code=409, detail={
-            "error": "IntegrityError",
-            "message": "Schema rejected the position; check qty, tenant_id, status invariants",
-            "detail": None,
-        })
-    update_positions_json()
-    return {"ok": True, "position": pos}
 
 
 @router.put(

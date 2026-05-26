@@ -238,3 +238,155 @@ def _build_open_request(
         idempotency_key=idempotency_key,
         _sentinel=_OPEN_REQUEST_SENTINEL,
     )
+
+
+# ---------------- Idempotency-Key cache (D-Tipo HTTP rung) ----------------
+#
+# Task 15 stub: the underlying `idempotency_keys` table is added by Task 16
+# (`db/schema.py::_migrate_idempotency_keys`). Until that lands, `get` always
+# returns None (no replay) and `set` is a best-effort no-op that swallows the
+# OperationalError raised by SQLite when the table doesn't exist. This keeps
+# BirthRegistrar's choreography wire-correct now (cache probe at top, cache
+# write inside the write-tx) and lets Task 16 light up the persistence layer
+# without re-touching the registrar.
+
+_IDEMPOTENCY_TTL = timedelta(hours=24)
+
+
+class IdempotencyCache:
+    """SQLite-backed cache for Idempotency-Key results keyed by (tenant_id, key).
+
+    Task 15: stubbed. Task 16 will wire the real `idempotency_keys` table +
+    24h TTL + lazy cleanup. Until then `get` returns None and `set` is a
+    best-effort no-op (silently absorbs the missing-table error so the
+    BirthRegistrar transaction still commits the position).
+    """
+
+    @staticmethod
+    def get(con: sqlite3.Connection, tenant_id: int, key: str) -> Optional[dict]:
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            # Lazy cleanup of expired entries for this (tenant, key) pair only.
+            con.execute(
+                "DELETE FROM idempotency_keys "
+                "WHERE tenant_id = ? AND key = ? AND expires_at < ?",
+                (tenant_id, key, now_iso),
+            )
+            row = con.execute(
+                "SELECT result_json FROM idempotency_keys "
+                "WHERE tenant_id = ? AND key = ?",
+                (tenant_id, key),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # Task 16 has not landed yet — table missing. Behave as cache-miss.
+            return None
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    @staticmethod
+    def set(con: sqlite3.Connection, tenant_id: int, key: str, result: dict) -> None:
+        try:
+            now = datetime.now(timezone.utc)
+            expires = (now + _IDEMPOTENCY_TTL).isoformat()
+            con.execute(
+                "INSERT OR REPLACE INTO idempotency_keys "
+                "(tenant_id, key, result_json, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (tenant_id, key, json.dumps(result, default=str),
+                 now.isoformat(), expires),
+            )
+        except sqlite3.OperationalError:
+            # Task 16 has not landed yet — table missing. No-op so the
+            # position INSERT still commits.
+            return
+
+
+# ---------------- BirthRegistrar (Op-ligero) ----------------
+
+
+class BirthRegistrar:
+    """Op-ligero owning the atomic write + post-commit for a position birth.
+
+    NOT a symmetric operator to PositionClosure. Validation already happened
+    upstream (Pydantic + _build_open_request). This class owns:
+      1. Idempotency-Key probe (read) + cached replay if hit.
+      2. The transactional INSERT + same-tx cache write (idempotent retry safe).
+      3. Translating sqlite3.IntegrityError on the partial UNIQUE index
+         into typed UniqueViolationError.
+      4. The post-commit update_positions_json (closes F8 — the JSON
+         snapshot regeneration was previously outside any transaction).
+      5. Structured logging at birth (closes F15).
+
+    Per Voronov 2026-05-26: NOT a symmetric operator to PositionClosure.
+    `close()` validates a transition between two known states of the same
+    object; `open()` validates a nomination act. They're cousins, not
+    siblings. BirthRegistrar is an op-ligero — validation already happened
+    upstream; the registrar only owns "registrar el acto, no validarlo".
+    """
+
+    @staticmethod
+    def register(validated: ValidatedOpenRequest) -> dict:
+        # Local imports avoid a circular at module load (api.positions imports
+        # api.positions_birth, and we want update_positions_json from there).
+        from db.positions import db_create_position  # noqa: PLC0415
+        # Step 1: idempotency probe (read-only short-circuit).
+        # Stub today (Task 16 wires real persistence); structurally correct
+        # so the wire-up remains stable when the table lights up.
+        if validated.idempotency_key:
+            with transaction() as con:
+                cached = IdempotencyCache.get(
+                    con, validated.tenant_id, validated.idempotency_key,
+                )
+            if cached is not None:
+                log.info(
+                    "BirthRegistrar: idempotent replay tenant=%s key=%s pos_id=%s",
+                    validated.tenant_id, validated.idempotency_key,
+                    cached.get("id"),
+                )
+                return cached
+
+        # Step 2 + 3: atomic write + cache + translate IntegrityError.
+        body_for_db = validated.payload.model_dump(mode="json")
+        try:
+            with transaction() as con:
+                pos = db_create_position(
+                    con, body_for_db, tenant_id=validated.tenant_id,
+                )
+                if validated.idempotency_key:
+                    IdempotencyCache.set(
+                        con, validated.tenant_id, validated.idempotency_key, pos,
+                    )
+        except sqlite3.IntegrityError as e:
+            msg = str(e).lower()
+            if "unique" in msg and (
+                "idx_positions_open_scan_unique" in msg or "scan_id" in msg
+            ):
+                raise UniqueViolationError(
+                    "An open position already exists for this scan_id",
+                    detail={
+                        "tenant_id": validated.tenant_id,
+                        "scan_id": validated.payload.scan_id,
+                    },
+                ) from e
+            raise
+
+        # Step 4: post-commit. F8 — update_positions_json was previously
+        # outside any transaction; BirthRegistrar being the single owner of
+        # the INSERT-then-JSON sequence is the planner's compromise (the
+        # JSON file-write cannot fold into the SQL tx; the structured log
+        # below surfaces both events for op visibility).
+        # Import via api.positions module to honor the test seam that lets
+        # the JSON write be monkeypatched at the api.positions namespace.
+        from api import positions as _api_positions  # noqa: PLC0415
+        _api_positions.update_positions_json()
+
+        # Step 5: F15 structured log at birth.
+        log.info(
+            "POSICION OPENED #%s %s @ $%s by tenant=%s",
+            pos["id"],
+            validated.payload.symbol,
+            validated.payload.entry_price,
+            validated.tenant_id,
+        )
+        return pos
