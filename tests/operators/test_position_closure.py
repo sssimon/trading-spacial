@@ -655,3 +655,145 @@ def test_reentering_without_execute_still_blocks_second_enter(
     with pytest.raises(RuntimeError, match=r"single-use"):
         with closure:
             closure.execute()
+
+
+# ---- Invariant 12: drift check survives float byte-identity loss (#475) ----
+
+def test_close_survives_float_drift_in_entry_price(fresh_db_with_two_tenants):
+    """A future migration that touches entry_price via arithmetic may lose
+    byte-identity without changing the mathematical value (e.g.,
+    `entry_price = qty * (entry_price / qty)` round-trips through float
+    arithmetic and lands on a near-equal but bit-different value). The drift
+    check must tolerate that via math.isclose so legitimate closes succeed.
+
+    Pre-fix (PR #486 era): exact equality (`==`) rejected ANY bit-level
+    difference, collapsing to not_found even for mathematically identical
+    values. Post-fix: math.isclose with rel_tol=1e-9 / abs_tol=1e-9 tolerates
+    the kind of drift any real-world migration arithmetic could introduce.
+
+    Closes #475 (Serrano F5 [HIGH, STATE/OPS])."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads entry_price=100.0 (per fixture)
+
+    # 1e-12 is ~70 ulp at magnitude 100.0 — clearly distinct as a float, well
+    # within math.isclose(rel_tol=1e-9, abs_tol=1e-9) tolerance (max diff ~1e-7).
+    near_100 = 100.0 + 1e-12
+    assert near_100 != 100.0, "test setup: value must be byte-distinct"
+    with transaction() as con:
+        con.execute("UPDATE positions SET entry_price = ? WHERE id = 1", (near_100,))
+
+    outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    # Pre-fix: outcome.status == "not_found" (the bug this issue fixes).
+    # Post-fix: math.isclose tolerates the 1e-12 drift; close succeeds.
+    assert outcome.status == "closed"
+
+
+def test_close_survives_float_drift_in_qty(fresh_db_with_two_tenants):
+    """Same as test_close_survives_float_drift_in_entry_price, but for qty.
+    Closes #475 (qty is the other REAL field subject to migration arithmetic)."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads qty=1.0 (per fixture)
+
+    near_1 = 1.0 + 1e-12
+    assert near_1 != 1.0, "test setup: value must be byte-distinct"
+    with transaction() as con:
+        con.execute("UPDATE positions SET qty = ? WHERE id = 1", (near_1,))
+
+    outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    assert outcome.status == "closed"
+
+
+# ---- Invariant 13: non-tenant drift emits a structured integrity log (#478) ----
+
+def test_non_tenant_drift_emits_integrity_log(fresh_db_with_two_tenants, caplog):
+    """When the drift check fires for a NON-tenant_id field (entry_price, qty,
+    direction, or symbol), the operator must emit a structured log.error
+    naming the field + precheck value + write_tx value. This makes data-
+    integrity events distinguishable from IDOR collapses in operator metrics.
+
+    The user-visible CloseOutcome shape remains IDOR-safe (status=not_found,
+    no payload) — internal distinguishability is via the log channel only.
+
+    Closes #478 (Serrano F11 [MEDIUM, STATE])."""
+    import logging
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads entry_price=100.0
+
+    # Clearly-detectable drift (not float noise — well outside isclose tolerance).
+    with transaction() as con:
+        con.execute("UPDATE positions SET entry_price = 999.99 WHERE id = 1")
+
+    with caplog.at_level(logging.ERROR, logger="operators.position_closure"):
+        outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    # User-visible: IDOR-safe shape (status=not_found, no payload).
+    assert outcome.status == "not_found"
+    assert outcome.position is None
+
+    # Internally: integrity event surfaced in the log channel.
+    integrity_logs = [r for r in caplog.records if "integrity event" in r.getMessage().lower()]
+    assert len(integrity_logs) >= 1, (
+        f"expected at least one integrity-event log, got records: {[r.getMessage() for r in caplog.records]}"
+    )
+    log_msg = integrity_logs[0].getMessage()
+    assert "entry_price" in log_msg, f"log must name the drifted field; got: {log_msg!r}"
+    assert "100.0" in log_msg, f"log must contain precheck value 100.0; got: {log_msg!r}"
+    assert "999.99" in log_msg, f"log must contain write_tx value 999.99; got: {log_msg!r}"
+
+
+def test_tenant_drift_does_NOT_emit_integrity_log(fresh_db_with_two_tenants, caplog):
+    """tenant_id drift remains IDOR-safe AND silent: collapsing to not_found
+    is intentional (USER mode must not leak 'position exists, you don't own
+    it' vs 'position doesn't exist'), and a log emission would itself leak
+    the existence of the row to anyone reading operator logs.
+
+    No integrity log fires on tenant_id-only drift. Non-tenant drift in the
+    same drift event WOULD log (covered by sibling test).
+
+    Closes #478 (IDOR safety preserved)."""
+    import logging
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads tenant_id=1
+
+    # Re-assign the row to a different tenant (simulates concurrent admin op).
+    with transaction() as con:
+        con.execute("UPDATE positions SET tenant_id = 2 WHERE id = 1")
+
+    with caplog.at_level(logging.ERROR, logger="operators.position_closure"):
+        outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    # User-visible: IDOR-safe collapse.
+    assert outcome.status == "not_found"
+
+    # Internally: NO integrity log — tenant_id is the IDOR-safe case.
+    integrity_logs = [r for r in caplog.records if "integrity event" in r.getMessage().lower()]
+    assert len(integrity_logs) == 0, (
+        f"tenant_id drift must not emit integrity log (IDOR safety); got: "
+        f"{[r.getMessage() for r in integrity_logs]}"
+    )

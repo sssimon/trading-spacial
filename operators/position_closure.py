@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+import math
 from typing import Literal, Optional
 
 from db import transaction as _tx_module  # imported as module so tests can
@@ -251,16 +252,40 @@ class PositionClosure:
                     pnl_usd=None, pnl_pct=None,
                 )
 
-            # Re-validate ALL other mutable fields (#469 + F6).
-            # tenant_id re-validation is the #461 closure (tenant reassigned between
-            # precheck and write-tx → IDOR-safe collapse to NOT_FOUND).
-            # entry_price/qty/direction/symbol drift means the snapshot is stale;
-            # collapse to NOT_FOUND for the same IDOR-safe shape as ownership mismatch.
-            if (row["tenant_id"] != snap.tenant_id
-                or row["entry_price"] != snap.entry_price
-                or row["qty"] != snap.qty
-                or row["direction"] != snap.direction
-                or row["symbol"] != snap.symbol):
+            # Re-validate ALL other mutable fields per-field (#469 + F6).
+            # tenant_id is the #461 IDOR-safe path: silent collapse, NO log
+            # (a log line would itself leak the row's existence to USER mode).
+            # entry_price/qty/direction/symbol drift = data-integrity event
+            # (#478): same IDOR-safe user response, but surfaced in operator
+            # logs so the event is distinguishable from a pure tenant collapse.
+            #
+            # entry_price/qty use math.isclose (#475): a future migration that
+            # touches these REAL columns via arithmetic may lose byte-identity
+            # without changing the mathematical value. Exact equality would
+            # false-positive into not_found.
+            drift_fields: list[tuple[str, object, object]] = []
+            if row["tenant_id"] != snap.tenant_id:
+                drift_fields.append(("tenant_id", snap.tenant_id, row["tenant_id"]))
+            if not math.isclose(row["entry_price"], snap.entry_price, rel_tol=1e-9, abs_tol=1e-9):
+                drift_fields.append(("entry_price", snap.entry_price, row["entry_price"]))
+            if not math.isclose(row["qty"], snap.qty, rel_tol=1e-9, abs_tol=1e-9):
+                drift_fields.append(("qty", snap.qty, row["qty"]))
+            if row["direction"] != snap.direction:
+                drift_fields.append(("direction", snap.direction, row["direction"]))
+            if row["symbol"] != snap.symbol:
+                drift_fields.append(("symbol", snap.symbol, row["symbol"]))
+
+            if drift_fields:
+                # Non-tenant drift is a data-integrity event — log per field.
+                # tenant_id alone stays silent (IDOR safety: #461).
+                for field, precheck_val, write_tx_val in drift_fields:
+                    if field == "tenant_id":
+                        continue
+                    log.error(
+                        "integrity event: snapshot field drift for pos_id=%s "
+                        "field=%s precheck=%r write_tx=%r",
+                        self._pos_id, field, precheck_val, write_tx_val,
+                    )
                 return CloseOutcome(status="not_found", position=None, pnl_usd=None, pnl_pct=None)
 
             # All snapshot fields confirmed. Snapshot is trusted; proceed.
