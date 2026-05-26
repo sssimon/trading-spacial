@@ -20,7 +20,7 @@ last_updated: 2026-05-26
 
 This file is the rule that bounds when admin-merge is acceptable in this repo. It exists because CI signals are convención for trust — *"a green CI signal is a fixed semantic commitment: this code reached a state that all required checks accepted"* (Voronov 2026-05-26). Every admin merge through a known-failing check converts that signal from a commitment into a heuristic; without a written rule, the practice expands to fit available pressure.
 
-This file is rung **convención** by definition — it is enforced by reviewer attention. Promoting it to rung **test** (CI parser that audits PR descriptions / mex log entries) is sub-task B of #488; the rule must be written before the parser can check it.
+This file is rung **convención** by definition — it is enforced by reviewer attention. Promoting it to rung **test** (CI parser that audits PR descriptions / mex log entries) is sub-task B of #488 (Phase 2 tracked in #514); the rule must be written before the parser can check it.
 
 ## The rule
 
@@ -77,7 +77,7 @@ The counter is arithmetic, not virtue. The decision is the *number*, not the rev
 
 **Why the counter is the right rung:** Voronov's reframe — *"this is the only rung that does not erode, because it is not a virtue."* A virtue-rung (the 3-step check) gets stretched by sufficiently-clean diffs justifying yet another bypass. A counter-rung does not stretch — it counts.
 
-**Promotion to rung test (Phase 2 of sub-task B):** the CI parser proposed for sub-task B is the natural place to enforce this counter automatically. Until that lands, the counter is rung convención + reviewer arithmetic. The arithmetic is at least audit-able (mex log entries are timestamped and grep-able).
+**Promotion to rung test (Phase 2 of sub-task B — tracked in #514):** the CI parser proposed for sub-task B is the natural place to enforce this counter automatically. Until that lands, the counter is rung convención + reviewer arithmetic. The arithmetic is at least audit-able (mex log entries are timestamped and grep-able).
 
 ## Orthogonal-flake list
 
@@ -201,4 +201,4 @@ This file is rung convención. The structural promotion to rung test (sub-task B
 4. Asserts each failure matches an entry in the orthogonal-flake list (by test name pattern).
 5. Fails the merge action if even one failure is not matched.
 
-Implementation is its own work; tracked under #488 sub-task B. Until then, this file's rule is enforced by reviewer discipline.
+Implementation is its own work; tracked in **#514** (#488 sub-task B Phase 2). Until then, this file's rule is enforced by reviewer discipline.

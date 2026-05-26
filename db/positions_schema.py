@@ -26,7 +26,7 @@ the drift before it lands on `upstream/main`.
 Phase 1 (this commit): declaration + test. The migrations still own the
 schema by construction; this file is the verifier.
 
-Phase 2 (deferred, separate WORK — not a PR, a project):
+Phase 2 (deferred, separate WORK — not a PR, a project — tracked in #513):
     The declaration in this file is **observational, not constructive**.
     It is a witness to the schema encoded in the vocabulary of the
     verifier — PRAGMA table_info shape, sqlite_master.sql substring

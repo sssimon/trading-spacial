@@ -30,7 +30,7 @@ Without a canonical taxonomy, three drift surfaces open:
 2. **Verb conflicts on the same issue.** `Closes #N` and `Advances #N` in the same body. Ambiguous; one of them is wrong.
 3. **Unauthorized verbs.** Someone introduces `Resolves #N` or `Handles #N` — non-canonical, future readers don't know what semantics were intended.
 
-This file is the canonical taxonomy that resolves the three. Rung convención (Phase 1). Promotion to rung test is sub-task C Phase 2 — a GitHub Action that runs the parser on PR open/edit.
+This file is the canonical taxonomy that resolves the three. Rung convención (Phase 1). Promotion to rung test is sub-task C Phase 2 — a GitHub Action that runs the parser on PR open/edit. **Tracked in #515.**
 
 ## The verbs
 
@@ -117,7 +117,7 @@ The parser library is in place (Phase 1). The next step is a GitHub Action `.git
 3. Posts a comment on the PR with the parsed taxonomy (so the author sees what GitHub will do on merge).
 4. Fails the check if conflicts or non-canonical verbs are found.
 
-Implementation is its own work; tracked under #488 sub-task C Phase 2. Until then, the parser exists as a pytest helper that can be invoked manually.
+Implementation is its own work; tracked in **#515** (#488 sub-task C Phase 2). Until then, the parser exists as a pytest helper that can be invoked manually.
 
 ## Related
 
