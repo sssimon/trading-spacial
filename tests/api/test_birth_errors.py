@@ -134,10 +134,13 @@ def test_route_does_not_collapse_server_exceptions_to_500_str(client, monkeypatc
 
     monkeypatch.setattr(_pos, "db_create_position", _exploding)
 
-    # TestClient propagates unhandled exceptions by default; switch to
-    # raise_server_exceptions=False so we observe the 500 response shape.
-    client._transport.raise_app_exceptions = False
-    resp = client.post("/positions", json={
+    # TestClient propagates unhandled exceptions by default. Reach into the
+    # underlying httpx transport to disable that so we observe the 500
+    # response shape FastAPI generates from its default exception handler
+    # (which must NOT leak str(e)).
+    from starlette.testclient import TestClient as _StarletteTC  # noqa: PLC0415
+    fresh = _StarletteTC(client.app, raise_server_exceptions=False)
+    resp = fresh.post("/positions", json={
         "symbol": "BTCUSDT", "entry_price": 100.0, "direction": "LONG", "qty": 10.0,
     })
     assert resp.status_code == 500
