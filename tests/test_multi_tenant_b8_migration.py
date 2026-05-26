@@ -58,13 +58,13 @@ def seeded_db(tmp_path, monkeypatch):
         # Pre-multi-tenant rows: tenant_id NULL across each per-user table
         con.execute(
             "INSERT INTO positions (symbol, direction, status, entry_price, "
-            "entry_ts) VALUES ('BTCUSDT', 'LONG', 'closed', 65000, "
-            "'2026-04-01T00:00:00')"
+            "entry_ts, qty) VALUES ('BTCUSDT', 'LONG', 'closed', 65000, "
+            "'2026-04-01T00:00:00', 1.0)"
         )
         con.execute(
             "INSERT INTO positions (symbol, direction, status, entry_price, "
-            "entry_ts) VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
-            "'2026-04-02T00:00:00')"
+            "entry_ts, qty) VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
+            "'2026-04-02T00:00:00', 1.0)"
         )
         con.execute(
             "INSERT INTO signal_outcomes (scan_id, symbol, signal_ts, "

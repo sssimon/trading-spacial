@@ -54,7 +54,7 @@ def _validated_time_limit_hours(value, symbol: str) -> float | None:
 def _write_position_event_log(pos: dict, reason: str, exit_price: float):
     try:
         _ensure_dirs()
-        qty = pos.get("qty") or 0
+        qty = pos["qty"]
         pnl_usd, pnl_pct = _calc_pnl(pos["direction"], pos["entry_price"], exit_price, qty)
         emoji = _EVENT_LOG_LABELS.get(reason, "STOP LOSS")
         ts_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

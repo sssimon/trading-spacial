@@ -244,8 +244,8 @@ def _seed_position(con, *, tenant_id: int, status: str = "open", id: int | None 
     # outer CM tried to COMMIT.
     cur = con.execute(
         "INSERT INTO positions "
-        "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
-        "VALUES ('BTCUSDT', 'LONG', ?, 50000, '2026-04-20T10:00:00+00:00', 1000, ?)",
+        "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, tenant_id) "
+        "VALUES ('BTCUSDT', 'LONG', ?, 50000, '2026-04-20T10:00:00+00:00', 1000, 0.02, ?)",
         (status, tenant_id),
     )
     return cur.lastrowid

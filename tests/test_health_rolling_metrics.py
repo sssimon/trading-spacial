@@ -24,9 +24,9 @@ def _insert_closed_position(conn, symbol, pnl_usd, exit_ts):
     """
     conn.execute(
         """INSERT INTO positions
-           (symbol, direction, status, entry_price, entry_ts,
+           (symbol, direction, status, entry_price, entry_ts, qty,
             exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 1.0, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl_usd, pnl_usd / 100.0),
     )
 
@@ -52,8 +52,8 @@ def test_open_positions_are_excluded(tmp_db):
     with transaction() as conn:
         conn.execute(
             """INSERT INTO positions
-               (symbol, direction, status, entry_price, entry_ts, pnl_usd, pnl_pct, tenant_id)
-               VALUES ('BTCUSDT', 'LONG', 'open', 100.0, ?, NULL, NULL, 1)""",
+               (symbol, direction, status, entry_price, entry_ts, qty, pnl_usd, pnl_pct, tenant_id)
+               VALUES ('BTCUSDT', 'LONG', 'open', 100.0, ?, 1.0, NULL, NULL, 1)""",
             (NOW.isoformat(),),
         )
         metrics = compute_rolling_metrics("BTCUSDT", conn, now=NOW)

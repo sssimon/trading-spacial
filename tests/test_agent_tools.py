@@ -106,9 +106,9 @@ def _seed_two_tenant_positions(con):
         ):
             con.execute(
                 "INSERT INTO positions "
-                "(symbol, direction, status, entry_price, entry_ts, size_usd, "
+                "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, "
                 " exit_price, exit_ts, pnl_usd, tenant_id) "
-                "VALUES ('BTCUSDT', ?, ?, ?, '2026-05-15T10:00:00+00:00', 1000, "
+                "VALUES ('BTCUSDT', ?, ?, ?, '2026-05-15T10:00:00+00:00', 1000, 0.02, "
                 " ?, ?, ?, ?)",
                 (direction, status, base_price, exit_price, exit_ts, pnl, tid),
             )
@@ -167,9 +167,9 @@ def test_get_position_detail_returns_not_found_for_other_tenant(tmp_db):
     with transaction() as con:
         cur = con.execute(
             "INSERT INTO positions "
-            "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
+            "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, tenant_id) "
             "VALUES ('BTCUSDT', 'LONG', 'open', 50000, "
-            "'2026-05-15T10:00:00+00:00', 1000, 2)"
+            "'2026-05-15T10:00:00+00:00', 1000, 0.02, 2)"
         )
         other_tenant_pos_id = cur.lastrowid
 
@@ -190,9 +190,9 @@ def test_get_position_detail_returns_row_for_own_tenant(tmp_db):
     with transaction() as con:
         cur = con.execute(
             "INSERT INTO positions "
-            "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
+            "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, tenant_id) "
             "VALUES ('ETHUSDT', 'LONG', 'open', 3000, "
-            "'2026-05-15T10:00:00+00:00', 500, 7)"
+            "'2026-05-15T10:00:00+00:00', 500, 0.166, 7)"
         )
         own_pos_id = cur.lastrowid
 

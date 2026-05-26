@@ -181,9 +181,9 @@ async def test_propose_close_path_uses_id_from_tool_result(tmp_db, monkeypatch):
     with transaction() as con:
         con.execute(
             "INSERT INTO positions "
-            "(symbol, direction, status, entry_price, entry_ts, size_usd, tenant_id) "
+            "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, tenant_id) "
             "VALUES ('ETHUSDT', 'LONG', 'open', 3000, '2026-05-19T10:00:00+00:00', "
-            "        1000, 1)",
+            "        1000, 0.333, 1)",
         )
         pos_id = con.execute("SELECT MAX(id) AS id FROM positions").fetchone()["id"]
 

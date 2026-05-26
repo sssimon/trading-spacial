@@ -27,9 +27,9 @@ def _insert_closed(conn, symbol, pnl, exit_ts):
     # would end the active tx and the outer CM's COMMIT would raise.
     conn.execute(
         """INSERT INTO positions
-           (symbol, direction, status, entry_price, entry_ts,
+           (symbol, direction, status, entry_price, entry_ts, qty,
             exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 1.0, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
 

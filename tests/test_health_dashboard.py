@@ -98,9 +98,9 @@ def tmp_db(tmp_path, monkeypatch):
 def _insert_closed_position(conn, symbol, pnl, exit_ts):
     conn.execute(
         """INSERT INTO positions
-           (symbol, direction, status, entry_price, entry_ts,
+           (symbol, direction, status, entry_price, entry_ts, qty,
             exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', ?, ?, 1)""",
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 1.0, 110.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
 
@@ -322,9 +322,9 @@ def test_get_health_dashboard_seeded_symbol_returns_full_state(client):
         for i in range(5):
             conn.execute(
                 """INSERT INTO positions
-                   (symbol, direction, status, entry_price, entry_ts,
+                   (symbol, direction, status, entry_price, entry_ts, qty,
                     exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 1.0, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (f"2026-04-2{1+i}T12:00:00+00:00", f"2026-04-2{1+i}T13:00:00+00:00"),
             )
         # Seed an event
@@ -433,10 +433,10 @@ def test_get_health_dashboard_no_double_count_on_realized_pnl_history(client):
             reason = "TP" if pnl > 0 else "SL"
             conn.execute(
                 """INSERT INTO positions
-                   (symbol, direction, status, entry_price, entry_ts,
+                   (symbol, direction, status, entry_price, entry_ts, qty,
                     exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct,
                     tenant_id)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, ?, ?, ?, ?, ?, 1)""",
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 1.0, ?, ?, ?, ?, ?, 1)""",
                 (
                     f"2026-04-2{i + 1}T12:00:00+00:00",
                     100.0 + pnl / 10.0,
@@ -487,9 +487,9 @@ def test_get_health_dashboard_isolates_tenants(client):
         # (a) Tenant 2 has a closed losing trade for ETH.
         conn.execute(
             """INSERT INTO positions
-               (symbol, direction, status, entry_price, entry_ts,
+               (symbol, direction, status, entry_price, entry_ts, qty,
                 exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-               VALUES ('ETH', 'LONG', 'closed', 1000.0, '2026-04-20T12:00:00+00:00',
+               VALUES ('ETH', 'LONG', 'closed', 1000.0, '2026-04-20T12:00:00+00:00', 1.0,
                        900.0, '2026-04-20T15:00:00+00:00', 'SL', -1000.0, -0.10, 2)"""
         )
         # (b) Tenant 2 has an OPEN long BTC position with a large unrealized

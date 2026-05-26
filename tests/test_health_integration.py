@@ -21,9 +21,9 @@ def _insert_closed(conn, symbol, pnl, exit_ts):
     # db.transaction's contract and break the outer CM's COMMIT.
     conn.execute(
         """INSERT INTO positions
-           (symbol, direction, status, entry_price, entry_ts,
+           (symbol, direction, status, entry_price, entry_ts, qty,
             exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-           VALUES (?, 'LONG', 'closed', 100.0, ?, 101.0, ?, 'TP', ?, ?, 1)""",
+           VALUES (?, 'LONG', 'closed', 100.0, ?, 1.0, 101.0, ?, 'TP', ?, ?, 1)""",
         (symbol, exit_ts, exit_ts, pnl, pnl / 100.0),
     )
 
@@ -134,9 +134,9 @@ def test_paused_reactivate_to_probation_then_complete_after_n_trades(tmp_db):
             ts = (datetime.now(timezone.utc) - timedelta(days=180 + i)).isoformat()
             conn.execute(
                 """INSERT INTO positions
-                   (symbol, direction, status, entry_price, entry_ts,
+                   (symbol, direction, status, entry_price, entry_ts, qty,
                     exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 95.0, ?, 'SL', -5.0, -0.05, 1)""",
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 1.0, 95.0, ?, 'SL', -5.0, -0.05, 1)""",
                 (ts, ts),
             )
         # Insert PAUSED row for BTC, set 15 days ago
@@ -175,9 +175,9 @@ def test_paused_reactivate_to_probation_then_complete_after_n_trades(tmp_db):
         with transaction() as conn:
             conn.execute(
                 """INSERT INTO positions
-                   (symbol, direction, status, entry_price, entry_ts,
+                   (symbol, direction, status, entry_price, entry_ts, qty,
                     exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
-                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
+                   VALUES ('BTC', 'LONG', 'closed', 100.0, ?, 1.0, 110.0, ?, 'TP', 10.0, 0.10, 1)""",
                 (ts, ts),
             )
         trigger_health_evaluation("BTC", cfg)

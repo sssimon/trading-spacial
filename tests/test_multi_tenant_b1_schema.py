@@ -230,8 +230,8 @@ class TestNullTenantIdAllowed:
         """B.1 explicitly leaves tenant_id nullable; insert NULL is valid."""
         con = sqlite3.connect(initialized_db)
         con.execute(
-            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, tenant_id) "
-            "VALUES (?, ?, ?, ?, ?, NULL)",
+            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, 1.0, NULL)",
             ("BTCUSDT", "LONG", "open", 80000.0, "2026-05-15T12:00:00Z"),
         )
         con.commit()
@@ -256,8 +256,8 @@ class TestBackfillTenant:
         # Insert positions with NULL tenant_id (simulating pre-multi-tenant data)
         for symbol, price in (("BTCUSDT", 80000), ("ETHUSDT", 2300), ("RUNEUSDT", 0.5)):
             con.execute(
-                "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, tenant_id) "
-                "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', NULL)",
+                "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
+                "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
                 (symbol, price),
             )
         con.commit()
@@ -284,8 +284,8 @@ class TestBackfillTenant:
 
         con = sqlite3.connect(initialized_db)
         con.execute(
-            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, tenant_id) "
-            "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', NULL)",
+            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
+            "VALUES (?, 'LONG', 'open', ?, '2026-05-15T12:00:00Z', 1.0, NULL)",
             ("BTCUSDT", 80000),
         )
         con.commit()
@@ -306,12 +306,12 @@ class TestBackfillTenant:
         con = sqlite3.connect(initialized_db)
         # One row with explicit tenant_id, one with NULL
         con.execute(
-            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, tenant_id) "
-            "VALUES ('BTCUSDT', 'LONG', 'open', 80000, '2026-05-15T12:00:00Z', 7)"
+            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
+            "VALUES ('BTCUSDT', 'LONG', 'open', 80000, '2026-05-15T12:00:00Z', 1.0, 7)"
         )
         con.execute(
-            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, tenant_id) "
-            "VALUES ('ETHUSDT', 'LONG', 'open', 2300, '2026-05-15T12:00:00Z', NULL)"
+            "INSERT INTO positions(symbol, direction, status, entry_price, entry_ts, qty, tenant_id) "
+            "VALUES ('ETHUSDT', 'LONG', 'open', 2300, '2026-05-15T12:00:00Z', 1.0, NULL)"
         )
         con.commit()
         con.close()
