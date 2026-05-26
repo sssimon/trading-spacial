@@ -96,9 +96,12 @@ class OwnershipValidatedSnapshot:
     SYSTEM mode: ownership validation does not apply; the snapshot is
     accepted by construction.
 
-    Construction requires the module-private _VALIDATION_SENTINEL. The only
-    legitimate constructor is `_build_validated_snapshot` (called by
-    `operators.position_closure.PositionClosure._run_precheck`).
+    Construction requires the module-private _VALIDATION_SENTINEL. The
+    runtime organ is the sentinel check in `__post_init__` (rung: tipo). The
+    intended constructor is `_build_validated_snapshot`, whose single call
+    site is `operators.position_closure.PositionClosure._run_precheck`; the
+    factory's single-call-site property is convention only (rung: convención
+    — see #477 for the registry-coherence follow-up).
 
     A future write-tx that consumes this type is guaranteed (by construction)
     that ownership was checked at precheck. The write-tx MUST STILL re-validate
@@ -115,16 +118,23 @@ class OwnershipValidatedSnapshot:
         if self._sentinel is not _VALIDATION_SENTINEL:
             raise TypeError(
                 "OwnershipValidatedSnapshot cannot be constructed directly. "
-                "Use the private validation sentinel via "
-                "operators.precheck._build_validated_snapshot (callable only "
-                "from operators.position_closure._run_precheck)."
+                "Use operators.precheck._build_validated_snapshot. "
+                "By convention (not enforced at runtime), the factory's "
+                "single call site is "
+                "operators.position_closure.PositionClosure._run_precheck. "
+                "See #477."
             )
 
 
 def _build_validated_snapshot(snapshot: PositionSnapshot) -> OwnershipValidatedSnapshot:
-    """Internal factory used by PositionClosure._run_precheck.
+    """Module-private factory used by PositionClosure._run_precheck.
 
-    NOT exported from this module's public surface (single underscore).
-    Module-private convention: external code should not call this directly.
+    The single-underscore prefix is convention only; Python does not enforce
+    the module-private boundary at import time. Calling this from any other
+    module will succeed at runtime — the rung is convención, not tipo.
+
+    See #477 for the open registry-coherence follow-up (whether to install a
+    real organ via frame inspection / closure pattern / module relocation, or
+    accept the asymmetry permanently).
     """
     return OwnershipValidatedSnapshot(inner=snapshot, _sentinel=_VALIDATION_SENTINEL)
