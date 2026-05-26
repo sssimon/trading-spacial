@@ -140,15 +140,31 @@ Tres consecuencias para esta codebase:
 2. `NewType` solo cuenta como 'tipo' si el consumer también está anotado y el camino completo es estructuralmente coherente. Una `PrecheckConn` definida y luego pasada a una función con anotación `sqlite3.Connection` regresa a 'convención'.
 3. Cerrar un issue (`#NNN`) contra una eliminación parcial de la patología deja la enfermedad en los sitios no tocados. Closure requiere que el predicado del issue sea verdad en todos los call sites, no sólo los listados en el plan.
 
+### Esquema de filas — una invariante, una fila (sub-task A de #488, decision 2026-05-26)
+
+Cada fila describe **una invariante** con **una closure decision**. Si una clase, función, o componente del sistema enforza múltiples invariantes distintas, **cada una recibe su propia fila**. La fila se refiere al PREDICADO, no al artifact.
+
+Razones (Voronov):
+- La invariante es la unidad de verificación. Predicate-by-predicate rows permiten que un test, schema constraint, o reviewer audit each row independently.
+- Conflated rows ("Tipo + runtime check + convención" para un solo artifact) overdeterminan la columna Capa y impiden audit por rung.
+- La columna "Issue cerrado" no puede mentir si una fila = una invariante = una closure decision.
+- Voronov sobre PR #496: *"the registry should record three rows, not one. Each row carries its own predicate."*
+
+Patrón anti-fila: agrupar predicados distintos bajo el mismo artifact porque "comparten código." Cuando notes que la columna Mecanismo creció a un párrafo, eso significa que la fila está conflated y necesita split.
+
 ### Invariantes registradas — estado tras Cluster D (post-#471 #470 #473, post-convergencia Serrano/Aurelius)
 
 > Esta tabla **reemplaza** la antigua tabla C2 (que listaba sólo #467/#468/#469). Las tres filas C2 están retenidas aquí; añade las siete filas de Cluster D. Una sola tabla de verdad — la duplicación adjacente previa era deuda doc nombrada por Serrano MEDIUM 10.
+
+> **Nota:** la fila previamente conflated para #469+F6 ("OwnershipValidatedSnapshot") fue split en 3 filas separadas (2026-05-26, sub-task A de #488) — una por predicado. Las 3 filas comparten el mismo artifact pero describen invariantes distintas.
 
 | Invariante de dominio | Capa enforced | Mecanismo | Issue cerrado |
 |---|---|---|---|
 | `qty` siempre tiene valor numérico para positions activas (o `status='legacy_unmeasurable'`) | **Schema** | `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')` en `positions` (vía `_migrate_qty_not_null`) | #467 |
 | `precheck_connection` y `snapshot_connection` son contratos distintos | **Tipo** | `NewType("PrecheckConn", sqlite3.Connection)` y `NewType("SnapshotConn", sqlite3.Connection)` en `db/transaction.py` — mypy detecta mis-uso | #468 |
-| Los campos del snapshot consumidos por el write-tx no cambian entre precheck y BEGIN IMMEDIATE | **Tipo + runtime check + convención** | `OwnershipValidatedSnapshot.__post_init__` sentinel check (rung tipo — sentinel `is _VALIDATION_SENTINEL`) + field-by-field re-validation en `PositionClosure.execute()` (rung runtime check). La construcción está bounded por **dos superficies de convención** que comparten una invariante: el factory `_build_validated_snapshot` mantiene single-call-site por convención (single-underscore), y el sentinel `_VALIDATION_SENTINEL` es importable directamente (`from operators.precheck import _VALIDATION_SENTINEL`). Ambas surfaces componen el rung convención — #477 (widened post-Voronov 2026-05-26) tracks la decisión única: instalar organ que cierre ambas surfaces (closure pattern / name-mangling / frame inspection) o aceptar permanentemente. PR #486 aplica Path 3 (honest narrowing) en docstrings + error message; el organ structural sigue abierto. Test rung: `test_error_message_does_not_overclaim_enforcement` ancla la doc-honesty contract. | #469 + F6 (#481 closed by PR #486; #477 advanced — wider invariant captures both surfaces; meta-arch next-moves tracked in #488) |
+| Los campos mutables del snapshot consumidos por el write-tx no cambiaron entre precheck y BEGIN IMMEDIATE | **Tipo + runtime check** | (1) `OwnershipValidatedSnapshot.__post_init__` rechaza construcción sin `_sentinel is _VALIDATION_SENTINEL` (rung tipo); (2) field-by-field re-validation en `PositionClosure.execute()` antes de mutar (rung runtime check). Los rungs compose para un solo predicado: si el snapshot llega a execute(), pasó por la ownership-validating factory Y los fields aún coinciden con la DB. | #469 + F6 |
+| `OwnershipValidatedSnapshot` se construye sólo via el factory de precheck (sin que otro caller importe el sentinel y construya directamente) | **Convención** (dos surfaces) | (a) `_build_validated_snapshot` por single-underscore convention; (b) `_VALIDATION_SENTINEL` es importable directamente (`from operators.precheck import _VALIDATION_SENTINEL`) y no hay órgano estructural que lo prevenga. Ambas surfaces componen el rung convención. PR #486 aplicó Path 3 (honest narrowing) en docstrings + error message; el organ estructural (closure pattern / name-mangling / frame inspection) sigue pendiente. | #477 (advanced, not closed — structural-organ decision pending; #487 closed as dup) |
+| El mensaje de error de `OwnershipValidatedSnapshot.__post_init__` describe sólo lo que enforza, no lo que aspira a enforzar | **Test** | `test_error_message_does_not_overclaim_enforcement` en `tests/operators/test_ownership_validated_snapshot.py` — anchored sobre las tres claims: (1) reference al factory, (2) ausencia de "callable only", (3) acknowledgement explícito del rung convención. | #481 closed by PR #486 |
 | `qty > 0` para positions activas (cierra el 0.0-bypass) | **Schema** | `CHECK ((qty IS NOT NULL AND qty > 0) OR status='legacy_unmeasurable')` (via `_migrate_qty_positive`) | #471 |
 | `tenant_id IS NOT NULL` para positions activas | **Schema** | `CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable','legacy_no_tenant'))` (via `_migrate_tenant_id_not_null`) | #471 |
 | `tenant_id: int > 0` en la frontera de entrada (anotación + rechazo runtime) | **Tipo + runtime órgano de rechazo** | `_build_open_request` rechaza `tenant_id` no-int, ≤ 0, bool, o None con `BodyValidationError` (regla de coherencia post-Serrano) | #471 F6 |
