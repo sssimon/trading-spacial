@@ -25,7 +25,7 @@ from typing import Literal, Optional
 
 from db import transaction as _tx_module  # imported as module so tests can
                                             # patch `transaction` on it
-from db.transaction import precheck_connection
+from db.transaction import PrecheckConn, precheck_connection
 from db.positions import db_get_position_by_id, db_close_position_sql, _calc_pnl
 from operators.precheck import (
     PositionSnapshot,
@@ -102,17 +102,24 @@ class PositionClosure:
     def __enter__(self) -> "PositionClosure":
         if self._consumed:
             raise RuntimeError("PositionClosure is single-use; construct a new one")
-        self._precheck_result = self._run_precheck()
+        with precheck_connection() as precheck_con:
+            self._precheck_result = self._run_precheck(precheck_con)
         return self
 
-    def _run_precheck(self) -> PrecheckResult:
+    def _run_precheck(self, precheck_con: PrecheckConn) -> PrecheckResult:
         """Read outside any transaction; return one of the 3 PrecheckResult variants.
 
         Implements ownership-before-lock (USER mode): a row whose tenant_id does
         not match caller_tenant_id collapses to PrecheckNotFound (IDOR-safe).
+
+        Signature consumes PrecheckConn (NewType from db.transaction) to declare
+        the KIND of connection this operator expects — Voronov-coherent: the
+        operator names its consumed contract, not just the helpers. Helper
+        signatures (db_get_position_by_id et al.) are intentionally not updated;
+        they accept either NewType via Python's structural subtyping of
+        sqlite3.Connection.
         """
-        with precheck_connection() as con:
-            row = db_get_position_by_id(con, self._pos_id)
+        row = db_get_position_by_id(precheck_con, self._pos_id)
 
         if row is None:
             return PrecheckNotFound()
