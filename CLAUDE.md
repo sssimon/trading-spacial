@@ -330,9 +330,18 @@ Cuatro capas posibles, de más fuerte a más débil:
 | Capa | Cómo enforza | Quién detecta violación |
 |---|---|---|
 | **Schema** | DDL constraint (CHECK, NOT NULL, FK, UNIQUE) | El motor SQLite, en write |
-| **Tipo** | Python typing (NewType, frozen dataclass, factory privada) | mypy en CI / `__post_init__` en runtime |
+| **Tipo** | Anotación + **órgano de rechazo en runtime** (`__post_init__` con `isinstance`, factory privada con sentinel, NewType propagado al consumer). En un lenguaje sin type-checker en CI, la anotación sola es convención disfrazada de sintaxis. La rung 'tipo' sólo es real cuando el constructor o el factory rechaza la entrada equivocada con `TypeError`. | mypy estricto en CI **o** runtime check explícito (`__post_init__` / factory sentinel) |
 | **Test** | Invariant test que falla si la violación ocurre | pytest en CI |
 | **Convención** | Comentario en código / sección de CLAUDE.md / revisión humana | Revisor (si recuerda mirar) |
+
+### Regla de coherencia (Voronov post-Serrano 2026-05-26)
+
+> "La fuerza de una garantía está acotada por encima por el órgano más débil que puede rechazarla en la frontera que la garantía dice proteger."
+
+Tres consecuencias para esta codebase:
+1. Las anotaciones forward-ref en dataclasses no son enforcement. Si una clase declara un field con un tipo específico, debe tener `__post_init__` que rechace lo contrario, o el field debe construirse vía factory privada con sentinel. Sin órgano de rechazo, la anotación pertenece a la rung 'convención', no a 'tipo'.
+2. `NewType` solo cuenta como 'tipo' si el consumer también está anotado y el camino completo es estructuralmente coherente. Una `PrecheckConn` definida y luego pasada a una función con anotación `sqlite3.Connection` regresa a 'convención'.
+3. Cerrar un issue (`#NNN`) contra una eliminación parcial de la patología deja la enfermedad en los sitios no tocados. Closure requiere que el predicado del issue sea verdad en todos los call sites, no sólo los listados en el plan.
 
 ### Invariantes C2 — estado tras este PR
 
