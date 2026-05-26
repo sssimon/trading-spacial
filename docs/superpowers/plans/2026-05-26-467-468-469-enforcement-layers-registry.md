@@ -10,6 +10,43 @@
 
 ---
 
+## AMENDMENT 2026-05-26 (post-Task-1 measurement + Voronov reframe)
+
+Task 1 medición reveló que la premisa del Path D original (backfill `qty = size_usd / entry_price`) **NO es ejecutable en producción**:
+
+- 2018 total positions; 670 con `qty IS NULL` (33%)
+- **ZERO backfillable** desde `size_usd/entry_price` (la inmensa mayoría tampoco tiene `size_usd`)
+- 668 son closed (arqueología del bug histórico, ya cerradas con `pnl_usd=0`)
+- 2 son open con `entry_ts=2026-06-15` futuro, `tenant_id=NULL` — debris (test fixtures leaked to prod DB)
+
+Voronov reframe completo:
+
+> La medición no eligió la política. Reveló que la política propuesta describía un mundo que no existe.
+>
+> Tu plan asumió **deuda de cierre** (size_usd existió, qty derivable). La medición dice **deuda de nacimiento** (size_usd nunca prometida).
+>
+> **`UPDATE qty=0` es mentira tipográfica**: cero y desconocido no son sinónimos. **`status='legacy_unmeasurable'` convierte 668 mentiras silenciosas en 668 reconocimientos explícitos.**
+
+### Finding meta (precede Task 4)
+
+> **El sistema tiene un `close()` que asume invariantes que `open()` nunca prometió.** `qty NULL` no es el problema. Es el síntoma. La membrana de cierre asume un contrato que la membrana de apertura nunca firmó. Mientras esa asimetría exista, Task 4 es cosmética: estás poniendo CHECK CONSTRAINT en una salida cuya entrada no garantiza nada.
+
+### Tasks amended
+
+- **Task 2 (registry):** ADD a "Finding meta — asimetría contractual create vs close" sub-section documenting the meta finding. ADD `legacy_unmeasurable` as a documented status that the schema CHECK exempts.
+- **Task 3 (TDD tests):** REWRITE — no más `test_migration_aborts_if_any_row_unbackfillable`. Add `test_unbackfillable_rows_get_legacy_unmeasurable_status` + `test_check_constraint_exempts_legacy_unmeasurable`.
+- **Task 4 (impl):** REWRITE policy. Backfill what computable; UPDATE remaining NULL rows to `status='legacy_unmeasurable'` (keep qty NULL — admitir ausencia, no inventar valor); CHECK constraint: `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')`. **Fija, sin flags.**
+- **NEW Task 13.5 (before push):** Open 2 new issues — (a) test/prod permeability (debris in production DB), (b) `create_position` vs `close_position` contract asymmetry.
+- **Task 14 PR description:** Reference both the original reframe (Cluster C2 meta) AND this amendment.
+
+### Voronov's sharpened principle (replace plan's original)
+
+> "No requiere medir para decidir si comprometerse. Requiere medir para saber a qué comprometerse."
+
+The commitment stands. The shape of the commitment changed.
+
+---
+
 ## Context (read before starting)
 
 PR #466 separated semantic from mechanical invariants of `read_only_connection`. C2 is the bill for that separation — it surfaces what the semantic layer asserts that the mechanical layer never promised. Voronov:
