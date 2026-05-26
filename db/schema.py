@@ -31,6 +31,7 @@ Per pre-reg `docs/superpowers/plans/2026-05-15-multi-tenant-b1-schema-pre-reg.md
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from db.connection import _open_configured_connection, _resolve_db_file
 from db.transaction import transaction
@@ -763,14 +764,22 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
     Idempotent: detects existing CHECK constraint and skips.
     """
     # Idempotency check: SQLite stores CREATE TABLE in sqlite_master.
+    # Anchor on the specific CHECK constraint DDL fragment, not the bare
+    # string "legacy_unmeasurable" — the latter false-positives on column
+    # defaults, comments, or unrelated CHECK constraints that mention the
+    # status value. Whitespace-normalized + case-folded to tolerate the
+    # variations SQLite uses when echoing back CREATE TABLE in sqlite_master.
+    # See #476 (Serrano F4 [HIGH, OPS/AMB]) for the failure mode.
     schema_row = con.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
     ).fetchone()
-    if schema_row and schema_row[0] and "legacy_unmeasurable" in schema_row[0]:
-        log.info(
-            "_migrate_qty_not_null: positions table already has the quarantine CHECK; skipping."
-        )
-        return
+    if schema_row and schema_row[0]:
+        normalized = "".join(schema_row[0].split()).lower()
+        if "check(qtyisnotnullorstatus='legacy_unmeasurable')" in normalized:
+            log.info(
+                "_migrate_qty_not_null: positions table already has the quarantine CHECK; skipping."
+            )
+            return
 
     # Column-aware migration: an old/stub positions table may not yet have
     # size_usd or qty columns (the earlier _migrate_* helpers are tolerant
@@ -817,6 +826,39 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         # No qty column at all — after recreation every existing row will land
         # with qty=NULL in the new schema, so all of them must be quarantined
         # up-front or the CHECK constraint would reject the INSERT.
+        #
+        # SAFETY GUARD (#474, Serrano F3 [HIGH, SEC/GAP]): bulk quarantine of
+        # active rows is dangerous in production. A DB rebuilt from a stale
+        # backup (or any artifact where qty was never added) would have every
+        # position flipped to 'legacy_unmeasurable' silently — kill-switch and
+        # notional code paths then skip these rows with a log.warning and the
+        # trading state is invisibly disabled. Refuse the destructive UPDATE
+        # unless the operator explicitly opts in via env flag.
+        status_counts = con.execute(
+            """SELECT status, COUNT(*) FROM positions
+               WHERE status != 'legacy_unmeasurable'
+               GROUP BY status"""
+        ).fetchall()
+        total_to_quarantine = sum(count for _, count in status_counts)
+        if total_to_quarantine > 0:
+            counts_repr = ", ".join(
+                f"{count} {status!r}" for status, count in status_counts
+            )
+            if os.environ.get("MIGRATE_QTY_ALLOW_BULK_QUARANTINE") != "1":
+                raise RuntimeError(
+                    f"_migrate_qty_not_null: refusing to bulk-quarantine "
+                    f"{total_to_quarantine} rows ({counts_repr}) in the "
+                    f"no-qty-column branch. Set "
+                    f"MIGRATE_QTY_ALLOW_BULK_QUARANTINE=1 to override "
+                    f"(operator acknowledges that the rows present in this "
+                    f"DB predate the qty column and should be marked "
+                    f"'legacy_unmeasurable'). See #474."
+                )
+            log.warning(
+                "_migrate_qty_not_null: bulk-quarantining %d rows under "
+                "MIGRATE_QTY_ALLOW_BULK_QUARANTINE opt-in: %s",
+                total_to_quarantine, counts_repr,
+            )
         con.execute(
             """UPDATE positions
                SET status = 'legacy_unmeasurable'
@@ -837,6 +879,14 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         "_migrate_qty_not_null: recreating positions table with CHECK constraint "
         "(qty IS NOT NULL OR status = 'legacy_unmeasurable')."
     )
+    # Defensive cleanup of any orphan positions_new from a prior interrupted
+    # run (#480, Serrano F12 [MEDIUM, OPS]): the idempotency probe at the top
+    # of this function checks for the CHECK constraint on `positions`, NOT for
+    # positions_new existence. If a previous run died between CREATE TABLE
+    # positions_new and ALTER TABLE positions_new RENAME (SIGKILL, OOM, disk
+    # full mid-commit), the next migration would abort on 'table
+    # positions_new already exists'. This DROP IF EXISTS recovers the path.
+    con.execute("DROP TABLE IF EXISTS positions_new")
     con.execute(
         """
         CREATE TABLE positions_new (
