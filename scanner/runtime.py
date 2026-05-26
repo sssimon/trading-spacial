@@ -63,6 +63,26 @@ _scanner_state: dict = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  THREAD-OWNERSHIP CONTROL (#495 root cause fix — closes the lifespan
+#  teardown race that #508's busy_timeout only masked)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Daemon=True is NOT ownership; it only means "do not block process exit."
+# Across test runs in the same Python process (pytest's TestClient pattern),
+# daemon threads from the previous lifespan stayed alive contending for the
+# new test's fresh DB. The two background threads (health_monitor_loop and
+# kill_switch_calibrator_loop) already accepted a `stop_event` parameter
+# but `start_scanner_thread` never created one — they each constructed a
+# default Event nobody outside could signal.
+#
+# Module-level Event lets start_scanner_thread own a single shared signal,
+# pass it to all three loops, and expose it for the lifespan teardown.
+# `.clear()` on each fresh boot so a previous teardown's `.set()` does not
+# kill the next test's threads at startup.
+_thread_stop_event: threading.Event = threading.Event()
+_managed_threads: list[threading.Thread] = []
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  SYMBOL CACHE  (curated list validated against Binance)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -292,11 +312,20 @@ def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
 #  SCANNER LOOP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def scanner_loop():
+def scanner_loop(stop_event: threading.Event | None = None):
+    """Background scan loop. Honors both `_scanner_state["running"]` (legacy
+    flag many sites still flip) and `stop_event` (preferred, lets the
+    lifespan teardown interrupt a long inter-cycle sleep instead of waiting
+    out the full `scan_interval_sec`). `stop_event=None` keeps the
+    pre-#495-fix behavior so direct callers (a few tests, manual scripts)
+    do not break."""
     # Lazy imports to stay within scanner/ boundary rules
     from api.config import load_config  # noqa: PLC0415
     from api.positions import update_positions_json  # noqa: PLC0415
     from api.signals import update_symbols_json  # noqa: PLC0415
+
+    if stop_event is None:
+        stop_event = threading.Event()
 
     cfg      = load_config()
     interval = cfg.get("scan_interval_sec", SCAN_INTERVAL_SEC)
@@ -305,7 +334,7 @@ def scanner_loop():
     _scanner_state["running"] = True
     _scanner_state["started_at"] = datetime.now(timezone.utc).isoformat()
 
-    while _scanner_state["running"]:
+    while _scanner_state["running"] and not stop_event.is_set():
         cycle_start = time.time()
         symbols     = get_active_symbols(n_sym)
         _scanner_state["symbols_active"] = symbols
@@ -321,7 +350,7 @@ def scanner_loop():
 
         cycle_prices = {}
         for sym in symbols:
-            if not _scanner_state["running"]:
+            if not _scanner_state["running"] or stop_event.is_set():
                 break
             result = execute_scan_for_symbol(sym, cfg)
             if result and result.get("price"):
@@ -358,7 +387,15 @@ def scanner_loop():
         elapsed    = time.time() - cycle_start
         sleep_time = max(5, interval - elapsed)
         log.info(f"Ciclo completo en {elapsed:.0f}s. Proximo en {sleep_time:.0f}s.")
-        time.sleep(sleep_time)
+        # Interruptible sleep: stop_event.wait() returns True if .set() was
+        # called from the lifespan teardown, breaking us out of the loop in
+        # ≤2s instead of waiting out the full inter-cycle interval (up to
+        # 300s). Closes the #495 race window where pytest's fresh DB
+        # collided with a still-sleeping scanner from the previous test.
+        if stop_event.wait(sleep_time):
+            break
+
+    log.info("scanner_loop exiting cleanly")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -366,20 +403,48 @@ def scanner_loop():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def start_scanner_thread():
+    """Launch the three managed background threads with shared ownership.
+
+    Creates a single `stop_event` that all three loops respect (scanner via
+    interruptible `stop_event.wait()` between cycles; health + calibrator
+    via the `stop_event` parameter they already accepted but never
+    received from this caller). Registers the threads in `_managed_threads`
+    so `stop_managed_threads()` can join them on lifespan teardown.
+
+    Backward-compatible return: still returns the scanner thread (the
+    pre-#495-fix shape) so existing callers (`btc_api.lifespan`, tests)
+    do not need updates beyond opting into the teardown call.
+    """
     # Lazy imports to stay within scanner/ boundary rules
     from api.config import load_config  # noqa: PLC0415
 
-    t = threading.Thread(target=scanner_loop, daemon=True, name="crypto-scanner")
+    # Fresh boot: clear the shared event in case a previous teardown set
+    # it. Reset the managed-threads list — the previous threads, if any,
+    # were already joined by the previous `stop_managed_threads()` call
+    # (or are dead daemons from a process that did not call it).
+    _thread_stop_event.clear()
+    _managed_threads.clear()
+
+    t = threading.Thread(
+        target=scanner_loop,
+        kwargs={"stop_event": _thread_stop_event},
+        daemon=True,
+        name="crypto-scanner",
+    )
     t.start()
+    _managed_threads.append(t)
+
     # Kill switch daily sweep (#138)
     from health import health_monitor_loop  # noqa: PLC0415
     health_thread = threading.Thread(
         target=health_monitor_loop,
         args=(lambda: load_config(),),
+        kwargs={"stop_event": _thread_stop_event},
         daemon=True,
         name="health-monitor",
     )
     health_thread.start()
+    _managed_threads.append(health_thread)
     log.info("Health monitor thread started (daily @ 00:00 UTC)")
 
     # Kill switch v2 auto-calibrator (#214 B4b.1)
@@ -387,9 +452,43 @@ def start_scanner_thread():
     calibrator_thread = threading.Thread(
         target=kill_switch_calibrator_loop,
         args=(lambda: load_config(),),
+        kwargs={"stop_event": _thread_stop_event},
         daemon=True,
         name="kill-switch-calibrator",
     )
     calibrator_thread.start()
+    _managed_threads.append(calibrator_thread)
     log.info("Kill switch v2 calibrator thread started (daily @ 00:00 UTC)")
     return t
+
+
+def stop_managed_threads(timeout_per_thread: float = 2.0) -> dict[str, bool]:
+    """Signal and join the three managed background threads.
+
+    Called from the lifespan teardown. Sets the shared stop_event (which
+    breaks each loop's interruptible sleep within ≤1 wake-up cycle),
+    sets the legacy `_scanner_state["running"]` flag for the same effect
+    via the scanner's other exit path, and joins each thread with a
+    bounded timeout.
+
+    Returns: dict mapping thread name → whether it terminated within the
+    timeout. A `False` indicates the thread is still alive after the join
+    timeout (logged as a warning, daemon=True still lets the process exit).
+
+    Idempotent: safe to call when no threads were started, or twice in a row.
+    """
+    _scanner_state["running"] = False
+    _thread_stop_event.set()
+
+    results: dict[str, bool] = {}
+    for t in _managed_threads:
+        t.join(timeout=timeout_per_thread)
+        alive = t.is_alive()
+        results[t.name] = not alive
+        if alive:
+            log.warning(
+                "stop_managed_threads: %s did not terminate within %.1fs",
+                t.name, timeout_per_thread,
+            )
+    _managed_threads.clear()
+    return results

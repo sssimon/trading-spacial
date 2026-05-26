@@ -33,10 +33,65 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import time
 from db.connection import _open_configured_connection, _resolve_db_file
 from db.transaction import transaction
 
 log = logging.getLogger("db.schema")
+
+
+def _set_wal_mode_idempotent_with_retry() -> None:
+    """Set journal_mode=WAL once per DB file, with retry on lock contention.
+
+    Idempotent path:
+      `PRAGMA journal_mode` (no assignment) returns the current mode.
+      If it is already 'wal', we skip the assignment entirely. This is the
+      steady-state path on every boot after the first (WAL is a persistent
+      file-level property), and it removes the most common race source —
+      issuing a no-op WAL switch that still requires heavy coordination.
+
+    Retry path (rare residual case):
+      If the DB is not yet in WAL mode AND `PRAGMA journal_mode=WAL` raises
+      `database is locked`, retry with backoff (3 attempts: 200ms, 600ms,
+      1500ms total ≤2.3s). On the fourth attempt, raise — at that point
+      the system is in a state init_db cannot recover from on its own.
+
+    `busy_timeout = 5000` is still applied first as defense against
+    sub-second contention that resolves within the PRAGMA's own wait.
+    """
+    backoffs = (0.2, 0.6, 1.5)
+    last_exc: sqlite3.OperationalError | None = None
+    for attempt, delay in enumerate((0.0, *backoffs)):
+        if delay > 0:
+            time.sleep(delay)
+        pragma_con = _open_configured_connection()
+        try:
+            pragma_con.execute("PRAGMA busy_timeout = 5000")
+            # Idempotency probe: a bare `PRAGMA journal_mode` returns the
+            # current mode without changing it. If already 'wal', skip the
+            # assignment — saves a heavy-coordination lock acquisition.
+            current = pragma_con.execute(
+                "PRAGMA journal_mode"
+            ).fetchone()
+            if current and str(current[0]).lower() == "wal":
+                return
+            pragma_con.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "database is locked" in msg or "database table is locked" in msg:
+                last_exc = exc
+                log.warning(
+                    "init_db: PRAGMA journal_mode=WAL locked on attempt %d/%d; "
+                    "retrying after %.1fs",
+                    attempt + 1, len(backoffs) + 1, backoffs[attempt] if attempt < len(backoffs) else 0,
+                )
+                continue
+            raise
+        finally:
+            pragma_con.close()
+    assert last_exc is not None
+    raise last_exc
 
 
 def init_db() -> None:
@@ -48,24 +103,23 @@ def init_db() -> None:
     DDL through the standard transaction() primitive. WAL mode is a persistent
     file-level property so this only matters on first boot for a fresh DB.
 
-    PRAGMA busy_timeout (#495 advances): set BEFORE the WAL pragma so the
-    connection waits up to 5s if another connection holds the DB lock
-    (typical race source: kill_switch_v2_calibrator background thread
-    started by lifespan and still holding a query connection when a fresh
-    test DB triggers re-init). Without busy_timeout, the WAL pragma fails
-    immediately with `sqlite3.OperationalError: database is locked` — the
-    flake that blocked CI on ~50% of post-Cluster-D PRs.
+    #495 history:
+      - PR #508: added `PRAGMA busy_timeout = 5000` before the WAL pragma.
+        Helped on read-lock contention but did not close the race where a
+        background thread held a write transaction at the moment WAL ran.
+      - This PR (root-cause fix): `scanner.runtime.stop_managed_threads()`
+        now deterministically joins the three lifespan-owned threads
+        before the next test boots, removing the orphan-writer source.
+      - This function (defense in depth): skip the WAL pragma entirely
+        when the DB is already in WAL mode (the steady-state on every
+        boot after the first), and retry with backoff on the rare
+        residual race where some other writer is still active.
+
+    Together, the root-cause fix should make `database is locked` here
+    impossible in CI; the defense-in-depth tier here keeps a single
+    surviving orphan from blocking init_db indefinitely in production.
     """
-    pragma_con = _open_configured_connection()
-    try:
-        # Wait up to 5000ms if another connection holds the lock at the
-        # moment the WAL pragma executes. SQLite's WAL-mode change requires
-        # not-strictly-exclusive but heavy-coordination access; a 5s window
-        # is enough for ordinary background queries to release.
-        pragma_con.execute("PRAGMA busy_timeout = 5000")
-        pragma_con.execute("PRAGMA journal_mode=WAL")
-    finally:
-        pragma_con.close()
+    _set_wal_mode_idempotent_with_retry()
 
     with transaction() as con:
         con.execute("""

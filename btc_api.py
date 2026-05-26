@@ -100,7 +100,7 @@ from db.positions import db_create_position_sql, db_get_positions, db_update_pos
 from notifier import notify, SystemEvent  # used directly at line 171
 from scanner.runtime import (
     _scanner_state, execute_scan_for_symbol, check_pending_signal_outcomes,
-    get_active_symbols, start_scanner_thread,
+    get_active_symbols, start_scanner_thread, stop_managed_threads,
 )
 
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")  # noqa: F841 — patched by tests
@@ -253,7 +253,14 @@ async def lifespan(app: FastAPI):
     log.info("Starting scanner thread…")
     start_scanner_thread()
     yield
-    _scanner_state["running"] = False
+    # #495 root-cause fix: deterministic teardown of the three managed
+    # background threads (scanner, health monitor, kill-switch calibrator).
+    # The legacy `_scanner_state["running"] = False` only flagged the
+    # scanner; the other two had no signal at all and survived the lifespan
+    # as orphans, contending with the next test's fresh DB for the WAL
+    # lock. `stop_managed_threads()` signals the shared event and joins
+    # each thread with a bounded timeout. See scanner.runtime for detail.
+    stop_managed_threads()
     log.info("Shutdown.")
 
 

@@ -83,14 +83,14 @@ The counter is arithmetic, not virtue. The decision is the *number*, not the rev
 
 The following failures are known intermittent issues with documented tracking. They may be bypassed via admin merge if they are the ONLY failures in a CI run AND each appears in the list below.
 
-### `tests/test_setup.py::*` — `sqlite3.OperationalError: database is locked`
+### ~~`tests/test_setup.py::*` — `sqlite3.OperationalError: database is locked`~~ (RETIRED 2026-05-26)
 
-- **Tracking:** #495
-- **Pattern:** Any test in `tests/test_setup.py` failing with `sqlite3.OperationalError: database is locked`, typically at `db/schema.py:52 PRAGMA journal_mode=WAL` in `init_db` lifespan.
-- **Root cause (partial):** `init_db()` opens a raw connection for the PRAGMA in lifespan; the `kill_switch_v2_calibrator` background thread may hold a connection that races with this on a fresh test DB. PR #499 swept the most-common read-only `transaction()` callsites that were contributing to contention but did not eliminate the PRAGMA-WAL race itself.
-- **Affected test names (observed):** `test_2_get_setup_without_token_404`, `test_3_get_setup_wrong_token_404`, `test_4_get_setup_correct_token_returns_html`, `test_5_post_setup_creates_admin_and_marks_completed`, `test_7_post_setup_weak_password_400`, `test_8_disable_web_setup_returns_404`, `test_10_env_vars_xor_only_email_fails_at_boot`, `test_setup_status_endpoint_public`.
-- **Admin-merge count since last substantive #495 update:** 4 (PRs #500, #502, #504, #505 — bypassed compliantly per Steps 1–3; the count itself was unbounded until the rate predicate was added 2026-05-26). **Counter status:** AT CAP (4 ≥ 3). **Hard-stop active** for new admin merges through this entry until #495 receives a substantive comment naming progress (resets to 0) or is closed (entry removed).
-- **Removal condition:** when a fix for the PRAGMA-WAL race lands and `tests/test_setup.py` is observed green on 20+ consecutive CI runs across at least 3 distinct PRs, this entry is removed.
+- **Tracking:** #495 — root-cause fix landed in this PR (`fix/scanner-thread-ownership`).
+- **Status:** **RETIRED from the orthogonal-flake list.** The flake had a named structural cause: the three background threads spawned by `start_scanner_thread()` (scanner, health monitor, kill-switch calibrator) had no shared stop_event and no ownership — only the scanner loop checked the legacy `_scanner_state["running"]` flag, while the other two daemons survived the lifespan teardown as orphans and contended with the next test's fresh DB for the WAL lock.
+- **Fix shape:** module-level `_thread_stop_event` in `scanner/runtime.py`, shared across all three loops; `stop_managed_threads()` called from the lifespan teardown signals and joins each thread with a bounded timeout. Defense in depth in `db/schema.py`: `init_db()` skips `PRAGMA journal_mode=WAL` when the DB is already in WAL mode (steady state on every boot after the first) and retries with backoff on the residual `database is locked` case.
+- **Why this is RETIRED, not "removed pending observation":** Voronov 2026-05-26 third meta-review reframed this flake as **revelatory, not orthogonal** — once a named structural cause was identified, the entry's place was no longer the quarantine list but the post-mortem. *"The orthogonal-flake list is a quarantine. Quarantines have a structural cost: they let you ship around a problem instead of through it."* Keeping the entry "until 20 green CI runs" would be tolerance dressed as observation; the structural fix is in place, so the entry leaves now.
+- **If the flake recurs after this PR:** open a new tracking issue with the reproduction, add the entry back to this list with a NEW number, and Voronov-review the failure mode — do not re-open #495 as if the fix did not happen. The retirement is a discrete event; recurrence is a new failure mode worth its own naming.
+- **Final admin-merge count under #495:** 4 (PRs #500, #502, #504, #505). PR #510 was NOT admin-merged through #495; it sat open while this fix-PR landed first (Voronov 2026-05-26 third meta-review's "Sequence X").
 
 ## What "orthogonal" means
 
@@ -159,6 +159,28 @@ PR #506 was NOT admin-merged. Instead, this update to the discipline file was au
 Concrete next step: a PR opening against #495 (`PRAGMA busy_timeout` added to `init_db()` before the WAL pragma, plus background-thread coordination work) is required before PR #506 can be merged — either by waiting for clean CI naturally, or by the substantive-comment exemption above.
 
 **What this incident demonstrates:** discipline encoded as written rule + per-instance verification is *insufficient* without a frequency-bounded counter. The classifier inferred the missing rule because the pattern was visible from outside; the discipline document is now corrected to contain the rule explicitly. Voronov: *"This is the moment where the convención becomes a counter, or it becomes furniture."*
+
+### #495 retired by sequence-X discipline (2026-05-26)
+
+PR #510 (`feat/canonical-positions-schema`) hit the same `test_setup.py` flake on its CI run. The flake was admin-merge-eligible under the rate predicate (counter had been reset to 0 by PR #508's merge, the lagging-signal qualifying event).
+
+Investigating WHY the flake recurred — instead of admin-merging — surfaced the structural cause: three background threads with no shared stop_event and no lifespan ownership. The fix was named (Layer A: thread ownership; Layer B: WAL idempotency + retry).
+
+The user asked Voronov whether to bundle the fix into PR #510 or split. Voronov refused both the obvious binary and surfaced **Sequence X**:
+
+> *"You are not asking 'bundle or split.' You are asking: does PR #510 carry the obligation to retire the flake that admin-merged it? The answer is no. The obligation belongs to the flake list, not to the PR that tripped over it."*
+
+> *"Sequence X: Fix-PR lands first. #510 re-runs CI cleanly without admin-merge. The flake retires. #510 merges through the gate, not around it."*
+
+> *"The bundle-by-predicate rule is being tested by the first case where obeying it costs you something. That is also the only case where obeying it means anything."*
+
+Sequence X was followed:
+1. PR #510 stayed open with one CI failure pending — not admin-merged.
+2. PR (this one) was opened against `upstream/main` with the thread-ownership fix.
+3. Once this PR merges, PR #510 re-runs CI; with the fix on main, the flake stops reproducing and #510 merges through the clean gate.
+4. The orthogonal-flake list entry for #495 is RETIRED (above) rather than "removed pending observation" — Voronov's third reframe: the flake was revelatory, not orthogonal, the moment its structural cause was named.
+
+**What this incident demonstrates:** the rate predicate from PR #507 + the lagging-signal clause from PR #509 are necessary but not sufficient. The third layer is **a willingness to refuse the convenient admin-merge when investigation surfaces a structural cause.** Without that willingness, an entry can sit on the orthogonal-flake list indefinitely, with each merge through it deferring the diagnosis. The Sequence X discipline is what converts a named cause into a closed entry.
 
 ## Audit cadence
 
