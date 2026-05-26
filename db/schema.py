@@ -343,6 +343,13 @@ def init_db() -> None:
     with transaction() as con_idx:
         _migrate_unique_open_scan(con_idx)
 
+    # Idempotency-Key cache table — #470 (Voronov D-Tipo HTTP rung).
+    # Backs `api.positions_birth.IdempotencyCache` with a per-tenant keyed
+    # store of POST /positions results (24h TTL, lazy cleanup on read).
+    # Independent of the positions table; safe to run any time. Idempotent.
+    with transaction() as con_idem:
+        _migrate_idempotency_keys(con_idem)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -1126,4 +1133,44 @@ def _migrate_unique_open_scan(con: sqlite3.Connection) -> None:
     log.info(
         "_migrate_unique_open_scan: partial UNIQUE index ensured "
         "(tenant_id, scan_id) WHERE status='open' AND scan_id IS NOT NULL."
+    )
+
+
+def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
+    """Idempotency-Key cache table — #470 (Voronov D-Tipo HTTP rung).
+
+    Backs `api.positions_birth.IdempotencyCache`: per-(tenant, key) cache of
+    serialized POST /positions results. 24h TTL enforced at read time
+    (`expires_at > now`), with lazy cleanup deleting expired rows for the
+    same (tenant, key) on each `get`. No background sweeper, no scheduler.
+
+    Per Voronov: "performance + UX, no invariante existencial" — this is the
+    operational cousin of the structural #470 partial UNIQUE index. The
+    schema fence catches duplicate scan_id at the DB; this cache lets a
+    well-behaved client retry safely without paying for a 409 round-trip.
+
+    PRIMARY KEY (tenant_id, key) makes `INSERT OR REPLACE` the natural
+    overwrite primitive. Secondary index on `expires_at` is reserved for a
+    future eager sweeper if lazy cleanup proves insufficient (NOT used by
+    the current `get` path; included for forward compatibility).
+
+    Idempotent: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    """
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS idempotency_keys (
+               tenant_id      INTEGER NOT NULL,
+               key            TEXT    NOT NULL,
+               result_json    TEXT    NOT NULL,
+               created_at     TEXT    NOT NULL,
+               expires_at     TEXT    NOT NULL,
+               PRIMARY KEY (tenant_id, key)
+           )"""
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_idempotency_expires "
+        "ON idempotency_keys(expires_at)"
+    )
+    log.info(
+        "_migrate_idempotency_keys: idempotency_keys table + expires index "
+        "ensured."
     )

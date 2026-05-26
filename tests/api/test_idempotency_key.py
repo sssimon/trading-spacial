@@ -6,9 +6,13 @@ import pytest
 
 @pytest.fixture
 def fresh_db_con(monkeypatch, tmp_path):
-    import os
+    # This codebase resolves the active DB via btc_api.DB_FILE (see
+    # db/connection.py::_resolve_db_file). Per the suite-wide convention
+    # (tests/conftest.py + others), point btc_api.DB_FILE at a tmp_path file
+    # so init_db() + every transaction() opens against an isolated DB.
+    import btc_api
     db_path = tmp_path / "ik.db"
-    monkeypatch.setenv("BTC_DB", str(db_path))
+    monkeypatch.setattr(btc_api, "DB_FILE", str(db_path))
     from db.schema import init_db
     init_db()
     from db.transaction import transaction
