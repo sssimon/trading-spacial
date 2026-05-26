@@ -620,3 +620,38 @@ def test_cross_mutation_race_entry_price_rejects_close(fresh_db_with_two_tenants
         pos = con.execute("SELECT status, entry_price FROM positions WHERE id=1").fetchone()
     assert pos["status"] == "open"
     assert pos["entry_price"] == 999.99  # our UPDATE remains
+
+
+# ---- Invariant 11: single-use enforcement symmetry (#460) ----
+
+def test_reentering_without_execute_still_blocks_second_enter(
+    fresh_db_with_two_tenants
+):
+    """A PositionClosure that is entered (precheck runs) but never executed
+    (early exit, or caller forgets to call execute()) must NOT be re-enterable.
+
+    The semantic is 'single-use': the first __enter__ commits the closure
+    instance to that one attempt, regardless of whether execute() was
+    called inside the block. The previous implementation only set the
+    consumed flag inside execute(), so an enter-without-execute left the
+    instance reusable — Serrano F-NEW-7 finding from PR #452 review.
+
+    Closes #460 (single-use enforcement asymmetry between __enter__ check
+    and execute() set)."""
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+
+    # First enter: succeeds. Deliberately do NOT call execute() inside.
+    with closure:
+        pass  # caller decided not to execute (degenerate but legal flow)
+
+    # Second enter on the same instance: must raise RuntimeError.
+    # Pre-fix: this would silently succeed because _consumed was only
+    # set by execute() — the enter check passed and a second precheck ran.
+    with pytest.raises(RuntimeError, match=r"single-use"):
+        with closure:
+            closure.execute()

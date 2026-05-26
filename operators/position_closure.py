@@ -96,12 +96,24 @@ class PositionClosure:
         self._state: Literal["INIT", "NOT_FOUND", "ALREADY_CLOSED", "OK_TO_PROCEED"] = "INIT"
         self._result_row: Optional[dict] = None
         self._result_pnl: tuple[Optional[float], Optional[float]] = (None, None)
+        # Two flags to enforce single-use symmetrically (#460):
+        #   _entered: set by __enter__. Prevents re-entry on the same instance
+        #             even when execute() was never called inside the first
+        #             enter (degenerate enter-without-execute flow).
+        #   _consumed: set by execute(). Prevents double-execute within a
+        #              single enter block.
+        # Both raise RuntimeError on re-use. Single-use means single-use.
+        self._entered = False
         self._consumed = False
         self._precheck_result: PrecheckResult | None = None
 
     def __enter__(self) -> "PositionClosure":
-        if self._consumed:
-            raise RuntimeError("PositionClosure is single-use; construct a new one")
+        if self._entered:
+            raise RuntimeError(
+                "PositionClosure is single-use; construct a new instance "
+                "for each close attempt (see #460)"
+            )
+        self._entered = True
         with precheck_connection() as precheck_con:
             self._precheck_result = self._run_precheck(precheck_con)
         return self
