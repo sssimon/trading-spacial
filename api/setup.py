@@ -32,7 +32,7 @@ from auth.setup import (
 )
 from auth.setup_html import render_completed_redirect, render_setup_page
 from db.auth_schema import has_any_user, is_setup_completed, mark_setup_completed
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 
 log = logging.getLogger("api.setup")
@@ -55,8 +55,15 @@ def _setup_done() -> bool:
     Note: deleting the row in system_state alone is not enough to reactivate
     /setup if there's still a user; you'd also need to delete that user.
     Conversely, if the user gets deleted but setup_completed_at remains,
-    /setup stays dead — by design (recovery is via CLI per the README)."""
-    with transaction() as con:
+    /setup stays dead — by design (recovery is via CLI per the README).
+
+    Uses snapshot_connection() (PRAGMA query_only=1, no writer lock) per
+    PR #493 patología — this is a terminal read (two boolean queries, no
+    follow-up mutation in the same logical operation). Previously this
+    called transaction() which acquires BEGIN IMMEDIATE; under concurrent
+    test setup it raced with the FastAPI lifespan's init_db() and
+    intermittently failed with 'database is locked' (#495 flake)."""
+    with snapshot_connection() as con:
         return has_any_user(con) or is_setup_completed(con)
 
 

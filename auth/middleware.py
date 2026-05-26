@@ -38,7 +38,7 @@ from starlette.types import ASGIApp
 
 from auth.models import User
 from auth.tokens import verify_access_token
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 
 def _bypass_role_or_none() -> str | None:
@@ -133,8 +133,16 @@ def _hydrate_user_from_db(user_id: int) -> User | None:
     instead of having to wait until the JWT expires. This is one extra
     sqlite read per protected request — acceptable for 2-5 users at one
     request every few seconds.
+
+    Uses snapshot_connection() (PRAGMA query_only=1, no writer lock) per
+    PR #493 patología — this is a terminal read (one SELECT, no follow-up
+    mutation in the same logical operation). Previously this called
+    transaction() which acquires BEGIN IMMEDIATE on every protected
+    request, racing with concurrent writes (kill-switch calibrator
+    background thread, init_db lifespan, signal scanner) and producing
+    intermittent 'database is locked' under test concurrency (#495).
     """
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             """
             SELECT id, email, role, is_active, created_at, password_changed_at,
