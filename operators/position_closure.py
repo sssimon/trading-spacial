@@ -94,7 +94,16 @@ class PositionClosure:
         self._cfg = cfg
         self._now = now or datetime.now(timezone.utc)
 
-        self._state: Literal["INIT", "NOT_FOUND", "ALREADY_CLOSED", "OK_TO_PROCEED"] = "INIT"
+        # NOTE: an earlier spec (docs/.../2026-05-25-446-preconditions-synthesis.md
+        # lines 137-148) declared a `_state` field as a four-valued string state
+        # machine for the closure lifecycle. The implementation absorbed that
+        # axis into PrecheckResult (the tagged union stored as
+        # _precheck_result) and the operator-lifecycle axis into _entered /
+        # _consumed booleans. `_state` was declared on this line but never
+        # assigned anywhere — fossil of the abandoned design. Deleted per
+        # Voronov 2026-05-26 (#492): "an operator that has not yet learned to
+        # delete its own ghosts will accumulate them until a future
+        # contributor can no longer tell which fields are load-bearing."
         self._result_row: Optional[dict] = None
         self._result_pnl: tuple[Optional[float], Optional[float]] = (None, None)
         # Two flags to enforce single-use symmetrically (#460):
