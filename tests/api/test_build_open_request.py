@@ -1,7 +1,10 @@
 """Tests for _build_open_request + ValidatedOpenRequest sentinel protection.
 
-Mirrors the OwnershipValidatedSnapshot pattern from C2: the type is only a
-guarantee if a runtime órgano de rechazo refuses the wrong sentinel.
+Mirrors the PrecheckOriginatedSnapshot pattern from C2: the type marks
+provenance (the request came through the validating factory) — its runtime
+órgano refuses the wrong sentinel. Per Voronov 2026-05-26 4th meta-review
+(#477), this pattern carries a provenance claim, not a safety claim. The
+safety claims live downstream at the consumer's re-validation.
 """
 import pytest
 

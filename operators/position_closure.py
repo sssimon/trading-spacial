@@ -30,8 +30,8 @@ from db.transaction import PrecheckConn, precheck_connection
 from db.positions import db_get_position_by_id, db_close_position_sql, _calc_pnl
 from operators.precheck import (
     PositionSnapshot,
-    OwnershipValidatedSnapshot,
-    _build_validated_snapshot,
+    PrecheckOriginatedSnapshot,
+    _build_originated_snapshot,
     PrecheckNotFound,
     PrecheckAlreadyClosed,
     PrecheckOkToProceed,
@@ -166,7 +166,7 @@ class PositionClosure:
             # MUST be reported distinctly, not collapsed to already_closed.
             return PrecheckRejectedState(snapshot=snapshot)
 
-        return PrecheckOkToProceed(snapshot=_build_validated_snapshot(snapshot))
+        return PrecheckOkToProceed(snapshot=_build_originated_snapshot(snapshot))
 
     @staticmethod
     def _snapshot_to_dict(snapshot: PositionSnapshot) -> dict:
@@ -210,15 +210,19 @@ class PositionClosure:
                 pnl_pct=None,
             )
 
-        # PrecheckOkToProceed: write-tx must re-validate ALL snapshot fields.
-        # OwnershipValidatedSnapshot guarantees ownership was checked at precheck;
-        # the snapshot's mutable fields (everything in PositionSnapshot — tenant_id,
-        # status, entry_price, qty, direction, symbol) MUST be re-validated against
-        # the fresh row inside BEGIN IMMEDIATE. Schema does not enforce immutability
-        # of entry_price/qty/direction/symbol (CLAUDE.md "Capas de enforcement"),
-        # so the write-tx is the only place where stale snapshots are caught.
-        validated = result.snapshot   # OwnershipValidatedSnapshot
-        snap = validated.inner         # PositionSnapshot
+        # PrecheckOkToProceed: this block is the SAFETY frontier for ownership.
+        # PrecheckOriginatedSnapshot marks provenance only (the snapshot came
+        # from the precheck factory) — it does NOT enforce ownership safety.
+        # The field-by-field re-validation below is the actual safety organ:
+        # Voronov 2026-05-26 4th meta-review (#477) named this explicitly —
+        # *"The sentinel is not load-bearing. The field-by-field re-validation
+        # is."* All mutable fields (tenant_id, status — and entry_price, qty,
+        # direction, symbol, which the schema does not enforce as immutable
+        # post-creation per CLAUDE.md "Capas de enforcement") MUST be
+        # re-validated against the fresh row inside BEGIN IMMEDIATE. This is
+        # the only place where stale or fabricated snapshots are caught.
+        originated = result.snapshot   # PrecheckOriginatedSnapshot
+        snap = originated.inner        # PositionSnapshot
         with _tx_module.transaction() as con:
             row = db_get_position_by_id(con, self._pos_id)
             if row is None:

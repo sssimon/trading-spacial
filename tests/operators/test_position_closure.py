@@ -594,8 +594,10 @@ def test_cross_mutation_race_entry_price_rejects_close(fresh_db_with_two_tenants
     and BEGIN IMMEDIATE (e.g., entry_price is updated by a migration or ad-hoc
     UPDATE), the operator must detect the drift and return not_found.
 
-    Closes #469 + F6: validation lives in the type (OwnershipValidatedSnapshot)
-    and the runtime field-by-field comparison in execute()."""
+    Closes #469 + F6: the type (PrecheckOriginatedSnapshot) marks provenance
+    from the precheck factory; the runtime safety organ is the field-by-field
+    re-validation in execute(). Per Voronov 2026-05-26 4th meta-review (#477),
+    the load-bearing check is here, not in the sentinel."""
     from operators.position_closure import PositionClosure
 
     closure = PositionClosure(

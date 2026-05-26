@@ -41,7 +41,7 @@ def test_precheck_result_variants_distinguishable():
     via isinstance."""
     from operators.precheck import (
         PositionSnapshot, PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProceed,
-        _build_validated_snapshot,
+        _build_originated_snapshot,
     )
 
     snap = PositionSnapshot(
@@ -52,7 +52,7 @@ def test_precheck_result_variants_distinguishable():
 
     nf = PrecheckNotFound()
     ac = PrecheckAlreadyClosed(snapshot=snap)
-    ok = PrecheckOkToProceed(snapshot=_build_validated_snapshot(snap))
+    ok = PrecheckOkToProceed(snapshot=_build_originated_snapshot(snap))
 
     assert isinstance(nf, PrecheckNotFound)
     assert not isinstance(nf, PrecheckAlreadyClosed)

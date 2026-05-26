@@ -19,7 +19,7 @@ log = logging.getLogger("db.transaction")
 # PrecheckConn is a connection authorized for reads that will FEED a follow-up
 # write transaction. The caller is contractually obligated to extract any field
 # the write-tx will need into an immutable snapshot (see
-# operators.precheck.OwnershipValidatedSnapshot) BEFORE the with block exits.
+# operators.precheck.PrecheckOriginatedSnapshot) BEFORE the with block exits.
 #
 # SnapshotConn is a connection authorized for TERMINAL reads — results
 # serialize to an output (JSON file, HTTP response, log) and are NOT used to

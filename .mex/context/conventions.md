@@ -152,19 +152,56 @@ Razones (Voronov):
 
 Patrón anti-fila: agrupar predicados distintos bajo el mismo artifact porque "comparten código." Cuando notes que la columna Mecanismo creció a un párrafo, eso significa que la fila está conflated y necesita split.
 
+### Pattern: provenance markers vs safety claims (Voronov 2026-05-26 4th meta-review, #477)
+
+Un tipo cuyo constructor está acotado por convención (single-underscore factory + sentinel importable) carga una **provenance claim**, NO una **safety claim**. La safety claim debe vivir en el consumer's re-validation, no en este tipo.
+
+**Cómo reconocer el pattern:**
+
+- El tipo tiene un `__post_init__` que rechaza construcción "incorrecta" (e.g., `_sentinel is not _MODULE_SENTINEL`).
+- El sentinel y el factory son single-underscore-prefix (importables — Python no enforza la barrera).
+- El consumer del tipo (downstream) hace su propia re-validación de los fields antes de actuar.
+
+**Cuál es la verdad estructural:**
+
+- El check del sentinel NO es load-bearing para safety. Es load-bearing para LEGIBILIDAD: hace que el type signature lea como un contrato ("este snapshot vino del precheck factory") sin que el reader tenga que walk el código.
+- El check de safety vive en el consumer (e.g., `PositionClosure.execute()` re-SELECT + field-by-field comparison inside BEGIN IMMEDIATE).
+- Un attacker que importe el sentinel y fabrique el tipo se cuela del provenance check, pero se cae en la re-validation downstream.
+
+**Cómo registrar esto en este file:**
+
+- Una row para el **provenance predicate** (rung **convención** — el órgano más débil al frontier es la single-underscore convention).
+- Una row separada para el **safety predicate** (rung **runtime check** — la re-validación field-by-field at the downstream frontier).
+- NO fusionar ambos en "Tipo + runtime check para un solo predicado." Son **DOS predicados a DOS frontiers**.
+
+**Cómo nombrar el tipo:**
+
+- El nombre debe describir la provenance, no la safety. `OwnershipValidatedSnapshot` overclaims; `PrecheckOriginatedSnapshot` honest naming.
+- El error message del sentinel-rejection debe nombrar: (a) el factory, (b) el rung convención explícitamente, (c) "provenance" como el semantic real, (d) dónde vive el safety organ downstream.
+
+**Instancias actuales del pattern:**
+
+- `PrecheckOriginatedSnapshot` (`operators/precheck.py`) — provenance: "snapshot came from precheck factory." Safety: `PositionClosure.execute()` field-by-field re-validation.
+- `ValidatedOpenRequest` (`api/positions_birth.py`) — provenance: "request came through `_build_open_request` validator." Safety: `BirthRegistrar.register`'s INSERT + idempotency-key probe inside the same transaction.
+
+Voronov cita load-bearing (4th meta-review): *"The issue is asking which lock to install on a door that opens into a corridor where every visitor is searched. The search is the security. The lock is theatre. The honest move is to stop calling it a lock."*
+
 ### Invariantes registradas — estado tras Cluster D (post-#471 #470 #473, post-convergencia Serrano/Aurelius)
 
 > Esta tabla **reemplaza** la antigua tabla C2 (que listaba sólo #467/#468/#469). Las tres filas C2 están retenidas aquí; añade las siete filas de Cluster D. Una sola tabla de verdad — la duplicación adjacente previa era deuda doc nombrada por Serrano MEDIUM 10.
 
-> **Nota:** la fila previamente conflated para #469+F6 ("OwnershipValidatedSnapshot") fue split en 3 filas separadas (2026-05-26, sub-task A de #488) — una por predicado. Las 3 filas comparten el mismo artifact pero describen invariantes distintas.
+> **Nota:** la fila previamente conflated para #469+F6 (entonces nombrada "OwnershipValidatedSnapshot", renombrada a `PrecheckOriginatedSnapshot` por #477 cierre via Path 6) fue split en 4 filas separadas:
+>
+> - Las primeras 3 filas (sub-task A de #488, 2026-05-26 AM) — una por predicado, ya que el row original mezclaba tres predicados distintos en una sola fila.
+> - La 4ta fila apareció después del Voronov 2026-05-26 4th meta-review (#477): el row "tipo + runtime check" que combinaba sentinel-check + field-by-field-re-validation era él mismo conflated. Son DOS predicados a DOS frontiers distintos: provenance (rung convención, frontera del precheck-to-execute hand-off) y re-validation (rung runtime check, frontera del write-tx BEGIN IMMEDIATE). Voronov: *"The sentinel guards provenance. The provenance claim does not gate safety, because safety is enforced downstream by re-validation. The sentinel exists to make the type signature readable as a contract, not to enforce the contract."*
 
 | Invariante de dominio | Capa enforced | Mecanismo | Issue cerrado |
 |---|---|---|---|
 | `qty` siempre tiene valor numérico para positions activas (o `status='legacy_unmeasurable'`) | **Schema** | `CHECK (qty IS NOT NULL OR status='legacy_unmeasurable')` en `positions` (vía `_migrate_qty_not_null`) | #467 |
 | `precheck_connection` y `snapshot_connection` son contratos distintos | **Tipo** | `NewType("PrecheckConn", sqlite3.Connection)` y `NewType("SnapshotConn", sqlite3.Connection)` en `db/transaction.py` — mypy detecta mis-uso | #468 |
-| Los campos mutables del snapshot consumidos por el write-tx no cambiaron entre precheck y BEGIN IMMEDIATE | **Tipo + runtime check** | (1) `OwnershipValidatedSnapshot.__post_init__` rechaza construcción sin `_sentinel is _VALIDATION_SENTINEL` (rung tipo); (2) field-by-field re-validation en `PositionClosure.execute()` antes de mutar (rung runtime check). Los rungs compose para un solo predicado: si el snapshot llega a execute(), pasó por la ownership-validating factory Y los fields aún coinciden con la DB. | #469 + F6 |
-| `OwnershipValidatedSnapshot` se construye sólo via el factory de precheck (sin que otro caller importe el sentinel y construya directamente) | **Convención** (dos surfaces) | (a) `_build_validated_snapshot` por single-underscore convention; (b) `_VALIDATION_SENTINEL` es importable directamente (`from operators.precheck import _VALIDATION_SENTINEL`) y no hay órgano estructural que lo prevenga. Ambas surfaces componen el rung convención. PR #486 aplicó Path 3 (honest narrowing) en docstrings + error message; el organ estructural (closure pattern / name-mangling / frame inspection) sigue pendiente. | #477 (advanced, not closed — structural-organ decision pending; #487 closed as dup) |
-| El mensaje de error de `OwnershipValidatedSnapshot.__post_init__` describe sólo lo que enforza, no lo que aspira a enforzar | **Test** | `test_error_message_does_not_overclaim_enforcement` en `tests/operators/test_ownership_validated_snapshot.py` — anchored sobre las tres claims: (1) reference al factory, (2) ausencia de "callable only", (3) acknowledgement explícito del rung convención. | #481 closed by PR #486 |
+| El snapshot consumido por `PositionClosure.execute()` provino del precheck factory (provenance marker, NO ownership-safety) | **Convención** (dos surfaces, ambas single-underscore) | `PrecheckOriginatedSnapshot.__post_init__` rechaza `_sentinel is not _ORIGINATION_SENTINEL`. El sentinel pattern es real — pero (a) `_build_originated_snapshot` (factory) y (b) `_ORIGINATION_SENTINEL` son ambos importables por nombre (Python no enforza single-underscore como barrier). El rung es convención, no tipo. La aceptación honesta es el cierre estructural — el type carries provenance, no safety. Voronov 2026-05-26 4th meta-review: *"The sentinel is not load-bearing. The field-by-field re-validation is. The sentinel is a provenance marker masquerading as a safety check — until renamed."* | #477 (closed via Path 6: honest acceptance + rename + registry split) |
+| Los campos mutables del snapshot no cambiaron entre precheck y BEGIN IMMEDIATE (ownership-safety frontier) | **Runtime check** | Field-by-field re-validation en `PositionClosure.execute()` compara CADA campo del snapshot contra una fresh re-SELECT inside BEGIN IMMEDIATE. Esta es la frontera donde la ownership-safety guarantee se enforza. Independiente del provenance check de arriba: un caller que fabrique un `PrecheckOriginatedSnapshot` con un `tenant_id` forjado se cuela del provenance check pero se cae aquí. | #469 + F6 |
+| El mensaje de error de `PrecheckOriginatedSnapshot.__post_init__` nombra lo que enforza (provenance) y lo que NO enforza (safety), apuntando al órgano downstream | **Test** | `test_error_message_does_not_overclaim_enforcement` en `tests/operators/test_precheck_originated_snapshot.py` — anchored sobre 5 claims: (1) reference al factory `_build_originated_snapshot`, (2) ausencia de "callable only", (3) acknowledgement explícito del rung convención, (4) nombrar "provenance" como el semantic real, (5) apuntar a `execute()` / re-validation como dónde vive el safety organ. | #481 closed by PR #486, extended by #477 closure |
 | `qty > 0` para positions activas (cierra el 0.0-bypass) | **Schema** | `CHECK ((qty IS NOT NULL AND qty > 0) OR status='legacy_unmeasurable')` (via `_migrate_qty_positive`) | #471 |
 | `tenant_id IS NOT NULL` para positions activas | **Schema** | `CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable','legacy_no_tenant'))` (via `_migrate_tenant_id_not_null`) | #471 |
 | `tenant_id: int > 0` en la frontera de entrada (anotación + rechazo runtime) | **Tipo + runtime órgano de rechazo** | `_build_open_request` rechaza `tenant_id` no-int, ≤ 0, bool, o None con `BodyValidationError` (regla de coherencia post-Serrano) | #471 F6 |
