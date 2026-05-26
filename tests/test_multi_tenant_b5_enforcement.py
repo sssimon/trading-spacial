@@ -33,10 +33,100 @@ def initialized_db(tmp_path, monkeypatch):
 
 
 def _tx_create_position(data: dict, tenant_id=None):
-    from db.positions import db_create_position
+    """Migration helper for D Task 17.
+
+    For `tenant_id is None` callers (legacy/pre-multi-tenant fixtures): use a
+    raw INSERT with `status='legacy_no_tenant'` to satisfy the D CHECK
+    constraint (`tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable',
+    'legacy_no_tenant')`). The legacy NULL-tenant semantic is what these
+    tests are validating, so the raw INSERT is the correct vehicle now that
+    `db_create_position` no longer accepts NULL tenant on an `'open'` row.
+
+    For `tenant_id: int` callers: route through the legitimate factory
+    (`_build_open_request`) + the new SQL helper (`db_create_position_sql`).
+    The Pydantic boundary requires `qty`, `direction`, allowlisted `symbol`,
+    and entry_ts within [now-7d, now+60s] — defaults injected here so the
+    legacy two-field call sites continue to express their intent.
+    """
     from db.transaction import transaction
+    if tenant_id is None:
+        # Legacy-NULL-tenant raw INSERT (Task 18-style pattern, needed here
+        # because db_create_position no longer accepts tenant_id=None).
+        from datetime import datetime, timezone
+        SYMBOL_MAP = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "RUNE": "RUNEUSDT"}
+        entry = float(data["entry_price"])
+        size_usd = data.get("size_usd")
+        qty = float(
+            data.get("qty")
+            if data.get("qty") is not None
+            else (size_usd / entry if size_usd else 1.0)
+        )
+        ts = data.get("entry_ts") or datetime.now(timezone.utc).isoformat()
+        sym = data["symbol"].upper()
+        sym = SYMBOL_MAP.get(sym, sym)
+        with transaction() as con:
+            cur = con.execute(
+                """
+                INSERT INTO positions
+                    (scan_id, symbol, direction, status, entry_price, entry_ts,
+                     sl_price, tp_price, size_usd, qty, atr_entry, be_mult,
+                     notes, tenant_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    data.get("scan_id"),
+                    sym,
+                    data.get("direction", "LONG").upper(),
+                    "legacy_no_tenant",
+                    entry,
+                    ts,
+                    data.get("sl_price"),
+                    data.get("tp_price"),
+                    size_usd,
+                    qty,
+                    data.get("atr_entry"),
+                    data.get("be_mult"),
+                    data.get("notes", ""),
+                    None,
+                ),
+            )
+            pos_id = cur.lastrowid
+            row = con.execute(
+                "SELECT * FROM positions WHERE id=?", (pos_id,),
+            ).fetchone()
+            return dict(row)
+    # Real-tenant path: route through the D-Tipo boundary.
+    from api.positions_birth import _build_open_request
+    from db.positions import db_create_position_sql
+    body = _coerce_body_for_birth(data)
+    validated = _build_open_request(body, tenant_id=tenant_id, idempotency_key=None)
     with transaction() as con:
-        return db_create_position(con, data, tenant_id=tenant_id)
+        return db_create_position_sql(con, validated)
+
+
+def _coerce_body_for_birth(data: dict) -> dict:
+    """Translate legacy 2-field test bodies into a Pydantic-valid shape.
+
+    - Symbol short-codes (`BTC`/`ETH`/`RUNE`) → curated allowlist
+      (`BTCUSDT`/`ETHUSDT`/`RUNEUSDT`).
+    - Default `direction='LONG'` and a sane `qty` derived from `size_usd`
+      when the legacy call didn't supply one.
+    - Drop body['tenant_id'] (the Pydantic model uses `extra='forbid'`;
+      tenant_id is JWT-derived, never body-derived — F6).
+    """
+    SYMBOL_MAP = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "RUNE": "RUNEUSDT"}
+    body = {k: v for k, v in data.items() if k != "tenant_id"}
+    sym = body.get("symbol", "").upper()
+    body["symbol"] = SYMBOL_MAP.get(sym, sym)
+    body.setdefault("direction", "LONG")
+    if "qty" not in body or body["qty"] is None:
+        size_usd = body.get("size_usd")
+        entry = body.get("entry_price")
+        if size_usd and entry:
+            body["qty"] = float(size_usd) / float(entry)
+        else:
+            body["qty"] = 1.0
+    return body
 
 
 def _tx_get_positions(status=None, tenant_id=None):
@@ -97,7 +187,6 @@ class TestGetCurrentTenantId:
 
 class TestDbCreatePosition:
     def test_with_tenant_id_persists(self, initialized_db):
-        from db.positions import db_create_position
         pos = _tx_create_position(
             {"symbol": "BTCUSDT", "entry_price": 80000, "size_usd": 500},
             tenant_id=42,
@@ -106,7 +195,6 @@ class TestDbCreatePosition:
 
     def test_without_tenant_id_is_null(self, initialized_db):
         """Legacy callers (no tenant_id) insert NULL — preserves pre-multi-tenant behavior."""
-        from db.positions import db_create_position
         pos = _tx_create_position(
             {"symbol": "BTCUSDT", "entry_price": 80000, "size_usd": 500},
         )
@@ -120,7 +208,7 @@ class TestDbCreatePosition:
 
 class TestDbGetPositions:
     def test_filters_by_tenant_id(self, initialized_db):
-        from db.positions import db_create_position, db_get_positions
+        from db.positions import db_get_positions  # noqa: F401
         _tx_create_position({"symbol": "BTC", "entry_price": 80000}, tenant_id=1)
         _tx_create_position({"symbol": "ETH", "entry_price": 2300}, tenant_id=2)
         _tx_create_position({"symbol": "RUNE", "entry_price": 0.5}, tenant_id=1)
@@ -129,13 +217,13 @@ class TestDbGetPositions:
         user2 = _tx_get_positions(tenant_id=2)
 
         assert len(user1) == 2
-        assert {p["symbol"] for p in user1} == {"BTC", "RUNE"}
+        assert {p["symbol"] for p in user1} == {"BTCUSDT", "RUNEUSDT"}
         assert len(user2) == 1
-        assert user2[0]["symbol"] == "ETH"
+        assert user2[0]["symbol"] == "ETHUSDT"
 
     def test_legacy_no_tenant_returns_all(self, initialized_db):
         """When tenant_id=None (legacy/internal), returns all rows including NULL."""
-        from db.positions import db_create_position, db_get_positions
+        from db.positions import db_get_positions  # noqa: F401
         _tx_create_position({"symbol": "BTC", "entry_price": 80000}, tenant_id=1)
         _tx_create_position({"symbol": "ETH", "entry_price": 2300})  # NULL
 
@@ -143,7 +231,7 @@ class TestDbGetPositions:
         assert len(all_positions) == 2
 
     def test_status_and_tenant_combined(self, initialized_db):
-        from db.positions import db_create_position, db_get_positions
+        from db.positions import db_get_positions  # noqa: F401
         from operators.position_closure import PositionClosure
         _tx_create_position({"symbol": "BTC", "entry_price": 80000, "size_usd": 500}, tenant_id=1)
         _tx_create_position({"symbol": "ETH", "entry_price": 2300, "size_usd": 500}, tenant_id=1)
@@ -160,13 +248,13 @@ class TestDbGetPositions:
 
     def test_pre_backfill_data_invisible(self, initialized_db):
         """Existing positions with tenant_id=NULL must NOT show up when filtering by tenant."""
-        from db.positions import db_create_position, db_get_positions
+        from db.positions import db_get_positions  # noqa: F401
         _tx_create_position({"symbol": "BTC", "entry_price": 80000})  # NULL tenant
         _tx_create_position({"symbol": "ETH", "entry_price": 2300}, tenant_id=1)
 
         user1 = _tx_get_positions(tenant_id=1)
         assert len(user1) == 1
-        assert user1[0]["symbol"] == "ETH"
+        assert user1[0]["symbol"] == "ETHUSDT"
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +264,6 @@ class TestDbGetPositions:
 
 class TestDbClosePosition:
     def test_owner_can_close(self, initialized_db):
-        from db.positions import db_create_position
         from operators.position_closure import PositionClosure
         pos = _tx_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
@@ -190,7 +277,6 @@ class TestDbClosePosition:
 
     def test_non_owner_returns_none(self, initialized_db):
         """IDOR protection: user 2 tries to close user 1's position → not_found."""
-        from db.positions import db_create_position
         from operators.position_closure import PositionClosure
         pos = _tx_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
@@ -208,7 +294,6 @@ class TestDbClosePosition:
 
     def test_legacy_no_tenant_works(self, initialized_db):
         """SYSTEM mode (no tenant_id) can close any position."""
-        from db.positions import db_create_position
         from operators.position_closure import PositionClosure
         pos = _tx_create_position(
             {"symbol": "BTC", "entry_price": 80000, "size_usd": 500},
@@ -227,7 +312,7 @@ class TestDbClosePosition:
 
 class TestDbUpdatePosition:
     def test_owner_can_update(self, initialized_db):
-        from db.positions import db_create_position, db_update_position
+        from db.positions import db_update_position  # noqa: F401
         pos = _tx_create_position(
             {"symbol": "BTC", "entry_price": 80000},
             tenant_id=1,
@@ -238,7 +323,7 @@ class TestDbUpdatePosition:
 
     def test_non_owner_returns_none(self, initialized_db):
         """IDOR: user 2 can't update user 1's position."""
-        from db.positions import db_create_position, db_update_position
+        from db.positions import db_update_position  # noqa: F401
         pos = _tx_create_position(
             {"symbol": "BTC", "entry_price": 80000},
             tenant_id=1,
@@ -259,7 +344,7 @@ class TestDbUpdatePosition:
 
 class TestDbLastExitTs:
     def test_filter_by_tenant(self, initialized_db):
-        from db.positions import db_create_position, db_last_exit_ts
+        from db.positions import db_last_exit_ts  # noqa: F401
         from operators.position_closure import PositionClosure
         # User 1 closes a BTC position
         pos1 = _tx_create_position(
@@ -273,13 +358,13 @@ class TestDbLastExitTs:
         )
 
         # User 1 sees their own exit
-        last_user1 = _tx_last_exit_ts("BTC", tenant_id=1)
+        last_user1 = _tx_last_exit_ts("BTCUSDT", tenant_id=1)
         assert last_user1 is not None
         # User 2 has no exit
-        last_user2 = _tx_last_exit_ts("BTC", tenant_id=2)
+        last_user2 = _tx_last_exit_ts("BTCUSDT", tenant_id=2)
         assert last_user2 is None
         # Legacy (no tenant) sees user 1's exit (most recent)
-        last_legacy = _tx_last_exit_ts("BTC")
+        last_legacy = _tx_last_exit_ts("BTCUSDT")
         assert last_legacy is not None
 
 
@@ -313,7 +398,6 @@ class TestTamperingResistance:
         Even if a malicious body contains {'tenant_id': 999}, only the explicit
         tenant_id arg (from JWT) is honored.
         """
-        from db.positions import db_create_position
         # Body claims tenant_id=999, but we pass tenant_id=1
         malicious_body = {
             "symbol": "BTC", "entry_price": 80000, "size_usd": 500,
@@ -332,7 +416,7 @@ class TestTamperingResistance:
 class TestBackfillRestoresVisibility:
     def test_backfill_makes_existing_data_visible(self, initialized_db):
         """Pre-backfill NULL data invisible to tenant filter; backfill flips that."""
-        from db.positions import db_create_position, db_get_positions
+        from db.positions import db_get_positions  # noqa: F401
         from db.schema import backfill_tenant
 
         # Pre-migration: legacy create (no tenant_id)
@@ -350,7 +434,7 @@ class TestBackfillRestoresVisibility:
         # Now user 1 sees the row
         results = _tx_get_positions(tenant_id=1)
         assert len(results) == 1
-        assert results[0]["symbol"] == "BTC"
+        assert results[0]["symbol"] == "BTCUSDT"
 
 
 # ---------------------------------------------------------------------------

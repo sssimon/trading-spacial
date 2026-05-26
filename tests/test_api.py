@@ -832,11 +832,34 @@ class TestExecuteScanForSymbol:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _tx_create_position(data: dict):
-    """Test helper: wrap db_create_position in a transaction."""
-    import btc_api
+    """Test helper: build a ValidatedOpenRequest and INSERT it.
+
+    D Task 17: routes through `_build_open_request` + `db_create_position_sql`.
+    Defaults are injected so legacy bodies (no `qty`, no `direction`,
+    lowercase symbol) still express their original intent under the stricter
+    Pydantic boundary. Pre-D the helper accepted `tenant_id=None`; the D
+    schema forbids that on `'open'` rows, so this helper now stamps
+    `tenant_id=1`.
+    """
+    from api.positions_birth import _build_open_request
+    from db.positions import db_create_position_sql
     from db.transaction import transaction
+    body = dict(data)
+    body.setdefault("direction", "LONG")
+    if isinstance(body.get("direction"), str):
+        body["direction"] = body["direction"].upper()
+    if "symbol" in body:
+        body["symbol"] = body["symbol"].upper()
+    if "qty" not in body or body["qty"] is None:
+        size_usd = body.get("size_usd")
+        entry = body.get("entry_price")
+        if size_usd and entry:
+            body["qty"] = float(size_usd) / float(entry)
+        else:
+            body["qty"] = 1.0
+    validated = _build_open_request(body, tenant_id=1, idempotency_key=None)
     with transaction() as con:
-        return btc_api.db_create_position(con, data)
+        return db_create_position_sql(con, validated)
 
 
 def _tx_get_positions(status=None, tenant_id=None):

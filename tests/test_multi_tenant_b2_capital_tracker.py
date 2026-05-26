@@ -117,17 +117,18 @@ class TestCloseHookIntegration:
     def test_manual_close_increments_balance(self, initialized_db):
         """API close path: close LONG +250 → balance +250."""
         from api.positions import close_position
+        from api.positions_birth import _build_open_request
         from db.capital import db_get_capital, INITIAL_CAPITAL_DEFAULT
-        from db.positions import db_create_position
+        from db.positions import db_create_position_sql
         from db.transaction import transaction
 
+        validated = _build_open_request(
+            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+             "direction": "LONG"},
+            tenant_id=1, idempotency_key=None,
+        )
         with transaction() as con:
-            pos = db_create_position(
-                con,
-                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-                 "direction": "LONG"},
-                tenant_id=1,
-            )
+            pos = db_create_position_sql(con, validated)
         close_position(
             pos_id=pos["id"],
             body={"exit_price": 125.0, "exit_reason": "MANUAL"},
@@ -141,17 +142,18 @@ class TestCloseHookIntegration:
     def test_manual_close_decrements_balance(self, initialized_db):
         """API close path: close LONG -100 → balance -100, peak unchanged, dd > 0."""
         from api.positions import close_position
+        from api.positions_birth import _build_open_request
         from db.capital import db_get_capital, INITIAL_CAPITAL_DEFAULT
-        from db.positions import db_create_position
+        from db.positions import db_create_position_sql
         from db.transaction import transaction
 
+        validated = _build_open_request(
+            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+             "direction": "LONG"},
+            tenant_id=1, idempotency_key=None,
+        )
         with transaction() as con:
-            pos = db_create_position(
-                con,
-                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-                 "direction": "LONG"},
-                tenant_id=1,
-            )
+            pos = db_create_position_sql(con, validated)
         close_position(
             pos_id=pos["id"],
             body={"exit_price": 90.0, "exit_reason": "MANUAL"},
@@ -167,22 +169,23 @@ class TestCloseHookIntegration:
     def test_auto_close_via_check_position_stops(self, initialized_db, monkeypatch):
         """Auto-exit path: SL_HIT in check_position_stops also updates capital."""
         from api.positions import check_position_stops
+        from api.positions_birth import _build_open_request
         from db.capital import db_get_capital, INITIAL_CAPITAL_DEFAULT
-        from db.positions import db_create_position
+        from db.positions import db_create_position_sql
 
         # Stub config so check_position_stops doesn't touch the filesystem
         import api.positions as _pos
         monkeypatch.setattr(_pos, "load_config", lambda: {"symbol_overrides": {}})
         monkeypatch.setattr(_pos, "update_positions_json", lambda: None)
 
+        validated = _build_open_request(
+            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+             "direction": "LONG", "sl_price": 95.0, "tp_price": 120.0},
+            tenant_id=3, idempotency_key=None,
+        )
         from db.transaction import transaction
         with transaction() as con:
-            db_create_position(
-                con,
-                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-                 "direction": "LONG", "sl_price": 95.0, "tp_price": 120.0},
-                tenant_id=3,
-            )
+            db_create_position_sql(con, validated)
         # Price tags SL → SL_HIT triggers db_close_position + capital hook
         check_position_stops("BTCUSDT", 94.0, now=datetime.now(timezone.utc))
         from db.transaction import transaction
@@ -204,17 +207,18 @@ class TestCloseHookIntegration:
     def test_cancel_does_not_touch_capital(self, initialized_db):
         """DELETE /positions/{id} (cancel) leaves capital untouched."""
         from api.positions import delete_position
+        from api.positions_birth import _build_open_request
         from db.capital import db_get_capital
-        from db.positions import db_create_position
+        from db.positions import db_create_position_sql
 
+        validated = _build_open_request(
+            {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
+             "direction": "LONG"},
+            tenant_id=9, idempotency_key=None,
+        )
         from db.transaction import transaction
         with transaction() as con:
-            db_create_position(
-                con,
-                {"symbol": "BTCUSDT", "entry_price": 100.0, "qty": 10.0,
-                 "direction": "LONG"},
-                tenant_id=9,
-            )
+            db_create_position_sql(con, validated)
         # Pull pos_id (we just created it)
         from db.positions import db_get_positions
         with transaction() as con:

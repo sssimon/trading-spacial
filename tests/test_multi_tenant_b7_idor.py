@@ -51,28 +51,39 @@ def client(tmp_path, monkeypatch):
 
 
 def _seed_other_user_position(symbol: str = "BTCUSDT") -> int:
-    """Insert position owned by OTHER_USER_ID. Returns pos_id."""
-    from db.positions import db_create_position
+    """Insert position owned by OTHER_USER_ID. Returns pos_id.
+
+    D Task 17: routes through `_build_open_request` + `db_create_position_sql`
+    (the new birth path). `qty` derived from size_usd/entry to mirror what the
+    legacy 5-deep fallback used to compute (now an explicit Pydantic field).
+    """
+    from api.positions_birth import _build_open_request
+    from db.positions import db_create_position_sql
     from db.transaction import transaction
+    entry, size = 80000.0, 500.0
+    validated = _build_open_request(
+        {"symbol": symbol, "entry_price": entry, "size_usd": size,
+         "qty": size / entry, "direction": "LONG"},
+        tenant_id=OTHER_USER_ID, idempotency_key=None,
+    )
     with transaction() as con:
-        pos = db_create_position(
-            con,
-            {"symbol": symbol, "entry_price": 80000, "size_usd": 500, "direction": "LONG"},
-            tenant_id=OTHER_USER_ID,
-        )
+        pos = db_create_position_sql(con, validated)
     return pos["id"]
 
 
 def _seed_own_position(symbol: str = "ETHUSDT") -> int:
-    """Insert position owned by TestClient (user_id=99)."""
-    from db.positions import db_create_position
+    """Insert position owned by TestClient (user_id=99). D Task 17 birth path."""
+    from api.positions_birth import _build_open_request
+    from db.positions import db_create_position_sql
     from db.transaction import transaction
+    entry, size = 2300.0, 300.0
+    validated = _build_open_request(
+        {"symbol": symbol, "entry_price": entry, "size_usd": size,
+         "qty": size / entry, "direction": "LONG"},
+        tenant_id=99, idempotency_key=None,
+    )
     with transaction() as con:
-        pos = db_create_position(
-            con,
-            {"symbol": symbol, "entry_price": 2300, "size_usd": 300, "direction": "LONG"},
-            tenant_id=99,
-        )
+        pos = db_create_position_sql(con, validated)
     return pos["id"]
 
 

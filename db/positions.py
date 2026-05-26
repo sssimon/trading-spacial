@@ -22,7 +22,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from api.positions_birth import ValidatedOpenRequest
 
 log = logging.getLogger("db.positions")
 
@@ -37,43 +40,54 @@ def _calc_pnl(direction: str, entry: float, exit_p: float, qty: float):
     return round(pnl_usd, 4), round(pnl_pct, 4)
 
 
-def db_create_position(
+def db_create_position_sql(
     con: sqlite3.Connection,
-    data: dict,
-    tenant_id: Optional[int] = None,
+    request: "ValidatedOpenRequest",
 ) -> dict:
-    """Create position. If tenant_id provided, persisted on the row.
+    """Thin SQL INSERT for a Position birth. NO defensive membranes.
 
-    Per B.5: API callers always pass tenant_id from JWT; internal/legacy
-    callers may pass None (row inserted with tenant_id NULL).
+    Per Cluster D (Voronov 2026-05-26): the Pydantic boundary
+    (`OpenPositionRequest`) + sentinel factory (`_build_open_request`)
+    already validated every field. The 5-deep `qty` fallback chain and the
+    `data.get(...)` membranes are GONE — they were #471 F5 ("código de
+    revisor" trying to compensate for an upstream contract that did not
+    exist). The only knowledge this function needs is the SQL shape.
 
-    Task 8 (#446): `con` is now mandatory positional first arg.
+    Mirrors the contract of `db_close_position_sql`: pure SQL, no transaction,
+    no side-effects beyond the INSERT. Caller (BirthRegistrar) owns the
+    transaction and the post-commit choreography.
     """
-    entry = float(data["entry_price"])
-    qty   = float(data.get("qty") or (float(data.get("size_usd", 0) or 0) / entry if entry else 0))
-    ts    = data.get("entry_ts") or datetime.now(timezone.utc).isoformat()
-    cur = con.execute("""
+    payload = request.payload
+    entry_ts = (
+        payload.entry_ts.isoformat()
+        if payload.entry_ts is not None
+        else datetime.now(timezone.utc).isoformat()
+    )
+    cur = con.execute(
+        """
         INSERT INTO positions
             (scan_id, symbol, direction, status, entry_price, entry_ts,
              sl_price, tp_price, size_usd, qty, atr_entry, be_mult, notes,
              tenant_id)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (
-        data.get("scan_id"),
-        data["symbol"].upper(),
-        data.get("direction", "LONG").upper(),
-        "open",
-        entry,
-        ts,
-        data.get("sl_price"),
-        data.get("tp_price"),
-        data.get("size_usd"),
-        qty,
-        data.get("atr_entry"),
-        data.get("be_mult"),
-        data.get("notes", ""),
-        tenant_id,  # NULL if not provided — legacy behavior
-    ))
+        """,
+        (
+            payload.scan_id,
+            payload.symbol,             # Pydantic validator already uppercased + allowlist-checked
+            payload.direction,          # Literal["LONG","SHORT"] enforced upstream
+            "open",
+            payload.entry_price,
+            entry_ts,
+            payload.sl_price,
+            payload.tp_price,
+            payload.size_usd,
+            payload.qty,                # Pydantic _qty_positive guarantees > 0
+            payload.atr_entry,
+            payload.be_mult,
+            payload.notes,
+            request.tenant_id,          # int from JWT, NOT from body
+        ),
+    )
     pos_id = cur.lastrowid
     row = con.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
     return dict(row)

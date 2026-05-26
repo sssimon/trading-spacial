@@ -54,10 +54,41 @@ def setup_db_and_cfg(tmp_path, monkeypatch):
 
 
 def _tx_create_position(data: dict):
-    import btc_api
+    """D Task 17: raw INSERT.
+
+    These time-limit tests pin `entry_ts` to historical timestamps (e.g.
+    2026-05-01) so that `check_position_stops(..., now=entry_dt + 14h)` can
+    deterministically fire the time-limit barrier. The Pydantic boundary
+    rejects `entry_ts` more than 7 days in the past, so this fixture must
+    bypass `_build_open_request`. A valid `qty` and `tenant_id` are stamped
+    so the D CHECK constraints (qty > 0, tenant_id NOT NULL) hold.
+    """
     from db.transaction import transaction
+    qty = float(data.get("qty") or 1.0)
+    sym = data["symbol"].upper()
+    direction = data.get("direction", "LONG").upper()
     with transaction() as con:
-        return btc_api.db_create_position(con, data)
+        cur = con.execute(
+            """
+            INSERT INTO positions
+                (scan_id, symbol, direction, status, entry_price, entry_ts,
+                 sl_price, tp_price, size_usd, qty, atr_entry, be_mult,
+                 notes, tenant_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                data.get("scan_id"), sym, direction, "open",
+                data["entry_price"], data["entry_ts"],
+                data.get("sl_price"), data.get("tp_price"),
+                data.get("size_usd"), qty, data.get("atr_entry"),
+                data.get("be_mult"), data.get("notes", ""), 1,
+            ),
+        )
+        pos_id = cur.lastrowid
+        row = con.execute(
+            "SELECT * FROM positions WHERE id=?", (pos_id,),
+        ).fetchone()
+        return dict(row)
 
 
 def _tx_get_positions(status=None):

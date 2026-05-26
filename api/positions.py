@@ -303,7 +303,7 @@ def open_position(
         leak str(e) to the client (closes Serrano BLOCKER 3 / #473).
 
     Task 15 wired this to BirthRegistrar.register, which owns:
-      - the write transaction (db_create_position inside `with transaction()`)
+      - the write transaction (db_create_position_sql inside `with transaction()`)
       - same-tx Idempotency-Key cache write (Task 16 lights up the persistence)
       - post-commit update_positions_json (closes F8)
       - structured POSICION OPENED log at birth (closes F15)

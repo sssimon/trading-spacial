@@ -329,7 +329,7 @@ class BirthRegistrar:
     def register(validated: ValidatedOpenRequest) -> dict:
         # Local imports avoid a circular at module load (api.positions imports
         # api.positions_birth, and we want update_positions_json from there).
-        from db.positions import db_create_position  # noqa: PLC0415
+        from db.positions import db_create_position_sql  # noqa: PLC0415
         # Step 1: idempotency probe (read-only short-circuit).
         # Stub today (Task 16 wires real persistence); structurally correct
         # so the wire-up remains stable when the table lights up.
@@ -347,12 +347,9 @@ class BirthRegistrar:
                 return cached
 
         # Step 2 + 3: atomic write + cache + translate IntegrityError.
-        body_for_db = validated.payload.model_dump(mode="json")
         try:
             with transaction() as con:
-                pos = db_create_position(
-                    con, body_for_db, tenant_id=validated.tenant_id,
-                )
+                pos = db_create_position_sql(con, validated)
                 if validated.idempotency_key:
                     IdempotencyCache.set(
                         con, validated.tenant_id, validated.idempotency_key, pos,

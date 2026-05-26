@@ -29,14 +29,40 @@ def _insert_position(
     exit_ts: str | None = "2026-01-02T00:00:00+00:00",
     direction: str = "LONG",
 ):
-    """Insert a position row directly via db helper."""
+    """Insert a position row directly via SQL.
+
+    D Task 17: bypasses `_build_open_request` for two reasons:
+      1. `entry_ts` is fixed to historical values (2026-01-*) that fall
+         outside the Pydantic 7-day birth window — this fixture exercises
+         `db_last_exit_ts` semantics on historical rows, not birth-time
+         validation.
+      2. Some test paths set `status='closed'` which is incompatible with
+         the birth path's `status='open'` invariant.
+
+    Raw INSERT here is the legitimate vehicle (Task 18-style — the test
+    intent is querying historical rows, not nominating new ones). A valid
+    `qty` and `tenant_id` are supplied to satisfy the D CHECK constraints.
+    """
+    from datetime import datetime, timezone
+    qty = 1.0  # any positive value satisfies the D CHECK
+    insert_ts = entry_ts or datetime.now(timezone.utc).isoformat()
     with transaction() as con:
-        pos = btc_api.db_create_position(con, {
-            "symbol": symbol,
-            "entry_price": entry_price,
-            "direction": direction,
-            "entry_ts": entry_ts,
-        })
+        cur = con.execute(
+            """
+            INSERT INTO positions
+                (scan_id, symbol, direction, status, entry_price, entry_ts,
+                 sl_price, tp_price, size_usd, qty, atr_entry, be_mult,
+                 notes, tenant_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (None, symbol.upper(), direction.upper(), "open",
+             entry_price, insert_ts, None, None, None, qty, None, None, "", 1),
+        )
+        pos_id = cur.lastrowid
+        row = con.execute(
+            "SELECT * FROM positions WHERE id=?", (pos_id,),
+        ).fetchone()
+        pos = dict(row)
     if status == "closed":
         with transaction() as con:
             con.execute(
