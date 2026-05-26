@@ -797,3 +797,64 @@ def test_tenant_drift_does_NOT_emit_integrity_log(fresh_db_with_two_tenants, cap
         f"tenant_id drift must not emit integrity log (IDOR safety); got: "
         f"{[r.getMessage() for r in integrity_logs]}"
     )
+
+
+def test_combined_tenant_and_non_tenant_drift_logs_only_non_tenant(
+    fresh_db_with_two_tenants, caplog
+):
+    """When BOTH tenant_id AND a non-tenant field (e.g. entry_price) drift
+    simultaneously, the operator must:
+      1. Emit the integrity log for the non-tenant field, AND
+      2. NOT include tenant_id in any log channel (IDOR safety must not be
+         defeated just because another field also drifted).
+
+    Guards against a future refactor that:
+      - moves the `continue` for tenant_id out of scope, OR
+      - reorders the per-field iteration in a way that lets tenant_id
+        leak into log records, OR
+      - replaces the per-field loop with a generic structured emission
+        that includes ALL drift_fields without honoring the tenant_id
+        IDOR carve-out.
+
+    Closes #478 — combined-drift safety carve-out for tenant_id."""
+    import logging
+    from operators.position_closure import PositionClosure
+
+    closure = PositionClosure(
+        pos_id=1, exit_price=110.0, exit_reason="TP_HIT",
+        mode="USER", caller_tenant_id=1,
+    )
+    closure.__enter__()  # precheck reads tenant_id=1, entry_price=100.0
+
+    # BOTH fields drift simultaneously in a single UPDATE.
+    with transaction() as con:
+        con.execute(
+            "UPDATE positions SET tenant_id = 2, entry_price = 999.99 WHERE id = 1"
+        )
+
+    with caplog.at_level(logging.ERROR, logger="operators.position_closure"):
+        outcome = closure.execute()
+    closure.__exit__(None, None, None)
+
+    # User-visible: IDOR-safe collapse (same shape as ownership mismatch).
+    assert outcome.status == "not_found"
+
+    # Integrity log fires for the non-tenant field.
+    integrity_logs = [r for r in caplog.records if "integrity event" in r.getMessage().lower()]
+    assert len(integrity_logs) >= 1, (
+        f"expected entry_price drift to emit integrity log; got: "
+        f"{[r.getMessage() for r in caplog.records]}"
+    )
+
+    # CRITICAL: tenant_id must not appear in any integrity log record, even
+    # though it also drifted. The IDOR-safe silence is field-scoped, not
+    # event-scoped.
+    for record in integrity_logs:
+        msg = record.getMessage()
+        assert "entry_price" in msg, (
+            f"expected entry_price log, got: {msg!r}"
+        )
+        assert "field=tenant_id" not in msg, (
+            f"tenant_id must not appear in integrity log even when combined "
+            f"with non-tenant drift (IDOR safety is field-scoped); got: {msg!r}"
+        )
