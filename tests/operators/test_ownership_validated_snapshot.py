@@ -39,9 +39,10 @@ def test_cannot_construct_with_none_sentinel():
 
 
 def test_internal_factory_builds_validated_snapshot():
-    """_build_validated_snapshot is the only legitimate constructor.
-    It is module-private (underscore prefix), not exported from precheck's
-    public surface."""
+    """_build_validated_snapshot is the INTENDED constructor by single-
+    underscore convention. Python does not prevent direct construction
+    via importing _VALIDATION_SENTINEL — that wider asymmetry is tracked
+    in #487. This test only asserts the factory path itself works."""
     from operators.precheck import (
         _build_validated_snapshot,
         OwnershipValidatedSnapshot,
@@ -96,7 +97,9 @@ def test_error_message_does_not_overclaim_enforcement():
     )
     # Positive: must explicitly acknowledge the convention rung, so future
     # readers don't infer a guarantee from the absence of qualifiers.
-    assert "convention" in message.lower() or "convención" in message.lower(), (
+    # Anchored to English single-form — the message lives in English; a
+    # polyglot `or` would let drift hide a regression (Serrano F4).
+    assert "convention" in message.lower(), (
         f"message must name the convention rung explicitly; got: {message!r}"
     )
 

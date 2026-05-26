@@ -1055,6 +1055,12 @@ snapshot, not the raw PositionSnapshot."
 
 ### Task 9: Implement OwnershipValidatedSnapshot + update PrecheckOkToProceed in operators/precheck.py
 
+> **Footnote (post-implementation, post-Serrano review of PR #486 — 2026-05-26):** The error message, sentinel comment, and `Closes #469 + F6` framing in the Step 1 code block below were softened/qualified after this plan executed. Specifically:
+> - PR #486 closes **#481** (doc honesty — the `"callable only from operators.position_closure._run_precheck"` wording was a documentation lie) and advances **#477** (registry coherence — Path 3 honest narrowing of the factory's single-call-site rung).
+> - Issue **#487** (post-Serrano F2) tracks the wider asymmetry: `_VALIDATION_SENTINEL` is module-attribute-accessible, so any caller importing the sentinel name can construct `OwnershipValidatedSnapshot` directly, bypassing the factory. The narrowing in PR #486 named the factory side only; the sentinel side is still open.
+>
+> **For the current source-of-truth wording, read `operators/precheck.py` on `upstream/main`.** This plan document is a historical snapshot of the original implementation directive and intentionally preserves the original phrasing for archaeological fidelity.
+
 **Files:**
 - Modify: `operators/precheck.py`
 

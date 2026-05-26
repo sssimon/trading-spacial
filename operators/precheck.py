@@ -52,14 +52,24 @@ class PrecheckAlreadyClosed:
 @dataclass(frozen=True)
 class PrecheckOkToProceed:
     """Position passed all precheck conditions. The snapshot is an
-    OwnershipValidatedSnapshot — a type-level guarantee that ownership was
-    checked at precheck time. The write-tx MUST STILL re-validate the
-    snapshot's mutable fields against a fresh re-SELECT inside BEGIN
-    IMMEDIATE (immutable fields trusted directly).
+    OwnershipValidatedSnapshot.
+
+    The sentinel check in OwnershipValidatedSnapshot.__post_init__ is the
+    runtime órgano (rung: tipo); the factory's single call site is
+    convention only (rung: convención — see #477). The sentinel itself is
+    module-attribute-accessible, which widens the convención surface
+    beyond the factory — see #487 for the open wider-asymmetry follow-up.
+
+    The write-tx MUST STILL re-validate the snapshot's mutable fields
+    against a fresh re-SELECT inside BEGIN IMMEDIATE (immutable fields
+    trusted directly).
 
     Runtime organ: __post_init__ rejects construction with a raw
-    PositionSnapshot. The 'tipo' rung in CLAUDE.md is real only because
-    this check exists (mypy is not in CI; annotation alone does not refuse).
+    PositionSnapshot (i.e., without the sentinel). The 'tipo' rung in
+    CLAUDE.md is real only because this check exists (mypy is not in CI;
+    annotation alone does not refuse). Anyone who imports
+    _VALIDATION_SENTINEL can construct directly without going through the
+    factory — see #487.
     """
     snapshot: "OwnershipValidatedSnapshot"
 
@@ -83,8 +93,11 @@ class PrecheckRejectedState:
 PrecheckResult = Union[PrecheckNotFound, PrecheckAlreadyClosed, PrecheckOkToProceed, PrecheckRejectedState]
 
 
-# Module-private sentinel — external callers cannot import this name
-# (single underscore is a convention; the factory check is by `is` identity).
+# Module-private sentinel — single-underscore convention only; Python does
+# NOT prevent `from operators.precheck import _VALIDATION_SENTINEL`. The
+# __post_init__ check is by `is` identity, so any caller who imports this
+# name can construct an OwnershipValidatedSnapshot for any PositionSnapshot.
+# Tracked in #487 (sentinel-import surface — wider asymmetry beyond #477).
 _VALIDATION_SENTINEL = object()
 
 
@@ -108,8 +121,14 @@ class OwnershipValidatedSnapshot:
     the snapshot's mutable fields against a fresh re-SELECT — that is enforced
     in PositionClosure.execute() by explicit field-by-field comparison.
 
-    Closes #469 + F6 (Voronov path C + E): the validation guarantee lives in
-    the type, not in a docstring.
+    Originally framed as "Closes #469 + F6 (Voronov path C + E): the
+    validation guarantee lives in the type, not in a docstring." The
+    Voronov registry-coherence rule (post-Serrano) qualifies this: the
+    guarantee is bounded by the weakest organ that enforces it. #469's
+    closure is rung tipo (sentinel `is` check) PLUS rung convención
+    (factory single-call-site by underscore; sentinel module-importable).
+    See #477 (factory side, advanced by PR #486) and #487 (sentinel side,
+    open) for the live coherence follow-ups.
     """
     inner: PositionSnapshot
     _sentinel: object  # must be _VALIDATION_SENTINEL at construction
