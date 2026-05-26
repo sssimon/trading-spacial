@@ -132,7 +132,7 @@ PositionClosure(
 )
 ```
 
-Validation raises `ValueError` before any DB work. Operator is single-use.
+Validation raises `ValueError` before any DB work. **Single-use semantic:** an instance is bound to at most one `__enter__` and at most one `execute()`; both raise `RuntimeError("...single-use")` on re-use. After `__enter__` returns, a second `__enter__` on the same instance raises — regardless of whether `execute()` was called inside the first block.
 
 ### Lifecycle as context manager
 

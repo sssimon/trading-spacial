@@ -110,8 +110,7 @@ class PositionClosure:
     def __enter__(self) -> "PositionClosure":
         if self._entered:
             raise RuntimeError(
-                "PositionClosure is single-use; construct a new instance "
-                "for each close attempt (see #460)"
+                "PositionClosure has already been entered; instances are single-use"
             )
         self._entered = True
         with precheck_connection() as precheck_con:
@@ -175,7 +174,9 @@ class PositionClosure:
 
     def execute(self) -> CloseOutcome:
         if self._consumed:
-            raise RuntimeError("PositionClosure already executed; single-use")
+            raise RuntimeError(
+                "PositionClosure has already been executed; instances are single-use"
+            )
         self._consumed = True
 
         result = self._precheck_result
