@@ -112,26 +112,42 @@ def test_same_key_different_body_raises_duplicate_idempotency_key_error(fresh_db
 
 
 def test_concurrent_same_key_serializes_to_one_position(fresh_db):
-    """Serrano BLOCKER 2 / Aurelius reframe: when the probe and the INSERT
-    share one transaction, two concurrent same-key requests must NOT both
-    INSERT — they serialize through BEGIN IMMEDIATE and the second one
-    sees the cached row.
+    """Serrano BLOCKER 2 / Aurelius reframe + Serrano HIGH 3: when the
+    probe and the INSERT share one transaction, two concurrent same-key
+    requests must NOT both INSERT — they serialize through BEGIN IMMEDIATE
+    and the second one sees the cached row.
+
+    Real barrier semantics (Serrano HIGH 3): `ThreadPoolExecutor.submit`
+    returns control before the worker hits the DB. Without a barrier the
+    workers can fire serially and the test passes for the wrong reason
+    (no contention was ever exercised). We add `threading.Barrier(N)`
+    shared across workers and have each worker call `barrier.wait()`
+    immediately before invoking `BirthRegistrar.register`. That forces
+    all N threads to reach the registrar entry point at roughly the same
+    time, so the post-state assertion (`n == 1`) is genuinely exercising
+    BEGIN IMMEDIATE serialization rather than coincidental ordering.
 
     Threading model: SQLite serializes write-tx at the file via the
     reserved-writer lock + busy_timeout. We launch N workers each calling
     BirthRegistrar.register with the SAME idempotency key and assert
     exactly one row is created.
     """
+    import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from api.positions_birth import BirthRegistrar
     from db.transaction import transaction
 
     N = 8
+    barrier = threading.Barrier(N)
     barrier_results: list[dict] = []
     errors: list[BaseException] = []
 
     def _worker():
         try:
+            # Force genuine concurrency on the registrar entry point:
+            # all N threads block here until the last one arrives, then
+            # they all release together (Serrano HIGH 3).
+            barrier.wait(timeout=30)
             return BirthRegistrar.register(
                 _validated(idempotency_key="k-concurrent")
             )
@@ -252,3 +268,71 @@ def test_f15_log_line_includes_scan_id(fresh_db, caplog):
         "expected POSICION OPENED log line with scan_id=99; got: "
         f"{[r.message for r in caplog.records]}"
     )
+
+
+def test_cache_unreachable_with_idempotency_key_raises_503_and_inserts_nothing(
+    fresh_db,
+):
+    """Serrano HIGH 2 / MEDIUM 8: when the request carries Idempotency-Key
+    AND the cache table is unreachable, the registrar must fail-closed
+    (raise IdempotencyCacheUnavailableError, status_code=503) rather than
+    silently INSERTing a position that the client cannot safely retry.
+
+    Setup: drop `idempotency_keys` after init_db so the schema exists for
+    every other invariant but the cache call inside the registrar's
+    BEGIN IMMEDIATE tx fires sqlite3.OperationalError (table-missing).
+
+    Assertions:
+      - IdempotencyCacheUnavailableError is raised (NOT a silent success).
+      - status_code is 503.
+      - The detail carries the operator triage fields (tenant_id,
+        idempotency_key, cache_error, op).
+      - positions table is unchanged — no orphan INSERT survived the tx
+        rollback.
+    """
+    from api.positions_birth import (
+        BirthRegistrar, IdempotencyCacheUnavailableError,
+    )
+    from db.transaction import transaction
+
+    # Drop the cache table — every other invariant in the schema stays
+    # intact (positions, the partial UNIQUE, the CHECK constraints, etc.).
+    with transaction() as con:
+        con.execute("DROP TABLE idempotency_keys")
+
+    with pytest.raises(IdempotencyCacheUnavailableError) as exc:
+        BirthRegistrar.register(_validated(idempotency_key="k-unreachable"))
+
+    assert exc.value.status_code == 503
+    detail = exc.value.detail
+    assert detail["tenant_id"] == 1
+    assert detail["idempotency_key"] == "k-unreachable"
+    assert detail["op"] == "get"  # the probe-path tripped first
+    assert "cache_error" in detail
+
+    # And no row was created. The tx that opened around the probe rolled
+    # back; the positions table is empty.
+    with transaction() as con:
+        n = con.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+    assert n == 0, f"expected zero positions after fail-closed; got {n}"
+
+
+def test_cache_unreachable_without_idempotency_key_proceeds_normally(fresh_db):
+    """Counterpart to the test above: a request WITHOUT Idempotency-Key
+    must NOT see IdempotencyCacheUnavailableError. The cache path is
+    bypassed entirely (`if validated.idempotency_key:`), so a degraded
+    cache cannot affect non-idempotent INSERTs. The client did not ask
+    for retry-safety; the registrar proceeds as a vanilla INSERT.
+    """
+    from api.positions_birth import BirthRegistrar
+    from db.transaction import transaction
+
+    with transaction() as con:
+        con.execute("DROP TABLE idempotency_keys")
+
+    pos = BirthRegistrar.register(_validated())  # no idempotency_key
+    assert pos["id"] >= 1
+    assert pos["status"] == "open"
+    with transaction() as con:
+        n = con.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+    assert n == 1
