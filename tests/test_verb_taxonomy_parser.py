@@ -1,153 +1,23 @@
-"""Verb-taxonomy parser + tests for PR body verb directives.
+"""Tests for the verb-taxonomy parser (`scripts/verb_taxonomy_parser`).
 
 Promotes the verb taxonomy from rung *convención* (documented in
 `.mex/context/verb-taxonomy.md`) to rung *test* (Phase 1 — parser is
-unit-tested; Phase 2 wiring into a GitHub Action that runs on PR events
-is tracked under #488 sub-task C).
+unit-tested; Phase 2 wires it into a GitHub Action that runs on PR
+events, tracked under #515).
 
-The parser:
-  - Extracts patterns matching `<Verb> #<number>` from a PR body.
-  - Classifies each verb as actionable (`Closes`, `Advances`, `Narrows`,
-    `Bounds`) or non-actionable (`Refs`, `Tracks`).
-  - Detects conflicts: same issue with multiple actionable verbs.
-  - Detects unknown verbs (typos like `Cloesd`, unauthorized verbs like
-    `Resolves` -- the latter is GitHub-recognized but discouraged in
-    this repo for consistency).
-
-The parser is pure Python with no API calls. It can be invoked locally
-before opening a PR, or wired to a CI action via Phase 2.
-
-Closes #488 sub-task C (Phase 1).
+The parser itself lives in `scripts/verb_taxonomy_parser.py` so the
+Phase 2 GitHub Action can import it without depending on `tests/`.
 """
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-
-
-# --- Taxonomy ---
-
-CANONICAL_ACTIONABLE_VERBS: frozenset[str] = frozenset({
-    "Closes", "Advances", "Narrows", "Bounds",
-})
-
-CANONICAL_NON_ACTIONABLE_VERBS: frozenset[str] = frozenset({
-    "Refs", "Tracks",
-})
-
-CANONICAL_VERBS: frozenset[str] = (
-    CANONICAL_ACTIONABLE_VERBS | CANONICAL_NON_ACTIONABLE_VERBS
+from scripts.verb_taxonomy_parser import (
+    CANONICAL_ACTIONABLE_VERBS,
+    CANONICAL_NON_ACTIONABLE_VERBS,
+    CANONICAL_VERBS,
+    GITHUB_CLOSES_SYNONYMS,
+    parse_pr_body,
 )
 
-# GitHub-recognized synonyms for Closes. Accepted by the parser as
-# semantically-Closes but flagged as non-canonical for this repo.
-GITHUB_CLOSES_SYNONYMS: frozenset[str] = frozenset({
-    "Fixes", "Resolves", "Close", "Fix", "Resolve",
-    "Closed", "Fixed", "Resolved",
-})
-
-
-# --- Data types ---
-
-@dataclass(frozen=True)
-class VerbDirective:
-    """A parsed `<Verb> #<number>` directive from a PR body."""
-    verb: str
-    issue: int
-    line_number: int  # 1-indexed
-    is_actionable: bool
-
-
-@dataclass(frozen=True)
-class ParseResult:
-    """The output of parsing a PR body."""
-    directives: tuple[VerbDirective, ...]
-    conflicts: tuple[str, ...]      # human-readable conflict descriptions
-    non_canonical: tuple[str, ...]  # human-readable warnings
-
-
-# --- Parser ---
-
-# Match: word starting with capital letter, followed by space, then `#NNN`.
-# Capture verb (group 1) and issue number (group 2). We capture the verb
-# loosely (any capitalized word) so the parser can detect typos and
-# unauthorized verbs by name, rather than missing them entirely.
-_DIRECTIVE_PATTERN = re.compile(
-    r"\b([A-Z][a-z]+)\s+#(\d+)\b",
-)
-
-
-def parse_pr_body(body: str) -> ParseResult:
-    """Parse a PR body and return all verb directives + conflicts.
-
-    The parser is permissive on verb capture (any capitalized word
-    followed by `#N` matches) so that typos and unauthorized verbs are
-    detected by name rather than silently ignored.
-    """
-    if not body:
-        return ParseResult(directives=(), conflicts=(), non_canonical=())
-
-    lines = body.split("\n")
-    directives: list[VerbDirective] = []
-    non_canonical: list[str] = []
-
-    for line_num, line in enumerate(lines, start=1):
-        for match in _DIRECTIVE_PATTERN.finditer(line):
-            verb = match.group(1)
-            issue = int(match.group(2))
-
-            if verb in CANONICAL_VERBS:
-                directives.append(VerbDirective(
-                    verb=verb,
-                    issue=issue,
-                    line_number=line_num,
-                    is_actionable=verb in CANONICAL_ACTIONABLE_VERBS,
-                ))
-            elif verb in GITHUB_CLOSES_SYNONYMS:
-                directives.append(VerbDirective(
-                    verb=verb,
-                    issue=issue,
-                    line_number=line_num,
-                    is_actionable=True,
-                ))
-                non_canonical.append(
-                    f"line {line_num}: {verb!r} is a GitHub synonym for "
-                    f"Closes but is non-canonical for this repo. Use "
-                    f"Closes #{issue} instead for consistency."
-                )
-            else:
-                # Possible typo or unknown verb. Flag.
-                non_canonical.append(
-                    f"line {line_num}: {verb!r} is not a recognized verb. "
-                    f"Did you mean one of: "
-                    f"{', '.join(sorted(CANONICAL_VERBS))}? "
-                    f"(See .mex/context/verb-taxonomy.md.)"
-                )
-
-    # Detect conflicts: same issue with multiple actionable verbs.
-    actionable_by_issue: dict[int, list[VerbDirective]] = {}
-    for d in directives:
-        if d.is_actionable:
-            actionable_by_issue.setdefault(d.issue, []).append(d)
-
-    conflicts: list[str] = []
-    for issue, ds in actionable_by_issue.items():
-        if len(ds) > 1:
-            verbs_used = [(d.verb, d.line_number) for d in ds]
-            conflicts.append(
-                f"issue #{issue} has {len(ds)} actionable verb directives: "
-                + ", ".join(f"{v} on line {ln}" for v, ln in verbs_used)
-                + ". Pick exactly one. (See .mex/context/verb-taxonomy.md.)"
-            )
-
-    return ParseResult(
-        directives=tuple(directives),
-        conflicts=tuple(conflicts),
-        non_canonical=tuple(non_canonical),
-    )
-
-
-# --- Tests ---
 
 def test_parser_extracts_canonical_actionable_verbs():
     """Each of the four actionable verbs is recognized and classified."""

@@ -1,0 +1,65 @@
+name: Verb taxonomy
+
+# Phase 2 of #488 sub-task C (tracked under #515): promote the verb
+# taxonomy from rung *test* (parser unit-tested) to rung *test* enforced
+# at the PR boundary. The workflow reads each PR body and posts a comment
+# if it finds conflicts (same issue with multiple actionable verbs) or
+# non-canonical verbs (typos, unauthorized synonyms).
+#
+# The workflow is non-blocking by design — findings post a comment but
+# do not fail the check. Acceptance criteria from #515: "Workflow posts
+# comments instead of failing the check (warning level, not blocking)."
+#
+# Opt-out: a PR labelled `skip-verb-taxonomy` skips the job entirely.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+# Cancel in-flight runs on the same PR when the body is edited rapidly.
+# Saves CI minutes; only the latest edit gets a check.
+concurrency:
+  group: verb-taxonomy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write   # to post a comment with findings
+  contents: read         # to checkout the repo
+
+jobs:
+  verb-check:
+    name: Verb taxonomy check
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Skip the job entirely if the PR is labelled with the opt-out.
+    if: "!contains(github.event.pull_request.labels.*.name, 'skip-verb-taxonomy')"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          # No pip install — the parser is pure stdlib (re, dataclasses).
+
+      - name: Run verb taxonomy check
+        id: check
+        env:
+          # Pass body via env var (not inline) to avoid shell injection
+          # from anything a contributor might write in the PR body.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" | python -m scripts.verb_taxonomy_check > comment.md
+          if [ -s comment.md ]; then
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post comment with findings
+        if: steps.check.outputs.has_findings == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body-file comment.md \
+            --repo ${{ github.repository }}
