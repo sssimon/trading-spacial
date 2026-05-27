@@ -9,7 +9,7 @@ triggers:
   - "bypass"
   - "merge blocked"
 edges:
-  - target: conventions.md
+  - target: context/conventions.md
     condition: when the CI failure surfaces an actual invariant violation (not a flake)
 last_updated: 2026-05-26
 ---

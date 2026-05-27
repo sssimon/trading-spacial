@@ -11,7 +11,7 @@ triggers:
   - "verb taxonomy"
   - "pr body"
 edges:
-  - target: ci-discipline.md
+  - target: context/ci-discipline.md
     condition: when a PR body's verb choice intersects with admin-merge or flake-list decisions
 last_updated: 2026-05-26
 ---
