@@ -16,6 +16,11 @@ import type { MacroResponse } from '../api';
 interface StatusBarProps {
   status: StatusResponse | null;
   macro:  MacroResponse | null;
+  /** Count of symbols currently PAUSED or in PROBATION by the kill switch.
+   *  Derived in App.tsx from /health/dashboard. Optional so existing call
+   *  sites that don't have the dashboard yet keep compiling (the cell shows
+   *  "todos activos" / 0 in that case). */
+  killSwitchActive?: number;
 }
 
 type Tone = 'bull' | 'bear' | 'warn' | 'neutral' | 'dim';
@@ -60,7 +65,7 @@ function fundingTone(v: number | null | undefined): Tone {
   return 'neutral';
 }
 
-const StatusBar: React.FC<StatusBarProps> = ({ status, macro }) => {
+const StatusBar: React.FC<StatusBarProps> = ({ status, macro, killSwitchActive }) => {
   const s = status?.scanner_state;
   const scansTotal   = s?.scans_total   ?? 0;
   const signalsTotal = s?.signals_total ?? 0;
@@ -72,9 +77,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ status, macro }) => {
   const fgLabel   = macro?.fear_greed_label ?? '—';
   const funding   = macro?.funding_rate_pct;
 
-  // Kill-switch paused count not yet exposed by /status — placeholder of 0
-  // with "todos activos" until wired (see follow-up note in PR #374).
-  const ksPaused  = 0;
+  const ksPaused  = killSwitchActive ?? 0;
 
   return (
     <div className={styles.strip}>

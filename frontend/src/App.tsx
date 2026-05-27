@@ -247,9 +247,19 @@ const App: React.FC = () => {
     }
   }, [signalForPos]);
 
+  // Count of symbols paused by the kill switch — derived from /health/dashboard
+  // (PAUSED + PROBATION tiers, per #383). Replaces the previous hardcoded 0.
+  const killSwitchActiveCount = useMemo(() => {
+    if (!dashboard) return 0;
+    return dashboard.symbols.reduce(
+      (n, s) => n + (s.state === 'PAUSED' || s.state === 'PROBATION' ? 1 : 0),
+      0,
+    );
+  }, [dashboard]);
+
   // Compose the MacroState the agent (Brief + Dock) consumes — merges the
-  // /macro response with /status scanner counters. Kill-switch count isn't
-  // exposed by /status yet, so we placeholder to 0 — same as StatusBar.
+  // /macro response with /status scanner counters and the per-symbol kill
+  // switch tiers from /health/dashboard.
   const macroState: MacroState = useMemo(() => ({
     regime:           macro?.regime ?? null,
     fng:              macro?.fear_greed_index ?? null,
@@ -257,8 +267,8 @@ const App: React.FC = () => {
     scansToday:       status?.scanner_state?.scans_total   ?? 0,
     signalsToday:     status?.scanner_state?.signals_total ?? 0,
     errors:           status?.scanner_state?.errors        ?? 0,
-    killSwitchActive: 0,
-  }), [macro, status]);
+    killSwitchActive: killSwitchActiveCount,
+  }), [macro, status, killSwitchActiveCount]);
 
   // Auto-tune view shape — our backend's TuneResult is structurally the same
   // as the view's TuneRun, minus the client-derived `hoursAgo` and the
@@ -330,16 +340,29 @@ const App: React.FC = () => {
     return out;
   }, [closedPositions]);
 
-  // PortfolioSummary for PositionsView's hero strip. Derived from /capital
-  // and the open-position pnl_pct totals.
-  // - equity: capital balance, fallback to 0 if /capital 404s
-  // - pnlToday: not exposed by backend yet → 0 with TODO
+  // Today's realized P&L — sum of pnl_usd over positions closed since
+  // 00:00 UTC. Derived client-side (no backend endpoint for intraday delta);
+  // replaces the previous hardcoded 0 (#383).
+  const pnlToday = useMemo(() => {
+    const now = new Date();
+    const todayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return closedPositions.reduce((acc, p) => {
+      if (!p.exit_ts || p.pnl_usd == null) return acc;
+      const t = new Date(p.exit_ts).getTime();
+      if (!Number.isFinite(t) || t < todayStartMs) return acc;
+      return acc + p.pnl_usd;
+    }, 0);
+  }, [closedPositions]);
+
+  // PortfolioSummary for PositionsView's hero strip.
+  // - equity:   capital balance, fallback to 0 if /capital 404s
+  // - pnlToday: sum of realized PnL over today's closed positions (UTC)
   // - drawdown: capital.max_drawdown_pct
   const portfolio: PortfolioSummary = useMemo(() => ({
     equity:   capital?.balance ?? 0,
-    pnlToday: 0,   // TODO: backend doesn't expose intraday delta yet
+    pnlToday,
     drawdown: capital?.max_drawdown_pct ?? 0,
-  }), [capital]);
+  }), [capital, pnlToday]);
 
   // Highest-score symbol with señal=true — used as the empty-state
   // suggestion in PositionsView.
@@ -614,7 +637,7 @@ const App: React.FC = () => {
                   onSymbolClick={setSelectedSymbol}
                   belowPageBar={
                     <>
-                      <StatusBar status={status} macro={macro} />
+                      <StatusBar status={status} macro={macro} killSwitchActive={killSwitchActiveCount} />
                       {AGENT_ENABLED ? (
                         <AgentBrief
                           symbols={symbols}
