@@ -304,6 +304,46 @@ Las siguientes patologías están reconocidas y deferidas — no son parte del c
 - **`entry_ts` window relajada (Serrano MEDIUM 9)** — `[now-7d, now+60s]` rechaza backfills legítimos y clientes con skew >60s. Requiere decisión UX antes de relajar. Sin issue formal aún.
 - **`legacy_no_tenant` consumer filters (Serrano MEDIUM 12)** — el status nuevo está en el schema; ningún consumer del UI / agente filtra rows con ese status explícitamente. Hoy es teórico (rows con `legacy_no_tenant` no son `open`, y las queries más activas filtran por status). Audit de cada consumer pendiente.
 
+## Review process patterns
+
+### Jurisdictional convergence — the 4-way triangulation rule (Voronov 2026-05-27, 8th meta-review on PR #521 / #518)
+
+When multiple roles (Serrano clinical, Voronov categorical, Halberg runtime, plus an empirical reproducer when there is a falsifiable claim) are dispatched against the same artifact and converge on the same verdict, the convergence is **load-bearing only on the central predicate the frontiers were asked about**. Side-findings — the asides each role drops while answering the central question — inherit the epistemic standard of casual claims, not of the convergence.
+
+Voronov's formulation:
+
+> *"The triangulation certifies the central predicate, not the surrounding prose."*
+
+Concrete instance: in the #497 review chain, Halberg's runtime verdict on WAL atomicity (the central question) was correct and load-bearing — his frontier. His side-finding about an `idx_positions_tenant` recreation gap (filed as #518) was wrong — his frontier did not extend to "did the author grep all definitions of the named identifier." Empirical drop+heal test (22/22 indexes healed by `init_db()`) refuted it. The convergence on the central question did not, and could not, extend to the side-finding.
+
+**Operational rule (review side):** when receiving any role's output, mark which claims the role had jurisdiction over and which were asides.
+- Claims within the role's frontier inherit whatever weight the role's verdict carries (and, if convergence with other roles exists on the same claim, the load-bearing convergence too).
+- Asides receive the standard of any casual claim — verify them at the appropriate frontier before acting on them.
+
+**Operational rule (verify side):** before treating a side-finding as load-bearing for a follow-up PR or issue, run the cheapest possible verification at the relevant frontier:
+- Side-finding asserts a runtime property → run the experiment (Halberg's frontier, but cheap-locally).
+- Side-finding asserts a local code fact ("X is created in N places") → grep the identifier.
+- Side-finding asserts a structural claim → apply the structural test the role used for the central verdict.
+
+This rule is the meta-application of the **discrete-cells fallacy** (Voronov's 7th reframe, recorded above and in #497 closing comment): a review's enumeration of side-findings is itself enumeration substituted for closure — *"a reviewer's side-findings inherit the epistemic standard of casual claims, not of the central verdict, and must be re-verified at that standard before being acted on."*
+
+### Range-fixed-point tests — a useful intermediate (Voronov 2026-05-27, same 8th meta-review)
+
+Between **enumeration** (test cells 1..N explicitly) and **closure** (`state_of(state) → S` total over the universe), there is a third shape:
+
+**Range-fixed-point test:** quantify over the function-under-test's own range. `f(state) ⊇ range(f, fresh_state)` under arbitrary perturbation of `state`.
+
+Concrete instance: `tests/test_init_db_index_self_healing.py::test_init_db_recreates_every_user_index_after_drop` drops every index after a successful `init_db()`, re-runs `init_db()`, asserts every index is back. The universe quantified over is "indexes that exist after a successful init_db on an empty DB" — defined by the function under test.
+
+**When to use:**
+- Question is "does f's range include X" — range-fixed-point is the right artifact.
+- Question is "does production have X that f does not promise" — range-fixed-point is **insufficient** (the universe is defined by the function, not by reality); full closure is needed (see #519 territory: declared schema state space).
+
+**When to avoid:**
+- If the failure mode lives outside f's range, the test will not catch it. Confirm the failure mode lives inside f's range before adopting this shape.
+
+Operational: when writing a regression test for a structural defect, name explicitly which of the three shapes (enumeration / range-fixed-point / closure) the test instantiates and why that shape is adequate for the defect.
+
 ## Verify Checklist
 
 Before merging any change touching `db/`, `operators/`, `auth/`, `api/`, or schema migrations:
