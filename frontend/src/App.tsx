@@ -235,9 +235,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (signalForPos) {
       setOpenPositionPrefill({
-        symbol:  signalForPos.symbol,
-        price:   signalForPos.price,
-        scan_id: signalForPos.id,
+        symbol:    signalForPos.symbol,
+        price:     signalForPos.price,
+        scan_id:   signalForPos.id,
+        sl:        signalForPos.sl_precio ?? null,
+        tp:        signalForPos.tp_precio ?? null,
+        direction: signalForPos.direction ?? undefined,
       });
       setOpenPositionModalOpen(true);
       setSignalForPos(null);

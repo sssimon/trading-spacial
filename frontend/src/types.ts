@@ -98,6 +98,11 @@ export interface Signal {
   macro_ok: boolean;
   gatillo: boolean;
   direction?: 'LONG' | 'SHORT' | null;
+  /** Historical SL/TP from sizing_1h at the time of the scan — projected from
+   *  the scan's payload by /signals (Closes #211). Null on pre-direction rows
+   *  or rows without sizing. Used by the OpenPositionModal prefill. */
+  sl_precio?: number | null;
+  tp_precio?: number | null;
 }
 
 export interface SignalsResponse {

@@ -195,6 +195,21 @@ def append_signal_log(rep: dict, scan_id: int):
         log.warning(f"append_signal_log error: {e}")
 
 
+def _payload_dict(row: dict) -> dict:
+    """Parse the JSON `payload` column of a scans row; tolerate corruption.
+
+    Used to project fields the scans schema doesn't dedicate columns for
+    (e.g. direction, sizing_1h.sl_precio/tp_precio) without a migration.
+    """
+    raw = row.get("payload")
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
 @router.get("", summary="Historial de escaneos / señales")
 def list_signals(
     limit:        int             = Query(50,    ge=1, le=500),
@@ -207,27 +222,32 @@ def list_signals(
         rows = get_scans(con, limit=limit, only_signals=only_signals,
                          only_setups=only_setups, since_hours=since_hours,
                          symbol=symbol)
-    return {
-        "total": len(rows),
-        "signals": [
-            {
-                "id":          r["id"],
-                "ts":          r["ts"],
-                "symbol":      r["symbol"],
-                "estado":      r["estado"],
-                "señal":       bool(r["señal"]),
-                "setup":       bool(r["setup"]),
-                "price":       r["price"],
-                "lrc_pct":     r["lrc_pct"],
-                "rsi_1h":      r["rsi_1h"],
-                "score":       r["score"],
-                "score_label": r["score_label"],
-                "macro_ok":    bool(r["macro_ok"]),
-                "gatillo":     bool(r["gatillo"]),
-            }
-            for r in rows
-        ],
-    }
+    items = []
+    for r in rows:
+        # sl_precio/tp_precio/direction live in the payload JSON (not in
+        # dedicated columns) — project them so the frontend can prefill the
+        # OpenPositionModal directly from a signal row (Closes #211).
+        payload = _payload_dict(r)
+        sizing  = payload.get("sizing_1h") or {}
+        items.append({
+            "id":          r["id"],
+            "ts":          r["ts"],
+            "symbol":      r["symbol"],
+            "estado":      r["estado"],
+            "señal":       bool(r["señal"]),
+            "setup":       bool(r["setup"]),
+            "price":       r["price"],
+            "lrc_pct":     r["lrc_pct"],
+            "rsi_1h":      r["rsi_1h"],
+            "score":       r["score"],
+            "score_label": r["score_label"],
+            "macro_ok":    bool(r["macro_ok"]),
+            "gatillo":     bool(r["gatillo"]),
+            "direction":   payload.get("direction"),
+            "sl_precio":   sizing.get("sl_precio"),
+            "tp_precio":   sizing.get("tp_precio"),
+        })
+    return {"total": len(rows), "signals": items}
 
 
 @router.get("/performance", summary="Métricas de éxito de las señales históricas")

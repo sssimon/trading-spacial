@@ -51,6 +51,7 @@ def sample_report():
         "symbol": "BTCUSDT",
         "estado": "✅ SEÑAL + GATILLO CONFIRMADOS — Calidad: PREMIUM ⭐⭐⭐ (sizing 150%)",
         "señal_activa": True,
+        "direction": "LONG",
         "price": 85000.0,
         "lrc_1h": {"pct": 15.5, "upper": 90000.0, "lower": 80000.0, "mid": 85000.0},
         "rsi_1h": 32.5,
@@ -394,6 +395,32 @@ class TestAPIEndpoints:
         r = client.get("/signals")
         assert r.status_code == 200
         assert r.json()["total"] == 1
+
+    def test_signals_projects_sl_tp_direction_from_payload(self, client, sample_report):
+        """#211: /signals must project sl_precio/tp_precio/direction from the
+        scan payload so the frontend can prefill the OpenPositionModal."""
+        import btc_api
+        btc_api.save_scan(sample_report)
+        r = client.get("/signals")
+        assert r.status_code == 200
+        sig = r.json()["signals"][0]
+        assert sig["direction"] == "LONG"
+        assert sig["sl_precio"] == 83300.0
+        assert sig["tp_precio"] == 88400.0
+
+    def test_signals_tolerates_missing_payload_fields(self, client, sample_report):
+        """Pre-#211 rows had no `direction` and possibly no sizing_1h.
+        The endpoint must surface null rather than KeyError-ing."""
+        import btc_api
+        legacy = {k: v for k, v in sample_report.items()
+                  if k not in ("direction", "sizing_1h")}
+        btc_api.save_scan(legacy)
+        r = client.get("/signals")
+        assert r.status_code == 200
+        sig = r.json()["signals"][0]
+        assert sig["direction"] is None
+        assert sig["sl_precio"] is None
+        assert sig["tp_precio"] is None
 
     def test_signals_latest_con_datos(self, client, sample_report):
         import btc_api
