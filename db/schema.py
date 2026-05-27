@@ -948,12 +948,45 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         "(qty IS NOT NULL OR status = 'legacy_unmeasurable')."
     )
     # Defensive cleanup of any orphan positions_new from a prior interrupted
-    # run (#480, Serrano F12 [MEDIUM, OPS]): the idempotency probe at the top
-    # of this function checks for the CHECK constraint on `positions`, NOT for
-    # positions_new existence. If a previous run died between CREATE TABLE
-    # positions_new and ALTER TABLE positions_new RENAME (SIGKILL, OOM, disk
-    # full mid-commit), the next migration would abort on 'table
-    # positions_new already exists'. This DROP IF EXISTS recovers the path.
+    # run (#480, Serrano F12 [MEDIUM, OPS]). The idempotency probe at the top
+    # of this function checks for the CHECK constraint on `positions`, NOT
+    # for positions_new existence. If an orphan positions_new is on disk, the
+    # next migration would abort on 'table positions_new already exists'.
+    # This DROP IF EXISTS recovers the path.
+    #
+    # On the MECHANISM that produces such an orphan:
+    #
+    # A SIGKILL between this `CREATE TABLE positions_new` and the later
+    # `ALTER TABLE positions_new RENAME TO positions` CANNOT leave the orphan
+    # on disk under the current `transaction()` wrapper. All five steps run
+    # inside one `BEGIN IMMEDIATE … COMMIT` against a WAL-mode connection
+    # (db/transaction.py:36-75, journal_mode forced at db/schema.py:78). The
+    # WAL commit-marker frame is written only by COMMIT; recovery on next
+    # open is invisible to readers if the marker is absent. The defensive
+    # DROP is correct, but the SIGKILL-between-CREATE-and-RENAME story does
+    # not describe a reachable failure mode under this wrapper. See the
+    # locked-in regression test at
+    # `tests/test_migration_wal_atomicity.py` and the closing comment of
+    # #497 (Halberg 2026-05-27 runtime verdict).
+    #
+    # Reachable producers of the orphan:
+    #   (b1) Pre-wrapper-era code path that ran CREATE TABLE positions_new
+    #        outside transaction() (auto-commit). The CREATE committed; the
+    #        process died before RENAME. Modern code path can no longer
+    #        produce this, but a pre-existing on-disk orphan survives.
+    #   (b2) `executescript()` slip — it issues an implicit COMMIT before
+    #        running, silently closing the surrounding BEGIN IMMEDIATE. If
+    #        any historical helper called executescript() containing the
+    #        CREATE, the CREATE committed; a crash before the RENAME left
+    #        an orphan. (Hence the "use individual con.execute()" rule
+    #        immediately above this block.)
+    #   (b3) Concurrent writer / manual sqlite3 CLI session that ran half
+    #        the migration in auto-commit mode and died.
+    #
+    # The DROP IF EXISTS defends against ALL THREE. The original Serrano F12
+    # text described it as guarding against mid-tx kill; runtime review
+    # (Halberg 2026-05-27) corrected the attribution. The defense is right;
+    # the comment now matches the runtime.
     con.execute("DROP TABLE IF EXISTS positions_new")
     con.execute(
         """
