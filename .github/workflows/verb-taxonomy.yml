@@ -2,19 +2,24 @@ name: Verb taxonomy
 
 # Phase 2 of #488 sub-task C (tracked under #515): promote the verb
 # taxonomy from rung *test* (parser unit-tested) to rung *test* enforced
-# at the PR boundary. The workflow reads each PR body and posts a comment
-# if it finds conflicts (same issue with multiple actionable verbs) or
-# non-canonical verbs (typos, unauthorized synonyms).
+# at the PR boundary. Two predicates, two jobs:
 #
-# The workflow is non-blocking by design — findings post a comment but
-# do not fail the check. Acceptance criteria from #515: "Workflow posts
+#   - verb-check: on open/edit/sync, post a comment if the PR body has
+#     conflicts (same issue with multiple actionable verbs) or non-canonical
+#     verbs (typos, unauthorized synonyms).
+#   - checkbox-check: on merge, fetch each issue named by a Closes/Fixes/
+#     Resolves directive, parse its checkbox acceptance criteria, post a
+#     comment if any are unchecked.
+#
+# Both jobs are non-blocking by design — findings post a comment but do
+# not fail the check. Per #515 acceptance criteria: "Workflow posts
 # comments instead of failing the check (warning level, not blocking)."
 #
-# Opt-out: a PR labelled `skip-verb-taxonomy` skips the job entirely.
+# Opt-out: a PR labelled `skip-verb-taxonomy` skips both jobs entirely.
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, edited, synchronize, closed]
 
 # Cancel in-flight runs on the same PR when the body is edited rapidly.
 # Saves CI minutes; only the latest edit gets a check.
@@ -25,14 +30,18 @@ concurrency:
 permissions:
   pull-requests: write   # to post a comment with findings
   contents: read         # to checkout the repo
+  issues: read           # checkbox-check fetches issue bodies via gh
 
 jobs:
   verb-check:
     name: Verb taxonomy check
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    # Skip the job entirely if the PR is labelled with the opt-out.
-    if: "!contains(github.event.pull_request.labels.*.name, 'skip-verb-taxonomy')"
+    # Skip on close events (handled by checkbox-check) and skip entirely
+    # if the PR is labelled with the opt-out.
+    if: |
+      github.event.action != 'closed' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-verb-taxonomy')
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +58,49 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           printf '%s' "$PR_BODY" | python -m scripts.verb_taxonomy_check > comment.md
+          if [ -s comment.md ]; then
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post comment with findings
+        if: steps.check.outputs.has_findings == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body-file comment.md \
+            --repo ${{ github.repository }}
+
+  checkbox-check:
+    name: Issue checkbox completion check on merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only run on actual merges (PR closed AND merged==true). Skipped
+    # on close-without-merge (the issues weren't auto-closed). Skipped
+    # if the PR carries the opt-out label.
+    if: |
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-verb-taxonomy')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run checkbox completion check
+        id: check
+        env:
+          # `gh` reads GH_TOKEN automatically for issue fetches inside
+          # the script. Pass the PR body via env to avoid shell injection.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" | python -m scripts.issue_checkbox_check \
+            --repo "${{ github.repository }}" > comment.md
           if [ -s comment.md ]; then
             echo "has_findings=true" >> "$GITHUB_OUTPUT"
           else
