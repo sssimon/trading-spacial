@@ -36,7 +36,6 @@ import { getOhlcv } from '../api';
 import { useAgentStream } from '../agent/useAgentStream';
 import { SURFACE_SYMBOL_DETAIL } from '../agent/surfaces';
 import type { ProposalChip, ToolChip } from '../agent/types';
-import { SCORE_FACTORS } from '../constants/score-factors';
 
 // ── Public types ─────────────────────────────────────────────
 
@@ -74,26 +73,6 @@ function cssVar(name: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback;
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
-}
-
-// TODO: replace when backend exposes symbol.score_components: boolean[].
-// See: frontend/src/constants/score-factors.ts for the 9-factor catalog.
-function buildFactors(symbol: SymbolStatus) {
-  const score   = symbol.score ?? 0;
-  const lrc     = symbol.lrc_pct ?? 50;
-  const trigger = symbol.señal === true;
-  const seed = symbol.symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-
-  const passes = new Set<number>();
-  if (lrc < 25) passes.add(0);   // LRC
-  if (trigger)  passes.add(8);   // TRIG
-  let i = 0;
-  while (passes.size < score && i < 100) {
-    const idx = (seed + i * 7) % 9;
-    passes.add(idx);
-    i++;
-  }
-  return SCORE_FACTORS.map((f, idx) => ({ ...f, pass: passes.has(idx) }));
 }
 
 // Note: the `<<<TOOL:name>>>` marker protocol the Copilot used to parse
@@ -399,25 +378,25 @@ const Copilot: React.FC<CopilotProps> = ({ symbol, agentEnabled }) => {
     surface: SURFACE_SYMBOL_DETAIL,
   });
 
-  // Proactive synthetic greeting computed locally — never goes on the
-  // wire, never enters the rolling transcript. Re-derives whenever
-  // the symbol or its score-relevant fields change.
+  // Proactive greeting computed locally from backend fields — never goes on
+  // the wire, never enters the rolling transcript. Re-derives whenever the
+  // symbol changes. Cites symbol.señal / symbol.gatillo / symbol.estado /
+  // symbol.score / symbol.direction directly — no thresholds invented here,
+  // no mock components fabricated (#528).
   const greeting = useMemo<{ text: string; verdict: Verdict } | null>(() => {
     if (!symbol) return null;
-    const factors = buildFactors(symbol);
-    const passing = factors.filter((f) => f.pass);
-    const failing = factors.filter((f) => !f.pass);
-    const verdict: Verdict =
-      passing.length >= 6 ? 'bull' :
-      passing.length >= 4 ? 'warn' :
-      'bear';
-    const base = symbol.symbol.replace('USDT', '');
-    const text =
-      verdict === 'bull'
-        ? `Detecté **setup firme** en ${base}. Score ${passing.length}/9, gatillo activo. ¿Quieres que te explique los factores o prefieres simular una posición?`
-        : verdict === 'warn'
-        ? `${base} muestra **setup parcial** (${passing.length}/9). Faltan ${failing.length} confirmaciones. ¿Te explico cuáles?`
-        : `${base} **no recomienda entrar ahora** — sólo ${passing.length} de 9 filtros se cumplen. ¿Te muestro qué falta?`;
+    const base   = symbol.symbol.replace('USDT', '');
+    const score  = symbol.score ?? 0;
+    const dir    = symbol.direction ?? 'LONG';
+    const isSig  = symbol.señal === true;
+    const isStp  = symbol.setup === true;
+    const isTrig = symbol.gatillo === true;
+    const verdict: Verdict = isSig ? 'bull' : isStp ? 'warn' : 'bear';
+    const text = isSig
+      ? `Señal ${dir} confirmada en ${base}. Score ${score}/9${isTrig ? ', gatillo activo' : ''}. ¿Quieres simular una posición o ver historial del par?`
+      : isStp
+      ? `${base} en setup ${dir.toLowerCase()}, ${isTrig ? 'gatillo activo' : 'esperando gatillo 5M'}. Score ${score}/9. ¿Te explico qué falta para señal?`
+      : `${base} sin setup ahora — score ${score}/9. ¿Te explico el estado actual?`;
     return { text, verdict };
   }, [symbol]);
 
