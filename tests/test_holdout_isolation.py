@@ -82,6 +82,14 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # near-miss the commit 2 → 3 → 4 cascade demonstrated when a holdout
     # reference moved out of a docstring during a later edit.
     "tests/test_walk_forward_eval.py",
+    # A.2 walk-forward orchestrator + aggregate tests (#276, commit 5).
+    # Module docstring references the locked holdout snapshot to assert
+    # that no fold fixture's `test_end` exceeds `holdout_start`. No
+    # `data/holdout/` access; tune_window and evaluate_window are
+    # monkeypatched with fakes and the aggregator runs on hand-rolled
+    # report fixtures. Pre-emptive whitelist (same near-miss rule as
+    # the commit-4 entry above).
+    "tests/test_walk_forward_aggregate.py",
 }
 
 # Directories that don't contain trading code; scanning them would be noise

@@ -586,6 +586,543 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Orchestrator + aggregate stats (commit 5 of #276)
+# --------------------------------------------------------------------------- #
+#
+# `run_walk_forward` drives the per-window pipeline end-to-end: for each
+# `Window` it calls `tune_window` → `evaluate_window` and collects the
+# per-window report into a single `WalkForwardRun` dict. The loop is
+# best-effort across folds — if a window's tune or eval raises, the error
+# is recorded on that window's report and iteration continues. This keeps
+# a single corrupt symbol cache or a transient I/O hiccup from blackening
+# the whole run.
+#
+# Aggregation rationale (read once, defend later):
+#
+#   - **OOS metric**: drawn from `evaluate_window` output, which projects
+#     `backtest.calculate_metrics` down to the seven keys in
+#     `_REPORT_METRIC_KEYS`. These include `sharpe_ratio`, `profit_factor`,
+#     `max_drawdown_pct`, `win_rate`, `net_pnl`, `total_return_pct`,
+#     `total_trades`.
+#
+#   - **IS metric (load-bearing decision)**: `auto_tune.optimize_symbol`
+#     does NOT expose a Sharpe on its train/validate split. It exposes
+#     `proposal_detail.val_pnl` / `val_pf` (proposed params on validate)
+#     and `current_val_pnl` (current params on validate baseline). The
+#     OOS/IS ratio in this commit is therefore computed on **net_pnl**:
+#       * IS  := the val_pnl of the params actually evaluated downstream
+#                (proposal_detail.val_pnl for CHANGE, current_val_pnl for
+#                KEEP/NO_DATA/KEEP_CURRENT/ERROR).
+#       * OOS := metrics.net_pnl from `evaluate_window`.
+#     The orchestrator attaches `is_pnl_by_symbol` to each window's
+#     report after `evaluate_window` returns — `evaluate_window` is not
+#     mutated (commit-4 contract preserved). Sharpe IS would require
+#     re-running the simulator on the train slice to manufacture an IS
+#     Sharpe — a different scope decision, deferred (see #276 follow-ups).
+#
+#   - **CV across windows**: computed per metric across windows that
+#     produced a numeric value. CV = std / mean. Zero or near-zero mean
+#     yields `None` with an explicit reason so consumers can distinguish
+#     "stable around zero" from "computed and meaningful".
+#
+#   - **Best/worst window**: indexed on `sharpe_ratio` when present (the
+#     OOS metric is available; the tune-side has no Sharpe but that's
+#     irrelevant — best/worst is an OOS comparison). Falls back to
+#     `total_return_pct` when Sharpe is missing across the run.
+
+
+@dataclass(frozen=True)
+class WalkForwardRun:
+    """End-to-end output of `run_walk_forward`.
+
+    Attributes:
+        windows:          The Window list the orchestrator was driven on
+                          (verbatim, in order). Empty list => empty run.
+        window_reports:   List of per-window reports in the same order as
+                          `windows`. Each entry is the dict shape
+                          documented on `evaluate_window`, plus an
+                          optional `error` key when the fold raised
+                          during tune or eval (best-effort policy).
+    """
+
+    windows: list[Window]
+    window_reports: list[dict]
+
+
+def _fold_error_report(window: Window, phase: str, exc: BaseException) -> dict:
+    """Build a minimal per-window report carrying a fold-level error.
+
+    Shape mirrors `evaluate_window`'s envelope so aggregation code does
+    not need to special-case errored folds — empty `results` plus an
+    `error` block at the top.
+    """
+    return {
+        "window_index": window.index,
+        "train_range": {
+            "start": window.train_start.isoformat(),
+            "end": window.train_end.isoformat(),
+        },
+        "test_range": {
+            "start": window.test_start.isoformat(),
+            "end": window.test_end.isoformat(),
+        },
+        "params": {},
+        "results": {},
+        "skipped": [],
+        "error": {
+            "phase": phase,            # "tune" | "evaluate"
+            "type": type(exc).__name__,
+            "message": str(exc),
+        },
+    }
+
+
+def run_walk_forward(windows: list[Window], app_config: dict) -> WalkForwardRun:
+    """Drive `tune_window` → `evaluate_window` over every fold in `windows`.
+
+    The loop is in-process and single-threaded. Process-pool / async
+    orchestration is deferred to a downstream commit (commit 6/7 of
+    #276 if the cost profile justifies it).
+
+    Best-effort policy: a per-window exception in tune or evaluate is
+    recorded on that fold's report under `"error"` and iteration
+    continues. The bala única (#322 holdout) is not at risk here — the
+    test ranges of every fold are bounded above by `holdout_start` via
+    `compute_windows`.
+
+    Args:
+        windows: Output of `compute_windows`. May be empty.
+        app_config: Application config dict, propagated unchanged to
+            `tune_window` and `evaluate_window`.
+
+    Returns:
+        A `WalkForwardRun` carrying the original window list and one
+        report per window (in the same order). Empty windows → empty
+        `window_reports`.
+    """
+    if not windows:
+        return WalkForwardRun(windows=[], window_reports=[])
+
+    reports: list[dict] = []
+    for window in windows:
+        try:
+            tuned = tune_window(window, app_config)
+        except BaseException as exc:  # noqa: BLE001 — best-effort across folds
+            log.warning(
+                "walk_forward: tune_window failed on window %d (%s): %s",
+                window.index, type(exc).__name__, exc,
+            )
+            reports.append(_fold_error_report(window, phase="tune", exc=exc))
+            continue
+
+        try:
+            report = evaluate_window(window, tuned, app_config)
+        except BaseException as exc:  # noqa: BLE001 — best-effort across folds
+            log.warning(
+                "walk_forward: evaluate_window failed on window %d (%s): %s",
+                window.index, type(exc).__name__, exc,
+            )
+            reports.append(_fold_error_report(window, phase="evaluate", exc=exc))
+            continue
+
+        # Enrich the report with the IS val_pnl per symbol so the
+        # aggregator can compute a real OOS/IS ratio. The orchestrator
+        # is the right layer for this: it holds both sides of the
+        # train/test boundary at once. We do NOT mutate `evaluate_window`
+        # (scope strictness for commit 5) — we attach a sibling block
+        # named `is_pnl_by_symbol`, which `_aggregate_oos_is` consumes.
+        report["is_pnl_by_symbol"] = _build_is_pnl_block(tuned, report)
+        reports.append(report)
+
+    return WalkForwardRun(windows=list(windows), window_reports=reports)
+
+
+# Metrics the aggregator computes CV over. Mirrors `_REPORT_METRIC_KEYS`
+# minus `total_trades` (a count, summed instead) — keeping ratio/return
+# metrics that have meaningful dispersion across folds.
+_CV_METRIC_KEYS = (
+    "net_pnl",
+    "profit_factor",
+    "sharpe_ratio",
+    "max_drawdown_pct",
+    "win_rate",
+    "total_return_pct",
+)
+
+
+def _extract_is_pnl(tune_result: dict) -> float | None:
+    """Pick the IS validate-pnl that corresponds to the params actually
+    evaluated downstream by `evaluate_window`.
+
+    Mirrors `_select_params_for_eval` policy:
+      - CHANGE  → `proposal_detail.val_pnl`
+      - KEEP / KEEP_CURRENT / NO_DATA / ERROR → `current_val_pnl`
+
+    Returns None if neither is available (e.g. ERROR with no current
+    baseline). The aggregator records the reason explicitly so a missing
+    IS does not silently collapse the ratio.
+    """
+    if not isinstance(tune_result, dict):
+        return None
+    reco = tune_result.get("recommendation")
+    if reco == "CHANGE":
+        detail = tune_result.get("proposal_detail")
+        if isinstance(detail, dict) and "val_pnl" in detail:
+            try:
+                return float(detail["val_pnl"])
+            except (TypeError, ValueError):
+                return None
+    # Fall back to baseline. May still be 0 or negative — that's a real
+    # IS signal, not a missing value.
+    val = tune_result.get("current_val_pnl")
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _stdev(values: list[float], mean: float) -> float:
+    # Population stdev (N), not sample (N-1). Walk-forward folds are
+    # the whole population the harness produced — not a sample of a
+    # larger one — so dividing by N is the honest call. Single-window
+    # CV is undefined regardless of which divisor we pick; we handle
+    # that upstream by returning `None` with a reason.
+    n = len(values)
+    if n == 0:
+        return 0.0
+    return (sum((v - mean) ** 2 for v in values) / n) ** 0.5
+
+
+# Threshold below which |mean| is treated as "indistinguishable from
+# zero" for CV purposes. Picked conservatively — net_pnl in USD, ratios
+# unitless. Below this we report `None` with reason rather than emit a
+# wildly inflated CV.
+_CV_MEAN_EPSILON = 1e-9
+
+
+def _cv_or_reason(values: list[float]) -> dict:
+    """Compute CV = std/mean over `values`, returning a structured
+    dict so consumers can distinguish "not enough data" from
+    "near-zero mean" from a real number.
+
+    Shape:
+        {"value": float, "n": int} on success.
+        {"value": None, "n": int, "reason": str} on degenerate input.
+    """
+    n = len(values)
+    if n == 0:
+        return {"value": None, "n": 0, "reason": "no_samples"}
+    if n == 1:
+        return {"value": None, "n": 1, "reason": "single_sample"}
+    m = _mean(values)
+    if abs(m) < _CV_MEAN_EPSILON:
+        return {"value": None, "n": n, "reason": "mean_near_zero"}
+    s = _stdev(values, m)
+    return {"value": s / abs(m), "n": n}
+
+
+def _collect_metric_values(
+    window_reports: list[dict], metric_key: str
+) -> list[float]:
+    """Walk every (window, symbol) cell and collect the numeric values
+    of `metric_key` from the projected metrics dict.
+
+    Skips: error sentinels, missing keys, non-numeric values. The
+    aggregator decides per-metric whether to fold these into CV
+    (collected here) or surface them as counters (handled separately).
+    """
+    out: list[float] = []
+    for report in window_reports:
+        results = report.get("results") if isinstance(report, dict) else None
+        if not isinstance(results, dict):
+            continue
+        for sym_entry in results.values():
+            if not isinstance(sym_entry, dict):
+                continue
+            metrics = sym_entry.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            v = metrics.get(metric_key)
+            if isinstance(v, bool):  # bool is an int subclass — guard
+                continue
+            if isinstance(v, (int, float)):
+                out.append(float(v))
+    return out
+
+
+def _window_score(report: dict, metric_key: str) -> float | None:
+    """Aggregate `metric_key` over a single window's per-symbol results
+    by mean. Returns None when no symbol produced a numeric value.
+
+    Best/worst are window-level decisions, so we collapse the per-symbol
+    metrics to one number per window before ranking.
+    """
+    results = report.get("results") if isinstance(report, dict) else None
+    if not isinstance(results, dict) or not results:
+        return None
+    vals: list[float] = []
+    for sym_entry in results.values():
+        if not isinstance(sym_entry, dict):
+            continue
+        metrics = sym_entry.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        v = metrics.get(metric_key)
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            vals.append(float(v))
+    if not vals:
+        return None
+    return _mean(vals)
+
+
+def aggregate_run_stats(run: WalkForwardRun) -> dict:
+    """Compute cross-window summary statistics from a WalkForwardRun.
+
+    Shape:
+        {
+            "n_windows": int,
+            "n_windows_with_trades": int,
+            "n_windows_skipped": int,   # folds that emitted no results
+            "n_windows_errored": int,   # folds that raised in tune/eval
+            "total_trades": int,
+            "oos_is_ratio": {
+                "value": float | None,
+                "n": int,
+                "reason": str,          # when value is None
+                "metric": "net_pnl",
+            },
+            "cv": {
+                metric_key: {"value": float | None, "n": int, "reason"?: str},
+                ...
+            },
+            "best_window": {"index": int, "metric": str, "value": float} | None,
+            "worst_window": {"index": int, "metric": str, "value": float} | None,
+        }
+
+    All ranking decisions are documented at the module top of the
+    `Orchestrator + aggregate stats` block. The defaults are deliberate:
+    OOS/IS on `net_pnl` (because the tuner does not expose IS Sharpe),
+    best/worst on `sharpe_ratio` with a `total_return_pct` fallback.
+    """
+    reports = run.window_reports if isinstance(run, WalkForwardRun) else []
+    n_windows = len(reports)
+
+    # Counters
+    n_with_trades = 0
+    n_errored = 0
+    n_skipped = 0
+    total_trades = 0
+    for r in reports:
+        if not isinstance(r, dict):
+            continue
+        if "error" in r and isinstance(r.get("error"), dict):
+            n_errored += 1
+            continue
+        results = r.get("results") or {}
+        window_trades = 0
+        for sym_entry in results.values():
+            if isinstance(sym_entry, dict):
+                nt = sym_entry.get("n_trades", 0)
+                if isinstance(nt, (int, float)) and not isinstance(nt, bool):
+                    window_trades += int(nt)
+        total_trades += window_trades
+        if window_trades > 0:
+            n_with_trades += 1
+        if not results:
+            # No symbols evaluated at all (e.g. empty tune results, or
+            # degenerate fold). Distinct from "errored" — record it.
+            n_skipped += 1
+
+    # CV per metric
+    cv: dict[str, dict] = {}
+    for key in _CV_METRIC_KEYS:
+        cv[key] = _cv_or_reason(_collect_metric_values(reports, key))
+
+    # OOS/IS on net_pnl. We need both sides per window:
+    #   OOS = window-aggregated net_pnl from `evaluate_window`
+    #   IS  = window-aggregated val_pnl from the tune dict that drove
+    #         this window's eval (which we do NOT carry on the report).
+    # The report does carry `params` per symbol but not the IS pnl. The
+    # honest answer: with the current report shape, IS is recoverable
+    # only at the symbol level if `evaluate_window` later embeds the
+    # tune's val_pnl. Until then, OOS/IS degrades elegantly.
+    oos_values: list[float] = _collect_metric_values(reports, "net_pnl")
+    is_block = _aggregate_oos_is(reports)
+    oos_is_ratio: dict
+    if is_block is None:
+        oos_is_ratio = {
+            "value": None,
+            "n": len(oos_values),
+            "reason": "is_pnl_not_on_report",
+            "metric": "net_pnl",
+        }
+    else:
+        is_total, oos_total, n_pairs = is_block
+        if n_pairs == 0:
+            oos_is_ratio = {
+                "value": None,
+                "n": 0,
+                "reason": "no_paired_windows",
+                "metric": "net_pnl",
+            }
+        elif abs(is_total) < _CV_MEAN_EPSILON:
+            oos_is_ratio = {
+                "value": None,
+                "n": n_pairs,
+                "reason": "is_pnl_near_zero",
+                "metric": "net_pnl",
+            }
+        else:
+            oos_is_ratio = {
+                "value": oos_total / is_total,
+                "n": n_pairs,
+                "metric": "net_pnl",
+            }
+
+    # Best / worst on sharpe with total_return_pct fallback.
+    best_block, worst_block = _best_worst(reports)
+
+    return {
+        "n_windows": n_windows,
+        "n_windows_with_trades": n_with_trades,
+        "n_windows_skipped": n_skipped,
+        "n_windows_errored": n_errored,
+        "total_trades": total_trades,
+        "oos_is_ratio": oos_is_ratio,
+        "cv": cv,
+        "best_window": best_block,
+        "worst_window": worst_block,
+    }
+
+
+def _build_is_pnl_block(tuned: dict, report: dict) -> dict:
+    """Build the per-symbol IS val_pnl block for a window's report.
+
+    Iterates symbols that actually reached the runner (present in
+    `report["params"]`) and pulls the IS pnl from the tune dict using
+    the same policy as `_select_params_for_eval` (CHANGE →
+    proposal_detail.val_pnl, else current_val_pnl). Symbols that the
+    evaluator skipped (no usable params) are deliberately absent from
+    the block — pairing them would be meaningless.
+
+    Returns:
+        {symbol: float} — only symbols where IS pnl is a finite number.
+        Symbols whose IS pnl is missing or non-numeric are dropped (the
+        aggregator's denominator should not silently include zeros it
+        did not measure).
+    """
+    out: dict[str, float] = {}
+    if not isinstance(tuned, dict):
+        return out
+    tune_results = tuned.get("results") or {}
+    if not isinstance(tune_results, dict):
+        return out
+    params_block = report.get("params") if isinstance(report, dict) else {}
+    if not isinstance(params_block, dict):
+        params_block = {}
+    for sym in params_block.keys():
+        is_pnl = _extract_is_pnl(tune_results.get(sym))
+        if is_pnl is None:
+            continue
+        out[sym] = is_pnl
+    return out
+
+
+def _aggregate_oos_is(
+    reports: list[dict],
+) -> tuple[float, float, int] | None:
+    """Compute paired (IS, OOS) net_pnl totals across windows.
+
+    Returns:
+        (is_total, oos_total, n_pairs) when at least one report carries
+        embedded IS pnl per symbol via a top-level `is_pnl_by_symbol`
+        dict (see contract note below). Otherwise None — the caller
+        surfaces `oos_is_ratio.value = None` with reason
+        ``is_pnl_not_on_report``.
+
+    Contract note:
+        `evaluate_window` itself does NOT embed IS val_pnl into its
+        report (that would couple it to the tune dict). The orchestrator
+        attaches `is_pnl_by_symbol` to the report after the eval call —
+        it is the layer that holds both sides of the train/test
+        boundary. If a caller invokes `aggregate_run_stats` on a run
+        built outside `run_walk_forward` (e.g. hand-rolled reports for
+        testing), `is_pnl_by_symbol` may be absent — we degrade with
+        the explicit `is_pnl_not_on_report` reason rather than fabricate
+        a number.
+    """
+    is_total = 0.0
+    oos_total = 0.0
+    n_pairs = 0
+    saw_is_block = False
+    for r in reports:
+        if not isinstance(r, dict) or "error" in r:
+            continue
+        is_block = r.get("is_pnl_by_symbol")
+        if not isinstance(is_block, dict):
+            continue
+        saw_is_block = True
+        results = r.get("results") or {}
+        for sym, is_pnl in is_block.items():
+            if not isinstance(is_pnl, (int, float)) or isinstance(is_pnl, bool):
+                continue
+            sym_entry = results.get(sym)
+            if not isinstance(sym_entry, dict):
+                continue
+            metrics = sym_entry.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            oos = metrics.get("net_pnl")
+            if not isinstance(oos, (int, float)) or isinstance(oos, bool):
+                continue
+            is_total += float(is_pnl)
+            oos_total += float(oos)
+            n_pairs += 1
+    if not saw_is_block:
+        return None
+    return (is_total, oos_total, n_pairs)
+
+
+def _best_worst(reports: list[dict]) -> tuple[dict | None, dict | None]:
+    """Rank windows by aggregated Sharpe (fallback total_return_pct).
+
+    Returns (best, worst) as dicts shaped::
+        {"index": int, "metric": str, "value": float}
+    or (None, None) when no window produced a numeric score under
+    either metric.
+    """
+    for metric in ("sharpe_ratio", "total_return_pct"):
+        scored: list[tuple[int, float]] = []
+        for r in reports:
+            if not isinstance(r, dict) or "error" in r:
+                continue
+            score = _window_score(r, metric)
+            if score is None:
+                continue
+            idx = r.get("window_index")
+            if not isinstance(idx, int):
+                continue
+            scored.append((idx, score))
+        if not scored:
+            continue
+        best_idx, best_val = max(scored, key=lambda t: t[1])
+        worst_idx, worst_val = min(scored, key=lambda t: t[1])
+        return (
+            {"index": best_idx, "metric": metric, "value": best_val},
+            {"index": worst_idx, "metric": metric, "value": worst_val},
+        )
+    return (None, None)
+
+
+# --------------------------------------------------------------------------- #
 # CLI (placeholder — no strategy execution yet)
 # --------------------------------------------------------------------------- #
 
