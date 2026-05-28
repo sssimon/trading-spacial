@@ -75,6 +75,13 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # not a data path). No `data/holdout/` access; assertion messages
     # legitimately name the boundary parameter for fold debugging.
     "tests/test_walk_forward_windows.py",
+    # A.2 walk-forward evaluation tests (#276, commit 4). Module docstring
+    # names `holdout_start` as the upper bound on `test_end` (commit 1
+    # contract reference). No `data/holdout/` access; the runner is mocked
+    # and reads nothing from disk. Pre-emptive whitelist to avoid the
+    # near-miss the commit 2 → 3 → 4 cascade demonstrated when a holdout
+    # reference moved out of a docstring during a later edit.
+    "tests/test_walk_forward_eval.py",
 }
 
 # Directories that don't contain trading code; scanning them would be noise

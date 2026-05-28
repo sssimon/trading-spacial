@@ -366,6 +366,226 @@ def tune_window(window: Window, config: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Per-window evaluation (commit 4 of #276)
+# --------------------------------------------------------------------------- #
+#
+# `evaluate_window` consumes the per-symbol tune output produced by
+# `tune_window` (commit 3) and runs the strategy on the fold's **test
+# range** — the slice `[window.test_start, window.test_end)` that follows
+# `train_end + warmup_gap_days`. The train range was already consumed
+# during tuning; the holdout is never touched.
+#
+# Contract:
+#   - The runner is `auto_tune.run_backtest_with_params`, the same wrapper
+#     that the tuner exercises every iteration. It loads OHLCV via
+#     `get_cached_data`, slices to `sim_start..sim_end`, and goes through
+#     the standard `cfg + symbol_overrides` path when `app_config` is
+#     supplied (gates active: time_limit + participation cap). Re-using
+#     it here keeps tune-vs-eval comparable bar-for-bar.
+#   - `cutoff` is deliberately NOT passed. `cutoff` belongs to the tune
+#     side (no-leakage upper bound on training data). For evaluation we
+#     **want** the test range to be visible — `compute_windows` already
+#     guarantees `window.test_end <= holdout_start` so the holdout
+#     remains untouched regardless.
+#   - Per-symbol params source: prefer `proposed_params` when the tuner
+#     recommended a change, fall back to `current_params` for KEEP /
+#     NO_DATA / ERROR / KEEP_CURRENT. Mirrors the policy that
+#     `tools/retune_pre_holdout.py::_build_params_block` applies when
+#     emitting the drop-in symbol_overrides block.
+#   - One call per symbol in the tune results. Single-threaded; downstream
+#     orchestration owns parallelism (same stance as `tune_window`).
+#
+# Holdout safety (Non-Negotiable #3):
+#   - The test range is bounded above by `holdout_start` (compute_windows
+#     contract). This function consumes that contract; it does not
+#     re-verify it.
+#   - `run_backtest_with_params` loads from `data/ohlcv.db`, never from
+#     `data/holdout/`. No code path here touches the locked snapshot.
+
+
+# Params slots the optimizer tunes. Mirrors the keys that
+# `tools/retune_pre_holdout.py::_build_params_block` emits and that
+# `run_backtest_with_params` consumes.
+_TUNED_PARAM_KEYS = ("atr_sl_mult", "atr_tp_mult", "atr_be_mult")
+
+# Metric keys we surface from `calculate_metrics` into the per-window
+# report. The full metrics dict from the simulator carries ~25 keys; we
+# project to the ones operators read first when comparing folds. Keep
+# this list in sync with `backtest.calculate_metrics` return shape if
+# field names change there.
+_REPORT_METRIC_KEYS = (
+    "total_trades",
+    "net_pnl",
+    "profit_factor",
+    "sharpe_ratio",
+    "max_drawdown_pct",
+    "win_rate",
+    "total_return_pct",
+)
+
+
+def _select_params_for_eval(tune_result: dict) -> dict | None:
+    """Pick the parameter set to evaluate from a single symbol's tune dict.
+
+    Returns the dict shape expected by ``run_backtest_with_params`` (the
+    three ATR keys), or ``None`` when no usable params are available
+    (e.g. recommendation == "ERROR" with no current_params either).
+    """
+    reco = tune_result.get("recommendation")
+    if reco == "CHANGE":
+        proposed = tune_result.get("proposed_params")
+        if isinstance(proposed, dict):
+            return {k: proposed[k] for k in _TUNED_PARAM_KEYS if k in proposed}
+    # KEEP / KEEP_CURRENT / NO_DATA / ERROR all fall back to current.
+    current = tune_result.get("current_params")
+    if isinstance(current, dict):
+        return {k: current[k] for k in _TUNED_PARAM_KEYS if k in current}
+    return None
+
+
+def _project_metrics(metrics: dict) -> dict:
+    """Project the simulator's metrics dict down to the report keys.
+
+    Missing keys are kept missing (not zero-filled) so the consumer can
+    distinguish "not computed" from "computed as zero". The error path
+    where `run_backtest_with_params` returns its sentinel dict
+    (``{"error": ..., "total_trades": 0, "net_pnl": 0, "profit_factor": 0}``)
+    is still legible — the keys that exist will land in the projection.
+    """
+    if not isinstance(metrics, dict):
+        return {}
+    return {k: metrics[k] for k in _REPORT_METRIC_KEYS if k in metrics}
+
+
+def _date_to_sim_datetime(d: date) -> datetime:
+    """Lift a fold boundary `date` to a midnight UTC `datetime`.
+
+    `run_backtest_with_params` expects `sim_start`/`sim_end` as
+    `datetime`. The harness stores boundaries as `date`; midnight UTC is
+    the canonical lift (same convention as `_train_end_to_cutoff`).
+    """
+    if isinstance(d, datetime):
+        return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
+def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
+    """Evaluate per-symbol tuned params on the fold's **test range**.
+
+    The train range was consumed during tuning (commit 3). The locked
+    snapshot is never touched — `compute_windows` (commit 1) guarantees
+    `window.test_end <= holdout_start` and the runner reads from
+    `data/ohlcv.db` exclusively.
+
+    Args:
+        window: Fold descriptor from `compute_windows`. The simulation
+            range is `[window.test_start, window.test_end)`.
+        tuned: The return value of `tune_window(window, config)`. Must
+            carry `tuned["results"][symbol]` for every symbol the
+            harness wants evaluated. Symbol order in the output mirrors
+            the iteration order of `tuned["results"]`.
+        config: Application config dict, same shape as `tune_window`
+            consumes. Passed through to `run_backtest_with_params` so
+            the standard `cfg + symbol_overrides` path stays active
+            (time_limit + participation cap gates on).
+
+    Returns:
+        A per-window report shaped::
+
+            {
+                "window_index": int,
+                "train_range": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"},
+                "test_range":  {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"},
+                "params": {symbol: {atr_sl_mult, atr_tp_mult, atr_be_mult}, ...},
+                "results": {
+                    symbol: {
+                        "n_trades": int,
+                        "metrics": dict,     # projection of calculate_metrics
+                        "regime_tag": None,  # see Note below
+                        "error": str | None, # populated on runner sentinel
+                    },
+                    ...
+                },
+                "skipped": [{"symbol": str, "reason": str}, ...],
+            }
+
+        ``regime_tag`` is always ``None`` here. The simulator emits
+        regime classification per-trade (see ``classify_market_regime``),
+        not a single tag per run. A fold-level summary would require an
+        aggregate decision (mode? majority?) the harness has not yet
+        agreed on; surfacing it now would invent semantics. Leave
+        ``None`` until a downstream commit chooses the rule.
+
+        ``skipped`` lists symbols whose tune dict had no usable params
+        and whose evaluation was therefore skipped (no runner call).
+
+    Empty-range handling:
+        If `window.test_start >= window.test_end` the report is returned
+        with empty `results` and `skipped`. No runner is invoked. This
+        is the harness's response to a degenerate fold at the history
+        edge — callers can detect it via `len(report["results"]) == 0`.
+    """
+    # Local import: keep `auto_tune` (and its pandas / strategy deps)
+    # out of `walk_forward` import time. Same rationale as `tune_window`.
+    import auto_tune  # noqa: PLC0415
+
+    report: dict = {
+        "window_index": window.index,
+        "train_range": {
+            "start": window.train_start.isoformat(),
+            "end": window.train_end.isoformat(),
+        },
+        "test_range": {
+            "start": window.test_start.isoformat(),
+            "end": window.test_end.isoformat(),
+        },
+        "params": {},
+        "results": {},
+        "skipped": [],
+    }
+
+    # Degenerate fold: empty test range. Return the envelope; do not
+    # invoke the runner. `compute_windows` does not produce such folds
+    # today, but the function must remain robust if a caller hand-rolls
+    # a Window for ad-hoc evaluation.
+    if window.test_start >= window.test_end:
+        return report
+
+    sim_start = _date_to_sim_datetime(window.test_start)
+    sim_end = _date_to_sim_datetime(window.test_end)
+
+    tune_results = tuned.get("results", {}) if isinstance(tuned, dict) else {}
+
+    for symbol, sym_tune in tune_results.items():
+        params = _select_params_for_eval(sym_tune)
+        if params is None or len(params) != len(_TUNED_PARAM_KEYS):
+            report["skipped"].append({
+                "symbol": symbol,
+                "reason": "no_usable_params",
+            })
+            continue
+
+        report["params"][symbol] = params
+
+        trades, metrics = auto_tune.run_backtest_with_params(
+            symbol,
+            params,
+            sim_start,
+            sim_end,
+            app_config=config,
+        )
+
+        report["results"][symbol] = {
+            "n_trades": len(trades) if trades else 0,
+            "metrics": _project_metrics(metrics),
+            "regime_tag": None,  # see docstring — intentionally unset
+            "error": metrics.get("error") if isinstance(metrics, dict) else None,
+        }
+
+    return report
+
+
+# --------------------------------------------------------------------------- #
 # CLI (placeholder — no strategy execution yet)
 # --------------------------------------------------------------------------- #
 
