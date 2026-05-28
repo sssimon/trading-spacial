@@ -51,6 +51,11 @@ export interface UseAgentStreamOptions {
   surface: AgentSurface;
 }
 
+export interface GreetingResult {
+  ok:   boolean;
+  text: string;
+}
+
 export interface UseAgentStreamReturn {
   msgs:              ChatMsg[];
   loading:           boolean;
@@ -67,6 +72,19 @@ export interface UseAgentStreamReturn {
    *  point conversationIdRef at the loaded id so the next sendTurn
    *  continues the conversation instead of starting a new one. */
   loadConversation:  (conversation_id: string) => Promise<void>;
+  /** #528 follow-up: fire a one-shot turn whose response NEVER enters
+   *  the rolling transcript and NEVER carries into the next sendTurn's
+   *  apiMessages. Used for the proactive greeting bubble of the
+   *  SymbolDetail copilot — the operator never typed anything to elicit
+   *  it, so it must not appear as a phantom assistant turn in the chat
+   *  history. Uses a fresh conversation_id per call. text_delta events
+   *  accumulate and stream via `onUpdate`. Tool calls, proposals, and
+   *  reasoning channels are intentionally ignored — greeting is text. */
+  streamGreeting:    (
+    prompt:   string,
+    hints:    AgentContextHints | undefined,
+    onUpdate: (text: string) => void,
+  ) => Promise<GreetingResult>;
 }
 
 /**
@@ -231,7 +249,53 @@ export function useAgentStream(opts: UseAgentStreamOptions): UseAgentStreamRetur
     }
   }, []);
 
-  return { msgs, loading, hydrating, sendTurn, resetConversation, confirmProposal, loadConversation };
+  const streamGreeting = useCallback(
+    async (
+      prompt: string,
+      hints: AgentContextHints | undefined,
+      onUpdate: (text: string) => void,
+    ): Promise<GreetingResult> => {
+      // Fresh conversation id — greeting must NOT inherit or contaminate
+      // the operator's rolling conversation. This call is fire-and-collect:
+      // text accumulates locally, never enters `msgs`, never carries into
+      // the next sendTurn's apiMessages.
+      const greetingConvId = newConversationId();
+      const apiMessages: AgentApiMessage[] = [
+        { role: 'user' as const, content: prompt },
+      ];
+      let accumulated = '';
+      try {
+        for await (const ev of streamAgentTurn({
+          conversation_id: greetingConvId,
+          surface:         opts.surface,
+          messages:        apiMessages,
+          context_hints:   hints,
+        })) {
+          if (ev.type === 'text_delta') {
+            accumulated += ev.text;
+            onUpdate(accumulated);
+          } else if (ev.type === 'error') {
+            // Treat any backend error as a failed enrichment — the caller
+            // falls back to the template greeting.
+            return { ok: false, text: accumulated };
+          }
+          // tool_use_*, proposal, reasoning_delta, keepalive, message_end:
+          // intentionally ignored. Greeting is text; proposals/tools would
+          // be a UX surprise in a bubble the operator never asked for.
+        }
+        return { ok: accumulated.length > 0, text: accumulated };
+      } catch {
+        // Network / stream-level failure → fallback to template.
+        return { ok: false, text: accumulated };
+      }
+    },
+    [opts.surface],
+  );
+
+  return {
+    msgs, loading, hydrating, sendTurn, resetConversation, confirmProposal,
+    loadConversation, streamGreeting,
+  };
 }
 
 // ── REST → transcript shape ─────────────────────────────────────────────
