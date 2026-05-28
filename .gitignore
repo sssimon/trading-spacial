@@ -82,6 +82,9 @@ frontend/dist/
 # ── Playwright MCP (screenshots/transcripts de sesiones locales) ──
 .playwright-mcp/
 
+# ── Superpowers (brainstorming visual companion sessions) ──
+.superpowers/
+
 # ── Screenshots ad-hoc en la raíz ─────────────────────────────
 # Solo en la raíz: PNGs en subcarpetas (p. ej. Backtesting_BTCUSDT/) sí se commitean
 /*.png
