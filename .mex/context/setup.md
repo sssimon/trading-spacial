@@ -24,7 +24,7 @@ last_updated: 2026-05-26
 
 - **Python 3** with `pandas`, `numpy`, `requests`, `fastapi`, `uvicorn`
 - **Node.js ≥ 20** + `npm` (for `frontend/` and `mex-agent`)
-- **Docker + Compose** (only for the production frontend + n8n stack)
+- **Docker + Compose** (only for the production frontend + backend stack)
 - **Windows** is required for `watchdog.py` and the Task Scheduler scripts; the rest is cross-platform.
 
 ## Backend (Python)
@@ -34,8 +34,7 @@ pip install pandas numpy requests fastapi uvicorn
 
 python btc_api.py          # REST API at http://localhost:8000
 python btc_scanner.py      # Standalone scanner (runs once, used by API)
-python trading_webhook.py  # Telegram webhook receiver at http://localhost:9000
-python watchdog.py         # Process supervisor (keeps API + webhook alive)
+python watchdog.py         # Process supervisor (keeps API alive — Windows only)
 python btc_report.py       # Generate standalone HTML market report
 ```
 
@@ -52,8 +51,8 @@ npm run preview  # Preview production build
 ## Docker (Production)
 
 ```bash
-docker compose up --build  # Frontend at :3000, n8n at :5678
-# Note: btc_api.py and watchdog.py run separately in Python, not via Docker
+docker compose up --build  # Frontend at :3000, backend at :8000
+# Note: watchdog.py runs separately in Python (Windows-only local-dev supervision).
 ```
 
 ## Tests

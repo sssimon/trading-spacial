@@ -26,7 +26,6 @@ A BTC/USDT automated trading signal system with multi-timeframe technical analys
 # Backend
 python btc_api.py          # REST API at http://localhost:8000
 python btc_scanner.py      # Standalone scanner (runs once, used by API)
-python trading_webhook.py  # Telegram webhook receiver at http://localhost:9000
 python watchdog.py         # Process supervisor (Windows only)
 
 # Tests
@@ -37,7 +36,7 @@ python -m pytest tests/test_api.py -v
 # Frontend
 cd frontend && npm install && npm run dev   # Dev server at http://localhost:5173
 
-# Docker (production frontend + n8n)
+# Docker (production frontend + backend)
 docker compose up --build
 
 # mex memory CLI

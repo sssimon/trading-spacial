@@ -24,10 +24,10 @@ last_updated: 2026-05-26
 
 ## Core Technologies
 
-- **Python 3** with **FastAPI** + **uvicorn** — REST API (`btc_api.py`), webhook receiver (`trading_webhook.py`), watchdog (`watchdog.py`)
+- **Python 3** with **FastAPI** + **uvicorn** — REST API (`btc_api.py`), watchdog (`watchdog.py`)
 - **SQLite** (`signals.db`) — `signals` + `positions` tables; only persistence layer
 - **React 18 + TypeScript + Vite** — frontend dashboard in `frontend/`
-- **Docker Compose** — production frontend (`:3000`) + n8n workflow (`:5678`); `btc_api.py` + `watchdog.py` run as bare Python, not containerised
+- **Docker Compose** — production frontend (`:3000`) + backend (`:8000`); `watchdog.py` runs as bare Python (Windows-only local-dev supervision)
 - **Node.js ≥ 20** — required for frontend build (`vite`, `tsc`) and for the `mex-agent` CLI
 
 ## Key Libraries
@@ -35,8 +35,6 @@ last_updated: 2026-05-26
 - **pandas / numpy** — OHLCV ingestion + indicator math
 - **requests** — Binance / Bybit / Fear & Greed / funding-rate fetchers
 - **FastAPI + Pydantic** — typed HTTP boundary. Pydantic models (e.g. `OpenPositionRequest` with `extra='forbid'`) are the runtime órgano de rechazo for the input layer. See [[conventions.md]] for the four-rung enforcement model.
-- **OpenClaw CLI** — outbound Telegram channel from `trading_webhook.py`
-- **n8n** — alternative outbound flow on port 5678
 - **`pymc`** (skill-installed, `pymc-bayesian-modeling`) — on-demand for Bayesian posteriors at §A.4 checkpoints. **Not invoked for prose-default magnitude updates.**
 
 ## Configuration: `config.json`
@@ -45,7 +43,7 @@ Primary config read by both scanner and API:
 
 ```json
 {
-  "webhook_url": "http://localhost:5678/webhook/crypto-scanner",
+  "webhook_url": "",
   "telegram_chat_id": "...",
   "telegram_bot_token": "...",
   "scan_interval_sec": 300,
@@ -66,7 +64,7 @@ Proxy format when needed: `socks5://127.0.0.1:1080`
 
 ## `security.webhook_allow_private_ips` (#127)
 
-SSRF guard for `webhook_url` (and `notifier.channels.webhook.endpoints`). Default `false` — rejects loopback, RFC1918, link-local, multicast, unspecified, reserved. The localhost-n8n setup shown above (`http://localhost:5678/...`) requires `webhook_allow_private_ips: true`, because `localhost` resolves to `127.0.0.1` which is loopback. Even with the flag on, link-local (`169.254.169.254` / AWS EC2 IMDS) is ALWAYS blocked — the flag relaxes local-network trust, not cloud-metadata exposure. POST /config can carry both fields in one request (`{"webhook_url":"http://localhost:5678/...","security":{"webhook_allow_private_ips":true}}`).
+SSRF guard for `webhook_url` (and `notifier.channels.webhook.endpoints`). Default `false` — rejects loopback, RFC1918, link-local, multicast, unspecified, reserved. Any local or RFC1918 webhook target (e.g. a dev receiver at `http://localhost:8080/hook`) requires `webhook_allow_private_ips: true`. Even with the flag on, link-local (`169.254.169.254` / AWS EC2 IMDS) is ALWAYS blocked — the flag relaxes local-network trust, not cloud-metadata exposure. POST /config can carry both fields in one request (`{"webhook_url":"http://localhost:8080/hook","security":{"webhook_allow_private_ips":true}}`).
 
 ## What We Deliberately Do NOT Use
 

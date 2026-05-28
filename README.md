@@ -77,7 +77,7 @@ For the why behind these bounds, see [`METHODOLOGY.md`](METHODOLOGY.md) § Struc
 | Auth | JWT, per-user setup, password reset by shell only |
 | Data sources | Binance Futures (primary), Bybit (fallback), CoinGecko (symbol metadata), Alternative.me (Fear & Greed) |
 | Production | Linux EC2 (`trading.sdar.dev`), Caddy reverse proxy, GitHub Actions deploy |
-| Local dev | Windows or Linux/macOS, Docker for frontend + n8n |
+| Local dev | Windows or Linux/macOS, Docker for frontend + backend |
 
 ---
 
@@ -246,7 +246,7 @@ Copy and fill in `config.json` (excluded from git — never commit tokens):
 
 ```json
 {
-  "webhook_url": "http://localhost:5678/webhook/crypto-scanner",
+  "webhook_url": "",
   "telegram_chat_id": "YOUR_CHAT_ID",
   "telegram_bot_token": "YOUR_BOT_TOKEN",
   "scan_interval_sec": 300,
@@ -265,7 +265,7 @@ Copy and fill in `config.json` (excluded from git — never commit tokens):
 
 Proxy format (if needed): `socks5://127.0.0.1:1080`
 
-**Note on `security.webhook_allow_private_ips`** (#127): default is `false` — the SSRF guard blocks loopback / RFC1918 / link-local webhook URLs. The localhost-n8n example above requires the flag set to `true`. Even with the flag enabled, link-local (e.g. `http://169.254.169.254/` AWS EC2 metadata endpoint) is always blocked.
+**Note on `security.webhook_allow_private_ips`** (#127): default is `false` — the SSRF guard blocks loopback / RFC1918 / link-local webhook URLs. Any local or private-network webhook target (e.g. a dev receiver at `http://localhost:8080/hook`) requires the flag set to `true`. Even with the flag enabled, link-local (e.g. `http://169.254.169.254/` AWS EC2 metadata endpoint) is always blocked.
 
 ---
 
@@ -314,7 +314,6 @@ python -m pytest tests/test_api.py -v
 ├── btc_api.py                 # FastAPI server (port 8000), scanner thread
 ├── btc_scanner.py             # Signal engine: indicators, scoring, regime detection
 ├── btc_report.py              # Standalone HTML market report generator
-├── trading_webhook.py         # Webhook receiver → Telegram (legacy path, port 9000)
 ├── watchdog.py                # Process supervisor — ⚠️ Windows-only; Linux prod
 │                              #   supervises via systemd (not yet in repo, tracked
 │                              #   in audit follow-ups)

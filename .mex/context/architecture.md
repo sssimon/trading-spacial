@@ -31,8 +31,9 @@ Binance API (Bybit fallback)
   → btc_scanner.py: fetch OHLCV, calculate LRC/RSI/BB/SMA100
   → Multi-timeframe scoring (0–9)
   → btc_api.py: store to signals.db (SQLite), evaluate notification filters
-  → trading_webhook.py (port 9000) → OpenClaw CLI → Telegram
-     OR n8n workflow (port 5678) → Telegram node
+  → notifier.notify(event)
+       → notifier/channels/telegram.py → Telegram Bot API (per-user, multi-tenant)
+       → notifier/channels/webhook.py  → optional outbound webhook_url (if configured)
 ```
 
 ## Components
@@ -41,8 +42,7 @@ Binance API (Bybit fallback)
 |------|---------|------|
 | `btc_api.py` | FastAPI REST server, DB management, scanner thread | 8000 |
 | `btc_scanner.py` | Signal generation engine (indicators + scoring) | — |
-| `trading_webhook.py` | Webhook receiver → Telegram via OpenClaw CLI | 9000 |
-| `watchdog.py` | Process supervisor for API + webhook (Windows only) | — |
+| `watchdog.py` | Process supervisor for API (Windows only) | — |
 | `btc_report.py` | Standalone HTML report generator (Binance Futures, ETF flows) | — |
 | `frontend/` | React 18 dashboard (symbols grid, signals table, positions) | 3000/5173 |
 | `signals.db` | SQLite: `signals` + `positions` tables | — |
