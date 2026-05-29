@@ -80,7 +80,15 @@ def _open_configured_connection() -> sqlite3.Connection:
     db_file = _resolve_db_file()
     con = sqlite3.connect(db_file, isolation_level=None)
     con.row_factory = _DictRow
-    con.execute("PRAGMA busy_timeout = 5000")
+    # busy_timeout raised 5000 -> 15000 after a production lock-contention
+    # incident (2026-05-29): the scanner's per-scan kill-switch decision burst
+    # (~80 BEGIN IMMEDIATE writes/cycle on a 460MB DB) held the writer lock long
+    # enough that read endpoints routed through transaction() (also
+    # BEGIN IMMEDIATE) timed out at 5s and returned 500. Read endpoints should
+    # use snapshot_connection() (WAL-concurrent, no writer lock) — this longer
+    # timeout is the safety net for the writes + any remaining BEGIN IMMEDIATE
+    # readers. Do NOT lower below 15000 without addressing the write-burst load.
+    con.execute("PRAGMA busy_timeout = 15000")
     return con
 
 

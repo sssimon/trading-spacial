@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
 from db.capital import db_get_capital, db_upsert_capital
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.capital")
 
@@ -30,7 +30,11 @@ class CapitalPutBody(BaseModel):
 
 @router.get("", summary="Get current capital state for current tenant")
 def get_capital(tenant_id: int = Depends(get_current_tenant_id)):
-    with transaction() as con:
+    # READ via snapshot_connection (WAL-concurrent, query_only, NO BEGIN
+    # IMMEDIATE) — a read must not contend for the writer lock. Using
+    # transaction() here 500'd under the scanner's write burst (prod incident
+    # 2026-05-29). PUT /capital below keeps transaction() (it writes).
+    with snapshot_connection() as con:
         row = db_get_capital(con, tenant_id)
     if row is None:
         raise HTTPException(

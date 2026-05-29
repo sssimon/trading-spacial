@@ -247,3 +247,36 @@ def test_PrecheckConn_and_SnapshotConn_are_distinct_NewTypes():
         assert wrapped_b is con
     finally:
         con.close()
+
+
+def test_snapshot_read_succeeds_while_writer_holds_lock(fresh_db):
+    """Regression for the 2026-05-29 prod lock-contention incident.
+
+    A read via snapshot_connection() must succeed while another connection
+    holds the writer lock (BEGIN IMMEDIATE) — WAL permits concurrent readers.
+    The read endpoints (GET /positions, GET /capital) previously routed reads
+    through transaction() (which itself does BEGIN IMMEDIATE); under the
+    scanner's per-scan write burst they timed out and returned 500. A read must
+    never contend for the writer lock.
+    """
+    from db.connection import _open_configured_connection
+    from db.transaction import snapshot_connection
+
+    # Seed one committed row (visible to the snapshot read).
+    with transaction() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS _lock_probe (id INTEGER PRIMARY KEY, v TEXT)")
+        con.execute("INSERT INTO _lock_probe (v) VALUES ('committed')")
+
+    # Hold the writer lock with an uncommitted write.
+    writer = _open_configured_connection()
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("INSERT INTO _lock_probe (v) VALUES ('uncommitted')")
+    try:
+        # Must NOT block or raise "database is locked"; sees the committed
+        # snapshot (1 row), not the writer's pending row.
+        with snapshot_connection() as con:
+            n = con.execute("SELECT COUNT(*) FROM _lock_probe").fetchone()[0]
+        assert n == 1
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
