@@ -12,6 +12,7 @@ registry hooks (``claim_trial`` / ``finalize_trial``) ARE module-level imports i
 """
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -143,3 +144,42 @@ def test_run_backtest_with_params_no_trial_source_does_not_register(monkeypatch)
     # ...but no trial was claimed or finalized (this is the eval/research path).
     assert claims == []
     assert finals == []
+
+
+def test_main_per_symbol_loop_propagates_operational_error(monkeypatch):
+    """A trial-registry durability failure (sqlite3.OperationalError) raised mid-
+    grid must ABORT the whole tune loudly — NOT be swallowed by the per-symbol
+    `except Exception` that degrades non-DB errors to an ERROR row.
+
+    The registry (claim_trial / finalize_trial) raises sqlite3.OperationalError
+    only after its bounded retry budget is exhausted (persistent lock / disk
+    full / corruption). Burying that would produce a partial tune report with a
+    silent N under-count (#278 Part 1)."""
+    import auto_tune as at
+
+    monkeypatch.setattr(at, "load_config", lambda: {"auto_tune": {"seed": 42}})
+    monkeypatch.setattr(at, "get_portfolio_symbols", lambda cfg: ["BTCUSDT", "ETHUSDT"])
+    monkeypatch.setattr(at, "initialize_seed", lambda cfg: 42)
+
+    seen = []
+
+    def boom_optimize(sym, config, today=None, *, cutoff=None):
+        seen.append(sym)
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(at, "optimize_symbol", boom_optimize)
+    # Guard: if the swallow ever wins, generate_report would be reached and the
+    # test would fail on the wrong assertion. Make it loud if reached.
+    monkeypatch.setattr(
+        at, "generate_report",
+        lambda *a, **k: pytest.fail("OperationalError was swallowed — main() "
+                                    "reached generate_report instead of aborting"),
+    )
+
+    monkeypatch.setattr("sys.argv", ["auto_tune.py", "--dry-run"])
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        at.main()
+
+    # Aborted on the FIRST symbol — did not continue to the second.
+    assert seen == ["BTCUSDT"]

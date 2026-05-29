@@ -723,6 +723,15 @@ def main():
                 print(f"  {sym}: CAMBIAR -> mejora +{d['improvement_pct']}%")
             else:
                 print(f"  {sym}: mantener params actuales")
+        except sqlite3.OperationalError:
+            # Trial-registry durability failure (#278 Part 1): claim_trial /
+            # finalize_trial raise sqlite3.OperationalError only after the
+            # bounded retry budget is exhausted (persistent lock, disk full,
+            # corruption). Swallowing it here would bury a silent N under-count
+            # and emit a partial tune report. Abort the whole tune loudly. Must
+            # precede the generic Exception handler below. Non-DB per-symbol
+            # errors still degrade gracefully (ERROR row + continue).
+            raise
         except Exception as e:
             log.error(f"  {sym}: ERROR - {e}")
             results.append({
