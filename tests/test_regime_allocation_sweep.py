@@ -1153,3 +1153,55 @@ def test_run_jobs_parallel_skips_trials_for_non_cell_workers(monkeypatch):
     )
     assert claims == []  # baselines do not produce trials
 # (AST scanner over all non-whitelisted modules). No need to duplicate here.
+
+
+def test_run_jobs_parallel_tolerates_finalize_failure(monkeypatch):
+    """POST-COMPUTE finalize failure must NOT discard the in-memory results.
+
+    The finalize loop runs after pool.map returns (all backtest compute done).
+    If finalize_trial raises (e.g. persistent DB lock), the sweep must still
+    RETURN the results list — hours of compute must not be lost, and the claim
+    (cheap, pre-compute) must still have happened. The orphan 'pending' rows
+    survive as N evidence.
+    """
+    import tools.regime_allocation_sweep as ras
+
+    class _FakePool:
+        def __init__(self, n): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def map(self, fn, jobs): return [fn(j) for j in jobs]
+
+    monkeypatch.setattr(ras, "Pool", _FakePool)
+
+    claims = []
+    monkeypatch.setattr(ras, "claim_trial",
+                        lambda **kw: (claims.append(kw), len(claims))[1])
+
+    def boom_finalize(tid, **kw):
+        raise RuntimeError("database is locked (persistent)")
+
+    monkeypatch.setattr(ras, "finalize_trial", boom_finalize)
+
+    expected = [{"sharpe_ratio": 1.0}, {"sharpe_ratio": 2.0}]
+    seq = iter(expected)
+
+    def fake_cell(job):
+        return next(seq)
+
+    monkeypatch.setattr(ras, "_process_regime_allocation_cell", fake_cell)
+
+    jobs = [
+        {"symbol": "BTCUSDT", "sub_window": "A", "vol_target": 0.30},
+        {"symbol": "ETHUSDT", "sub_window": "A", "vol_target": 0.30},
+    ]
+    # Must NOT raise even though every finalize_trial raises.
+    results = ras._run_jobs_parallel(
+        jobs, workers=1, label="test", worker_fn=fake_cell,
+    )
+
+    # Results (the compute) survive the finalize failures.
+    assert results == expected
+    # Claim happened for both jobs before compute (cheap, pre-compute, loud).
+    assert len(claims) == 2
+    assert all(c["source"] == "regime_allocation_sweep" for c in claims)

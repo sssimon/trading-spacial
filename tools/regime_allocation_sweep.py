@@ -1158,16 +1158,31 @@ def _run_jobs_parallel(
     )
 
     if produces_trials:
+        # POST-COMPUTE finalize loop runs AFTER pool.map returns — every
+        # backtest cell has already executed and `results` is in memory. A
+        # finalize failure here (e.g. a persistent DB lock) must NOT propagate:
+        # that would discard hours of compute AND leave completed trials stuck
+        # 'pending'. Tolerate per-trial finalize failures — the orphan 'pending'
+        # row still counts toward N, and `results` is returned regardless. The
+        # CLAIM loop above stays LOUD on purpose: a claim failure before compute
+        # is cheap to abort, so it is allowed to propagate.
         for tid, res in zip(trial_ids, results):
             if tid is None:
                 continue
             err = res.get("error") if isinstance(res, dict) else None
-            if err:
-                finalize_trial(tid, status="failed", error=str(err))
-            else:
-                finalize_trial(
-                    tid, status="ok",
-                    metrics=res if isinstance(res, dict) else None,
+            try:
+                if err:
+                    finalize_trial(tid, status="failed", error=str(err))
+                else:
+                    finalize_trial(
+                        tid, status="ok",
+                        metrics=res if isinstance(res, dict) else None,
+                    )
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(
+                    f"[regime_allocation_sweep] finalize_trial failed for "
+                    f"trial {tid}: {type(e).__name__}: {e} (orphan 'pending' "
+                    f"row preserved; compute results kept)\n"
                 )
 
     _emit_worker_error_summary(results)
