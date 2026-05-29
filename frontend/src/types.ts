@@ -235,6 +235,7 @@ export interface PositionCreatePayload {
   symbol:      string;
   direction?:  PositionDirection;
   entry_price: number;
+  qty:         number;            // REQUIRED by the backend OpenPositionRequest
   sl_price?:   number | null;
   tp_price?:   number | null;
   size_usd?:   number | null;

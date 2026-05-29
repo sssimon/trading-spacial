@@ -66,6 +66,7 @@ const OpenPositionModal: React.FC<OpenPositionModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!entry) { setError('El precio de entrada es requerido'); return; }
+    if (!size || qty <= 0) { setError('El capital (USD) debe ser mayor a 0'); return; }
     setSaving(true);
     setError(null);
     try {
@@ -73,6 +74,10 @@ const OpenPositionModal: React.FC<OpenPositionModalProps> = ({
         symbol,
         direction,
         entry_price: entry,
+        // qty is REQUIRED by the backend OpenPositionRequest (it forbids extra
+        // fields and cross-validates qty * entry_price ≈ size_usd). Send the
+        // full-precision computed value, not the rounded display value.
+        qty,
         sl_price:   sl || null,
         tp_price:   tp || null,
         size_usd:   size || null,
