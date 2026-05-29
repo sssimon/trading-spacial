@@ -761,6 +761,8 @@ git commit -m "feat(trials): register trials in optimize_new_tokens sweep (Advan
 
 ## Task 6: Wire `auto_tune.run_backtest_with_params`
 
+> **AMENDED 2026-05-29 (operator-confirmed):** Verification point 1 surfaced that `run_backtest_with_params` has 5 EXTERNAL callers — `walk_forward.py:847` (EVALUATION phase, not selection) + 4 research tools (`r1`/`r2`/`r3`/`q2`). Registering unconditionally would pull them into N as `auto_tune` trials — out of the agreed "core 4" scope AND a methodology bug (counting evaluation runs as selection trials corrupts the N denominator). FIX: registration is now OPT-IN via a keyword-only `trial_source: str | None = None`. The function claims/finalizes ONLY when `trial_source is not None` (using it as the `source`). auto_tune's 3 internal callers pass `trial_source="auto_tune"`; the 5 external callers keep the default `None` and register nothing. `_finalize_from_metrics(trial_id, ...)` early-returns `(trades, metrics)` when `trial_id is None`; the `except` finalizes only `if trial_id is not None`, then re-raises. Implemented in commit `794747e`.
+
 **Files:**
 - Modify: `auto_tune.py` (`run_backtest_with_params` — the single chokepoint, 3 callers)
 - Test: `tests/test_auto_tune_trials.py` (create)
