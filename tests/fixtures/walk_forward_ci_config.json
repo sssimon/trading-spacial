@@ -1,0 +1,15 @@
+{
+  "_comment": "Minimal app_config fixture for the walk-forward CI smoke job (#276). Two symbols from btc_scanner.DEFAULT_SYMBOLS with full ATR overrides so frozen_params_for_window keeps them. Numbers are demo placeholders — do NOT cite as tuned production values (Non-Negotiable #5: pre-#223/#224 baselines inflated). The smoke job validates wiring only.",
+  "symbol_overrides": {
+    "BTCUSDT": {
+      "atr_sl_mult": 1.5,
+      "atr_tp_mult": 3.0,
+      "atr_be_mult": 1.0
+    },
+    "ETHUSDT": {
+      "atr_sl_mult": 1.4,
+      "atr_tp_mult": 2.8,
+      "atr_be_mult": 0.9
+    }
+  }
+}

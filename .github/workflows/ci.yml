@@ -52,6 +52,63 @@ jobs:
         # data/ohlcv.db (705 MB, gitignored) auto-skip via @pytest.mark.skipif.
         run: pytest -m "not network"
 
+  walk-forward-smoke:
+    name: Walk-forward (CI smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Smoke job for #276. Validates that the harness CLI imports cleanly,
+    # parses args, computes windows on a degenerate (zero-fold) range,
+    # and exits 1 with the documented "no windows fit" branch — without
+    # touching data/ohlcv.db (gitignored, 705 MB) or invoking the real
+    # auto_tune.optimize_symbol. The point is wiring, not metrics.
+    # Real-window pipeline coverage lives in tests/test_walk_forward_main.py
+    # under the pytest suite (Property 3) — that path stubs auto_tune so
+    # the runner is never reached.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        # Same requirements-dev.txt as the backend job — `walk_forward`
+        # only needs the runtime deps + dateutil, but installing dev
+        # avoids a second resolver pass.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run walk-forward CLI smoke
+        # Degenerate range: initial_train_months > available history →
+        # compute_windows returns []. The CLI's "no windows" branch
+        # surfaces rc=1 and prints a warning, no OHLCV is read, no
+        # auto_tune call is made. We assert rc == 1 explicitly: any
+        # other exit code means the wiring broke.
+        run: |
+          set +e
+          python walk_forward.py \
+            --history-start 2023-01-01 \
+            --history-end   2023-02-01 \
+            --holdout-start 2026-01-01 \
+            --initial-train-months 12 \
+            --test-months 3 \
+            --step-months 3 \
+            --execute \
+            --ci-mode \
+            --config-path tests/fixtures/walk_forward_ci_config.json
+          rc=$?
+          set -e
+          if [ "$rc" != "1" ]; then
+            echo "::error::walk_forward.py smoke expected rc=1 (zero-window range), got rc=$rc"
+            exit 1
+          fi
+          echo "walk_forward smoke OK (rc=1 = no windows fit, as expected)"
+
   frontend:
     name: Frontend (tsc + vitest + build)
     runs-on: ubuntu-latest
