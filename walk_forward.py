@@ -471,7 +471,271 @@ def _date_to_sim_datetime(d: date) -> datetime:
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 
-def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
+# --------------------------------------------------------------------------- #
+# Per-window regime composite (#536, completes #276)
+# --------------------------------------------------------------------------- #
+#
+# Residual 1 — `regime_tag` for the window: a single BULL/BEAR/NEUTRAL tag.
+# Paso 0 (agreed in #536): the aggregation rule is **composite_mean** — build
+# the daily composite over the test window, then classify its mean. Composite
+# = 40% price + 30% F&G + 30% funding (mode='global' weights from
+# strategy.regime), reusing the production scorers so the window composite is
+# byte-identical to live regime detection.
+#
+# Residual 2 — `per_regime` breakdown: bucket the window's trades by the
+# composite regime active on each trade's entry day. Same taxonomy as the
+# window tag (agreed in #536) — one vocabulary across the whole report.
+#
+# Holdout safety (Non-Negotiable #2/#3): these helpers are pure — they read no
+# data source. The caller loads the three frames from NON-HOLDOUT origins
+# (`data/ohlcv.db`, `data/backtest/*.csv`); `compute_windows` bounds every
+# `test_end <= holdout_start`, so the composite only ever indexes pre-holdout
+# dates. No `open_holdout`, no `"holdout"` literal.
+
+# Composite weights and thresholds mirror strategy.regime mode='global'.
+_REGIME_W_PRICE = 0.40
+_REGIME_W_FNG = 0.30
+_REGIME_W_FUNDING = 0.30
+_REGIME_BULL_ABOVE = 60
+_REGIME_BEAR_BELOW = 40
+_REGIME_NEUTRAL_SCORE = 50  # F&G / funding fallback when history misses a day
+
+
+def _classify_regime_score(score: float) -> str:
+    """Map a 0-100 composite score to BULL/BEAR/NEUTRAL.
+
+    Thresholds mirror `strategy.regime._compute_local_regime`: strictly above
+    60 is BULL, strictly below 40 is BEAR, the closed band [40, 60] is NEUTRAL.
+    """
+    if score > _REGIME_BULL_ABOVE:
+        return "BULL"
+    if score < _REGIME_BEAR_BELOW:
+        return "BEAR"
+    return "NEUTRAL"
+
+
+def _normalize_daily_index(df):
+    """Return a copy of `df` with a tz-naive, sorted DatetimeIndex, or None
+    when the frame is empty / has no usable index."""
+    import pandas as pd  # noqa: PLC0415 — keep pandas out of import time
+    if df is None or len(df) == 0:
+        return None
+    out = df.copy()
+    idx = pd.DatetimeIndex(out.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    out.index = idx
+    return out.sort_index()
+
+
+def _daily_value_series(df, col: str, agg: str = "last"):
+    """Collapse a frame to a tz-naive, day-indexed Series of `col`.
+
+    `agg` controls intra-day aggregation: 'last' for an already-daily series
+    (F&G), 'mean' for sub-daily samples (8h funding). Returns None when the
+    frame is empty or lacks the column.
+    """
+    import pandas as pd  # noqa: PLC0415
+    if df is None or len(df) == 0 or col not in getattr(df, "columns", []):
+        return None
+    s = df[col].copy()
+    idx = pd.DatetimeIndex(s.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    s.index = idx
+    s = s.sort_index()
+    daily = s.resample("1D").mean() if agg == "mean" else s.resample("1D").last()
+    return daily.dropna()
+
+
+def _value_asof(series, day):
+    """Forward-filled value of `series` at/before `day`, or None."""
+    import pandas as pd  # noqa: PLC0415
+    if series is None or len(series) == 0:
+        return None
+    try:
+        val = series.asof(day)
+    except (TypeError, KeyError):
+        return None
+    if val is None or pd.isna(val):
+        return None
+    return val
+
+
+def _build_window_regime_series(btc_daily, fng_df, funding_df, test_start, test_end):
+    """Per-day composite regime score over ``[test_start, test_end)``.
+
+    Pure: takes already-loaded historical frames and returns a DataFrame
+    indexed by calendar day (left-inclusive of the test range) with columns
+    ``price``, ``fng``, ``funding``, ``composite``. Reads no data source.
+
+    - ``price``    : `strategy.regime._compute_price_score` on the BTC daily
+      history up to and including each day (lookback honoured; <200 bars
+      yields the production 100 fallback).
+    - ``fng``      : `_compute_fng_score` of the day's Fear & Greed value
+      (forward-filled; neutral 50 when history misses the day).
+    - ``funding``  : `_compute_funding_score` of the day's mean funding rate
+      (forward-filled; neutral 50 when history misses the day).
+    - ``composite``: 0.40*price + 0.30*fng + 0.30*funding (global weights).
+
+    Returns an empty DataFrame when the window has no days.
+    """
+    import pandas as pd  # noqa: PLC0415
+    from strategy.regime import (  # noqa: PLC0415
+        _compute_fng_score,
+        _compute_funding_score,
+        _compute_price_score,
+    )
+
+    # Degenerate test range → empty series. `date_range(s, s, inclusive="left")`
+    # still yields one element in pandas, so guard the empty/inverted case
+    # explicitly (mirrors `evaluate_window`'s `test_start >= test_end` check).
+    if pd.Timestamp(test_start) >= pd.Timestamp(test_end):
+        return pd.DataFrame(columns=["price", "fng", "funding", "composite"])
+
+    days = pd.date_range(
+        pd.Timestamp(test_start), pd.Timestamp(test_end), freq="D", inclusive="left"
+    )
+    if len(days) == 0:
+        return pd.DataFrame(columns=["price", "fng", "funding", "composite"])
+
+    btc = _normalize_daily_index(btc_daily)
+    fng_daily = _daily_value_series(fng_df, "fng", agg="last")
+    funding_daily = _daily_value_series(funding_df, "rate", agg="mean")
+
+    rows = []
+    for d in days:
+        price_score = _compute_price_score(btc.loc[:d]) if btc is not None else 100
+        fng_val = _value_asof(fng_daily, d)
+        funding_val = _value_asof(funding_daily, d)
+        fng_score = (
+            _compute_fng_score(int(fng_val)) if fng_val is not None
+            else _REGIME_NEUTRAL_SCORE
+        )
+        funding_score = (
+            _compute_funding_score(float(funding_val)) if funding_val is not None
+            else _REGIME_NEUTRAL_SCORE
+        )
+        composite = (
+            price_score * _REGIME_W_PRICE
+            + fng_score * _REGIME_W_FNG
+            + funding_score * _REGIME_W_FUNDING
+        )
+        rows.append((d, price_score, fng_score, funding_score, composite))
+
+    return pd.DataFrame(
+        rows, columns=["ts", "price", "fng", "funding", "composite"]
+    ).set_index("ts")
+
+
+def _window_regime_tag(regime_series):
+    """Residual 1: the window's regime_tag via the agreed rule (Paso 0 → C,
+    "composite_mean") — classify the mean of the daily composite.
+
+    Returns ``{regime, score, components, n_days, method}`` or None when the
+    series is empty / unavailable.
+    """
+    if regime_series is None or len(regime_series) == 0:
+        return None
+    mean_composite = float(regime_series["composite"].mean())
+    return {
+        "regime": _classify_regime_score(mean_composite),
+        "score": round(mean_composite, 2),
+        "components": {
+            "price": round(float(regime_series["price"].mean()), 2),
+            "fng": round(float(regime_series["fng"].mean()), 2),
+            "funding": round(float(regime_series["funding"].mean()), 2),
+        },
+        "n_days": int(len(regime_series)),
+        "method": "composite_mean",
+    }
+
+
+def _per_regime_breakdown(trades, regime_series):
+    """Residual 2: bucket closed trades by the composite regime active on
+    their entry day (same taxonomy as the window tag).
+
+    Returns ``{"BULL": {...}, "BEAR": {...}, "NEUTRAL": {...}}`` where each
+    bucket carries ``{trades, win_rate, avg_pnl_pct, total_pnl_usd}`` (mirrors
+    `backtest.classify_market_regime`'s per-bucket shape), or None when the
+    regime series is unavailable.
+    """
+    import pandas as pd  # noqa: PLC0415
+    if regime_series is None or len(regime_series) == 0:
+        return None
+
+    composite = regime_series["composite"]
+    buckets: dict[str, list] = {"BULL": [], "BEAR": [], "NEUTRAL": []}
+    for t in trades or []:
+        if t.get("exit_reason") == "OPEN":
+            continue
+        entry = t.get("entry_time")
+        if entry is None:
+            continue
+        ts = pd.Timestamp(entry)
+        if ts.tz is not None:
+            ts = ts.tz_localize(None)
+        score = _value_asof(composite, ts.normalize())
+        if score is None:
+            continue
+        buckets[_classify_regime_score(float(score))].append(t)
+
+    result = {}
+    for regime, regime_trades in buckets.items():
+        if not regime_trades:
+            result[regime] = {
+                "trades": 0, "win_rate": 0, "avg_pnl_pct": 0, "total_pnl_usd": 0,
+            }
+            continue
+        df_r = pd.DataFrame(regime_trades)
+        wins = df_r[df_r["pnl_usd"] > 0]
+        result[regime] = {
+            "trades": len(df_r),
+            "win_rate": round(len(wins) / len(df_r) * 100, 1),
+            "avg_pnl_pct": round(float(df_r["pnl_pct"].mean()), 2),
+            "total_pnl_usd": round(float(df_r["pnl_usd"].sum()), 2),
+        }
+    return result
+
+
+def _load_regime_data(app_config: dict | None = None) -> dict | None:
+    """Load the three historical series the regime composite needs, from
+    NON-HOLDOUT production sources. Returns ``{btc_daily, fng_df, funding_df}``
+    or None on any failure (regime_tag then degrades to None).
+
+    Sources (never the locked snapshot — Non-Negotiable #2/#3):
+      - BTC daily OHLCV ← `backtest.get_cached_data('BTCUSDT', '1d')`
+        → `data/ohlcv.db`
+      - Fear & Greed    ← `backtest.get_historical_fear_greed()`
+        → `data/backtest/fear_greed_history.csv`
+      - funding rate    ← `backtest.get_historical_funding_rate()`
+        → `data/backtest/btc_funding_rate_history.csv`
+    """
+    import backtest  # noqa: PLC0415
+    try:
+        btc_daily = backtest.get_cached_data("BTCUSDT", "1d")
+        if btc_daily is None or len(btc_daily) == 0:
+            log.warning(
+                "walk_forward: regime data load — empty BTC daily; "
+                "regime_tag disabled for this run"
+            )
+            return None
+        return {
+            "btc_daily": btc_daily,
+            "fng_df": backtest.get_historical_fear_greed(),
+            "funding_df": backtest.get_historical_funding_rate(),
+        }
+    except Exception as exc:  # noqa: BLE001 — regime is best-effort enrichment
+        log.warning(
+            "walk_forward: regime data load failed (%s): %s — regime_tag disabled",
+            type(exc).__name__, exc,
+        )
+        return None
+
+
+def evaluate_window(
+    window: Window, tuned: dict, config: dict, regime_data: dict | None = None
+) -> dict:
     """Evaluate per-symbol tuned params on the fold's **test range**.
 
     The train range was consumed during tuning (commit 3). The locked
@@ -490,6 +754,11 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
             consumes. Passed through to `run_backtest_with_params` so
             the standard `cfg + symbol_overrides` path stays active
             (time_limit + participation cap gates on).
+        regime_data: Optional dict ``{btc_daily, fng_df, funding_df}`` of
+            already-loaded NON-HOLDOUT historical frames. When provided, the
+            window's ``regime_tag`` and ``per_regime`` are computed from it;
+            when None (default) both stay None and no regime I/O runs. The
+            orchestrator loads it once and passes it down.
 
     Returns:
         A per-window report shaped::
@@ -503,20 +772,23 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
                     symbol: {
                         "n_trades": int,
                         "metrics": dict,     # projection of calculate_metrics
-                        "regime_tag": None,  # see Note below
                         "error": str | None, # populated on runner sentinel
                     },
                     ...
                 },
                 "skipped": [{"symbol": str, "reason": str}, ...],
+                "regime_tag": dict | None,   # window-level; see Note below
+                "per_regime": dict | None,   # window-level; see Note below
             }
 
-        ``regime_tag`` is always ``None`` here. The simulator emits
-        regime classification per-trade (see ``classify_market_regime``),
-        not a single tag per run. A fold-level summary would require an
-        aggregate decision (mode? majority?) the harness has not yet
-        agreed on; surfacing it now would invent semantics. Leave
-        ``None`` until a downstream commit chooses the rule.
+        ``regime_tag`` and ``per_regime`` are window-level (#536, completes
+        #276), populated only when ``regime_data`` is supplied; otherwise both
+        stay ``None`` and the function performs no regime I/O. ``regime_tag``
+        is the composite BULL/BEAR/NEUTRAL of the test window under the agreed
+        rule (Paso 0 → C, "composite_mean": classify the mean of the daily
+        40/30/30 price+F&G+funding composite). ``per_regime`` buckets the
+        window's trades by the composite regime on each trade's entry day —
+        same taxonomy as ``regime_tag``.
 
         ``skipped`` lists symbols whose tune dict had no usable params
         and whose evaluation was therefore skipped (no runner call).
@@ -544,6 +816,8 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
         "params": {},
         "results": {},
         "skipped": [],
+        "regime_tag": None,
+        "per_regime": None,
     }
 
     # Degenerate fold: empty test range. Return the envelope; do not
@@ -558,6 +832,7 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
 
     tune_results = tuned.get("results", {}) if isinstance(tuned, dict) else {}
 
+    all_trades: list[dict] = []
     for symbol, sym_tune in tune_results.items():
         params = _select_params_for_eval(sym_tune)
         if params is None or len(params) != len(_TUNED_PARAM_KEYS):
@@ -577,12 +852,35 @@ def evaluate_window(window: Window, tuned: dict, config: dict) -> dict:
             app_config=config,
         )
 
+        if trades:
+            all_trades.extend(trades)
+
         report["results"][symbol] = {
             "n_trades": len(trades) if trades else 0,
             "metrics": _project_metrics(metrics),
-            "regime_tag": None,  # see docstring — intentionally unset
             "error": metrics.get("error") if isinstance(metrics, dict) else None,
         }
+
+    # Window-level regime composite (#536). Best-effort enrichment: a failure
+    # here must not blacken an otherwise-valid fold. The helpers are pure; the
+    # frames in `regime_data` were loaded by the orchestrator from NON-HOLDOUT
+    # sources (Non-Negotiable #2/#3).
+    if regime_data is not None:
+        try:
+            series = _build_window_regime_series(
+                regime_data.get("btc_daily"),
+                regime_data.get("fng_df"),
+                regime_data.get("funding_df"),
+                window.test_start,
+                window.test_end,
+            )
+            report["regime_tag"] = _window_regime_tag(series)
+            report["per_regime"] = _per_regime_breakdown(all_trades, series)
+        except Exception as exc:  # noqa: BLE001 — regime is best-effort
+            log.warning(
+                "walk_forward: regime composite failed on window %d (%s): %s",
+                window.index, type(exc).__name__, exc,
+            )
 
     return report
 
@@ -671,6 +969,8 @@ def _fold_error_report(window: Window, phase: str, exc: BaseException) -> dict:
         "params": {},
         "results": {},
         "skipped": [],
+        "regime_tag": None,
+        "per_regime": None,
         "error": {
             "phase": phase,            # "tune" | "evaluate"
             "type": type(exc).__name__,
@@ -746,6 +1046,7 @@ def run_walk_forward(
     windows: list[Window],
     app_config: dict,
     ci_mode: bool = False,
+    load_regime: bool = False,
 ) -> WalkForwardRun:
     """Drive `tune_window` → `evaluate_window` over every fold in `windows`.
 
@@ -770,6 +1071,11 @@ def run_walk_forward(
             `evaluate_window` (and the resulting report shape) is
             unchanged; only the source of per-symbol params differs.
             Default False (production behaviour unchanged).
+        load_regime: When True, load the regime composite's NON-HOLDOUT
+            source frames once and pass them to every `evaluate_window`
+            so each fold carries a window-level `regime_tag` + `per_regime`
+            (#536). Default False keeps the orchestrator I/O-free for unit
+            tests; the CLI (`main`) opts in.
 
     Returns:
         A `WalkForwardRun` carrying the original window list and one
@@ -778,6 +1084,13 @@ def run_walk_forward(
     """
     if not windows:
         return WalkForwardRun(windows=[], window_reports=[])
+
+    # Load the regime composite's NON-HOLDOUT source frames once for the whole
+    # run — the orchestrator is the right layer to amortise the disk/CSV read
+    # across folds. Best-effort: on failure `regime_data` is None and every
+    # window's regime_tag degrades to None. Opt-in via `load_regime` so unit
+    # tests of the orchestrator stay I/O-free.
+    regime_data = _load_regime_data(app_config) if load_regime else None
 
     reports: list[dict] = []
     for window in windows:
@@ -795,7 +1108,7 @@ def run_walk_forward(
             continue
 
         try:
-            report = evaluate_window(window, tuned, app_config)
+            report = evaluate_window(window, tuned, app_config, regime_data=regime_data)
         except BaseException as exc:  # noqa: BLE001 — best-effort across folds
             log.warning(
                 "walk_forward: evaluate_window failed on window %d (%s): %s",
@@ -1480,7 +1793,9 @@ def main(argv: list[str] | None = None) -> int:
         # (stdout before the JSON marker) so a consumer can split on the
         # `=== walk-forward summary (JSON) ===` line.
         app_config = _load_app_config(args.config_path)
-        run = run_walk_forward(windows, app_config, ci_mode=args.ci_mode)
+        run = run_walk_forward(
+            windows, app_config, ci_mode=args.ci_mode, load_regime=True
+        )
         summary = aggregate_run_stats(run)
         print("=== walk-forward summary (JSON) ===")
         print(json.dumps(summary, indent=2, sort_keys=True, default=str))

@@ -154,7 +154,7 @@ def test_orchestrator_iterates_windows_in_order(monkeypatch):
         calls.append(("tune", window.index, out))
         return out
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         calls.append(("eval", window.index, tuned))
         return _window_report(
             window.index,
@@ -214,7 +214,7 @@ def test_orchestrator_attaches_is_pnl_block(monkeypatch):
             },
         }
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         # Both symbols reached the runner; both get embedded in params.
         return _window_report(
             window.index,
@@ -283,7 +283,7 @@ def test_orchestrator_continues_after_tune_failure(monkeypatch):
 
     eval_called_on: list[int] = []
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         eval_called_on.append(window.index)
         return _window_report(
             window.index,
@@ -324,7 +324,7 @@ def test_orchestrator_continues_after_eval_failure(monkeypatch):
             "recommendation": "KEEP",
         }}}
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         if window.index == 0:
             raise ValueError("synthetic eval failure on window 0")
         return _window_report(
@@ -617,7 +617,7 @@ def test_run_and_aggregate_end_to_end(monkeypatch):
             }},
         }
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         return _window_report(
             window.index,
             results={"BTCUSDT": _sym_entry(

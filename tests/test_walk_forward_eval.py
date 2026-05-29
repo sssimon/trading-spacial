@@ -18,8 +18,10 @@ Invariants exercised:
   2. Per-symbol params come from the tune output: `proposed_params`
      when `recommendation == "CHANGE"`, `current_params` otherwise.
   3. The returned report shape carries `window_index`, `train_range`,
-     `test_range`, `params`, `results[symbol].{n_trades, metrics,
-     regime_tag, error}`, and `skipped`.
+     `test_range`, `params`, `results[symbol].{n_trades, metrics, error}`,
+     `skipped`, and the window-level `regime_tag` / `per_regime` (None here
+     because these eval tests pass no `regime_data`; populated path is
+     covered in `test_walk_forward_regime.py`).
   4. Degenerate test range (`test_start >= test_end`) returns the
      envelope with no runner calls.
   5. A symbol whose tune dict carries no usable params is recorded in
@@ -302,23 +304,28 @@ def test_report_has_declared_shape(patch_auto_tune):
     report = evaluate_window(window, tuned, config={"symbol_overrides": {}})
 
     # Top-level keys.
-    for key in ("window_index", "train_range", "test_range", "params", "results", "skipped"):
+    for key in (
+        "window_index", "train_range", "test_range", "params", "results",
+        "skipped", "regime_tag", "per_regime",
+    ):
         assert key in report, f"missing top-level key: {key}"
 
     assert report["window_index"] == 7
     assert report["train_range"] == {"start": "2023-01-01", "end": "2025-04-01"}
     assert report["test_range"] == {"start": "2025-04-01", "end": "2025-07-01"}
 
-    # Per-symbol entry.
+    # regime_tag / per_regime are window-level (#536) and stay None when no
+    # regime_data is supplied — these eval tests never pass it.
+    assert report["regime_tag"] is None
+    assert report["per_regime"] is None
+
+    # Per-symbol entry — the old per-symbol `regime_tag` placeholder is retired.
     entry = report["results"]["BTCUSDT"]
-    for key in ("n_trades", "metrics", "regime_tag", "error"):
+    for key in ("n_trades", "metrics", "error"):
         assert key in entry, f"missing per-symbol key: {key}"
+    assert "regime_tag" not in entry, "regime_tag is now window-level, not per-symbol"
 
     assert entry["n_trades"] == 1
-    assert entry["regime_tag"] is None, (
-        "regime_tag is intentionally None until a fold-aggregation rule "
-        "is agreed on; the simulator emits regime per-trade, not per-run"
-    )
     assert entry["error"] is None
 
 
