@@ -28,6 +28,8 @@ import requests
 import pandas as pd
 import numpy as np
 
+from db.trials import claim_trial, finalize_trial
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger("auto_tune")
 
@@ -174,6 +176,19 @@ def _slice_below_cutoff(df: pd.DataFrame, cutoff_naive: datetime, symbol: str, n
     return sliced
 
 
+def _finalize_from_metrics(trial_id, trades, metrics):
+    """Finalize a trial from a (trades, metrics) result and return it unchanged
+    so call sites can `return _finalize_from_metrics(...)`."""
+    if not trades or "error" in metrics:
+        finalize_trial(
+            trial_id, status="failed",
+            error=str(metrics.get("error", "no trades")),
+        )
+    else:
+        finalize_trial(trial_id, status="ok", metrics=metrics)
+    return trades, metrics
+
+
 def run_backtest_with_params(symbol: str, params: dict,
                              sim_start: datetime, sim_end: datetime,
                              *, cutoff: datetime = None,
@@ -204,80 +219,90 @@ def run_backtest_with_params(symbol: str, params: dict,
 
     Returns (trades, metrics).
     """
-    from backtest import (
-        get_cached_data, simulate_strategy, calculate_metrics,
-        get_historical_fear_greed, get_historical_funding_rate,
+    trial_id = claim_trial(
+        source="auto_tune",
+        symbol=symbol,
+        combo=params,
+        window_label=f"{sim_start.date()}..{sim_end.date()}",
     )
-
-    # Load data (cached)
-    df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=2))
-    df4h = get_cached_data(symbol, "4h", start_date=sim_start - relativedelta(months=2))
-    df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=1))
-    df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=12))
-
-    df_fng = get_historical_fear_greed()
-    df_funding = get_historical_funding_rate()
-
-    if cutoff is not None:
-        cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
-        df1h = _slice_below_cutoff(df1h, cutoff_naive, symbol, "df1h")
-        df4h = _slice_below_cutoff(df4h, cutoff_naive, symbol, "df4h")
-        df5m = _slice_below_cutoff(df5m, cutoff_naive, symbol, "df5m")
-        df1d = _slice_below_cutoff(df1d, cutoff_naive, symbol, "df1d")
-        df_fng = _slice_below_cutoff(df_fng, cutoff_naive, symbol, "df_fng")
-        df_funding = _slice_below_cutoff(df_funding, cutoff_naive, symbol, "df_funding")
-
-    if df1h.empty or df4h.empty or df5m.empty:
-        return [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
-
-    use_overrides_path = cutoff is not None and app_config is not None
-    if use_overrides_path:
-        # Standard path: cfg + symbol_overrides — gates active (time-limit,
-        # participation cap). Inject the grid candidate into the target
-        # symbol's overrides while preserving other per-symbol settings.
-        base_overrides = app_config.get("symbol_overrides", {}) or {}
-        sym_key = symbol.upper()
-        sym_base = base_overrides.get(sym_key, {})
-        sym_base = sym_base if isinstance(sym_base, dict) else {}
-        candidate_overrides = dict(base_overrides)
-        candidate_overrides[sym_key] = {
-            **sym_base,
-            "atr_sl_mult": params["atr_sl_mult"],
-            "atr_tp_mult": params["atr_tp_mult"],
-            "atr_be_mult": params["atr_be_mult"],
-        }
-        trades, equity_curve = simulate_strategy(
-            df1h, df4h, df5m, symbol,
-            sl_mode="atr",
-            df1d=df1d,
-            sim_start=sim_start,
-            sim_end=sim_end,
-            df_fng=df_fng,
-            df_funding=df_funding,
-            cfg=app_config,
-            symbol_overrides=candidate_overrides,
-        )
-    else:
-        # Legacy path: byte-identical to pre-#287 behavior. Time-limit +
-        # participation cap are bypassed by design (see CLAUDE.md).
-        trades, equity_curve = simulate_strategy(
-            df1h, df4h, df5m, symbol,
-            sl_mode="atr",
-            atr_sl_mult=params["atr_sl_mult"],
-            atr_tp_mult=params["atr_tp_mult"],
-            atr_be_mult=params["atr_be_mult"],
-            df1d=df1d,
-            sim_start=sim_start,
-            sim_end=sim_end,
-            df_fng=df_fng,
-            df_funding=df_funding,
+    try:
+        from backtest import (
+            get_cached_data, simulate_strategy, calculate_metrics,
+            get_historical_fear_greed, get_historical_funding_rate,
         )
 
-    if not trades:
-        return [], {"error": "No trades", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
+        # Load data (cached)
+        df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=2))
+        df4h = get_cached_data(symbol, "4h", start_date=sim_start - relativedelta(months=2))
+        df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=1))
+        df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=12))
 
-    metrics = calculate_metrics(trades, equity_curve)
-    return trades, metrics
+        df_fng = get_historical_fear_greed()
+        df_funding = get_historical_funding_rate()
+
+        if cutoff is not None:
+            cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+            df1h = _slice_below_cutoff(df1h, cutoff_naive, symbol, "df1h")
+            df4h = _slice_below_cutoff(df4h, cutoff_naive, symbol, "df4h")
+            df5m = _slice_below_cutoff(df5m, cutoff_naive, symbol, "df5m")
+            df1d = _slice_below_cutoff(df1d, cutoff_naive, symbol, "df1d")
+            df_fng = _slice_below_cutoff(df_fng, cutoff_naive, symbol, "df_fng")
+            df_funding = _slice_below_cutoff(df_funding, cutoff_naive, symbol, "df_funding")
+
+        if df1h.empty or df4h.empty or df5m.empty:
+            return _finalize_from_metrics(trial_id, [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0})
+
+        use_overrides_path = cutoff is not None and app_config is not None
+        if use_overrides_path:
+            # Standard path: cfg + symbol_overrides — gates active (time-limit,
+            # participation cap). Inject the grid candidate into the target
+            # symbol's overrides while preserving other per-symbol settings.
+            base_overrides = app_config.get("symbol_overrides", {}) or {}
+            sym_key = symbol.upper()
+            sym_base = base_overrides.get(sym_key, {})
+            sym_base = sym_base if isinstance(sym_base, dict) else {}
+            candidate_overrides = dict(base_overrides)
+            candidate_overrides[sym_key] = {
+                **sym_base,
+                "atr_sl_mult": params["atr_sl_mult"],
+                "atr_tp_mult": params["atr_tp_mult"],
+                "atr_be_mult": params["atr_be_mult"],
+            }
+            trades, equity_curve = simulate_strategy(
+                df1h, df4h, df5m, symbol,
+                sl_mode="atr",
+                df1d=df1d,
+                sim_start=sim_start,
+                sim_end=sim_end,
+                df_fng=df_fng,
+                df_funding=df_funding,
+                cfg=app_config,
+                symbol_overrides=candidate_overrides,
+            )
+        else:
+            # Legacy path: byte-identical to pre-#287 behavior. Time-limit +
+            # participation cap are bypassed by design (see CLAUDE.md).
+            trades, equity_curve = simulate_strategy(
+                df1h, df4h, df5m, symbol,
+                sl_mode="atr",
+                atr_sl_mult=params["atr_sl_mult"],
+                atr_tp_mult=params["atr_tp_mult"],
+                atr_be_mult=params["atr_be_mult"],
+                df1d=df1d,
+                sim_start=sim_start,
+                sim_end=sim_end,
+                df_fng=df_fng,
+                df_funding=df_funding,
+            )
+
+        if not trades:
+            return _finalize_from_metrics(trial_id, [], {"error": "No trades", "total_trades": 0, "net_pnl": 0, "profit_factor": 0})
+
+        metrics = calculate_metrics(trades, equity_curve)
+        return _finalize_from_metrics(trial_id, trades, metrics)
+    except Exception as e:
+        finalize_trial(trial_id, status="failed", error=str(e))
+        raise
 
 
 def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime = None) -> dict:
