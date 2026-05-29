@@ -268,8 +268,13 @@ def list_positions(
     status: Optional[str] = Query("all", description="open | closed | all"),
     tenant_id: int = Depends(get_current_tenant_id),
 ):
-    # B.5 #258: tenant_id from JWT, never from request param/header/body
-    with transaction() as con:
+    # B.5 #258: tenant_id from JWT, never from request param/header/body.
+    # READ via snapshot_connection (WAL-concurrent, query_only, NO BEGIN
+    # IMMEDIATE) — NOT transaction(). transaction() takes the writer lock even
+    # for reads; under the scanner's write burst it 500'd with "database is
+    # locked" (prod incident 2026-05-29). A read must never contend for the
+    # writer lock.
+    with snapshot_connection() as con:
         positions = db_get_positions(con, status, tenant_id=tenant_id)
     return {"total": len(positions), "positions": positions}
 
