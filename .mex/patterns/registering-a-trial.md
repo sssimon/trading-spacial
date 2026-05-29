@@ -29,6 +29,20 @@ Do **not** register from:
 - One-shot gates / diagnostics (`gate_*`, `a02_honesty_diff`, the `r*`/`q*`
   research tools).
 
+### Known exclusion: `scripts/tune_per_direction.py`
+
+`scripts/tune_per_direction.py` is an exploratory per-direction (long/short)
+selection sweep that is currently **NOT wired**. It has no automated caller — it
+is invoked only by `tests/test_tune_pipeline_e2e.py` (direct subprocess, schema
+smoke) and is superseded by `auto_tune` / `regime_allocation` for the live
+selection path. Per-direction tuning is explicitly "out of scope" in
+`tools/retune_pre_holdout.py` (A.4-1 scope brief, option (b)).
+
+**TRIGGER:** if per-direction tuning is ever resurrected as a *live selection
+path* (an automated caller that feeds `config.json["symbol_overrides"]`), it
+MUST be wired into the registry (`source="tune_per_direction"`, exploratory
+`study_type`) or its runs silently under-count N.
+
 ## Steps
 
 1. `from db.trials import claim_trial, finalize_trial` at the orchestrator top
