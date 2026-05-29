@@ -28,6 +28,8 @@ import requests
 import pandas as pd
 import numpy as np
 
+from db.trials import claim_trial, finalize_trial
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger("auto_tune")
 
@@ -174,10 +176,30 @@ def _slice_below_cutoff(df: pd.DataFrame, cutoff_naive: datetime, symbol: str, n
     return sliced
 
 
+def _finalize_from_metrics(trial_id, trades, metrics):
+    """Finalize a trial from a (trades, metrics) result and return it unchanged
+    so call sites can `return _finalize_from_metrics(...)`.
+
+    No-op when ``trial_id is None`` (trial registration was not opted in via
+    ``trial_source``): just return the result unchanged without touching the
+    registry."""
+    if trial_id is None:
+        return trades, metrics
+    if not trades or "error" in metrics:
+        finalize_trial(
+            trial_id, status="failed",
+            error=str(metrics.get("error", "no trades")),
+        )
+    else:
+        finalize_trial(trial_id, status="ok", metrics=metrics)
+    return trades, metrics
+
+
 def run_backtest_with_params(symbol: str, params: dict,
                              sim_start: datetime, sim_end: datetime,
                              *, cutoff: datetime = None,
-                             app_config: dict | None = None):
+                             app_config: dict | None = None,
+                             trial_source: str | None = None):
     """Run a backtest for a symbol with given ATR params over a date range.
 
     When ``cutoff`` is provided, all OHLCV bars with timestamp ``>= cutoff``
@@ -202,82 +224,104 @@ def run_backtest_with_params(symbol: str, params: dict,
     by design (see CLAUDE.md and ``backtest.py``); existing auto_tune CLI
     callers stay on this path unless they opt in.
 
+    Trial registration (#278 Part 1): OPT-IN via ``trial_source``. When
+    ``trial_source`` is None (the default), NO trial is claimed/finalized —
+    this is the path the EVALUATION caller (``walk_forward``) and the research
+    tools take, and counting their runs as SELECTION trials would corrupt the
+    trial-count N (#278 Part 2). Only auto_tune's own baseline + grid + validate
+    backtests opt in by passing ``trial_source="auto_tune"``.
+
     Returns (trades, metrics).
     """
-    from backtest import (
-        get_cached_data, simulate_strategy, calculate_metrics,
-        get_historical_fear_greed, get_historical_funding_rate,
+    trial_id = (
+        claim_trial(
+            source=trial_source,
+            symbol=symbol,
+            combo=params,
+            window_label=f"{sim_start.date()}..{sim_end.date()}",
+        )
+        if trial_source is not None
+        else None
     )
-
-    # Load data (cached)
-    df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=2))
-    df4h = get_cached_data(symbol, "4h", start_date=sim_start - relativedelta(months=2))
-    df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=1))
-    df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=12))
-
-    df_fng = get_historical_fear_greed()
-    df_funding = get_historical_funding_rate()
-
-    if cutoff is not None:
-        cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
-        df1h = _slice_below_cutoff(df1h, cutoff_naive, symbol, "df1h")
-        df4h = _slice_below_cutoff(df4h, cutoff_naive, symbol, "df4h")
-        df5m = _slice_below_cutoff(df5m, cutoff_naive, symbol, "df5m")
-        df1d = _slice_below_cutoff(df1d, cutoff_naive, symbol, "df1d")
-        df_fng = _slice_below_cutoff(df_fng, cutoff_naive, symbol, "df_fng")
-        df_funding = _slice_below_cutoff(df_funding, cutoff_naive, symbol, "df_funding")
-
-    if df1h.empty or df4h.empty or df5m.empty:
-        return [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
-
-    use_overrides_path = cutoff is not None and app_config is not None
-    if use_overrides_path:
-        # Standard path: cfg + symbol_overrides — gates active (time-limit,
-        # participation cap). Inject the grid candidate into the target
-        # symbol's overrides while preserving other per-symbol settings.
-        base_overrides = app_config.get("symbol_overrides", {}) or {}
-        sym_key = symbol.upper()
-        sym_base = base_overrides.get(sym_key, {})
-        sym_base = sym_base if isinstance(sym_base, dict) else {}
-        candidate_overrides = dict(base_overrides)
-        candidate_overrides[sym_key] = {
-            **sym_base,
-            "atr_sl_mult": params["atr_sl_mult"],
-            "atr_tp_mult": params["atr_tp_mult"],
-            "atr_be_mult": params["atr_be_mult"],
-        }
-        trades, equity_curve = simulate_strategy(
-            df1h, df4h, df5m, symbol,
-            sl_mode="atr",
-            df1d=df1d,
-            sim_start=sim_start,
-            sim_end=sim_end,
-            df_fng=df_fng,
-            df_funding=df_funding,
-            cfg=app_config,
-            symbol_overrides=candidate_overrides,
-        )
-    else:
-        # Legacy path: byte-identical to pre-#287 behavior. Time-limit +
-        # participation cap are bypassed by design (see CLAUDE.md).
-        trades, equity_curve = simulate_strategy(
-            df1h, df4h, df5m, symbol,
-            sl_mode="atr",
-            atr_sl_mult=params["atr_sl_mult"],
-            atr_tp_mult=params["atr_tp_mult"],
-            atr_be_mult=params["atr_be_mult"],
-            df1d=df1d,
-            sim_start=sim_start,
-            sim_end=sim_end,
-            df_fng=df_fng,
-            df_funding=df_funding,
+    try:
+        from backtest import (
+            get_cached_data, simulate_strategy, calculate_metrics,
+            get_historical_fear_greed, get_historical_funding_rate,
         )
 
-    if not trades:
-        return [], {"error": "No trades", "total_trades": 0, "net_pnl": 0, "profit_factor": 0}
+        # Load data (cached)
+        df1h = get_cached_data(symbol, "1h", start_date=sim_start - relativedelta(months=2))
+        df4h = get_cached_data(symbol, "4h", start_date=sim_start - relativedelta(months=2))
+        df5m = get_cached_data(symbol, "5m", start_date=sim_start - relativedelta(months=1))
+        df1d = get_cached_data(symbol, "1d", start_date=sim_start - relativedelta(months=12))
 
-    metrics = calculate_metrics(trades, equity_curve)
-    return trades, metrics
+        df_fng = get_historical_fear_greed()
+        df_funding = get_historical_funding_rate()
+
+        if cutoff is not None:
+            cutoff_naive = cutoff.replace(tzinfo=None) if cutoff.tzinfo else cutoff
+            df1h = _slice_below_cutoff(df1h, cutoff_naive, symbol, "df1h")
+            df4h = _slice_below_cutoff(df4h, cutoff_naive, symbol, "df4h")
+            df5m = _slice_below_cutoff(df5m, cutoff_naive, symbol, "df5m")
+            df1d = _slice_below_cutoff(df1d, cutoff_naive, symbol, "df1d")
+            df_fng = _slice_below_cutoff(df_fng, cutoff_naive, symbol, "df_fng")
+            df_funding = _slice_below_cutoff(df_funding, cutoff_naive, symbol, "df_funding")
+
+        if df1h.empty or df4h.empty or df5m.empty:
+            return _finalize_from_metrics(trial_id, [], {"error": "No data", "total_trades": 0, "net_pnl": 0, "profit_factor": 0})
+
+        use_overrides_path = cutoff is not None and app_config is not None
+        if use_overrides_path:
+            # Standard path: cfg + symbol_overrides — gates active (time-limit,
+            # participation cap). Inject the grid candidate into the target
+            # symbol's overrides while preserving other per-symbol settings.
+            base_overrides = app_config.get("symbol_overrides", {}) or {}
+            sym_key = symbol.upper()
+            sym_base = base_overrides.get(sym_key, {})
+            sym_base = sym_base if isinstance(sym_base, dict) else {}
+            candidate_overrides = dict(base_overrides)
+            candidate_overrides[sym_key] = {
+                **sym_base,
+                "atr_sl_mult": params["atr_sl_mult"],
+                "atr_tp_mult": params["atr_tp_mult"],
+                "atr_be_mult": params["atr_be_mult"],
+            }
+            trades, equity_curve = simulate_strategy(
+                df1h, df4h, df5m, symbol,
+                sl_mode="atr",
+                df1d=df1d,
+                sim_start=sim_start,
+                sim_end=sim_end,
+                df_fng=df_fng,
+                df_funding=df_funding,
+                cfg=app_config,
+                symbol_overrides=candidate_overrides,
+            )
+        else:
+            # Legacy path: byte-identical to pre-#287 behavior. Time-limit +
+            # participation cap are bypassed by design (see CLAUDE.md).
+            trades, equity_curve = simulate_strategy(
+                df1h, df4h, df5m, symbol,
+                sl_mode="atr",
+                atr_sl_mult=params["atr_sl_mult"],
+                atr_tp_mult=params["atr_tp_mult"],
+                atr_be_mult=params["atr_be_mult"],
+                df1d=df1d,
+                sim_start=sim_start,
+                sim_end=sim_end,
+                df_fng=df_fng,
+                df_funding=df_funding,
+            )
+
+        if not trades:
+            return _finalize_from_metrics(trial_id, [], {"error": "No trades", "total_trades": 0, "net_pnl": 0, "profit_factor": 0})
+
+        metrics = calculate_metrics(trades, equity_curve)
+        return _finalize_from_metrics(trial_id, trades, metrics)
+    except Exception as e:
+        if trial_id is not None:
+            finalize_trial(trial_id, status="failed", error=str(e))
+        raise
 
 
 def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime = None) -> dict:
@@ -302,7 +346,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
     log.info(f"  {symbol}: baseline on validate ({val_start.date()} -> {val_end.date()})...")
     _, baseline_metrics = run_backtest_with_params(
         symbol, current_params, val_start, val_end,
-        cutoff=cutoff, app_config=config,
+        cutoff=cutoff, app_config=config, trial_source="auto_tune",
     )
     current_val_pnl = baseline_metrics.get("net_pnl", 0)
 
@@ -314,7 +358,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
     for combo in combos:
         _, metrics = run_backtest_with_params(
             symbol, combo, train_start, train_end,
-            cutoff=cutoff, app_config=config,
+            cutoff=cutoff, app_config=config, trial_source="auto_tune",
         )
         train_results.append({
             "params": combo,
@@ -345,7 +389,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
         params = candidate["params"]
         trades_val, val_metrics = run_backtest_with_params(
             symbol, params, val_start, val_end,
-            cutoff=cutoff, app_config=config,
+            cutoff=cutoff, app_config=config, trial_source="auto_tune",
         )
         val_pnl = val_metrics.get("net_pnl", 0)
         val_pf = val_metrics.get("profit_factor", 0)
@@ -679,6 +723,15 @@ def main():
                 print(f"  {sym}: CAMBIAR -> mejora +{d['improvement_pct']}%")
             else:
                 print(f"  {sym}: mantener params actuales")
+        except sqlite3.OperationalError:
+            # Trial-registry durability failure (#278 Part 1): claim_trial /
+            # finalize_trial raise sqlite3.OperationalError only after the
+            # bounded retry budget is exhausted (persistent lock, disk full,
+            # corruption). Swallowing it here would bury a silent N under-count
+            # and emit a partial tune report. Abort the whole tune loudly. Must
+            # precede the generic Exception handler below. Non-DB per-symbol
+            # errors still degrade gracefully (ERROR row + continue).
+            raise
         except Exception as e:
             log.error(f"  {sym}: ERROR - {e}")
             results.append({

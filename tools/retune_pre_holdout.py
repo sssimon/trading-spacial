@@ -72,6 +72,18 @@ def _optimize_worker(payload: tuple) -> dict:
     auto_tune.initialize_seed(config)
     try:
         return auto_tune.optimize_symbol(symbol, config, today=cutoff, cutoff=cutoff)
+    except sqlite3.OperationalError:
+        # Trial-registry durability failure (#278 Part 1): optimize_symbol calls
+        # run_backtest_with_params(..., trial_source="auto_tune"), which claims /
+        # finalizes trials in db/trials.py. Those raise sqlite3.OperationalError
+        # only after the bounded retry budget is exhausted (persistent lock, disk
+        # full, corruption). Converting it to an ERROR result here would bury a
+        # silent N under-count and emit a partial re-tune artefact. Re-raise so the
+        # whole run aborts loudly: in the ProcessPoolExecutor path this surfaces
+        # via ex.map(...) re-raising in the parent. Must precede the generic
+        # Exception handler below. Non-DB per-symbol errors still degrade gracefully
+        # (ERROR result + continue). Mirrors auto_tune.main()'s handler (77e7653).
+        raise
     except Exception as exc:  # noqa: BLE001
         return {
             "symbol": symbol,

@@ -167,6 +167,11 @@ APP_CONFIG_PATH_DEFAULT: Final[Path] = REPO_ROOT / "config.defaults.json"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Trial registry (#278 Part 1). Imported after the sys.path.insert so `db` is
+# importable when the harness is invoked directly. Trial writes happen in the
+# PARENT process (_run_jobs_parallel), never in pool children.
+from db.trials import claim_trial, finalize_trial  # noqa: E402
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -1114,10 +1119,37 @@ def _emit_worker_error_summary(results: list[dict]) -> None:
 def _run_jobs_parallel(
     jobs: list[dict], workers: int, label: str, worker_fn=None,
 ) -> list[dict]:
-    """Run jobs in parallel via multiprocessing.Pool. Progress on stderr."""
+    """Run jobs in parallel via multiprocessing.Pool. Progress on stderr.
+
+    Trial registration (claim-then-execute) happens in THIS parent process,
+    never in the pool child: child crashes leave a 'pending' row that still
+    counts toward N. pool.map preserves order, so results[i] <-> jobs[i] <->
+    trial_ids[i]. Only cell workers that run calculate_metrics produce trials;
+    arithmetic baselines (btc_bh / hubrich) are gated out.
+    """
     if not jobs:
         return []
     worker_fn = worker_fn or _process_regime_allocation_cell
+
+    # NOTE: function-IDENTITY matching. A future caller that wraps the worker in
+    # functools.partial / a lambda / a bound method would NOT be `in` this tuple
+    # and would silently skip trial registration (N under-count). Register any
+    # new trial-producing worker here by its bare function object.
+    produces_trials = worker_fn in (
+        _process_regime_allocation_cell,
+        _process_lrc_archived_baseline_cell,
+    )
+    trial_ids: list[int | None] = [None] * len(jobs)
+    if produces_trials:
+        for i, job in enumerate(jobs):
+            combo = {k: job[k] for k in ("symbol", "sub_window", "vol_target") if k in job}
+            trial_ids[i] = claim_trial(
+                source="regime_allocation_sweep",
+                symbol=job.get("symbol"),
+                combo=combo,
+                window_label=str(job.get("sub_window") or job.get("window") or ""),
+            )
+
     sys.stderr.write(
         f"[regime_allocation_sweep] {label}: {len(jobs)} jobs × {workers} workers...\n"
     )
@@ -1128,6 +1160,35 @@ def _run_jobs_parallel(
     sys.stderr.write(
         f"[regime_allocation_sweep] {label}: completed in {elapsed:.1f}s\n"
     )
+
+    if produces_trials:
+        # POST-COMPUTE finalize loop runs AFTER pool.map returns — every
+        # backtest cell has already executed and `results` is in memory. A
+        # finalize failure here (e.g. a persistent DB lock) must NOT propagate:
+        # that would discard hours of compute AND leave completed trials stuck
+        # 'pending'. Tolerate per-trial finalize failures — the orphan 'pending'
+        # row still counts toward N, and `results` is returned regardless. The
+        # CLAIM loop above stays LOUD on purpose: a claim failure before compute
+        # is cheap to abort, so it is allowed to propagate.
+        for tid, res in zip(trial_ids, results):
+            if tid is None:
+                continue
+            err = res.get("error") if isinstance(res, dict) else None
+            try:
+                if err:
+                    finalize_trial(tid, status="failed", error=str(err))
+                else:
+                    finalize_trial(
+                        tid, status="ok",
+                        metrics=res if isinstance(res, dict) else None,
+                    )
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(
+                    f"[regime_allocation_sweep] finalize_trial failed for "
+                    f"trial {tid}: {type(e).__name__}: {e} (orphan 'pending' "
+                    f"row preserved; compute results kept)\n"
+                )
+
     _emit_worker_error_summary(results)
     return results
 

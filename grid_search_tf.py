@@ -31,6 +31,7 @@ from backtest import (
     get_historical_fear_greed, get_historical_funding_rate,
     INITIAL_CAPITAL, DATA_DIR,
 )
+from db.trials import claim_trial, finalize_trial
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger("grid_search_tf")
@@ -102,11 +103,12 @@ def grid_search_symbol(symbol: str, grid: dict,
     log.info(f"Testing {total} parameter combinations for {symbol}...")
     results = []
     start_time = time.time()
+    window_label = f"{sim_start}..{sim_end}"
 
     for idx, combo in enumerate(combos):
         params = dict(zip(keys, combo))
 
-        # Skip invalid combos (fast >= slow)
+        # Skip invalid combos (fast >= slow) — these never run, not trials.
         if params["tf_ema_fast"] >= params["tf_ema_slow"]:
             continue
 
@@ -122,6 +124,12 @@ def grid_search_symbol(symbol: str, grid: dict,
             }
         }
 
+        trial_id = claim_trial(
+            source="grid_search_tf",
+            symbol=symbol,
+            combo=params,
+            window_label=window_label,
+        )
         try:
             trades, equity = simulate_strategy(
                 df1h=df1h, df4h=df4h, df5m=df5m,
@@ -133,11 +141,15 @@ def grid_search_symbol(symbol: str, grid: dict,
             )
 
             if not trades:
+                finalize_trial(trial_id, status="failed", error="no trades")
                 continue
 
             metrics = calculate_metrics(trades, equity)
             if "error" in metrics:
+                finalize_trial(trial_id, status="failed", error=str(metrics["error"]))
                 continue
+
+            finalize_trial(trial_id, status="ok", metrics=metrics)
 
             result = {
                 "symbol": symbol,
@@ -155,6 +167,7 @@ def grid_search_symbol(symbol: str, grid: dict,
             results.append(result)
 
         except Exception as e:
+            finalize_trial(trial_id, status="failed", error=str(e))
             log.warning(f"  Error with {params}: {e}")
             continue
 

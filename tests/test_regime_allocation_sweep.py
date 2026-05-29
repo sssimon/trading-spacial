@@ -1076,4 +1076,132 @@ class TestProfitFactorInfCoercion:
         target = tmp_path / "test.json"
         with pytest.raises(ValueError, match="Out of range"):
             ras._save_json(target, {"x": math.inf})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trial registry wiring (#278 Part 1) — parent-side claim/finalize around
+# pool.map. The trial WRITE happens in the parent, never in the child worker:
+# a child crash leaves a 'pending' row that still counts toward N. pool.map
+# preserves order, so results[i] <-> jobs[i] <-> trial_ids[i]. Only the two
+# trial-producing cell workers (which run calculate_metrics) register trials;
+# arithmetic baselines (btc_bh / hubrich) are gated out.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_run_jobs_parallel_registers_trials_for_cell_workers(monkeypatch):
+    import tools.regime_allocation_sweep as ras
+
+    # Avoid real multiprocessing: run the worker in-process, order-preserving.
+    class _FakePool:
+        def __init__(self, n):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def map(self, fn, jobs):
+            return [fn(j) for j in jobs]
+
+    monkeypatch.setattr(ras, "Pool", _FakePool)
+
+    claims, finals = [], []
+    monkeypatch.setattr(ras, "claim_trial",
+                        lambda **kw: (claims.append(kw), len(claims))[1])
+    monkeypatch.setattr(ras, "finalize_trial",
+                        lambda tid, **kw: finals.append((tid, kw)))
+
+    # A trial-producing worker: first job ok, second errored.
+    seq = iter([{"sharpe_ratio": 1.0}, {"error": "boom"}])
+
+    def fake_cell(job):
+        return next(seq)
+
+    monkeypatch.setattr(ras, "_process_regime_allocation_cell", fake_cell)
+
+    jobs = [
+        {"symbol": "BTCUSDT", "sub_window": "A", "vol_target": 0.30},
+        {"symbol": "ETHUSDT", "sub_window": "A", "vol_target": 0.30},
+    ]
+    ras._run_jobs_parallel(jobs, workers=1, label="test", worker_fn=fake_cell)
+
+    assert len(claims) == 2
+    assert all(c["source"] == "regime_allocation_sweep" for c in claims)
+    assert [kw["status"] for _, kw in finals] == ["ok", "failed"]
+
+
+def test_run_jobs_parallel_skips_trials_for_non_cell_workers(monkeypatch):
+    import tools.regime_allocation_sweep as ras
+
+    class _FakePool:
+        def __init__(self, n): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def map(self, fn, jobs): return [fn(j) for j in jobs]
+
+    monkeypatch.setattr(ras, "Pool", _FakePool)
+
+    claims = []
+    monkeypatch.setattr(ras, "claim_trial",
+                        lambda **kw: (claims.append(kw), len(claims))[1])
+    monkeypatch.setattr(ras, "finalize_trial", lambda tid, **kw: None)
+
+    def bh_baseline(job):  # NOT a trial-producing worker
+        return {"baseline": True}
+
+    ras._run_jobs_parallel(
+        [{"symbol": "BTCUSDT"}], workers=1, label="bh", worker_fn=bh_baseline,
+    )
+    assert claims == []  # baselines do not produce trials
 # (AST scanner over all non-whitelisted modules). No need to duplicate here.
+
+
+def test_run_jobs_parallel_tolerates_finalize_failure(monkeypatch):
+    """POST-COMPUTE finalize failure must NOT discard the in-memory results.
+
+    The finalize loop runs after pool.map returns (all backtest compute done).
+    If finalize_trial raises (e.g. persistent DB lock), the sweep must still
+    RETURN the results list — hours of compute must not be lost, and the claim
+    (cheap, pre-compute) must still have happened. The orphan 'pending' rows
+    survive as N evidence.
+    """
+    import tools.regime_allocation_sweep as ras
+
+    class _FakePool:
+        def __init__(self, n): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def map(self, fn, jobs): return [fn(j) for j in jobs]
+
+    monkeypatch.setattr(ras, "Pool", _FakePool)
+
+    claims = []
+    monkeypatch.setattr(ras, "claim_trial",
+                        lambda **kw: (claims.append(kw), len(claims))[1])
+
+    def boom_finalize(tid, **kw):
+        raise RuntimeError("database is locked (persistent)")
+
+    monkeypatch.setattr(ras, "finalize_trial", boom_finalize)
+
+    expected = [{"sharpe_ratio": 1.0}, {"sharpe_ratio": 2.0}]
+    seq = iter(expected)
+
+    def fake_cell(job):
+        return next(seq)
+
+    monkeypatch.setattr(ras, "_process_regime_allocation_cell", fake_cell)
+
+    jobs = [
+        {"symbol": "BTCUSDT", "sub_window": "A", "vol_target": 0.30},
+        {"symbol": "ETHUSDT", "sub_window": "A", "vol_target": 0.30},
+    ]
+    # Must NOT raise even though every finalize_trial raises.
+    results = ras._run_jobs_parallel(
+        jobs, workers=1, label="test", worker_fn=fake_cell,
+    )
+
+    # Results (the compute) survive the finalize failures.
+    assert results == expected
+    # Claim happened for both jobs before compute (cheap, pre-compute, loud).
+    assert len(claims) == 2
+    assert all(c["source"] == "regime_allocation_sweep" for c in claims)
