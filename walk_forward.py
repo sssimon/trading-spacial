@@ -29,10 +29,12 @@ up — see issue #276 for the staged rollout.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Iterable
 
 from dateutil.relativedelta import relativedelta
@@ -1230,6 +1232,28 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Cheap enough for CI smoke runs. Default off (production)."
         ),
     )
+    p.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Drive run_walk_forward + aggregate_run_stats over the computed "
+            "windows and print the aggregate summary as JSON on stdout. "
+            "Without --ci-mode this calls the real optimizer per window "
+            "(minutes per symbol). With --ci-mode the loop uses frozen "
+            "symbol_overrides params — cheap enough for CI smoke runs."
+        ),
+    )
+    p.add_argument(
+        "--config-path",
+        type=str,
+        default=None,
+        help=(
+            "Path to a JSON file used as the app_config dict. When omitted, "
+            "api.config.load_config() is invoked (production behaviour). The "
+            "flag exists so CI smoke can drive a 1-2 symbol fixture without "
+            "pulling the full production config graph."
+        ),
+    )
     return p
 
 
@@ -1240,6 +1264,36 @@ def _print_windows(windows: Iterable[Window]) -> None:
             f"test {w.test_start}..{w.test_end}  "
             f"(warmup={w.warmup_gap_days}d)"
         )
+
+
+def _load_app_config(config_path: str | None) -> dict:
+    """Load the app_config dict the harness drives `tune_window` /
+    `frozen_params_for_window` / `evaluate_window` with.
+
+    When `config_path` is provided, the file is read as JSON and returned
+    verbatim — no merge with the production layered config, no env-var
+    overlay, no defaults file. This is intentional: CI smoke needs to
+    drive a *minimal* fixture (1-2 symbols, ATR overrides) without
+    pulling the full production graph.
+
+    When `config_path` is `None`, `api.config.load_config()` is invoked
+    (the same call `btc_api`, the scanner and the legacy
+    `auto_tune.load_config()` use). Production behaviour stays unchanged.
+    """
+    if config_path is None:
+        from api.config import load_config  # noqa: PLC0415
+        return load_config()
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"--config-path not found: {config_path}")
+    with path.open("r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    if not isinstance(cfg, dict):
+        raise ValueError(
+            f"--config-path must contain a JSON object at the top level, "
+            f"got {type(cfg).__name__}"
+        )
+    return cfg
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1264,16 +1318,29 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_windows(windows)
 
+    if args.execute:
+        # Execution path (commit 7 of #276). Loads the app config (fixture
+        # or production), drives `run_walk_forward` over the computed
+        # windows, then prints the aggregate stats as JSON on stdout. The
+        # human-readable per-window dump above stays on stderr-equivalent
+        # (stdout before the JSON marker) so a consumer can split on the
+        # `=== walk-forward summary (JSON) ===` line.
+        app_config = _load_app_config(args.config_path)
+        run = run_walk_forward(windows, app_config, ci_mode=args.ci_mode)
+        summary = aggregate_run_stats(run)
+        print("=== walk-forward summary (JSON) ===")
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+        return 0
+
     if args.ci_mode:
         log.info(
-            "ci-mode requested: when the execution path lands, "
-            "tuning will be skipped and symbol_overrides ATR params "
-            "will be used as frozen params per window."
+            "ci-mode requested without --execute: window math only. "
+            "Pass --execute to drive the orchestrator + aggregate path."
         )
 
     if not args.dry_run:
         log.warning(
-            "Execution path not implemented yet — see #276. "
+            "Execution path requires --execute. "
             "Re-run with --dry-run to silence this warning."
         )
     return 0
