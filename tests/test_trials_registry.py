@@ -100,3 +100,43 @@ def test_finalize_invalid_status_raises(trials_db):
     tid = claim_trial(source="auto_tune", combo={"x": 1})
     with pytest.raises(ValueError, match="ok.*failed"):
         finalize_trial(tid, status="done")
+
+
+def test_with_write_retry_succeeds_after_transient_lock(monkeypatch):
+    import db.trials
+    monkeypatch.setattr(db.trials.time, "sleep", lambda s: None)  # skip real backoff
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    assert db.trials._with_write_retry("test", flaky) == "ok"
+    assert calls["n"] == 2
+
+
+def test_with_write_retry_exhaustion_raises(monkeypatch):
+    import db.trials
+    monkeypatch.setattr(db.trials.time, "sleep", lambda s: None)
+
+    def always_locked():
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        db.trials._with_write_retry("test", always_locked)
+
+
+def test_with_write_retry_non_lock_error_propagates_immediately(monkeypatch):
+    import db.trials
+    monkeypatch.setattr(db.trials.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise sqlite3.OperationalError("no such table: trials")
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        db.trials._with_write_retry("test", boom)
+    assert calls["n"] == 1  # no retry on non-lock errors
