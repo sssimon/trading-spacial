@@ -27,6 +27,7 @@ from backtest import (
     get_historical_fear_greed, get_historical_funding_rate,
     INITIAL_CAPITAL,
 )
+from db.trials import claim_trial, finalize_trial
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger("optimize")
@@ -61,10 +62,17 @@ def optimize_symbol(symbol, sim_start, sim_end):
 
     results = []
     start_time = time.time()
+    window_label = f"{sim_start}..{sim_end}"
 
     for idx, combo in enumerate(combos):
         params = dict(zip(keys, combo))
 
+        trial_id = claim_trial(
+            source="optimize_new_tokens",
+            symbol=symbol,
+            combo=params,
+            window_label=window_label,
+        )
         try:
             trades, equity = simulate_strategy(
                 df1h=df1h, df4h=df4h, df5m=df5m,
@@ -78,11 +86,15 @@ def optimize_symbol(symbol, sim_start, sim_end):
             )
 
             if not trades:
+                finalize_trial(trial_id, status="failed", error="no trades")
                 continue
 
             metrics = calculate_metrics(trades, equity)
             if "error" in metrics:
+                finalize_trial(trial_id, status="failed", error=str(metrics["error"]))
                 continue
+
+            finalize_trial(trial_id, status="ok", metrics=metrics)
 
             results.append({
                 "symbol": symbol,
@@ -96,6 +108,7 @@ def optimize_symbol(symbol, sim_start, sim_end):
                 "final_equity": metrics["final_equity"],
             })
         except Exception as e:
+            finalize_trial(trial_id, status="failed", error=str(e))
             log.warning(f"  Error: {e}")
             continue
 
