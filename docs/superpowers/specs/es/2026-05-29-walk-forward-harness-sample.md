@@ -102,13 +102,24 @@ fija el contrato):
         "win_rate":         "n/a",
         "total_return_pct": "n/a"
       },
-      "regime_tag": null,
       "error":      null
     }
   },
   "skipped": [
     {"symbol": "n/a", "reason": "no_usable_params"}
   ],
+  "regime_tag": {
+    "regime":     "n/a",
+    "score":      "n/a",
+    "components": {"price": "n/a", "fng": "n/a", "funding": "n/a"},
+    "n_days":     "n/a",
+    "method":     "composite_mean"
+  },
+  "per_regime": {
+    "BULL":    {"trades": "n/a", "win_rate": "n/a", "avg_pnl_pct": "n/a", "total_pnl_usd": "n/a"},
+    "BEAR":    {"trades": "n/a", "win_rate": "n/a", "avg_pnl_pct": "n/a", "total_pnl_usd": "n/a"},
+    "NEUTRAL": {"trades": "n/a", "win_rate": "n/a", "avg_pnl_pct": "n/a", "total_pnl_usd": "n/a"}
+  },
   "is_pnl_by_symbol": {
     "<symbol>": "n/a"
   }
@@ -117,10 +128,23 @@ fija el contrato):
 
 Notas de forma (no son números, son contratos):
 
-- `regime_tag` es siempre `null` en este commit: el simulador clasifica
-  régimen por-trade, no por-run. Un fold-level regime tag requiere una decisión
-  agregada (modo? mayoría?) que el harness aún no fija — surfacearla ahora sería
-  inventar semántica.
+- `regime_tag` y `per_regime` son **window-level** (#536, completa #276). Se
+  pueblan sólo cuando el orquestador carga `regime_data` de fuentes
+  **NON-HOLDOUT** (`data/ohlcv.db` + `data/backtest/*.csv`) y lo pasa a
+  `evaluate_window` (`run_walk_forward(..., load_regime=True)`); sin ese dato
+  quedan `null` y no se hace I/O de régimen.
+  - `regime_tag` = composite **BULL/BEAR/NEUTRAL** de la test window bajo la
+    regla acordada en el Paso 0 (`method: "composite_mean"`): clasificar la
+    **media** del composite diario `40% precio + 30% F&G + 30% funding` (pesos
+    `mode='global'` de `strategy.regime`, umbrales `>60` BULL / `<40` BEAR).
+    `method` es un contrato fijo, no una métrica medida.
+  - `per_regime` agrupa los trades de la ventana por el régimen composite del
+    **día de entrada** de cada trade — misma taxonomía que `regime_tag` (un solo
+    vocabulario en todo el reporte). Forma por bucket idéntica a
+    `backtest.classify_market_regime`.
+- El antiguo placeholder **per-symbol** `regime_tag` (siempre `null`) queda
+  **retirado**: la decisión de agregación ya está fijada y vive a nivel de
+  ventana.
 - `error` se popula sólo cuando el runner retorna su sentinel
   (`{"error": ..., "total_trades": 0, "net_pnl": 0, "profit_factor": 0}`) — por
   ejemplo cuando `data/ohlcv.db` no cubre el rango.
@@ -261,8 +285,11 @@ Repito para que ningún lector apurado se confunda:
 
 ---
 
-**Versión de la forma**: corresponde al estado del módulo `walk_forward.py` en
-el commit que introduce `--execute` (commit 7 de #276). Cuando el shape del
-JSON cambie (nuevas métricas, nuevos campos en `oos_is_ratio.reason`, regime
-tag agregado por fold), regenerar este sample en una versión nueva y dejar
-ésta como histórica.
+**Versión de la forma**: corresponde al estado del módulo `walk_forward.py`
+tras #536 (completa #276) — `regime_tag` + `per_regime` window-level añadidos
+sobre el shape de `--execute` (commit 7). Actualizado in-place porque #536
+cierra el mismo epic #276 el mismo día; el git history preserva el shape
+anterior (per-symbol `regime_tag: null`). Cuando el shape del JSON vuelva a
+cambiar (nuevas métricas, nuevos campos en `oos_is_ratio.reason`, deflated
+metrics de #278), regenerar este sample en una versión nueva y dejar ésta como
+histórica.

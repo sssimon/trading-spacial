@@ -120,7 +120,7 @@ def test_skips_tune_window(patch_auto_tune, monkeypatch):
     monkeypatch.setattr(walk_forward, "tune_window", boom_tune)
 
     # Stub evaluate_window so we don't try to actually run a backtest.
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         return {
             "window_index": window.index,
             "train_range": {
@@ -170,7 +170,7 @@ def test_uses_config_overrides(patch_auto_tune, monkeypatch):
 
     seen_tuned: list[dict] = []
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         seen_tuned.append(tuned)
         # Mirror the evaluate_window envelope.
         params = {
@@ -276,7 +276,7 @@ def test_default_off(patch_auto_tune, monkeypatch):
             },
         }
 
-    def fake_eval(window, tuned, config):
+    def fake_eval(window, tuned, config, regime_data=None):
         return {
             "window_index": window.index,
             "train_range": {
