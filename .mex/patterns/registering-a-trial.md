@@ -72,6 +72,13 @@ Do **not** register from:
 - **`db/trials.py` writes ONLY to `signals.db`.** It must never import
   `open_holdout` or touch `data/holdout/` (Non-Negotiable #2/#3). It is correctly
   absent from `HOLDOUT_LEGITIMATE_MODULES`.
+- **N is DISTINCT `(source, combo_json, window_label)`, not raw `COUNT(*)`.**
+  Some sweeps legitimately re-run an identical configuration, producing duplicate
+  rows for the SAME selection candidate. `regime_allocation_sweep`'s sensitivity
+  pass re-runs the `vol_target=0.30` primary cell (0.30 ∈ both the primary pass
+  and `SENSITIVITY_VOL_TARGETS`), so every in-coverage `(symbol, sub_window)` cell
+  at 0.30 is recorded twice. Part 2 must de-duplicate on the identity tuple before
+  counting — a raw `COUNT(*)` over-inflates N and over-deflates the best Sharpe.
 
 ## Verify Checklist
 

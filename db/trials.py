@@ -29,6 +29,15 @@ Design (Halberg runtime review 2026-05-29):
   only 'exploratory' trials inflate selection bias; 'confirmatory'
   pre-registered studies (epic C) are recordable later WITHOUT schema change.
 
+N-counting contract for #278 Part 2: compute N over DISTINCT
+(source, combo_json, window_label) tuples, NOT raw COUNT(*). Some sweeps
+legitimately re-run an identical configuration: e.g. regime_allocation_sweep's
+sensitivity pass re-runs the vol_target=0.30 primary cell (0.30 is in both the
+primary pass and SENSITIVITY_VOL_TARGETS), producing identical-config duplicate
+rows. Those duplicates are the SAME selection candidate competing once, so a raw
+COUNT(*) would over-inflate N (over-deflating the best Sharpe). De-duplicate on
+the identity tuple before counting.
+
 Scope (operator-confirmed 2026-05-29): wired into the 4 exploratory selection
 sweeps — auto_tune, grid_search_tf, optimize_new_tokens, regime_allocation_sweep.
 The pre-registered signal_calibration_* sweeps are confirmatory and excluded.
