@@ -1131,6 +1131,10 @@ def _run_jobs_parallel(
         return []
     worker_fn = worker_fn or _process_regime_allocation_cell
 
+    # NOTE: function-IDENTITY matching. A future caller that wraps the worker in
+    # functools.partial / a lambda / a bound method would NOT be `in` this tuple
+    # and would silently skip trial registration (N under-count). Register any
+    # new trial-producing worker here by its bare function object.
     produces_trials = worker_fn in (
         _process_regime_allocation_cell,
         _process_lrc_archived_baseline_cell,

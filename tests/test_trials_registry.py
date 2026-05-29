@@ -140,3 +140,82 @@ def test_with_write_retry_non_lock_error_propagates_immediately(monkeypatch):
     with pytest.raises(sqlite3.OperationalError, match="no such table"):
         db.trials._with_write_retry("test", boom)
     assert calls["n"] == 1  # no retry on non-lock errors
+
+
+def _read_trials_direct(db_path):
+    """Read the trials table via a direct connection to `db_path`, independent
+    of any monkeypatched module globals (used after installing patches that
+    would break the shared transaction() path)."""
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in con.execute(
+            "SELECT * FROM trials ORDER BY id"
+        ).fetchall()]
+    finally:
+        con.close()
+
+
+def test_ensure_trials_schema_idempotent(trials_db, monkeypatch):
+    """_ensure_trials_schema must be safe to call repeatedly:
+    (a) no exception on a second call,
+    (b) the `trials` table + any prior rows survive,
+    (c) once `_schema_ensured` is True the second call is a no-op — it issues
+        no DDL (proven by monkeypatching `transaction` to blow up and confirming
+        it is NOT called while the flag is already set).
+    """
+    import db.trials
+
+    # First call runs the schema DDL (fixture reset _schema_ensured=False).
+    db.trials._ensure_trials_schema()
+    assert db.trials._schema_ensured is True
+
+    # Insert a row so we can prove idempotency preserves prior data.
+    tid = db.trials.claim_trial(source="grid_search_tf", combo={"x": 1})
+    rows_before = _read_trials_direct(trials_db)
+    assert len(rows_before) == 1
+    assert rows_before[0]["id"] == tid
+
+    # (c) With _schema_ensured already True, a second call must short-circuit
+    # BEFORE touching the DB. Make transaction() + WAL re-set explode if reached.
+    def exploding_transaction(*a, **k):
+        raise AssertionError(
+            "_ensure_trials_schema opened a transaction when _schema_ensured "
+            "was already True — second call was NOT a no-op"
+        )
+
+    def exploding_wal(*a, **k):
+        raise AssertionError("WAL re-set on no-op second call")
+
+    monkeypatch.setattr(db.trials, "transaction", exploding_transaction)
+    monkeypatch.setattr(
+        db.trials, "_set_wal_mode_idempotent_with_retry", exploding_wal,
+    )
+
+    # (a) No exception even though transaction/WAL would blow up if reached.
+    db.trials._ensure_trials_schema()
+
+    # (b) Table + prior row still intact — read via a direct connection so the
+    # exploding monkeypatches above don't interfere.
+    rows_after = _read_trials_direct(trials_db)
+    assert len(rows_after) == 1
+    assert rows_after[0]["id"] == tid
+    assert rows_after[0]["source"] == "grid_search_tf"
+
+
+def test_ensure_trials_schema_creates_table_when_flag_reset(trials_db, monkeypatch):
+    """Belt-and-suspenders for the idempotent CREATE: resetting _schema_ensured
+    and calling again (e.g. a fresh process) re-issues CREATE TABLE IF NOT
+    EXISTS without error and without dropping existing rows."""
+    import db.trials
+
+    db.trials._ensure_trials_schema()
+    tid = db.trials.claim_trial(source="auto_tune", combo={"y": 2})
+
+    # Simulate a fresh process: flag reset, but the table already exists on disk.
+    monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    db.trials._ensure_trials_schema()  # CREATE TABLE IF NOT EXISTS → no-op DDL
+
+    rows = _all_trials()
+    assert len(rows) == 1
+    assert rows[0]["id"] == tid
