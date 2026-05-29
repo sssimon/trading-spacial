@@ -63,6 +63,7 @@ def test_run_backtest_with_params_finalizes_ok(monkeypatch):
         {"atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
         datetime(2022, 1, 1, tzinfo=timezone.utc),
         datetime(2022, 4, 1, tzinfo=timezone.utc),
+        trial_source="auto_tune",
     )
 
     # The wrap returns the (trades, metrics) tuple unchanged.
@@ -101,8 +102,44 @@ def test_run_backtest_with_params_finalizes_failed_on_exception(monkeypatch):
             {"atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
             datetime(2022, 1, 1, tzinfo=timezone.utc),
             datetime(2022, 4, 1, tzinfo=timezone.utc),
+            trial_source="auto_tune",
         )
 
     assert len(claims) == 1
     assert finals[0][1]["status"] == "failed"
     assert "exploded" in finals[0][1]["error"]
+
+
+def test_run_backtest_with_params_no_trial_source_does_not_register(monkeypatch):
+    """Default path (no trial_source) is the walk_forward/tools path: it must
+    register NOTHING. Only auto_tune's own sweep opts in via
+    trial_source="auto_tune". Counting evaluation/research runs as selection
+    trials would corrupt the N denominator (#278 Part 2)."""
+    import auto_tune as at
+    import backtest as bt
+
+    _patch_loaders(monkeypatch)
+    monkeypatch.setattr(bt, "simulate_strategy", lambda *a, **k: (["t"], ["e"]))
+    monkeypatch.setattr(bt, "calculate_metrics", lambda *a, **k: {
+        "total_trades": 5, "net_pnl": 50, "profit_factor": 1.3, "sharpe_ratio": 0.9,
+    })
+
+    claims, finals = [], []
+    monkeypatch.setattr(at, "claim_trial",
+                        lambda **kw: (claims.append(kw), len(claims))[1])
+    monkeypatch.setattr(at, "finalize_trial",
+                        lambda tid, **kw: finals.append((tid, kw)))
+
+    trades, metrics = at.run_backtest_with_params(
+        "BTCUSDT",
+        {"atr_sl_mult": 1.0, "atr_tp_mult": 3.0, "atr_be_mult": 2.0},
+        datetime(2022, 1, 1, tzinfo=timezone.utc),
+        datetime(2022, 4, 1, tzinfo=timezone.utc),
+    )
+
+    # Result is unchanged...
+    assert trades == ["t"]
+    assert metrics["net_pnl"] == 50
+    # ...but no trial was claimed or finalized (this is the eval/research path).
+    assert claims == []
+    assert finals == []

@@ -178,7 +178,13 @@ def _slice_below_cutoff(df: pd.DataFrame, cutoff_naive: datetime, symbol: str, n
 
 def _finalize_from_metrics(trial_id, trades, metrics):
     """Finalize a trial from a (trades, metrics) result and return it unchanged
-    so call sites can `return _finalize_from_metrics(...)`."""
+    so call sites can `return _finalize_from_metrics(...)`.
+
+    No-op when ``trial_id is None`` (trial registration was not opted in via
+    ``trial_source``): just return the result unchanged without touching the
+    registry."""
+    if trial_id is None:
+        return trades, metrics
     if not trades or "error" in metrics:
         finalize_trial(
             trial_id, status="failed",
@@ -192,7 +198,8 @@ def _finalize_from_metrics(trial_id, trades, metrics):
 def run_backtest_with_params(symbol: str, params: dict,
                              sim_start: datetime, sim_end: datetime,
                              *, cutoff: datetime = None,
-                             app_config: dict | None = None):
+                             app_config: dict | None = None,
+                             trial_source: str | None = None):
     """Run a backtest for a symbol with given ATR params over a date range.
 
     When ``cutoff`` is provided, all OHLCV bars with timestamp ``>= cutoff``
@@ -217,13 +224,24 @@ def run_backtest_with_params(symbol: str, params: dict,
     by design (see CLAUDE.md and ``backtest.py``); existing auto_tune CLI
     callers stay on this path unless they opt in.
 
+    Trial registration (#278 Part 1): OPT-IN via ``trial_source``. When
+    ``trial_source`` is None (the default), NO trial is claimed/finalized —
+    this is the path the EVALUATION caller (``walk_forward``) and the research
+    tools take, and counting their runs as SELECTION trials would corrupt the
+    trial-count N (#278 Part 2). Only auto_tune's own baseline + grid + validate
+    backtests opt in by passing ``trial_source="auto_tune"``.
+
     Returns (trades, metrics).
     """
-    trial_id = claim_trial(
-        source="auto_tune",
-        symbol=symbol,
-        combo=params,
-        window_label=f"{sim_start.date()}..{sim_end.date()}",
+    trial_id = (
+        claim_trial(
+            source=trial_source,
+            symbol=symbol,
+            combo=params,
+            window_label=f"{sim_start.date()}..{sim_end.date()}",
+        )
+        if trial_source is not None
+        else None
     )
     try:
         from backtest import (
@@ -301,7 +319,8 @@ def run_backtest_with_params(symbol: str, params: dict,
         metrics = calculate_metrics(trades, equity_curve)
         return _finalize_from_metrics(trial_id, trades, metrics)
     except Exception as e:
-        finalize_trial(trial_id, status="failed", error=str(e))
+        if trial_id is not None:
+            finalize_trial(trial_id, status="failed", error=str(e))
         raise
 
 
@@ -327,7 +346,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
     log.info(f"  {symbol}: baseline on validate ({val_start.date()} -> {val_end.date()})...")
     _, baseline_metrics = run_backtest_with_params(
         symbol, current_params, val_start, val_end,
-        cutoff=cutoff, app_config=config,
+        cutoff=cutoff, app_config=config, trial_source="auto_tune",
     )
     current_val_pnl = baseline_metrics.get("net_pnl", 0)
 
@@ -339,7 +358,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
     for combo in combos:
         _, metrics = run_backtest_with_params(
             symbol, combo, train_start, train_end,
-            cutoff=cutoff, app_config=config,
+            cutoff=cutoff, app_config=config, trial_source="auto_tune",
         )
         train_results.append({
             "params": combo,
@@ -370,7 +389,7 @@ def optimize_symbol(symbol: str, config: dict, today=None, *, cutoff: datetime =
         params = candidate["params"]
         trades_val, val_metrics = run_backtest_with_params(
             symbol, params, val_start, val_end,
-            cutoff=cutoff, app_config=config,
+            cutoff=cutoff, app_config=config, trial_source="auto_tune",
         )
         val_pnl = val_metrics.get("net_pnl", 0)
         val_pf = val_metrics.get("profit_factor", 0)
