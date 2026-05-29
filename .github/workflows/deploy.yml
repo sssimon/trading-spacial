@@ -13,6 +13,11 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
+  # Manual trigger: recover a deploy when the push event was not picked up by
+  # Actions (observed 2026-05-29 — the #540 squash-merge to main created the
+  # commit but no push-triggered run fired, a GitHub-side transient). Run with:
+  #   gh workflow run deploy.yml --ref main
+  workflow_dispatch:
 
 concurrency:
   group: deploy-production
@@ -103,12 +108,21 @@ jobs:
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          sleep 15
-          if ! ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health"; then
-            echo "::error::Health check falló. Logs del servicio:"
-            ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
-            exit 1
-          fi
+          # Poll up to ~60s: the service can take well over 15s to answer
+          # /health after restart on the large prod DB. The prior single-shot
+          # "sleep 15 + one curl" failed 5 of 6 recent deploys even when the
+          # rsync + restart had already succeeded — a false-red. Retry instead.
+          for i in $(seq 1 12); do
+            if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health" >/dev/null 2>&1; then
+              echo "Health check passed (attempt ${i}/12)."
+              exit 0
+            fi
+            echo "Health check attempt ${i}/12 not ready; retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Health check failed after 12 attempts (~60s). Service logs:"
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
+          exit 1
 
       - name: Cleanup
         if: always()
