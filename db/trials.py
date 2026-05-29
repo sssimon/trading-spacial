@@ -1,0 +1,129 @@
+"""Trial registry — the audit ledger for backtest trials (A.0.3, #278 Part 1).
+
+Every backtest run inside an exploratory parameter/window SWEEP is a "trial".
+The deflated-metrics work (#278 Part 2) deflates the best Sharpe by the number
+of trials N that competed for selection (López de Prado 2018). For N to be
+honest, the registry MUST record every selection trial BEFORE it runs, so a
+crashed run still counts (its row survives as status='pending').
+
+Design (Halberg runtime review 2026-05-29):
+- Claim-then-execute: claim_trial() INSERTs status='pending' BEFORE the
+  simulator runs; finalize_trial() UPDATEs to 'ok'/'failed' after. A process
+  that dies before finalize leaves an orphan 'pending' row — that row IS the
+  evidence the trial existed, preserving the N denominator. Registering INSIDE
+  the running process AFTER the fact cannot count a process that crashes.
+- Writes go through db.transaction.transaction() (configured connection,
+  busy_timeout=5000, BEGIN IMMEDIATE), wrapped in bounded retry/backoff on
+  'database is locked'. signals.db already has concurrent writers (scanner,
+  API); a TRANSIENT lock must NOT abort a multi-hour sweep. Only durability
+  exhaustion (backoff spent, disk full, corruption) aborts loudly.
+- Storage: signals.db (same DB as tune_results; precedent
+  auto_tune.save_tune_result). The sweep scripts do not call db.schema.init_db,
+  so this module ensures its own table + WAL idempotently on first use.
+- source + study_type columns let Part 2 compute N_effective by filtering:
+  only 'exploratory' trials inflate selection bias; 'confirmatory'
+  pre-registered studies (epic C) are recordable later WITHOUT schema change.
+
+Scope (operator-confirmed 2026-05-29): wired into the 4 exploratory selection
+sweeps — auto_tune, grid_search_tf, optimize_new_tokens, regime_allocation_sweep.
+The pre-registered signal_calibration_* sweeps are confirmatory and excluded.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import time
+from datetime import datetime, timezone
+
+from db.schema import _set_wal_mode_idempotent_with_retry
+from db.transaction import transaction
+
+log = logging.getLogger("db.trials")
+
+_WRITE_BACKOFFS = (0.2, 0.6, 1.5)
+_schema_ensured = False
+
+
+def _ensure_trials_schema() -> None:
+    """Idempotent: set WAL once + CREATE TABLE IF NOT EXISTS. Runs once/process."""
+    global _schema_ensured
+    if _schema_ensured:
+        return
+    _set_wal_mode_idempotent_with_retry()
+    with transaction() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claimed_ts TEXT NOT NULL,
+                finalized_ts TEXT,
+                source TEXT NOT NULL,
+                study_type TEXT NOT NULL DEFAULT 'exploratory',
+                symbol TEXT,
+                combo_json TEXT NOT NULL,
+                window_label TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                sharpe REAL,
+                metrics_json TEXT,
+                error TEXT
+            )
+            """
+        )
+    _schema_ensured = True
+
+
+def _with_write_retry(label: str, fn):
+    """Run fn() (a write through transaction()) with bounded backoff on
+    'database is locked'. Mirrors db.schema._set_wal_mode_idempotent_with_retry.
+    A transient lock is retried; a non-lock error propagates immediately; only
+    backoff exhaustion raises (abort loudly — durability failure only)."""
+    last_exc: sqlite3.OperationalError | None = None
+    for attempt, delay in enumerate((0.0, *_WRITE_BACKOFFS)):
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "database is locked" in msg or "database table is locked" in msg:
+                last_exc = exc
+                log.warning(
+                    "trials.%s locked on attempt %d/%d; retrying",
+                    label, attempt + 1, len(_WRITE_BACKOFFS) + 1,
+                )
+                continue
+            raise
+    assert last_exc is not None
+    raise last_exc
+
+
+def claim_trial(
+    *,
+    source: str,
+    combo: dict,
+    symbol: str | None = None,
+    window_label: str | None = None,
+    study_type: str = "exploratory",
+) -> int:
+    """Record a trial as 'pending' BEFORE running it. Returns the trial id.
+
+    Call immediately before invoking the simulator. If the process dies before
+    finalize_trial(), the 'pending' row remains as evidence the trial existed
+    (preserves N). Raises sqlite3.OperationalError only on DB durability failure
+    after retries are exhausted (abort loudly)."""
+    _ensure_trials_schema()
+    now = datetime.now(timezone.utc).isoformat()
+    combo_json = json.dumps(combo, default=str, sort_keys=True)
+
+    def _do() -> int:
+        with transaction() as con:
+            cur = con.execute(
+                "INSERT INTO trials "
+                "(claimed_ts, source, study_type, symbol, combo_json, window_label, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                (now, source, study_type, symbol, combo_json, window_label),
+            )
+            return int(cur.lastrowid)
+
+    return _with_write_retry("claim_trial", _do)
