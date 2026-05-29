@@ -17,6 +17,11 @@ Design (Halberg runtime review 2026-05-29):
   'database is locked'. signals.db already has concurrent writers (scanner,
   API); a TRANSIENT lock must NOT abort a multi-hour sweep. Only durability
   exhaustion (backoff spent, disk full, corruption) aborts loudly.
+  Real retry budget: each of the 4 attempts opens a connection with
+  busy_timeout=5000, so each attempt can block up to 5s INSIDE SQLite before
+  raising 'database is locked'. Total worst case is therefore ~22s
+  (4 × 5s busy_timeout + the inter-attempt backoff sum 0.2 + 0.6 + 1.5 = 2.3s),
+  NOT the 2.3s backoff sum alone — the busy_timeout dominates the budget.
 - Storage: signals.db (same DB as tune_results; precedent
   auto_tune.save_tune_result). The sweep scripts do not call db.schema.init_db,
   so this module ensures its own table + WAL idempotently on first use.
@@ -41,6 +46,9 @@ from db.transaction import transaction
 
 log = logging.getLogger("db.trials")
 
+# Inter-attempt backoff (seconds). NOTE: these 2.3s are NOT the retry budget —
+# each attempt also blocks up to busy_timeout=5000ms inside SQLite, so the real
+# worst-case budget across the 4 attempts is ~22s (4 × 5s + 0.2 + 0.6 + 1.5).
 _WRITE_BACKOFFS = (0.2, 0.6, 1.5)
 _schema_ensured = False
 
