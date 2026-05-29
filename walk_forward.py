@@ -1202,6 +1202,160 @@ def _best_worst(reports: list[dict]) -> tuple[dict | None, dict | None]:
 
 
 # --------------------------------------------------------------------------- #
+# Final-winner holdout evaluation (commit 8 of #276) — WIRED, NOT INVOKED
+# --------------------------------------------------------------------------- #
+#
+# This is the last leg of the harness: once a walk-forward run has produced a
+# single winning parameter set, A.4-3 evaluates that winner ONCE against the
+# locked out-of-sample snapshot under `data/holdout/`. That read is the bala
+# única — there is exactly one honest shot at it, and a partial peek burns it
+# just as surely as a full run.
+#
+# Per Non-Negotiable #3 and decisions.md §Caveat 5 (#322), A.4-3 holdout
+# execution is BLOCKED until ALL THREE closure criteria for #322 are met:
+#   1. the pre-holdout re-tune produces viable candidates (not NO_DATA), AND
+#   2. the A.4-2 walk-forward passes, AND
+#   3. the drift check on the holdout snapshots is completed.
+#
+# Until then this leg is wired but unreachable. The gate below is a hard
+# `raise HoldoutExecutionBlocked` placed BEFORE any `open_holdout(...)` call,
+# guarded by a module constant (`_HOLDOUT_322_CLOSED`) that defaults to
+# "blocked". This constant is a KILL-SWITCH, not a cryptographic lock: a
+# deliberate, reviewed PR can reassign it (and the test in fix B that asserts
+# it stays False) once #322 closure criteria are met — and module-attribute
+# reassignment is the idiomatic mechanism here (the test suite already uses
+# `monkeypatch.setattr(walk_forward, ...)`). The REAL control is PROCEDURAL:
+# the human-reviewed PR is the checkpoint that the bala única is being spent
+# intentionally, NOT the immutability of the constant. That is by design — the
+# review is the gate, not the inability to reassign an attribute.
+#
+# The `open_holdout(..., evaluation_mode=True)` call is written below so the
+# access shape is correct, wired, and review-auditable the day #322 closes. It
+# is the only legitimate read of `data/holdout/` (Non-Negotiable #2). To make a
+# stray peek impossible even if the kill-switch were flipped without finishing
+# #322, the `raise NotImplementedError` is placed BEFORE `open_holdout(...)`:
+# the access wrapper is unreachable until the NotImplementedError is ALSO
+# removed (which is #322-closure work). open_holdout therefore stays grep-able
+# and wired as the integration point, but cannot run today.
+
+
+class HoldoutExecutionBlocked(RuntimeError):
+    """Raised when A.4-3 holdout evaluation is attempted while #322 is open.
+
+    This is the harness-level guard for Non-Negotiable #3. It fires *before*
+    any holdout read, so no partial peek is possible. It is distinct from
+    `data.holdout_access.HoldoutAccessError` (the wrapper-level guard): this
+    one says "the harness is not authorised to run A.4-3 yet", the wrapper
+    one says "you reached the wrapper without evaluation_mode=True".
+    """
+
+
+# A.4-3 kill-switch. Defaults to False = BLOCKED. Flipping this to True is a
+# reviewed decision tied to #322 closure (re-tune candidates AND A.4-2 pass
+# AND drift check done — see decisions.md §Caveat 5). It is a module constant
+# so there is no caller-supplied runtime path, no kwarg, and no env var that
+# flips it: the only ways to reach holdout execution are (a) reassign this
+# attribute and (b) remove the NotImplementedError below — both edits live in
+# source and both are caught in PR review. The constant is NOT immune to
+# deliberate `walk_forward._HOLDOUT_322_CLOSED = True` reassignment (the suite
+# uses `monkeypatch.setattr` on this very module), and it is not meant to be:
+# the human-reviewed PR is the checkpoint that the bala única is being spent
+# intentionally, not the immutability of the symbol.
+_HOLDOUT_322_CLOSED: bool = False
+
+
+def evaluate_winner_on_holdout(
+    winning_params_by_symbol: dict,
+    config: dict,
+    *,
+    holdout_rel_path: str,
+) -> dict:
+    """Evaluate the walk-forward winner ONCE against the locked holdout.
+
+    A.4-3, the final leg of #276. Consumes a single winning parameter set
+    (per symbol) selected from a completed walk-forward run and scores it on
+    the out-of-sample snapshot under `data/holdout/`. This is the bala única:
+    one honest shot, no peeking.
+
+    **This function is wired but CANNOT execute today.** Per Non-Negotiable #3
+    and decisions.md §Caveat 5 (#322), A.4-3 is blocked until the re-tune
+    produces candidates, A.4-2 passes, and the drift check is done.
+
+    The block is enforced by ONE access guard: the hard
+    ``HoldoutExecutionBlocked`` raise gated on ``_HOLDOUT_322_CLOSED`` (default
+    False). That raise is the only thing standing between a caller and the
+    holdout read. ``_HOLDOUT_322_CLOSED`` is a kill-switch, not a cryptographic
+    lock — a reviewed PR can reassign it (and edit the fix-B test that asserts
+    it stays False); the human review IS the checkpoint, by design. There is no
+    caller-supplied runtime path, kwarg, or env var that flips it.
+
+    A second statement — the ``NotImplementedError`` raised BEFORE
+    ``open_holdout(...)`` — marks that the A.4-3 evaluation body is
+    intentionally undefined until #322 closes. It is NOT a second guard on the
+    read; it is a placeholder that also has to be removed for the read to
+    become reachable, which adds one more line of #322-closure work in front of
+    the bala única. As a result ``open_holdout(...)`` stays grep-able and wired
+    as the integration point but is unreachable today even if the kill-switch
+    were flipped on its own.
+
+    Args:
+        winning_params_by_symbol: ``{symbol: {atr_sl_mult, atr_tp_mult,
+            atr_be_mult}}`` — the single winner chosen from the run.
+        config: Application config dict (same shape the rest of the harness
+            consumes).
+        holdout_rel_path: Relative path inside `data/holdout/` to load, resolved
+            through the access wrapper. Required (no default): `data/holdout/`
+            holds parquet/JSON snapshots, not a single sqlite file, so the
+            #322-closure PR must name the real target explicitly rather than
+            inherit an invented layout.
+
+    Returns:
+        A holdout evaluation report (shape TBD when A.4-3 is unblocked —
+        defined alongside the closure of #322, not invented here).
+
+    Raises:
+        HoldoutExecutionBlocked: Always, while `_HOLDOUT_322_CLOSED` is False.
+            This is the load-bearing access guard. Do not remove it, do not
+            pass a flag to skip it, do not flip the constant outside a
+            #322-closure PR.
+    """
+    # ── HARD GATE (Non-Negotiable #3 / #322) ──────────────────────────────
+    # This raise precedes every holdout access below. While #322 is open the
+    # bala única stays in the chamber — no full run, no partial peek. This is
+    # the ONLY guard on the holdout read.
+    if not _HOLDOUT_322_CLOSED:
+        raise HoldoutExecutionBlocked(
+            "A.4-3 holdout execution is blocked until #322 closure criteria "
+            "are ALL met: (1) pre-holdout re-tune produces viable candidates, "
+            "(2) A.4-2 walk-forward passes, (3) drift check on holdout "
+            "snapshots completed. See CLAUDE.md Non-Negotiable #3 and "
+            ".mex/context/decisions.md §Caveat 5. A partial peek burns the "
+            "bala única just as surely as a full run."
+        )
+
+    # ── Unreachable until #322 closes ─────────────────────────────────────
+    # The NotImplementedError is placed BEFORE open_holdout on purpose: even if
+    # the kill-switch above were flipped, control still cannot reach the read
+    # until this line is also removed (#322-closure work). The body of A.4-3 is
+    # intentionally undefined here.
+    raise NotImplementedError(
+        "A.4-3 evaluation body is defined alongside #322 closure, not here."
+    )
+
+    # The only legitimate entry to data/holdout/ is the access wrapper with
+    # evaluation_mode=True (Non-Negotiable #2) — no string literals, no
+    # Path(...) / "holdout". This call is the wired, grep-able integration
+    # point; it is unreachable until the raise above is removed at #322 closure.
+    from data.holdout_access import open_holdout  # noqa: PLC0415
+
+    holdout_db = open_holdout(holdout_rel_path, evaluation_mode=True)
+    raise NotImplementedError(  # pragma: no cover
+        f"A.4-3 evaluation body is defined alongside #322 closure, not here. "
+        f"Resolved holdout path would be: {holdout_db}"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # CLI (placeholder — no strategy execution yet)
 # --------------------------------------------------------------------------- #
 

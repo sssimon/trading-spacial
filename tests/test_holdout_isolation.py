@@ -68,8 +68,16 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # as a console label — `HOLDOUT_START` is the cutoff timestamp constant,
     # the literal string is operator-facing output, not a data access path.
     "tools/r2_gates_rederivation.py",
-    # A.2 walk-forward harness modules and A.4 evaluation modules will be
-    # added here when those tickets land.
+    # A.2 walk-forward harness + A.4-3 final-winner holdout evaluation
+    # (#276, commit 8). `evaluate_winner_on_holdout` is the ONLY function in
+    # the repo that legitimately reads `data/holdout/` for evaluation, via
+    # `open_holdout(rel_path, evaluation_mode=True)` (Non-Negotiable #2). The
+    # call is WIRED but UNREACHABLE: a hard `raise HoldoutExecutionBlocked`
+    # guarded by the `_HOLDOUT_322_CLOSED` module constant (default False)
+    # precedes every holdout access, so A.4-3 cannot run until #322 closure
+    # criteria are met (Non-Negotiable #3 / decisions.md §Caveat 5). Whitelisted
+    # in the same commit that introduces the mention, per the commit-4 rule.
+    "walk_forward.py",
     # A.2 walk-forward harness property tests (#276). Validates structural
     # invariants on window boundaries against `holdout_start` (a date cutoff,
     # not a data path). No `data/holdout/` access; assertion messages
@@ -382,3 +390,65 @@ def test_wrapper_path_traversal_is_refused():
 
     with pytest.raises(HoldoutAccessError):
         open_holdout("../ohlcv.db", evaluation_mode=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A.4-3 kill-switch — gate stays blocked and fires BEFORE any holdout read
+# (#276 commit 8 / #322 / Non-Negotiable #3). Regression net for the
+# adversarial audit tripwire: the gate must raise before open_holdout runs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_a43_gate_constant_defaults_to_blocked():
+    """`_HOLDOUT_322_CLOSED` must stay False until #322 closure.
+
+    This is a deliberate checkpoint: flipping the harness gate to True requires
+    editing THIS assertion as well as `walk_forward._HOLDOUT_322_CLOSED`, in a
+    reviewed PR tied to #322 closure (Non-Negotiable #3). If this fails on a
+    PR that is not closing #322, the bala única is being spent by accident.
+    """
+    import walk_forward
+
+    assert walk_forward._HOLDOUT_322_CLOSED is False, (
+        "A.4-3 gate flipped to True outside a #322-closure PR — the holdout "
+        "bala única must not be spendable until #322 criteria are all met. "
+        "See CLAUDE.md Non-Negotiable #3 and .mex/context/decisions.md §Caveat 5."
+    )
+
+
+def test_a43_gate_fires_before_any_holdout_read(monkeypatch):
+    """`evaluate_winner_on_holdout` must raise BEFORE `open_holdout` is reached.
+
+    Regression for the adversarial-audit tripwire (commit 8 / faddd1c): we
+    sabotage `data.holdout_access.open_holdout` so that *any* call to it
+    explodes, then invoke the harness entry point. The gate must raise
+    `HoldoutExecutionBlocked` without `open_holdout` ever being called — proving
+    no partial peek at `data/holdout/` is possible while #322 is open. The
+    import inside `evaluate_winner_on_holdout` is local, so patching the symbol
+    on the source module is what the call resolves at runtime.
+    """
+    import data.holdout_access as holdout_access
+    import walk_forward
+
+    sentinel = {"called": False}
+
+    def _explode(*args, **kwargs):
+        sentinel["called"] = True
+        raise AssertionError(
+            "open_holdout was reached — the A.4-3 gate did NOT fire first. "
+            "A peek at the locked holdout was possible. This burns the bala única."
+        )
+
+    monkeypatch.setattr(holdout_access, "open_holdout", _explode)
+
+    with pytest.raises(walk_forward.HoldoutExecutionBlocked):
+        walk_forward.evaluate_winner_on_holdout(
+            winning_params_by_symbol={},
+            config={},
+            holdout_rel_path="fng.parquet",
+        )
+
+    assert sentinel["called"] is False, (
+        "open_holdout was invoked despite the gate — access guard ordering is "
+        "broken; the read happens before the block."
+    )
