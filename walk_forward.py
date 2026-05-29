@@ -677,12 +677,79 @@ def _fold_error_report(window: Window, phase: str, exc: BaseException) -> dict:
     }
 
 
-def run_walk_forward(windows: list[Window], app_config: dict) -> WalkForwardRun:
+def frozen_params_for_window(window: Window, app_config: dict) -> dict:
+    """Build a `tune_window`-shaped dict from frozen `symbol_overrides` ATR
+    params, without running `auto_tune.optimize_symbol` at all.
+
+    Rationale (commit 6 of #276): CI cannot afford to drive the real
+    optimizer per window — `optimize_symbol` is minutes per symbol and
+    walks the full grid. For smoke / regression tests the loop only
+    needs to prove that orchestration + eval is wired correctly; the
+    tuning recommendation itself can be replaced by the params already
+    present in `app_config["symbol_overrides"]`. This function
+    materialises that substitution.
+
+    Contract:
+      - Output shape is byte-compatible with `tune_window` so
+        downstream `evaluate_window` + `_build_is_pnl_block` consume it
+        without branching on a "frozen" flag.
+      - One entry per symbol in `get_portfolio_symbols(app_config)`
+        whose override is a dict carrying all three ATR keys
+        (`atr_sl_mult`, `atr_tp_mult`, `atr_be_mult`). Symbols missing
+        any key are skipped: there is no params to freeze.
+      - Recommendation is always `"KEEP_CURRENT"`. `proposed_params`
+        and `proposal_detail` are `None`. `current_val_pnl` is `0.0`
+        because no IS measurement was taken — the aggregator's
+        OOS/IS ratio in CI mode therefore reports `is_pnl_near_zero`,
+        which is the honest signal (we did not measure IS).
+
+    Holdout safety (Non-Negotiable #3):
+      - No data is loaded. No `optimize_symbol` is invoked. No
+        backtest runs. The function reads `symbol_overrides` from the
+        in-memory config dict and nothing else. The locked snapshot is
+        not touched even indirectly.
+    """
+    import auto_tune  # noqa: PLC0415 — same import policy as tune_window
+
+    symbols = auto_tune.get_portfolio_symbols(app_config)
+    overrides = (app_config or {}).get("symbol_overrides", {}) or {}
+    cutoff = _train_end_to_cutoff(window.train_end)
+
+    results: dict[str, dict] = {}
+    for sym in symbols:
+        sym_cfg = overrides.get(sym)
+        if not isinstance(sym_cfg, dict):
+            continue
+        if not all(k in sym_cfg for k in _TUNED_PARAM_KEYS):
+            continue
+        frozen = {k: sym_cfg[k] for k in _TUNED_PARAM_KEYS}
+        results[sym] = {
+            "symbol": sym,
+            "recommendation": "KEEP_CURRENT",
+            "current_params": frozen,
+            "current_val_pnl": 0.0,
+            "proposed_params": None,
+            "proposal_detail": None,
+        }
+
+    return {
+        "window_index": window.index,
+        "train_end": window.train_end.isoformat(),
+        "cutoff": cutoff.isoformat(),
+        "results": results,
+    }
+
+
+def run_walk_forward(
+    windows: list[Window],
+    app_config: dict,
+    ci_mode: bool = False,
+) -> WalkForwardRun:
     """Drive `tune_window` → `evaluate_window` over every fold in `windows`.
 
     The loop is in-process and single-threaded. Process-pool / async
-    orchestration is deferred to a downstream commit (commit 6/7 of
-    #276 if the cost profile justifies it).
+    orchestration is deferred to a downstream commit of #276 if the
+    cost profile justifies it.
 
     Best-effort policy: a per-window exception in tune or evaluate is
     recorded on that fold's report under `"error"` and iteration
@@ -694,6 +761,13 @@ def run_walk_forward(windows: list[Window], app_config: dict) -> WalkForwardRun:
         windows: Output of `compute_windows`. May be empty.
         app_config: Application config dict, propagated unchanged to
             `tune_window` and `evaluate_window`.
+        ci_mode: When True, replace the per-window tune step with
+            `frozen_params_for_window` — uses the ATR multipliers
+            already in `symbol_overrides` instead of invoking the
+            optimizer. The orchestrator's contract with
+            `evaluate_window` (and the resulting report shape) is
+            unchanged; only the source of per-symbol params differs.
+            Default False (production behaviour unchanged).
 
     Returns:
         A `WalkForwardRun` carrying the original window list and one
@@ -706,7 +780,10 @@ def run_walk_forward(windows: list[Window], app_config: dict) -> WalkForwardRun:
     reports: list[dict] = []
     for window in windows:
         try:
-            tuned = tune_window(window, app_config)
+            if ci_mode:
+                tuned = frozen_params_for_window(window, app_config)
+            else:
+                tuned = tune_window(window, app_config)
         except BaseException as exc:  # noqa: BLE001 — best-effort across folds
             log.warning(
                 "walk_forward: tune_window failed on window %d (%s): %s",
@@ -1144,6 +1221,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print computed windows and exit. Currently the only mode.",
     )
+    p.add_argument(
+        "--ci-mode",
+        action="store_true",
+        help=(
+            "Skip per-window auto_tune.optimize_symbol calls; reuse the "
+            "ATR multipliers already in symbol_overrides as frozen params. "
+            "Cheap enough for CI smoke runs. Default off (production)."
+        ),
+    )
     return p
 
 
@@ -1177,6 +1263,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _print_windows(windows)
+
+    if args.ci_mode:
+        log.info(
+            "ci-mode requested: when the execution path lands, "
+            "tuning will be skipped and symbol_overrides ATR params "
+            "will be used as frozen params per window."
+        )
 
     if not args.dry_run:
         log.warning(
