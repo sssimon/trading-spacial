@@ -56,3 +56,47 @@ def test_claim_trial_study_type_can_be_confirmatory(trials_db):
         study_type="confirmatory",
     )
     assert _all_trials()[0]["study_type"] == "confirmatory"
+
+
+def test_finalize_trial_ok_records_metrics_and_sharpe(trials_db):
+    from db.trials import claim_trial, finalize_trial
+
+    tid = claim_trial(source="auto_tune", combo={"x": 1}, symbol="ETHUSDT")
+    finalize_trial(tid, status="ok", metrics={"sharpe_ratio": 1.42, "net_pnl": 100})
+
+    row = _all_trials()[0]
+    assert row["status"] == "ok"
+    assert row["finalized_ts"]
+    assert row["sharpe"] == pytest.approx(1.42)
+    assert json.loads(row["metrics_json"])["net_pnl"] == 100
+    assert row["error"] is None
+
+
+def test_finalize_trial_failed_records_error(trials_db):
+    from db.trials import claim_trial, finalize_trial
+
+    tid = claim_trial(source="auto_tune", combo={"x": 1})
+    finalize_trial(tid, status="failed", error="No data")
+
+    row = _all_trials()[0]
+    assert row["status"] == "failed"
+    assert row["error"] == "No data"
+    assert row["sharpe"] is None
+
+
+def test_crashed_trial_leaves_pending_row(trials_db):
+    """A claim with no finalize (process died) must remain countable."""
+    from db.trials import claim_trial
+
+    claim_trial(source="grid_search_tf", combo={"x": 1})
+    row = _all_trials()[0]
+    assert row["status"] == "pending"
+    assert row["finalized_ts"] is None
+
+
+def test_finalize_invalid_status_raises(trials_db):
+    from db.trials import claim_trial, finalize_trial
+
+    tid = claim_trial(source="auto_tune", combo={"x": 1})
+    with pytest.raises(ValueError, match="ok.*failed"):
+        finalize_trial(tid, status="done")

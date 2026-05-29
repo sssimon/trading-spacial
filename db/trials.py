@@ -127,3 +127,34 @@ def claim_trial(
             return int(cur.lastrowid)
 
     return _with_write_retry("claim_trial", _do)
+
+
+def finalize_trial(
+    trial_id: int,
+    *,
+    status: str,
+    metrics: dict | None = None,
+    error: str | None = None,
+) -> None:
+    """Mark a claimed trial 'ok' or 'failed'. Extracts sharpe + full metrics
+    JSON for convenience. Raises on DB durability failure (abort loudly)."""
+    if status not in ("ok", "failed"):
+        raise ValueError(f"finalize_trial status must be 'ok' or 'failed', got {status!r}")
+    now = datetime.now(timezone.utc).isoformat()
+    sharpe = None
+    metrics_json = None
+    if metrics is not None:
+        metrics_json = json.dumps(metrics, default=str)
+        raw = metrics.get("sharpe_ratio", metrics.get("sharpe"))
+        if isinstance(raw, (int, float)):
+            sharpe = float(raw)
+
+    def _do() -> None:
+        with transaction() as con:
+            con.execute(
+                "UPDATE trials SET finalized_ts=?, status=?, sharpe=?, "
+                "metrics_json=?, error=? WHERE id=?",
+                (now, status, sharpe, metrics_json, error, trial_id),
+            )
+
+    _with_write_retry("finalize_trial", _do)
