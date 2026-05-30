@@ -30,7 +30,7 @@ import json
 import logging
 from typing import Any
 
-from db.transaction import transaction
+from db.transaction import snapshot_connection
 
 log = logging.getLogger("api.agent.tools.handlers")
 
@@ -91,7 +91,7 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
     from health import get_dashboard_state
     from api.config import load_config
 
-    with transaction() as con:
+    with snapshot_connection() as con:
         open_positions = db_get_positions(con, status="open", tenant_id=tenant_id)
     open_count = len(open_positions)
     total_notional = sum(float(p.get("size_usd") or 0) for p in open_positions)
@@ -121,7 +121,7 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
 def get_positions(*, tenant_id: int) -> dict:
     """Currently open positions, summarized."""
     from db.positions import db_get_positions
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = db_get_positions(con, status="open", tenant_id=tenant_id)
     return {"positions": [_position_to_summary(p) for p in rows]}
 
@@ -133,7 +133,7 @@ def get_position_detail(*, tenant_id: int, position_id: int) -> dict:
     row exists but doesn't belong to this tenant, return 'not_found' —
     never reveals existence cross-tenant.
     """
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             "SELECT * FROM positions WHERE id=? AND tenant_id=?",
             (position_id, tenant_id),
@@ -154,7 +154,7 @@ def get_symbols_with_signals(*, tenant_id: int, limit: int = 10) -> dict:  # noq
     than `limit` raw scan rows that may all be the same symbol.
     """
     from db.signals import get_latest_scan_per_symbol
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = get_latest_scan_per_symbol(con, limit=limit, only_signals=False)
     return {
         "symbols": [
@@ -176,7 +176,7 @@ def get_symbol_setup(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
     """
     from db.signals import get_scans
     norm = _normalize_symbol(symbol)
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = get_scans(con, limit=1, symbol=norm)
     if not rows:
         return {"error": "not_found"}
@@ -225,7 +225,7 @@ def get_recent_signals(*, tenant_id: int, limit: int = 10, since_hours: int = 24
     signal for every tenant; the per-user split lives in the dispatcher
     layer added in B.4 #257)."""
     from db.signals import get_scans
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = get_scans(con, limit=limit, only_signals=True, since_hours=since_hours)
     return {
         "signals": [
@@ -251,7 +251,7 @@ def get_closed_trades(*, tenant_id: int, window: str = "30d") -> dict:
     from datetime import datetime, timedelta, timezone
     from db.positions import db_get_positions
 
-    with transaction() as con:
+    with snapshot_connection() as con:
         if window == "all":
             rows = db_get_positions(con, status="closed", tenant_id=tenant_id)
         else:

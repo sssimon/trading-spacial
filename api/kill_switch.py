@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.config import load_config, save_config
 from api.deps import verify_api_key
 from auth.dependencies import require_role
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.kill_switch")
 
@@ -87,7 +87,7 @@ def kill_switch_list_recommendations(
     """List auto-calibrator recommendations, latest first."""
     import json as _json
 
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         sql = (
             "SELECT id, ts, triggered_by, slider_value, projected_pnl, "
             "projected_dd, status, applied_ts, applied_by, report_json "
@@ -151,7 +151,7 @@ def kill_switch_apply_recommendation(rec_id: int):
     from datetime import datetime, timezone
 
     try:
-        with transaction() as conn:
+        with snapshot_connection() as conn:
             row = conn.execute(
                 """SELECT id, status, slider_value
                    FROM kill_switch_recommendations WHERE id = ?""",
@@ -243,7 +243,7 @@ def kill_switch_ignore_recommendation(rec_id: int):
     from datetime import datetime, timezone
 
     try:
-        with transaction() as conn:
+        with snapshot_connection() as conn:
             row = conn.execute(
                 """SELECT id, status FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),

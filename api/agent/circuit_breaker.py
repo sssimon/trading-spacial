@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from api.config import load_config
-from db.transaction import transaction
+from db.transaction import snapshot_connection
 
 log = logging.getLogger("api.agent.circuit_breaker")
 
@@ -103,7 +103,7 @@ def _global_spend_last_24h() -> float:
     """
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=24)).isoformat()
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS total "
             "FROM agent_conversations "
