@@ -49,6 +49,7 @@ import numpy as np
 import requests
 
 from data import market_data as md
+from deflation import deflated_sharpe_ratio as _dsr, prob_sharpe_positive as _psp
 
 # Import scanner functions
 from btc_scanner import (
@@ -1492,8 +1493,29 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
 #  METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
-    """Calculate comprehensive trading metrics."""
+def calculate_metrics(
+    trades: list[dict],
+    equity_curve: list[dict],
+    *,
+    per_trade_returns=None,
+    n_effective: int | None = None,
+    sigma_sr_trials: float | None = None,
+) -> dict:
+    """Calculate comprehensive trading metrics.
+
+    n_effective (optional): number of strategy trials attempted.
+    sigma_sr_trials (optional): std-dev of trial Sharpe distribution (required
+    alongside n_effective to compute sharpe_deflated / DSR probability).
+
+    sharpe_deflated is the Deflated Sharpe Ratio PROBABILITY in [0,1] (López de
+    Prado 2018). It is computed ONLY when BOTH n_effective and sigma_sr_trials
+    are provided. Otherwise sharpe_deflated = None.
+
+    prob_sr_gt_0 is the PSR(benchmark=0) probability — always present when
+    n_obs >= 2, None otherwise.
+
+    A.0.3 / #278 Part 2 Task 3: reserved key names must not be repurposed.
+    """
     if not trades:
         # Empty-trades early return — emit clamped_trade_count: 0 and
         # bankruptcy_count: 0 for shape consistency. CLI consumer below
@@ -1626,6 +1648,26 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
             if t.get("exit_reason") != "OPEN")
     )
 
+    # A.0.3 (#278) deflated metrics
+    calmar = (total_return_pct / abs(max_drawdown)) if max_drawdown != 0 else None
+
+    ret_series = pd.Series(per_trade_returns, dtype="float64") if per_trade_returns is not None \
+        else (pd.Series(closed["pnl_pct"].values / 100, dtype="float64") if len(closed) > 1 else pd.Series([], dtype="float64"))
+
+    prob_sr_gt_0 = None
+    sharpe_deflated = None
+    if len(ret_series) > 1:
+        skew = float(ret_series.skew())
+        excess_kurt = ret_series.kurt()
+        kurt_raw = float(excess_kurt) + 3.0 if pd.notna(excess_kurt) else 3.0
+        if skew != skew:  # NaN guard
+            skew = 0.0
+        prob_sr_gt_0 = _psp(sr=sharpe, n_returns=len(ret_series), skew=skew, kurt_raw=kurt_raw)
+        if n_effective is not None and sigma_sr_trials is not None:
+            sharpe_deflated = _dsr(
+                sr=sharpe, n_trials=int(n_effective), sigma_sr_trials=float(sigma_sr_trials),
+                n_returns=len(ret_series), skew=skew, kurt_raw=kurt_raw)
+
     return {
         "total_trades": total_trades,
         "wins": win_count,
@@ -1652,6 +1694,18 @@ def calculate_metrics(trades: list[dict], equity_curve: list[dict]) -> dict:
         "median_trade_pct": round(closed["pnl_pct"].median(), 2) if len(closed) > 0 else 0,
         "final_equity": round(INITIAL_CAPITAL + net_pnl, 2),
         "score_tiers": score_tiers,
+        # A.0.3 / #278 Part 2 Task 3: Calmar + deflated companions.
+        # calmar / calmar_ratio: raw Calmar, both keys present, None when maxDD==0.
+        # prob_sr_gt_0: PSR(benchmark=0), always present (None when N<2).
+        # sharpe_deflated: DSR probability in [0,1], None unless both n_effective
+        #   and sigma_sr_trials are injected (Task 5 injects real registry sigma).
+        # n_effective / sigma_sr_trials: echoed from caller (None if not given).
+        "calmar": round(calmar, 3) if calmar is not None else None,
+        "calmar_ratio": round(calmar, 3) if calmar is not None else None,
+        "prob_sr_gt_0": round(prob_sr_gt_0, 4) if prob_sr_gt_0 is not None else None,
+        "sharpe_deflated": round(sharpe_deflated, 4) if sharpe_deflated is not None else None,
+        "n_effective": int(n_effective) if n_effective is not None else None,
+        "sigma_sr_trials": round(float(sigma_sr_trials), 4) if sigma_sr_trials is not None else None,
         **cost_metrics,
     }
 
