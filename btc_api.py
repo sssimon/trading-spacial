@@ -431,7 +431,8 @@ def list_symbols():
     """Retorna el último escaneo de cada símbolo, ordenado por señal y score."""
     import json as _json  # noqa: PLC0415 — local import keeps the module-level surface unchanged
     symbols = _scanner_state.get("symbols_active") or get_active_symbols()
-    with transaction() as con:
+    # READ via snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         rows    = get_signals_summary(con)
     by_sym  = {r["symbol"]: r for r in rows}
     result  = []

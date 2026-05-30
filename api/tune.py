@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.config import load_config, CONFIG_FILE
 from api.deps import verify_api_key
 from auth.dependencies import require_role
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.tune")
 
@@ -27,7 +27,8 @@ router = APIRouter(prefix="/tune", tags=["tune"])
 @router.get("/latest", summary="Latest tune result")
 def tune_latest():
     """Returns the most recent tune_result row (with parsed results_json) or null."""
-    with transaction() as con:
+    # READ via snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         row = con.execute(
             "SELECT * FROM tune_results ORDER BY id DESC LIMIT 1"
         ).fetchone()
