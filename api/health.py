@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
-from db.transaction import transaction
+from db.transaction import snapshot_connection
 
 log = logging.getLogger("api.health")
 
@@ -34,7 +34,8 @@ class ReactivateRequest(BaseModel):
 @router.get("/health/symbols", dependencies=[Depends(verify_api_key)])
 def get_health_symbols():
     """List current health state per symbol."""
-    with transaction() as con:
+    # READ via snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         rows = con.execute(
             """SELECT symbol, state, state_since, last_evaluated_at,
                       last_metrics_json, manual_override
@@ -52,7 +53,7 @@ def get_health_events(
     limit: int = Query(50, ge=1, le=500, description="Max rows to return (capped to prevent unbounded scans)"),
 ):
     """Transition history. Optionally filter by symbol."""
-    with transaction() as con:
+    with snapshot_connection() as con:
         if symbol:
             rows = con.execute(
                 """SELECT id, symbol, from_state, to_state, trigger_reason,
@@ -115,7 +116,7 @@ def health_check():
 
     # Database connectivity
     try:
-        with transaction() as con:
+        with snapshot_connection() as con:
             con.execute("SELECT 1")
         checks["database"] = "ok"
     except Exception as e:

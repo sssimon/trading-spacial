@@ -12,7 +12,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 
 log = logging.getLogger("health")
@@ -1040,11 +1040,10 @@ def get_dashboard_state(
     ks_cfg = (cfg.get("kill_switch") or {})
     now = datetime.now(timezone.utc)
 
-    # Task 8.5: open ONE transaction and thread `conn` through every helper.
+    # Task 8.5: open ONE connection and thread `conn` through every helper.
     # Previously each helper opened its own tx → nested-BEGIN-IMMEDIATE
-    # deadlock. db_get_capital is now also called inside the outer tx so it
-    # serializes against any concurrent capital write.
-    with transaction() as conn:
+    # deadlock. Using snapshot_connection (WAL-concurrent, no writer lock) — #494.
+    with snapshot_connection() as conn:
         from db.capital import db_get_capital
         capital = db_get_capital(conn, tenant_id)
         # Build symbol list: union of DEFAULT_SYMBOLS + any DB rows. This way

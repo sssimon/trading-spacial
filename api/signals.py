@@ -21,7 +21,7 @@ from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
 from api.telegram import build_telegram_message
-from db.transaction import transaction, snapshot_connection
+from db.transaction import snapshot_connection
 from db.signals import (
     get_latest_signal, get_latest_scan, get_scans, get_signals_summary, save_scan,
 )
@@ -262,7 +262,8 @@ def get_signals_performance(
     (tenant_id=NULL) are invisible. Each user sees their own performance
     tracking.
     """
-    with transaction() as con:
+    # READ via snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         # Solo señales completadas (24h de historia) — filtradas por tenant
         rows = con.execute(
             "SELECT * FROM signal_outcomes WHERE status = 'completed' AND tenant_id = ?",
@@ -320,7 +321,7 @@ def get_signals_performance(
 def latest_signal(
     symbol: Optional[str] = Query(None, description="Filtrar por par (ej: SOLUSDT)")
 ):
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = get_latest_signal(con, symbol)
     if not row:
         msg = f"Sin señales para {symbol}." if symbol else "Sin señales registradas."
@@ -353,7 +354,7 @@ def latest_signal(
 def latest_message(
     symbol: Optional[str] = Query(None, description="Filtrar por par")
 ):
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = get_latest_signal(con, symbol)
     if not row:
         return {"message": "Sin señales registradas aun."}
@@ -371,7 +372,7 @@ def latest_message(
 
 @router.get("/{scan_id}", summary="Detalle de un escaneo por ID")
 def signal_by_id(scan_id: int):
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Escaneo #{scan_id} no encontrado")

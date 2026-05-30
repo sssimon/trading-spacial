@@ -507,6 +507,42 @@ class TestAPIEndpoints:
         assert "symbols" in data
         assert "total" in data
 
+    def test_dashboard_read_endpoints_use_snapshot_not_writer_lock(
+        self, client, monkeypatch
+    ):
+        """Regression for #494 batch 1.
+
+        GET /symbols (and the other dashboard-polled read endpoints) must
+        use snapshot_connection(), not transaction() (BEGIN IMMEDIATE).
+        Concurrency proof: while a writer holds BEGIN IMMEDIATE the endpoint
+        must still return 200. Mirrors
+        tests/db/test_transaction.py::test_snapshot_read_succeeds_while_writer_holds_lock.
+        """
+        import btc_api
+        from db.connection import _open_configured_connection
+
+        # Hold the writer lock with an uncommitted write — simulates the
+        # scanner's per-scan write burst that caused the prod 500s.
+        writer = _open_configured_connection()
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "INSERT INTO scans (ts, symbol, estado, señal, setup, price, "
+            "lrc_pct, rsi_1h, score, score_label, macro_ok, gatillo) "
+            "VALUES ('2026-01-01T00:00:00', 'BTCUSDT', 'test', 0, 0, "
+            "1.0, 0.0, 50.0, 0, 'test', 0, 0)"
+        )
+        try:
+            # GET /symbols uses snapshot_connection (WAL concurrent read);
+            # must NOT block or 500 even while writer holds the lock.
+            r = client.get("/symbols")
+            assert r.status_code == 200, (
+                f"/symbols returned {r.status_code} while writer held BEGIN IMMEDIATE — "
+                "endpoint is still using transaction() instead of snapshot_connection()"
+            )
+        finally:
+            writer.execute("ROLLBACK")
+            writer.close()
+
     def test_signals_filtro_symbol(self, client, sample_report):
         import btc_api
         btc_api.save_scan(sample_report)
