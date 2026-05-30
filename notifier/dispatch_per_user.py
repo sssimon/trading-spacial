@@ -15,7 +15,7 @@ import logging
 import sqlite3
 from typing import Any
 
-from db.transaction import transaction
+from db.transaction import transaction, snapshot_connection
 from db.user_preferences import db_get_user_preferences
 from notifier import notify
 from notifier.channels.base import DeliveryReceipt
@@ -77,7 +77,8 @@ def dispatch_signal_to_users(
     The downstream `notify()` call still owns its own transactions
     (file/network I/O — must not extend the DB lock).
     """
-    with transaction() as _users_con:
+    # Pure reads — snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as _users_con:
         users = _list_active_users(_users_con)
     if not users:
         log.debug("dispatch_signal_to_users: no active users — broadcast skipped")
@@ -86,7 +87,7 @@ def dispatch_signal_to_users(
     out: dict[int, list[DeliveryReceipt]] = {}
 
     for user in users:
-        with transaction() as inner_con:
+        with snapshot_connection() as inner_con:
             prefs = db_get_user_preferences(inner_con, user["id"])
         if prefs is None:
             symbol_filter = _DEFAULT_SYMBOL_FILTER

@@ -30,7 +30,7 @@ from btc_scanner import scan
 from data import market_data as md
 from db.connection import backup_db
 from db.signals import get_signals_summary, save_scan
-from db.transaction import transaction
+from db.transaction import transaction, snapshot_connection
 from notifier import notify, SystemEvent
 
 log = logging.getLogger("scanner.runtime")
@@ -159,7 +159,8 @@ def check_pending_signal_outcomes(current_prices: dict[str, float]):
     """
     from datetime import datetime, timezone  # noqa: PLC0415
 
-    with transaction() as con:
+    # Pure read — snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         rows = con.execute("SELECT * FROM signal_outcomes WHERE status = 'pending'").fetchall()
 
     if not rows:
@@ -358,8 +359,8 @@ def scanner_loop(stop_event: threading.Event | None = None):
 
         # Actualizar data/symbols_status.json al final de cada ciclo
         try:
-            from db.transaction import transaction  # noqa: PLC0415
-            with transaction() as con:
+            # Pure read — snapshot_connection (WAL-concurrent, no writer lock) — #494
+            with snapshot_connection() as con:
                 rows = get_signals_summary(con)
             update_symbols_json(rows)
         except Exception as e:
