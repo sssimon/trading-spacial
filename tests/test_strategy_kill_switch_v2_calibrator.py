@@ -365,6 +365,46 @@ def test_calibrator_loop_iteration_failure_is_logged_not_propagated(
     )
 
 
+# ── #397: _compute_current_portfolio_dd double-count fix ────────────────────
+
+
+@pytest.fixture
+def fresh_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    import btc_api
+    monkeypatch.setattr(btc_api, "DB_FILE", str(db_path))
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    from db.schema import init_db
+    init_db()
+    return str(db_path)
+
+
+def test_compute_current_portfolio_dd_does_not_double_count_closed_trades(fresh_db):
+    """#397: closed trades are already folded into capital.balance. The live
+    DD must be computed as balance + open_mtm, never balance + Σ_closed."""
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+
+    cfg = {"capital_usd": 1000.0}
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=10_200.0, peak_balance=10_400.0)
+        for i, pnl in enumerate([200.0, 200.0, -300.0, 200.0, -100.0]):
+            con.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts, qty,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+                   VALUES ('BTC','LONG','closed',100.0,?,1.0,?,?,?,?,?,1)""",
+                (f"2026-04-2{i+1}T12:00:00+00:00", 100.0 + pnl/10.0,
+                 f"2026-04-2{i+1}T13:00:00+00:00", "TP" if pnl > 0 else "SL",
+                 pnl, pnl/100.0),
+            )
+
+    dd = _compute_current_portfolio_dd(cfg, tenant_id=1)
+    assert dd == pytest.approx(-(10_400.0 - 10_200.0) / 10_400.0, abs=1e-6)
+
+
 # ── B4b.1: POST /kill_switch/recalibrate ────────────────────────────────────
 
 
