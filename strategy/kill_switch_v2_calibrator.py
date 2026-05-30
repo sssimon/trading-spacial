@@ -559,9 +559,10 @@ def _load_current_regime_score() -> float | None:
 def _compute_current_portfolio_dd(
     cfg: dict[str, Any], *, tenant_id: int, conn=None,
 ) -> float:
-    """Compute live portfolio DD from `tenant_id`'s closed trades + open positions MTM.
+    """Compute live portfolio DD from ledger balance + open-position MTM.
 
-    Reuses kill_switch_v2.compute_portfolio_dd + compute_portfolio_equity_curve.
+    Reuses kill_switch_v2.compute_portfolio_dd_from_ledger (ledger + open MTM;
+    closed PnL already in balance — see #397).
     Returns 0.0 if anything fails (conservative — won't fire degradation trigger).
 
     Per multi-tenant policy: `tenant_id` is required. The capital base is the
@@ -573,40 +574,37 @@ def _compute_current_portfolio_dd(
     inner helpers opened their own).
     """
     try:
-        from strategy.kill_switch_v2 import (
-            compute_portfolio_equity_curve, compute_portfolio_dd,
-        )
+        from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
         from strategy.kill_switch_v2_shadow import (
-            _load_closed_trades, _load_open_positions, _snapshot_prices,
+            _load_open_positions, _snapshot_prices,
         )
         from db.capital import db_get_capital
-        # Task 5 (#446): `db_get_capital` now requires `con` positional.
+        # Task 5 (#446): `db_get_capital` requires `con` positional.
         # When the caller did not pass `conn`, open a short read-only tx.
         if conn is not None:
             cap_row = db_get_capital(conn, tenant_id)
+            opens = _load_open_positions(conn, tenant_id=tenant_id)
         else:
-            from db.transaction import transaction as _tx_for_cap
-            with _tx_for_cap() as _cap_con:
-                cap_row = db_get_capital(_cap_con, tenant_id)
+            from db.transaction import transaction as _tx
+            with _tx() as _c:
+                cap_row = db_get_capital(_c, tenant_id)
+                opens = _load_open_positions(_c, tenant_id=tenant_id)
+
         if cap_row and cap_row.get("balance") is not None:
-            capital_base = float(cap_row["balance"])
+            balance = float(cap_row["balance"])
+            peak_balance = cap_row.get("peak_balance")
         else:
-            capital_base = float(cfg.get("capital_usd", 1000.0))
-        if conn is not None:
-            _closed = _load_closed_trades(conn, tenant_id=tenant_id)
-            _opens = _load_open_positions(conn, tenant_id=tenant_id)
-        else:
-            from db.transaction import transaction as _tx_for_loads
-            with _tx_for_loads() as _loads_con:
-                _closed = _load_closed_trades(_loads_con, tenant_id=tenant_id)
-                _opens = _load_open_positions(_loads_con, tenant_id=tenant_id)
-        equity_curve = compute_portfolio_equity_curve(
-            closed_trades=_closed,
-            open_positions=_opens,
-            capital_base=capital_base,
+            # No ledger row (pre-onboarding): cfg default, no peak history.
+            balance = float(cfg.get("capital_usd", 1000.0))
+            peak_balance = None
+
+        result = compute_portfolio_dd_from_ledger(
+            balance=balance,
+            peak_balance=(float(peak_balance) if peak_balance is not None else None),
+            open_positions=opens,
             now_price_by_symbol=_snapshot_prices(),
         )
-        return float(compute_portfolio_dd(equity_curve))
+        return float(result["portfolio_dd"])
     except Exception as e:
         log.warning(
             "compute_current_portfolio_dd failed for tenant_id=%s: %s",

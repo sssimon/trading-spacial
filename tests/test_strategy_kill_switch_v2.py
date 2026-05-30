@@ -406,10 +406,10 @@ def test_emit_shadow_fail_open_swallows_exceptions(tmp_path, monkeypatch, caplog
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    def _boom():
+    def _boom(*a, **kw):
         raise RuntimeError("simulated DB corruption")
 
-    monkeypatch.setattr(shadow_mod, "_load_closed_trades", _boom)
+    monkeypatch.setattr(shadow_mod, "_load_open_positions", _boom)
 
     import logging
     with caplog.at_level(logging.WARNING, logger="kill_switch_v2_shadow"):
@@ -427,8 +427,17 @@ def test_emit_shadow_fail_open_swallows_exceptions(tmp_path, monkeypatch, caplog
 
 
 def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_shadow_cache):
-    """cfg without capital_usd → $1000 base, not $100,000."""
+    """Ledger balance near $1000 produces ~-0.05 DD (not ~-0.0005 from $100k capital).
+
+    The ledger path reads balance + peak from the capital row. We seed
+    balance=950, peak=1000 → DD = (1000-950)/1000 = -0.05. This verifies the
+    system operates at $1000-scale, not $100k-scale (the pre-#397 bug would
+    have produced ≈-0.05 from double-counted closed trades; now the DD is
+    sourced purely from the capital ledger).
+    """
     import btc_api, observability
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction as _tx
     from strategy.kill_switch_v2_shadow import emit_shadow_decision
 
     db_path = str(tmp_path / "signals.db")
@@ -437,15 +446,11 @@ def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_
         delattr(btc_api, "_db_conn")
     btc_api.init_db()
 
-    # Seed one closed trade: -$50 PnL
-    # With capital=$1000 → DD = -50/1000 = -0.05 (REDUCED band at slider=50)
-    # With capital=$100k → DD = -50/100_000 = -0.0005 (NORMAL — the bug)
-    with transaction() as conn:
-        conn.execute(
-            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, pnl_usd, tenant_id) VALUES('BTCUSDT', 'LONG', 50000, 0.01, "
-            "'closed', '2026-04-20T10:00:00+00:00', '2026-04-20T12:00:00+00:00', -50.0, 1)"
-        )
+    # Seed capital: $50 loss already realized (balance=950, peak=1000).
+    # Ledger DD = (1000 - 950) / 1000 = -0.05.
+    # A $100k-scale ledger would give DD ≈ -0.0005 — the old bug.
+    with _tx() as con:
+        db_upsert_capital(con, 1, balance=950.0, peak_balance=1000.0)
 
     emit_shadow_decision(symbol="BTCUSDT", cfg={}, tenant_id=1)
 
@@ -455,7 +460,7 @@ def test_emit_shadow_default_capital_1000_applied(tmp_path, monkeypatch, _clean_
     reasons = json.loads(rows[0]["reasons_json"])
     assert reasons["portfolio_dd"] == pytest.approx(-0.05)
     # At slider=50, reduced=-0.055 → -0.05 is still NORMAL, but the number
-    # is at the right order of magnitude (bug would produce -0.0005).
+    # is at the right order of magnitude (a $100k-scale ledger gives -0.0005).
 
 
 def test_emit_shadow_warning_includes_traceback(tmp_path, monkeypatch, caplog, _clean_shadow_cache):
@@ -1517,12 +1522,14 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
     tmp_path, monkeypatch, _clean_shadow_cache,
 ):
     """
-    DD=-0.052 on $1000 capital (= -$52 PnL):
+    Ledger DD=-0.052 (balance=948, peak=1000):
     - slider=50 (NEUTRAL): reduced_dd = (-0.08 + -0.03)/2 = -0.055 → DD=-0.052 is NORMAL.
     - slider=60 (BULL bonus): reduced_dd = -0.08 + 0.6*(-0.03 - -0.08) = -0.05 → REDUCED.
-    Same DB state, only regime_score differs.
+    Same DB state (capital ledger), only regime_score differs.
     """
     import btc_api, observability
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction as _tx
     from strategy.kill_switch_v2_shadow import emit_shadow_decision
     from datetime import datetime, timezone
 
@@ -1535,13 +1542,9 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
 
-    with transaction() as conn:
-        conn.execute(
-            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -52.0, 1)",
-            ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
-        )
+    # Seed capital: balance=948, peak=1000 → ledger DD = (1000-948)/1000 = -0.052
+    with _tx() as con:
+        db_upsert_capital(con, 1, balance=948.0, peak_balance=1000.0)
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -1572,8 +1575,15 @@ def test_bull_regime_makes_reduced_threshold_stricter_enough_to_flip_tier(
 def test_bear_regime_makes_reduced_threshold_laxer_enough_to_flip_tier(
     tmp_path, monkeypatch, _clean_shadow_cache,
 ):
-    """BEAR penalty relaxes reduced_dd threshold enough to flip REDUCED to NORMAL."""
+    """BEAR penalty relaxes reduced_dd threshold enough to flip REDUCED to NORMAL.
+
+    Ledger DD=-0.057 (balance=943, peak=1000):
+    - slider=50 (NEUTRAL): reduced_dd=-0.055 → DD=-0.057 crosses threshold → REDUCED.
+    - slider=40 (BEAR penalty): reduced_dd=-0.06 → DD=-0.057 is above → NORMAL.
+    """
     import btc_api, observability
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction as _tx
     from strategy.kill_switch_v2_shadow import emit_shadow_decision
     from datetime import datetime, timezone
 
@@ -1586,13 +1596,9 @@ def test_bear_regime_makes_reduced_threshold_laxer_enough_to_flip_tier(
     import strategy.kill_switch_v2_shadow as sh
     monkeypatch.setattr(sh, "_now", lambda: datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc))
 
-    with transaction() as conn:
-        conn.execute(
-            "INSERT INTO positions(symbol, direction, entry_price, qty, status, "
-            "entry_ts, exit_ts, exit_reason, pnl_usd, tenant_id) VALUES "
-            "('BTCUSDT', 'LONG', 50000, 0.01, 'closed', ?, ?, 'TP', -57.0, 1)",
-            ("2026-04-20T10:00:00+00:00", "2026-04-20T12:00:00+00:00"),
-        )
+    # Seed capital: balance=943, peak=1000 → ledger DD = (1000-943)/1000 = -0.057
+    with _tx() as con:
+        db_upsert_capital(con, 1, balance=943.0, peak_balance=1000.0)
 
     cfg = {"kill_switch": {"v2": {
         "aggressiveness": 50,
@@ -2392,6 +2398,68 @@ def test_emit_shadow_writes_per_symbol_tier_alert_when_baseline_breaks(
     assert reasons["per_symbol"]["trades_count"] >= 100
 
 
+# ── #397: emit_shadow_decision persists ledger DD (not double-counted) ──────
+
+
+def test_emit_shadow_decision_persists_ledger_dd_not_inflated(
+    tmp_path, monkeypatch, _clean_shadow_cache,
+):
+    """#397: the portfolio_dd written to the decision log must be the ledger
+    DD (balance + open_mtm), not the inflated curve that re-applies closed
+    trades. Also checks dd_formula_version='ledger_v1' tag is present."""
+    import json
+    import btc_api
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction as _tx, snapshot_connection
+    from strategy.kill_switch_v2_shadow import emit_shadow_decision
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed capital: balance=10_200 (realized PnL already folded in),
+    # peak_balance=10_400 (historical high-water mark).
+    # Expected ledger DD = (10_400 - 10_200) / 10_400 ≈ 0.019231
+    # → portfolio_dd = -(10_400 - 10_200) / 10_400 ≈ -0.019231
+    with _tx() as con:
+        db_upsert_capital(con, 1, balance=10_200.0, peak_balance=10_400.0)
+        # Seed closed trades whose PnL is ALREADY included in the balance=10_200.
+        # The old buggy formula would double-count these and report a larger DD.
+        for i, pnl in enumerate([200.0, 200.0, -300.0, 200.0, -100.0]):
+            con.execute(
+                """INSERT INTO positions
+                   (symbol, direction, status, entry_price, entry_ts, qty,
+                    exit_price, exit_ts, exit_reason, pnl_usd, pnl_pct, tenant_id)
+                   VALUES ('BTC','LONG','closed',100.0,?,1.0,?,?,?,?,?,1)""",
+                (
+                    f"2026-04-2{i+1}T12:00:00+00:00",
+                    100.0 + pnl / 10.0,
+                    f"2026-04-2{i+1}T13:00:00+00:00",
+                    "TP" if pnl > 0 else "SL",
+                    pnl,
+                    pnl / 100.0,
+                ),
+            )
+
+    cfg = {"capital_usd": 1000.0, "kill_switch": {"v2": {"aggressiveness": 50.0}}}
+    emit_shadow_decision("BTC", cfg, tenant_id=1)
+
+    with snapshot_connection() as con:
+        row = con.execute(
+            """SELECT reasons_json FROM kill_switch_decisions
+               WHERE engine='v2_shadow' ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+    assert row is not None, "no v2_shadow decision row written"
+    reasons = json.loads(row["reasons_json"])
+    # The correct ledger DD: (10_400 - 10_200) / 10_400 (negative, in drawdown)
+    assert reasons["portfolio_dd"] == pytest.approx(
+        -(10_400.0 - 10_200.0) / 10_400.0, abs=1e-6
+    )
+    assert reasons.get("dd_formula_version") == "ledger_v1"
+
+
 def test_emit_shadow_per_symbol_fail_open_returns_normal_with_status_failed(
     tmp_path, monkeypatch, caplog, _clean_shadow_cache,
 ):
@@ -2633,3 +2701,87 @@ def test_is_baseline_stale_future_timestamp_returns_true():
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
     future = (now + timedelta(days=1)).isoformat()
     assert _is_baseline_stale(future, stale_days=7, now=now) is True
+
+
+# ── #397: compute_portfolio_dd_from_ledger ──────────────────────────────────
+
+
+def test_dd_from_ledger_flat_no_positions():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["peak_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_does_not_double_count_closed_pnl():
+    # balance already includes realized PnL; with no open positions the DD
+    # must be 0 relative to the ledger peak — NOT inflated by re-applying trades.
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_200.0, peak_balance=10_400.0,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["current_equity"] == pytest.approx(10_200.0)
+    assert out["peak_equity"] == pytest.approx(10_400.0)
+    assert out["portfolio_dd"] == pytest.approx(-(10_400.0 - 10_200.0) / 10_400.0)
+
+
+def test_dd_from_ledger_open_long_loss_drives_drawdown():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "BTC", "entry_price": 100.0, "qty": 10.0, "direction": "LONG"}],
+        now_price_by_symbol={"BTC": 90.0},  # -100 MTM
+    )
+    assert out["current_equity"] == pytest.approx(9_900.0)
+    assert out["peak_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(-100.0 / 10_000.0)
+
+
+def test_dd_from_ledger_open_short_gain_lifts_peak():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "ETH", "entry_price": 100.0, "qty": 5.0, "direction": "SHORT"}],
+        now_price_by_symbol={"ETH": 80.0},  # +100 MTM
+    )
+    assert out["current_equity"] == pytest.approx(10_100.0)
+    assert out["peak_equity"] == pytest.approx(10_100.0)  # unrealized gain lifts peak
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_skips_legacy_unmeasurable_qty_none():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "BTC", "entry_price": 100.0, "qty": None, "direction": "LONG"}],
+        now_price_by_symbol={"BTC": 50.0},
+    )
+    # qty=None row excluded from MTM (not coerced to 0 exposure silently).
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_peak_balance_none_falls_back_to_balance():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=9_000.0, peak_balance=None,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["peak_equity"] == pytest.approx(9_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_skips_symbol_without_price():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "DOGE", "entry_price": 1.0, "qty": 100.0, "direction": "LONG"}],
+        now_price_by_symbol={},  # no price for DOGE
+    )
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)

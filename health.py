@@ -1157,54 +1157,39 @@ def get_dashboard_state(
             peak_raw = capital.get("peak_balance")
             ledger_peak = float(peak_raw) if peak_raw is not None else realized_balance
 
-            # MTM of open positions: (price_now - entry) × qty, signed by direction.
-            # Tenant-scoped per multi-tenant policy (epic B #253).
+            # Delegate to the shared helper — single source of truth (#397).
             try:
                 from strategy.kill_switch_v2_shadow import (
                     _load_open_positions, _snapshot_prices,
                 )
+                from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
                 open_positions = _load_open_positions(conn, tenant_id=tenant_id)
-                prices = _snapshot_prices()
-                open_mtm = 0.0
-                for pos in open_positions:
-                    sym = pos.get("symbol")
-                    if not sym or sym not in prices:
-                        continue
-                    raw_qty = pos.get("qty")
-                    if raw_qty is None:
-                        # Quarantined legacy_unmeasurable position (#467) —
-                        # explicitly excluded from open-MTM. Surfacing rather
-                        # than silently coercing to 0 (Serrano BLOCKER 2).
-                        log.warning(
-                            "get_dashboard_state: skipping legacy_unmeasurable "
-                            "position from open_mtm sym=%s", sym,
-                        )
-                        continue
-                    entry = float(pos.get("entry_price") or 0)
-                    qty = float(raw_qty)
-                    direction = pos.get("direction", "LONG")
-                    price_now = float(prices[sym])
-                    if direction == "SHORT":
-                        open_mtm += (entry - price_now) * qty
-                    else:
-                        open_mtm += (price_now - entry) * qty
-            except Exception:
-                log.warning(
-                    "get_dashboard_state open-MTM computation failed; "
-                    "treating open_mtm as 0", exc_info=True,
+                _dd = compute_portfolio_dd_from_ledger(
+                    balance=realized_balance,
+                    peak_balance=ledger_peak,
+                    open_positions=open_positions,
+                    now_price_by_symbol=_snapshot_prices(),
                 )
-                open_mtm = 0.0
-
-            current_equity = realized_balance + open_mtm
-            peak_equity = max(ledger_peak, current_equity)
-            portfolio_dd = (
-                (peak_equity - current_equity) / peak_equity
-                if peak_equity > 0 else 0.0
-            )
-            # Sign convention: kill_switch_v2.compute_portfolio_dd returns a
-            # negative number when in drawdown; match it so evaluate_portfolio_tier
-            # interprets the threshold the same way.
-            portfolio_dd = -portfolio_dd
+                current_equity = _dd["current_equity"]
+                peak_equity = _dd["peak_equity"]
+                portfolio_dd = _dd["portfolio_dd"]
+            except Exception:
+                # Open-MTM / price snapshot failed. Fall back to the LEDGER-ONLY
+                # drawdown (no open_mtm) — realized DD is ledger-derived and does
+                # NOT depend on prices, so a price-feed outage must not erase a
+                # real drawdown (that would under-protect the kill-switch, the
+                # #397 failure class). Mirrors the pre-helper except semantics.
+                log.warning(
+                    "get_dashboard_state ledger-DD computation failed; "
+                    "falling back to ledger-only DD (no open MTM)", exc_info=True,
+                )
+                current_equity = realized_balance
+                peak_equity = max(ledger_peak, realized_balance)
+                _dd = (
+                    (peak_equity - current_equity) / peak_equity
+                    if peak_equity > 0 else 0.0
+                )
+                portfolio_dd = -_dd
         else:
             # No capital row for this tenant — pre-onboarding / fresh user.
             # Display cfg.capital_usd as a neutral base. We still tenant-scope

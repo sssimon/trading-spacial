@@ -117,6 +117,18 @@ Structurally distinct alternative strategy class to the LRC architecture. Mutual
 
 **Authoritative spec doc:** `docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md` — read this before touching anything under the `regime_allocation` flag.
 
+### Portfolio drawdown — single source of truth
+
+`strategy.kill_switch_v2.compute_portfolio_dd_from_ledger(balance, peak_balance,
+open_positions, now_price_by_symbol)` is the ONE canonical live-DD computation.
+`current_equity = balance + open_mtm`; closed PnL is already folded into the
+capital ledger `balance` (apply_pnl_to_capital), so it is NEVER re-applied.
+Consumers: `emit_shadow_decision`, `_compute_current_portfolio_dd`,
+`get_dashboard_state`. Re-walking closed trades double-counts and under-reports
+DD — the #397 bug. Do not reintroduce `compute_portfolio_equity_curve(capital_base=
+balance, closed_trades=...)` on a live path. New v2_shadow decision rows carry
+`dd_formula_version="ledger_v1"`; historical rows predate the fix.
+
 ## What Does NOT Exist Here
 
 - **No inbound Telegram bot** for trade approval — Telegram is outbound only; approval is CLI / frontend manual.

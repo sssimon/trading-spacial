@@ -12,6 +12,7 @@ last_updated: 2026-05-26
 | Read from `data/holdout/` (A.2 walk-forward, A.4 evaluation) | [holdout-access.md](holdout-access.md) |
 | Pick between `precheck_connection()` and `snapshot_connection()` | [precheck-vs-snapshot.md](precheck-vs-snapshot.md) |
 | Register a trial in a parameter/window sweep (#278) | [registering-a-trial.md](registering-a-trial.md) |
+| Compute live portfolio drawdown / equity (kill-switch, shadow, dashboard) | [computing-portfolio-dd.md](computing-portfolio-dd.md) |
 
 ## How to grow this index
 
