@@ -186,6 +186,72 @@ def compute_portfolio_dd(equity_curve: list[dict[str, Any]]) -> float:
     return (current - peak) / peak
 
 
+def compute_portfolio_dd_from_ledger(
+    *,
+    balance: float,
+    peak_balance: float | None,
+    open_positions: list[dict[str, Any]],
+    now_price_by_symbol: dict[str, float],
+) -> dict[str, float]:
+    """Portfolio drawdown from the capital ledger + open-position MTM.
+
+    The capital ledger `balance` already folds every closed trade's realized
+    PnL (via apply_pnl_to_capital). The correct live equity is therefore
+    `balance + open_mtm` — NOT `balance + Σ_closed_trades + open_mtm`, which
+    double-counts the closed PnL and under-reports drawdown (#397).
+
+    This is the single source of truth extracted from get_dashboard_state's
+    ledger path. Pure: no DB access, no price-cache reads — caller supplies
+    balance, peak, positions, and prices.
+
+    Args:
+        balance: tenant's ledger balance (realized PnL already applied).
+        peak_balance: tenant's monotonic ledger peak; falls back to `balance`
+            when None (pre-onboarding tenants).
+        open_positions: [{"symbol", "entry_price", "qty", "direction"}]. Rows
+            with `qty is None` are quarantined legacy_unmeasurable (#467) and
+            excluded from MTM rather than silently counted as zero exposure.
+        now_price_by_symbol: current price per symbol; symbols without a price
+            are skipped.
+
+    Returns:
+        {"portfolio_dd", "current_equity", "peak_equity"}.
+        portfolio_dd is NEGATIVE when in drawdown, 0.0 otherwise — same sign
+        convention as compute_portfolio_dd, so evaluate_portfolio_tier reads
+        the threshold identically.
+    """
+    open_mtm = 0.0
+    for pos in open_positions:
+        sym = pos.get("symbol")
+        if not sym or sym not in now_price_by_symbol:
+            continue
+        raw_qty = pos.get("qty")
+        if raw_qty is None:
+            log.warning(
+                "compute_portfolio_dd_from_ledger: skipping legacy_unmeasurable "
+                "position from open_mtm sym=%s", sym,
+            )
+            continue
+        entry = float(pos.get("entry_price") or 0)
+        qty = float(raw_qty)
+        direction = pos.get("direction", "LONG")
+        price_now = float(now_price_by_symbol[sym])
+        if direction == "SHORT":
+            open_mtm += (entry - price_now) * qty
+        else:
+            open_mtm += (price_now - entry) * qty
+
+    current_equity = float(balance) + open_mtm
+    ledger_peak = float(peak_balance) if peak_balance is not None else float(balance)
+    peak_equity = max(ledger_peak, current_equity)
+    dd = (peak_equity - current_equity) / peak_equity if peak_equity > 0 else 0.0
+    return {
+        "portfolio_dd": -dd,
+        "current_equity": current_equity,
+        "peak_equity": peak_equity,
+    }
+
+
 def evaluate_portfolio_tier(
     portfolio_dd: float,
     concurrent_failures: int,

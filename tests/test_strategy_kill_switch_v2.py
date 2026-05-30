@@ -2633,3 +2633,87 @@ def test_is_baseline_stale_future_timestamp_returns_true():
     now = datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc)
     future = (now + timedelta(days=1)).isoformat()
     assert _is_baseline_stale(future, stale_days=7, now=now) is True
+
+
+# ── #397: compute_portfolio_dd_from_ledger ──────────────────────────────────
+
+
+def test_dd_from_ledger_flat_no_positions():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["peak_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_does_not_double_count_closed_pnl():
+    # balance already includes realized PnL; with no open positions the DD
+    # must be 0 relative to the ledger peak — NOT inflated by re-applying trades.
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_200.0, peak_balance=10_400.0,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["current_equity"] == pytest.approx(10_200.0)
+    assert out["peak_equity"] == pytest.approx(10_400.0)
+    assert out["portfolio_dd"] == pytest.approx(-(10_400.0 - 10_200.0) / 10_400.0)
+
+
+def test_dd_from_ledger_open_long_loss_drives_drawdown():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "BTC", "entry_price": 100.0, "qty": 10.0, "direction": "LONG"}],
+        now_price_by_symbol={"BTC": 90.0},  # -100 MTM
+    )
+    assert out["current_equity"] == pytest.approx(9_900.0)
+    assert out["peak_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(-100.0 / 10_000.0)
+
+
+def test_dd_from_ledger_open_short_gain_lifts_peak():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "ETH", "entry_price": 100.0, "qty": 5.0, "direction": "SHORT"}],
+        now_price_by_symbol={"ETH": 80.0},  # +100 MTM
+    )
+    assert out["current_equity"] == pytest.approx(10_100.0)
+    assert out["peak_equity"] == pytest.approx(10_100.0)  # unrealized gain lifts peak
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_skips_legacy_unmeasurable_qty_none():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "BTC", "entry_price": 100.0, "qty": None, "direction": "LONG"}],
+        now_price_by_symbol={"BTC": 50.0},
+    )
+    # qty=None row excluded from MTM (not coerced to 0 exposure silently).
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_peak_balance_none_falls_back_to_balance():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=9_000.0, peak_balance=None,
+        open_positions=[], now_price_by_symbol={},
+    )
+    assert out["peak_equity"] == pytest.approx(9_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+def test_dd_from_ledger_skips_symbol_without_price():
+    from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
+    out = compute_portfolio_dd_from_ledger(
+        balance=10_000.0, peak_balance=10_000.0,
+        open_positions=[{"symbol": "DOGE", "entry_price": 1.0, "qty": 100.0, "direction": "LONG"}],
+        now_price_by_symbol={},  # no price for DOGE
+    )
+    assert out["current_equity"] == pytest.approx(10_000.0)
+    assert out["portfolio_dd"] == pytest.approx(0.0)
