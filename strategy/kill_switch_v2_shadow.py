@@ -395,10 +395,9 @@ def emit_shadow_decision(
     this once per tenant.
     """
     from strategy.kill_switch_v2 import (
-        compute_portfolio_equity_curve,
-        compute_portfolio_dd,
         evaluate_portfolio_tier,
         classify_regime,
+        compute_portfolio_dd_from_ledger,
     )
     from strategy import kill_switch_v2 as _ks_v2
     import observability
@@ -422,36 +421,32 @@ def emit_shadow_decision(
                 cfg_eff = cfg if isinstance(cfg, dict) else {}
             _regime_adjustment_status = "failed"
 
-        # Capital base for this tenant: ledger if present, else cfg default.
-        # (We still use the curve here for telemetry / transitions logging; the
-        # health dashboard switched to ledger+MTM to avoid double-counting,
-        # but emit_shadow is a write-side observer and historical curve
-        # consumers expect the same shape across the run.)
+        # Ledger-based DD (#397): balance already folds realized PnL; the live
+        # equity is balance + open MTM. Do NOT walk closed trades again (that
+        # double-counts and under-reports DD). Single source of truth:
+        # kill_switch_v2.compute_portfolio_dd_from_ledger (same as the dashboard).
         from db.capital import db_get_capital
-        from db.transaction import transaction as _tx_for_cap
-        # Task 5 (#446): `db_get_capital` now requires `con` positional.
-        with _tx_for_cap() as _cap_con:
-            _capital_row = db_get_capital(_cap_con, tenant_id)
+        from db.transaction import transaction as _tx
+        with _tx() as _con:
+            _capital_row = db_get_capital(_con, tenant_id)
+            opens = _load_open_positions(_con, tenant_id=tenant_id)
         if _capital_row and _capital_row.get("balance") is not None:
-            capital_base = float(_capital_row["balance"])
+            _balance = float(_capital_row["balance"])
+            _peak = _capital_row.get("peak_balance")
         else:
-            capital_base = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
-
-        from db.transaction import transaction as _tx_for_loads
-        with _tx_for_loads() as _loads_con:
-            closed = _load_closed_trades(_loads_con, tenant_id=tenant_id)
-            opens = _load_open_positions(_loads_con, tenant_id=tenant_id)
+            _balance = float(cfg.get("capital_usd", _DEFAULT_CAPITAL_USD))
+            _peak = None
         prices = _snapshot_prices()
         if now_price_by_symbol:
             prices.update(now_price_by_symbol)
 
-        equity_curve = compute_portfolio_equity_curve(
-            closed_trades=closed,
+        _dd_result = compute_portfolio_dd_from_ledger(
+            balance=_balance,
+            peak_balance=(float(_peak) if _peak is not None else None),
             open_positions=opens,
-            capital_base=capital_base,
             now_price_by_symbol=prices,
         )
-        portfolio_dd = compute_portfolio_dd(equity_curve)
+        portfolio_dd = _dd_result["portfolio_dd"]
         concurrent = _count_concurrent_failures()
 
         portfolio = evaluate_portfolio_tier(
@@ -530,6 +525,7 @@ def emit_shadow_decision(
             size_factor=1.0,
             skip=False,
             reasons={
+                "dd_formula_version": "ledger_v1",
                 "portfolio_dd": portfolio_dd,
                 "reduced_threshold": portfolio["reduced_threshold"],
                 "frozen_threshold": portfolio["frozen_threshold"],
