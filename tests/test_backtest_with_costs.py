@@ -227,10 +227,13 @@ def test_calculate_metrics_omits_cost_aggregates_for_costless_trades(btc_data):
 
 
 @requires_ohlcv
-def test_calculate_metrics_does_not_use_a03_reserved_names(btc_data):
-    """Mini-contract enforcement (#277 + #278): A.0.2 must NOT define any of
-    the field names reserved for A.0.3. If A.0.3 needs more reserved names,
-    surface in the PR and let the reviewer arbitrate — do not silently extend."""
+def test_calculate_metrics_a03_shipped_present_deferred_absent(btc_data):
+    """Mini-contract enforcement (#277 + #278). A.0.3 Part 2 (#278) now DEFINES a
+    subset of the once-reserved names; the rest stay DEFERRED (Serrano HIGH 8 —
+    their formulas are undefined in literature). This guard pins the split: the
+    shipped names MUST be present, the deferred names MUST still be absent. If a
+    future part ships a deferred name, move it across deliberately in the PR — do
+    not silently extend."""
     from backtest import simulate_strategy, calculate_metrics
 
     trades, equity = simulate_strategy(
@@ -241,14 +244,21 @@ def test_calculate_metrics_does_not_use_a03_reserved_names(btc_data):
     )
     metrics = calculate_metrics(trades, equity)
 
-    A03_RESERVED = {
-        "sharpe_deflated", "sortino_deflated", "prob_sr_gt_0",
-        "calmar_deflated_approx", "n_effective", "sigma_sr_trials",
-        "calmar", "calmar_ratio",  # raw Calmar belongs to A.0.3 too per spec
+    # Shipped in A.0.3 Part 2 — first-class metric keys, always emitted.
+    A03_SHIPPED = {
+        "calmar", "calmar_ratio", "prob_sr_gt_0", "sharpe_deflated",
+        "n_effective", "sigma_sr_trials",
     }
-    leaks = A03_RESERVED & set(metrics.keys())
-    assert not leaks, (
-        f"A.0.2 must not define A.0.3-reserved fields; leaked: {leaks}"
+    # Deferred — names reserved, formulas not yet defined. Must NOT leak.
+    A03_DEFERRED = {"sortino_deflated", "calmar_deflated", "calmar_deflated_approx"}
+
+    missing = A03_SHIPPED - set(metrics.keys())
+    assert not missing, (
+        f"A.0.3 Part 2 must define the shipped names; missing: {missing}"
+    )
+    leaked_deferred = A03_DEFERRED & set(metrics.keys())
+    assert not leaked_deferred, (
+        f"deferred A.0.3 names must not be defined yet; leaked: {leaked_deferred}"
     )
 
 

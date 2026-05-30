@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import statistics
 import time
 from datetime import datetime, timezone
 
@@ -175,3 +176,42 @@ def finalize_trial(
             )
 
     _with_write_retry("finalize_trial", _do)
+
+
+# Registry inception (Part 1 merged) — anchor for "N registered since A.0.3".
+A03_DECAY_DATE = datetime(2026, 11, 29, tzinfo=timezone.utc)
+A03_N_FLOOR = 50
+
+
+def selection_population_stats(*, study_type: str = "exploratory") -> dict:
+    """Aggregate the selection-trial population for deflation.
+
+    Over all trials of the given study_type with a non-NULL sharpe, deduplicated
+    by DISTINCT (source, combo_json, window_label) — identical configs re-run by
+    a sensitivity pass count once (see registering-a-trial.md). Returns
+    {"n_registered": int, "sigma_sr_trials": float | None}. sigma is the
+    population stdev of the per-distinct-config annualized Sharpes (None if < 2)."""
+    _ensure_trials_schema()
+    with transaction() as con:
+        rows = con.execute(
+            "SELECT AVG(sharpe) AS s FROM trials "
+            "WHERE study_type = ? AND sharpe IS NOT NULL "
+            "GROUP BY source, combo_json, window_label",
+            (study_type,),
+        ).fetchall()
+    sharpes = [float(r["s"]) for r in rows if r["s"] is not None]
+    n = len(sharpes)
+    sigma = statistics.pstdev(sharpes) if n >= 2 else None
+    return {"n_registered": n, "sigma_sr_trials": sigma}
+
+
+def n_effective(
+    n_registered: int, *, today: datetime, decay_date: datetime = A03_DECAY_DATE,
+    floor: int = A03_N_FLOOR,
+) -> int:
+    """N_effective = max(n_registered, floor) until decay_date, then n_registered.
+
+    The floor avoids deflating against an artificially small N during the
+    registry's bootstrap. It decays to 0 on/after decay_date (#278 spec)."""
+    active_floor = floor if today < decay_date else 0
+    return max(n_registered, active_floor)

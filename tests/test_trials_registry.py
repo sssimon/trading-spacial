@@ -219,3 +219,52 @@ def test_ensure_trials_schema_creates_table_when_flag_reset(trials_db, monkeypat
     rows = _all_trials()
     assert len(rows) == 1
     assert rows[0]["id"] == tid
+
+
+from datetime import datetime, timezone
+
+
+def test_selection_population_stats_dedups_distinct_configs(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+
+    # Two DISTINCT exploratory configs + one duplicate of the first.
+    t1 = claim_trial(source="auto_tune", combo={"a": 1}, window_label="W")
+    finalize_trial(t1, status="ok", metrics={"sharpe_ratio": 1.0})
+    t2 = claim_trial(source="auto_tune", combo={"a": 2}, window_label="W")
+    finalize_trial(t2, status="ok", metrics={"sharpe_ratio": 2.0})
+    t3 = claim_trial(source="auto_tune", combo={"a": 1}, window_label="W")  # dup of t1
+    finalize_trial(t3, status="ok", metrics={"sharpe_ratio": 1.0})
+
+    stats = selection_population_stats()
+    assert stats["n_registered"] == 2          # dup collapsed
+    assert stats["sigma_sr_trials"] == pytest.approx(0.5, abs=1e-9)  # stdev of [1.0, 2.0] (population)
+
+
+def test_selection_population_stats_excludes_confirmatory_and_null_sharpe(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+
+    a = claim_trial(source="auto_tune", combo={"a": 1})
+    finalize_trial(a, status="ok", metrics={"sharpe_ratio": 1.0})
+    b = claim_trial(source="signal_calibration", combo={"a": 2}, study_type="confirmatory")
+    finalize_trial(b, status="ok", metrics={"sharpe_ratio": 9.0})  # confirmatory -> excluded
+    c = claim_trial(source="auto_tune", combo={"a": 3})            # pending, NULL sharpe -> excluded
+    d = claim_trial(source="auto_tune", combo={"a": 4})
+    finalize_trial(d, status="failed", error="x")                  # failed, NULL sharpe -> excluded
+
+    stats = selection_population_stats()
+    assert stats["n_registered"] == 1
+    assert stats["sigma_sr_trials"] is None  # stdev of a single value is undefined
+
+
+def test_n_effective_floor_active_then_decayed(trials_db):
+    from db.trials import n_effective
+
+    decay = datetime(2026, 11, 29, tzinfo=timezone.utc)
+    # Before decay: floor wins when registry is small.
+    before = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    assert n_effective(n_registered=10, today=before, decay_date=decay) == 50
+    assert n_effective(n_registered=80, today=before, decay_date=decay) == 80  # registry wins
+    # On/after decay: floor is 0.
+    after = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert n_effective(n_registered=10, today=after, decay_date=decay) == 10
+    assert n_effective(n_registered=0, today=after, decay_date=decay) == 0

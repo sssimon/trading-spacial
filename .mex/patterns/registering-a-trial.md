@@ -93,6 +93,13 @@ MUST be wired into the registry (`source="tune_per_direction"`, exploratory
   and `SENSITIVITY_VOL_TARGETS`), so every in-coverage `(symbol, sub_window)` cell
   at 0.30 is recorded twice. Part 2 must de-duplicate on the identity tuple before
   counting — a raw `COUNT(*)` over-inflates N and over-deflates the best Sharpe.
+- **Consuming the registry for deflation (#278 Part 2).** `db/trials.selection_population_stats()`
+  computes N + `sigma_sr_trials` over exploratory DISTINCT configs; `n_effective()`
+  applies the floor/decay. The DSR is computed POST-HOC (e.g.
+  `scripts/a03_deflation_honesty_diff.py`), never live inside `calculate_metrics`
+  (which stays registry-free — it runs in `multiprocessing.Pool` children).
+  `calculate_metrics` only emits `sharpe_deflated` when `n_effective` +
+  `sigma_sr_trials` are injected as keyword params. See `docs/deflation.md`.
 
 ## Verify Checklist
 
