@@ -1174,13 +1174,22 @@ def get_dashboard_state(
                 peak_equity = _dd["peak_equity"]
                 portfolio_dd = _dd["portfolio_dd"]
             except Exception:
+                # Open-MTM / price snapshot failed. Fall back to the LEDGER-ONLY
+                # drawdown (no open_mtm) — realized DD is ledger-derived and does
+                # NOT depend on prices, so a price-feed outage must not erase a
+                # real drawdown (that would under-protect the kill-switch, the
+                # #397 failure class). Mirrors the pre-helper except semantics.
                 log.warning(
                     "get_dashboard_state ledger-DD computation failed; "
-                    "treating as flat", exc_info=True,
+                    "falling back to ledger-only DD (no open MTM)", exc_info=True,
                 )
                 current_equity = realized_balance
-                peak_equity = ledger_peak
-                portfolio_dd = 0.0
+                peak_equity = max(ledger_peak, realized_balance)
+                _dd = (
+                    (peak_equity - current_equity) / peak_equity
+                    if peak_equity > 0 else 0.0
+                )
+                portfolio_dd = -_dd
         else:
             # No capital row for this tenant — pre-onboarding / fresh user.
             # Display cfg.capital_usd as a neutral base. We still tenant-scope
