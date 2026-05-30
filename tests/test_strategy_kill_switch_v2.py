@@ -2785,3 +2785,66 @@ def test_dd_from_ledger_skips_symbol_without_price():
     )
     assert out["current_equity"] == pytest.approx(10_000.0)
     assert out["portfolio_dd"] == pytest.approx(0.0)
+
+
+# ── #494 Batch 3: concurrency regression ─────────────────────────────────────
+
+
+def test_scanner_read_succeeds_while_writer_holds_lock(tmp_path, monkeypatch):
+    """Batch 3 (#494): scanner/calibrator/shadow pure reads must NOT block
+    when the scanner's own write loop holds BEGIN IMMEDIATE.
+
+    Mirrors tests/db/test_transaction.py::test_snapshot_read_succeeds_while_writer_holds_lock
+    but exercises the migrated scanner-batch functions specifically:
+    _load_v2_state, _load_baseline, and _load_last_recalibration_ts.
+
+    A still-on-transaction() implementation raises 'database is locked';
+    snapshot_connection() reads the committed snapshot concurrently.
+    """
+    import btc_api
+    from db.connection import _open_configured_connection
+    from db.transaction import transaction as _tx
+    from strategy.kill_switch_v2_shadow import _load_v2_state, _load_baseline
+    from strategy.kill_switch_v2_calibrator import _load_last_recalibration_ts
+
+    db_path = str(tmp_path / "signals.db")
+    monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+    if hasattr(btc_api, "_db_conn"):
+        delattr(btc_api, "_db_conn")
+    btc_api.init_db()
+
+    # Seed committed rows so reads return something meaningful.
+    with _tx() as con:
+        con.execute(
+            """INSERT OR IGNORE INTO kill_switch_v2_state
+               (symbol, velocity_cooldown_until, velocity_last_trigger_ts, updated_at)
+               VALUES ('BTCUSDT', NULL, NULL, '2026-01-01T00:00:00+00:00')"""
+        )
+        con.execute(
+            """INSERT OR IGNORE INTO kill_switch_v2_baseline
+               (symbol, baseline_wr, baseline_sigma, trades_count, computed_at)
+               VALUES ('BTCUSDT', 0.55, 0.3, 50, '2026-01-01T00:00:00+00:00')"""
+        )
+
+    # Hold the writer lock with an uncommitted write — simulates the scanner
+    # mid-write burst that caused the original lock-contention incident.
+    writer = _open_configured_connection()
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        "INSERT INTO kill_switch_v2_state "
+        "(symbol, velocity_cooldown_until, velocity_last_trigger_ts, updated_at) "
+        "VALUES ('ETHUSDT', NULL, NULL, '2026-01-01T00:00:00+00:00')"
+    )
+    try:
+        # All three must succeed (read committed snapshot) without raising.
+        state = _load_v2_state("BTCUSDT")
+        baseline = _load_baseline("BTCUSDT")
+        last_ts = _load_last_recalibration_ts()
+
+        assert state is not None, "_load_v2_state returned None"
+        assert baseline is not None, "_load_baseline returned None"
+        # _load_last_recalibration_ts returns None when no recommendations row — that's fine.
+        assert isinstance(last_ts, (str, type(None)))
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()

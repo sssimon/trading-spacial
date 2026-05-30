@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from db.transaction import transaction
+from db.transaction import transaction, snapshot_connection
 from notifier import dedupe, ratelimit
 from notifier._storage import record_delivery
 from notifier._templates import render
@@ -92,7 +92,8 @@ def notify(
         if tenant_id is not None else event.dedupe_key
     )
     window_seconds = _resolve_dedupe_window(event, cfg)
-    with transaction() as con:
+    # Pure read — snapshot_connection (WAL-concurrent, no writer lock) — #494
+    with snapshot_connection() as con:
         _should_send = dedupe.should_send(
             con, event.event_type, dedupe_key,
             window_seconds=window_seconds,

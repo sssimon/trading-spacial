@@ -101,9 +101,9 @@ def _load_recent_sl_timestamps(
 ) -> list[str]:
     """Load exit_ts of closed positions with exit_reason='SL' for a symbol within window."""
     from datetime import timedelta
-    from db.transaction import transaction
+    from db.transaction import snapshot_connection
     cutoff = (now - timedelta(hours=float(window_hours))).isoformat()
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         rows = conn.execute(
             """SELECT exit_ts
                FROM positions
@@ -119,8 +119,8 @@ def _load_recent_sl_timestamps(
 
 def _load_v2_state(symbol: str) -> dict[str, Any]:
     """Load per-symbol v2 state. Returns keys with None defaults if row missing."""
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import snapshot_connection
+    with snapshot_connection() as conn:
         row = conn.execute(
             """SELECT velocity_cooldown_until, velocity_last_trigger_ts
                FROM kill_switch_v2_state
@@ -206,8 +206,8 @@ def _evaluate_velocity(symbol: str, cfg: dict[str, Any]) -> bool:
 
 def _load_closed_trades_for_symbol(symbol: str) -> list[dict[str, Any]]:
     """Load closed positions for a symbol with non-NULL exit_ts."""
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import snapshot_connection
+    with snapshot_connection() as conn:
         rows = conn.execute(
             """SELECT exit_ts, pnl_usd
                FROM positions
@@ -222,8 +222,8 @@ def _load_closed_trades_for_symbol(symbol: str) -> list[dict[str, Any]]:
 
 def _load_baseline(symbol: str) -> dict[str, Any] | None:
     """Load per-symbol baseline. Returns None if no row exists."""
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import snapshot_connection
+    with snapshot_connection() as conn:
         row = conn.execute(
             """SELECT baseline_wr, baseline_sigma, trades_count, computed_at
                FROM kill_switch_v2_baseline
@@ -426,8 +426,9 @@ def emit_shadow_decision(
         # double-counts and under-reports DD). Single source of truth:
         # kill_switch_v2.compute_portfolio_dd_from_ledger (same as the dashboard).
         from db.capital import db_get_capital
-        from db.transaction import transaction as _tx
-        with _tx() as _con:
+        from db.transaction import snapshot_connection as _snap
+        # Pure reads — use snapshot_connection (WAL-concurrent, no writer lock) — #494
+        with _snap() as _con:
             _capital_row = db_get_capital(_con, tenant_id)
             opens = _load_open_positions(_con, tenant_id=tenant_id)
         if _capital_row and _capital_row.get("balance") is not None:
@@ -458,8 +459,9 @@ def emit_shadow_decision(
         # B6: record portfolio-tier transitions for the dashboard
         try:
             from health import recent_portfolio_transitions, record_portfolio_transition
-            from db.transaction import transaction as _tx_for_pt
-            with _tx_for_pt() as _pt_con:
+            from db.transaction import snapshot_connection as _snap_for_pt, transaction as _tx_for_pt
+            # Pure read — snapshot_connection (WAL-concurrent, no writer lock) — #494
+            with _snap_for_pt() as _pt_con:
                 recent = recent_portfolio_transitions(_pt_con, limit=1)
             prev_tier = recent[0]["to_tier"] if recent else "NORMAL"
             if prev_tier != portfolio["tier"]:

@@ -21,10 +21,10 @@ _GRID_STEP = 5
 def _load_closed_positions_window(window_days: float, now) -> list[dict[str, Any]]:
     """Load closed positions with exit_ts within the last window_days, ordered by entry_ts."""
     from datetime import timedelta
-    from db.transaction import transaction
+    from db.transaction import snapshot_connection
 
     cutoff = (now - timedelta(days=float(window_days))).isoformat()
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         rows = conn.execute(
             """SELECT symbol, entry_ts, exit_ts, exit_reason, pnl_usd
                FROM positions

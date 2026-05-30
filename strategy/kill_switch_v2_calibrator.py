@@ -242,8 +242,8 @@ def _persist_recommendation(
 
 def _load_last_recalibration_ts() -> str | None:
     """Return the latest ts from kill_switch_recommendations, or None."""
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import snapshot_connection
+    with snapshot_connection() as conn:
         row = conn.execute(
             "SELECT MAX(ts) FROM kill_switch_recommendations",
         ).fetchone()
@@ -252,9 +252,9 @@ def _load_last_recalibration_ts() -> str | None:
 
 def _count_recalibrations_today(now) -> int:
     """Count rows in kill_switch_recommendations persisted today (UTC)."""
-    from db.transaction import transaction
+    from db.transaction import snapshot_connection
     today_prefix = now.strftime("%Y-%m-%d")
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM kill_switch_recommendations WHERE ts LIKE ?",
             (today_prefix + "%",),
@@ -264,8 +264,8 @@ def _count_recalibrations_today(now) -> int:
 
 def _load_last_applied_recommendation() -> dict[str, Any] | None:
     """Return the most recent applied recommendation row as a dict, or None."""
-    from db.transaction import transaction
-    with transaction() as conn:
+    from db.transaction import snapshot_connection
+    with snapshot_connection() as conn:
         row = conn.execute(
             """SELECT id, ts, slider_value, projected_pnl, projected_dd,
                       status, applied_ts, applied_by, report_json
@@ -291,9 +291,9 @@ def _load_last_calibration_regime_score() -> float | None:
     field is missing.
     """
     import json
-    from db.transaction import transaction
+    from db.transaction import snapshot_connection
 
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         row = conn.execute(
             """SELECT report_json FROM kill_switch_recommendations
                ORDER BY ts DESC, id DESC LIMIT 1""",
@@ -318,11 +318,11 @@ def _count_symbols_with_recent_alerts(window_hours: float) -> int:
     have per_symbol_tier='ALERT' OR portfolio_tier IN ('REDUCED','FROZEN').
     """
     from datetime import datetime, timedelta, timezone
-    from db.transaction import transaction
+    from db.transaction import snapshot_connection
 
     now = datetime.now(tz=timezone.utc)
     cutoff = (now - timedelta(hours=float(window_hours))).isoformat()
-    with transaction() as conn:
+    with snapshot_connection() as conn:
         row = conn.execute(
             """SELECT COUNT(DISTINCT symbol)
                FROM kill_switch_decisions
@@ -443,9 +443,10 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
             # when ANY tenant breaches them, not when the (meaningless) cross-
             # tenant aggregate does.
             from db.capital import db_list_active_tenant_ids
-            from db.transaction import transaction as _tx_for_tenants
+            from db.transaction import snapshot_connection as _snap_for_tenants
             # Task 5 (#446): `db_list_active_tenant_ids` now requires `con`.
-            with _tx_for_tenants() as _tenants_con:
+            # Pure SELECT — use snapshot_connection (WAL-concurrent, no writer lock) — #494
+            with _snap_for_tenants() as _tenants_con:
                 tenant_ids = db_list_active_tenant_ids(_tenants_con)
             if tenant_ids:
                 per_tenant_dd = [
@@ -585,8 +586,9 @@ def _compute_current_portfolio_dd(
             cap_row = db_get_capital(conn, tenant_id)
             opens = _load_open_positions(conn, tenant_id=tenant_id)
         else:
-            from db.transaction import transaction as _tx
-            with _tx() as _c:
+            from db.transaction import snapshot_connection as _snap
+            # Pure reads — use snapshot_connection (WAL-concurrent, no writer lock) — #494
+            with _snap() as _c:
                 cap_row = db_get_capital(_c, tenant_id)
                 opens = _load_open_positions(_c, tenant_id=tenant_id)
 

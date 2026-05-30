@@ -149,8 +149,9 @@ def _build_e5_cooldown(symbol: str, cfg: dict) -> dict:
 
     try:
         from db.positions import db_last_exit_ts  # noqa: PLC0415
-        from db.transaction import transaction  # noqa: PLC0415
-        with transaction() as con:
+        from db.transaction import snapshot_connection  # noqa: PLC0415
+        # Pure read — snapshot_connection (WAL-concurrent, no writer lock) — #494
+        with snapshot_connection() as con:
             last_exit_dt = db_last_exit_ts(con, symbol)
     except Exception as e:  # noqa: BLE001
         # Throttle: one log line per (symbol, exc-type) per process.
