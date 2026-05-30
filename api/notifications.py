@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.notifications")
 
@@ -39,7 +39,7 @@ def get_notifications(
     from notifier._storage import list_unread
     if not unread:
         # Full list (both read + unread) — direct query (list_unread filters on read_at).
-        with transaction() as con:
+        with snapshot_connection() as con:
             rows = con.execute(
                 """SELECT id, event_type, event_key, priority, payload_json,
                           channels_sent, delivery_status, sent_at, read_at, error_log
@@ -52,7 +52,7 @@ def get_notifications(
         cols = ("id", "event_type", "event_key", "priority", "payload_json",
                 "channels_sent", "delivery_status", "sent_at", "read_at", "error_log")
         return {"notifications": [dict(zip(cols, r)) for r in rows]}
-    with transaction() as con:
+    with snapshot_connection() as con:
         return {"notifications": list_unread(con, limit=limit, tenant_id=tenant_id)}
 
 

@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from api.agent.audit import RETENTION_DAYS
 from auth.dependencies import get_current_tenant_id
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.agent.history")
 
@@ -221,7 +221,7 @@ def list_conversations(
     Pre-reg D.7: tenant_id from JWT, never from query/body.
     """
     now = _now_iso()
-    with transaction() as con:
+    with snapshot_connection() as con:
         # Parameters live in two buckets so the order in execute() lines
         # up with the placeholder order in the final SQL: JOIN clause
         # comes BEFORE WHERE, so any `?` in the JOIN must be earlier in
@@ -321,7 +321,7 @@ def get_messages(
     signed_payload is never persisted and therefore never returned.
     """
     now = _now_iso()
-    with transaction() as con:
+    with snapshot_connection() as con:
         meta = con.execute(
             "SELECT conversation_id, tenant_id, title, surface, pinned, expires_at "
             "FROM agent_conversation_meta WHERE conversation_id = ?",

@@ -51,7 +51,7 @@ from api.agent.proposals import (
 from api.agent.streaming import sse_serialize
 from auth.dependencies import get_current_tenant_id, get_current_user, require_role
 from auth.models import User
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.agent.router")
 
@@ -504,7 +504,7 @@ def get_agent_metrics():
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     today_iso  = datetime.now(timezone.utc).date().isoformat() + "T00:00:00+00:00"
 
-    with transaction() as con:
+    with snapshot_connection() as con:
         today_row = con.execute(
             "SELECT "
             "  COUNT(*) AS turn_count, "

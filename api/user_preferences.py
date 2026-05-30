@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 from db.user_preferences import (
     db_get_user_preferences,
     db_upsert_user_preferences,
@@ -69,7 +69,7 @@ def _mask_token(token: str) -> str:
 
 @router.get("", summary="Get preferences for current tenant (defaults if unset)")
 def get_preferences(tenant_id: int = Depends(get_current_tenant_id)):
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = db_get_user_preferences(con, tenant_id)
     if row is None:
         # Return sensible defaults — per pre-reg §3.2
@@ -150,7 +150,7 @@ def post_preferences_test(tenant_id: int = Depends(get_current_tenant_id)):
     """
     from notifier.channels.telegram import TelegramChannel  # noqa: PLC0415
 
-    with transaction() as con:
+    with snapshot_connection() as con:
         prefs = db_get_user_preferences(con, tenant_id) or {}
     notify_channels = prefs.get("notify_channels") or {}
 

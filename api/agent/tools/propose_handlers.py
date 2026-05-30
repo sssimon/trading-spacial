@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from db.transaction import transaction
+from db.transaction import snapshot_connection
 
 from api.agent.proposals import (
     ACTION_APPLY_TUNE,
@@ -78,7 +78,7 @@ def propose_close_position(
     rationale:       str,
 ) -> dict:
     """Verify ownership, sign a close_position proposal, persist."""
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             "SELECT symbol, direction, status, entry_price, size_usd "
             "FROM positions WHERE id = ? AND tenant_id = ?",
@@ -126,7 +126,7 @@ def propose_reactivate_symbol(
     norm = symbol.upper().strip()
     if not norm.endswith("USDT"):
         norm = f"{norm}USDT"
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             "SELECT state FROM symbol_health WHERE symbol = ?",
             (norm,),

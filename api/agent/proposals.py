@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.agent.proposals")
 
@@ -305,7 +305,7 @@ def persist_proposal(
 def load_proposal_row(proposal_id: str) -> Optional[dict]:
     """Fetch the row from agent_side_effects. Returns None if absent.
     Caller compares result column to decide pending vs consumed."""
-    with transaction() as con:
+    with snapshot_connection() as con:
         row = con.execute(
             """SELECT id, tenant_id, conversation_id, ts, action, args_json,
                       idempotency_key, result, http_status, expires_at
