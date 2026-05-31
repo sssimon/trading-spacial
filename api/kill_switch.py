@@ -181,29 +181,45 @@ def kill_switch_apply_recommendation(rec_id: int):
                 ),
             )
 
-        # Write config override. save_config only merges at kill_switch level
-        # (it replaces the entire v2 sub-dict), so do read-modify-write here to
-        # preserve other v2 keys (auto_calibrator, regime_adjustments, etc).
-        existing_cfg = load_config()
-        existing_v2 = (existing_cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
-        merged_v2 = {**existing_v2, "aggressiveness": slider_int}
-        save_config({"kill_switch": {"v2": merged_v2}})
-
-        # Update DB row
+        # #550: the atomic UPDATE is the authority — NOT the pre-check read above
+        # (which only fast-paths 404/400 + validates the slider). Guard with
+        # status='pending' and check rowcount so a concurrent ignore/apply/
+        # supersede landing in the pre-check -> write window cannot cause a config
+        # change for a recommendation that ends up not applied. The config write
+        # therefore runs ONLY after this request wins the transition.
         now_iso = datetime.now(tz=timezone.utc).isoformat()
         with transaction() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """UPDATE kill_switch_recommendations
                    SET status = 'applied', applied_ts = ?, applied_by = 'operator'
-                   WHERE id = ?""",
+                   WHERE id = ? AND status = 'pending'""",
                 (now_iso, rec_id),
             )
+            if cur.rowcount == 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"recommendation {rec_id} was concurrently modified "
+                        "(apply/ignore/supersede); not applied"
+                    ),
+                )
             updated = conn.execute(
                 """SELECT id, ts, triggered_by, slider_value, projected_pnl,
                           projected_dd, status, applied_ts, applied_by, report_json
                    FROM kill_switch_recommendations WHERE id = ?""",
                 (rec_id,),
             ).fetchone()
+
+        # Side effect runs only after winning the atomic transition (#550).
+        # save_config only merges at kill_switch level (it replaces the entire v2
+        # sub-dict), so do read-modify-write here to preserve other v2 keys
+        # (auto_calibrator, regime_adjustments, etc). Residual: if this throws
+        # after the UPDATE commits, the row is 'applied' but the slider isn't
+        # persisted — a loud 500, single request, no silent double-apply.
+        existing_cfg = load_config()
+        existing_v2 = (existing_cfg.get("kill_switch", {}) or {}).get("v2", {}) or {}
+        merged_v2 = {**existing_v2, "aggressiveness": slider_int}
+        save_config({"kill_switch": {"v2": merged_v2}})
 
         log.warning(
             "Kill switch v2: operator applied recomendación id=%d slider=%d",
@@ -257,14 +273,25 @@ def kill_switch_ignore_recommendation(rec_id: int):
                 detail=f"recommendation {rec_id} is already {row[1]}",
             )
 
+        # #550: guard the UPDATE with status='pending' + rowcount so a stale
+        # pre-check cannot overwrite a recommendation the calibrator (or another
+        # operator) already transitioned.
         now_iso = datetime.now(tz=timezone.utc).isoformat()
         with transaction() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """UPDATE kill_switch_recommendations
                    SET status = 'ignored', applied_ts = ?, applied_by = 'operator'
-                   WHERE id = ?""",
+                   WHERE id = ? AND status = 'pending'""",
                 (now_iso, rec_id),
             )
+            if cur.rowcount == 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"recommendation {rec_id} was concurrently modified; "
+                        "not ignored"
+                    ),
+                )
             updated = conn.execute(
                 """SELECT id, ts, triggered_by, slider_value, projected_pnl,
                           projected_dd, status, applied_ts, applied_by, report_json
