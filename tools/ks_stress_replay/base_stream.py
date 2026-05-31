@@ -1,8 +1,10 @@
 """Pass 1: generate the per-symbol base trade stream (no kill switch) over the
 pre-holdout window, with a hard holdout cutoff and bankruptcy flagging.
 
-Reuses the loader + config helpers from tools.regime_retune_pre_holdout and
-backtest.simulate_strategy (apply_kill_switch=False).
+Uses api.config.load_config() (the production layered merge: hardcoded →
+config.defaults.json → config.secrets.json → config.json → env) for
+symbol_overrides + tuned defaults, _load_frames from tools.regime_retune_pre_holdout
+for OHLCV frames, and backtest.simulate_strategy (apply_kill_switch=False).
 """
 from __future__ import annotations
 
@@ -60,9 +62,16 @@ def generate_base_stream(
     syms = symbols if symbols is not None else CURATED_SYMBOLS
 
     from backtest import simulate_strategy
-    from tools.regime_retune_pre_holdout import _load_frames, _load_config
+    from tools.regime_retune_pre_holdout import _load_frames
+    from api.config import load_config
 
-    app_config = _load_config()
+    app_config = load_config()
+    if not app_config.get("symbol_overrides"):
+        raise RuntimeError(
+            "load_config() returned no symbol_overrides — config.defaults.json "
+            "missing or empty. The base stream would run with generic ATR "
+            "multipliers, contaminating the v1-vs-v2 comparison."
+        )
     overrides = app_config.get("symbol_overrides", {}) or {}
 
     stream: dict = {}
