@@ -41,11 +41,14 @@ una curva parametrizada por el slider de agresividad. El veredicto tiene tres ni
 
 | Nivel | Condición |
 |---|---|
-| **STRONG** | Algún slider de v2 Pareto-domina v1: max DD de portafolio **menor** Y P&L total **≥** el de v1. |
-| **PASS (DD-first)** | Algún slider de v2 reduce el max DD de portafolio en **≥3 pp absolutos O ≥15% relativo** (basta con que se cumpla una de las dos) **y** conserva **≥90% del P&L de v1**. |
-| **FAIL** | Ningún slider de v2 cumple el gate DD-first. |
+| **STRONG** | Algún slider de v2 cumple el **margen de DD** (reduce el max DD de portafolio en **≥3 pp absolutos O ≥15% relativo**) **y** conserva **P&L ≥ el de v1** (cero costo). |
+| **PASS (DD-first)** | Algún slider de v2 cumple el **mismo margen de DD** (**≥3 pp absolutos O ≥15% relativo**) **y** conserva **≥90% del P&L de v1** (costo chico permitido), sin ser STRONG. |
+| **FAIL** | Ningún slider de v2 cumple el margen de DD dentro del piso de P&L. |
 
-Los umbrales del gate (3 pp / 15% / 90%) quedan **pre-registrados** aquí y no se mueven
+STRONG y PASS exigen **el mismo margen de DD**; difieren solo en el costo de P&L
+(STRONG = sin costo, P&L ≥ v1; PASS = costo ≤ 10%). Una mejora de DD por debajo del
+margen (p.ej. 1 pp, posible ruido) no dispara ningún nivel — guard de robustez. Los
+umbrales del gate (3 pp / 15% / 90%) quedan **pre-registrados** aquí y no se mueven
 después de ver resultados. Mover el poste post-hoc invalida la evidencia.
 
 Criterio primario: **DD-first con piso de P&L** (decisión del 2026-05-31). La filosofía
@@ -159,9 +162,9 @@ Directorio `data/retune/2026-05-31-ks-stress-replay/`:
 | Engines | `none`, `v1`, `v2@30`, `v2@50`, `v2@70` |
 | Grid de slider v2 | 30 / 50 / 70 |
 | Config base | producción (`symbol_overrides` + gates activos) |
-| Gate DD-first | max DD de v2 ≥3 pp absolutos O ≥15% relativo menor que v1 |
-| Piso de P&L | P&L de v2 ≥ 90% del P&L de v1 |
-| Gate STRONG | algún slider v2 Pareto-domina v1 (DD menor Y P&L ≥) |
+| Margen de DD (común a STRONG y PASS) | max DD de v2 ≥3 pp absolutos O ≥15% relativo menor que v1 |
+| Piso de P&L (PASS) | P&L de v2 ≥ 90% del P&L de v1 |
+| Gate STRONG | algún slider v2 cumple el margen de DD Y conserva P&L ≥ v1 (cero costo) |
 | Capital base | el del backtest estándar (consistente con `simulate_strategy`) |
 
 ## 7. Fuera de alcance (YAGNI)
