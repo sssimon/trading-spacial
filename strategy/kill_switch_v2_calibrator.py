@@ -449,11 +449,24 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
             with _snap_for_tenants() as _tenants_con:
                 tenant_ids = db_list_active_tenant_ids(_tenants_con)
             if tenant_ids:
-                per_tenant_dd = [
-                    _compute_current_portfolio_dd(cfg, tenant_id=tid)
-                    for tid in tenant_ids
-                ]
-                current_dd = min(per_tenant_dd)  # most negative = worst DD
+                per_tenant_dd = []
+                for tid in tenant_ids:
+                    try:
+                        per_tenant_dd.append(
+                            _compute_current_portfolio_dd(
+                                cfg, tenant_id=tid, strict=True,
+                            )
+                        )
+                    except Exception as _dd_err:
+                        # #543: a tenant whose DD cannot be computed is EXCLUDED
+                        # from the degradation min() — never injected as a phantom
+                        # 0.0 that would mask the other tenants' real drawdown.
+                        log.warning(
+                            "portfolio DD failed for tenant_id=%s; excluding "
+                            "tenant from degradation eval: %s",
+                            tid, _dd_err, exc_info=True,
+                        )
+                current_dd = min(per_tenant_dd) if per_tenant_dd else 0.0
             else:
                 current_dd = 0.0
             last_applied = _load_last_applied_recommendation()
@@ -558,13 +571,28 @@ def _load_current_regime_score() -> float | None:
 
 
 def _compute_current_portfolio_dd(
-    cfg: dict[str, Any], *, tenant_id: int, conn=None,
+    cfg: dict[str, Any], *, tenant_id: int, conn=None, strict: bool = False,
 ) -> float:
     """Compute live portfolio DD from ledger balance + open-position MTM.
 
     Reuses kill_switch_v2.compute_portfolio_dd_from_ledger (ledger + open MTM;
     closed PnL already in balance — see #397).
-    Returns 0.0 if anything fails (conservative — won't fire degradation trigger).
+
+    Fail-closed contract (#543). Two failure sub-classes are handled distinctly:
+
+    - **Ledger read failure** (capital row / open positions): nothing can be
+      computed. With ``strict=True`` the exception PROPAGATES so a safety caller
+      (e.g. the B5 auto-recovery gate ``_is_portfolio_normal``, or the
+      degradation trigger) can fail closed instead of seeing a permissive
+      phantom ``0.0`` — ``0.0`` means "no drawdown", the most dangerous default
+      for a circuit-breaker input. With ``strict=False`` (the default, for
+      display callers such as ``get_dashboard_state``) it returns ``0.0``.
+    - **Price-snapshot / MTM failure**: the realized drawdown is ledger-derived
+      and does NOT depend on prices. A price-feed outage must not erase a real
+      drawdown (the #397 failure class). Degrade to the ledger-only DD,
+      ``-(peak - balance)/peak``, never ``0.0`` — and never re-raise (even under
+      ``strict``): a transient price hiccup freezing the system every tick is
+      worse than a one-tick MTM gap. Mirrors ``get_dashboard_state`` (#542).
 
     Per multi-tenant policy: `tenant_id` is required. The capital base is the
     tenant's ledger balance when present, falling back to cfg["capital_usd"]
@@ -574,6 +602,10 @@ def _compute_current_portfolio_dd(
     (e.g. get_dashboard_state, which owns an outer tx and would deadlock if
     inner helpers opened their own).
     """
+    # ── Phase 1: ledger reads (unrecoverable on failure) ────────────────────
+    # Imports live inside the try so an ImportError follows the same fail-closed
+    # contract as a ledger read (strict → propagate, lenient → 0.0) rather than
+    # escaping uncaught (#543 audit, Lens 4).
     try:
         from strategy.kill_switch_v2 import compute_portfolio_dd_from_ledger
         from strategy.kill_switch_v2_shadow import (
@@ -587,7 +619,7 @@ def _compute_current_portfolio_dd(
             opens = _load_open_positions(conn, tenant_id=tenant_id)
         else:
             from db.transaction import snapshot_connection as _snap
-            # Pure reads — use snapshot_connection (WAL-concurrent, no writer lock) — #494
+            # Pure reads — snapshot_connection (WAL-concurrent, no writer lock) — #494
             with _snap() as _c:
                 cap_row = db_get_capital(_c, tenant_id)
                 opens = _load_open_positions(_c, tenant_id=tenant_id)
@@ -599,7 +631,19 @@ def _compute_current_portfolio_dd(
             # No ledger row (pre-onboarding): cfg default, no peak history.
             balance = float(cfg.get("capital_usd", 1000.0))
             peak_balance = None
+    except Exception as e:
+        # #543: unrecoverable. strict callers fail closed (propagate); display
+        # callers keep the legacy permissive 0.0.
+        log.warning(
+            "compute_current_portfolio_dd ledger read failed for tenant_id=%s: %s",
+            tenant_id, e, exc_info=True,
+        )
+        if strict:
+            raise
+        return 0.0
 
+    # ── Phase 2: full DD with open-MTM; degrade to ledger-only on failure ────
+    try:
         result = compute_portfolio_dd_from_ledger(
             balance=balance,
             peak_balance=(float(peak_balance) if peak_balance is not None else None),
@@ -608,8 +652,20 @@ def _compute_current_portfolio_dd(
         )
         return float(result["portfolio_dd"])
     except Exception as e:
-        log.warning(
-            "compute_current_portfolio_dd failed for tenant_id=%s: %s",
-            tenant_id, e, exc_info=True,
+        # #543/#542: price-feed / MTM failure. The realized (ledger-only)
+        # drawdown is known and price-independent — keep it rather than erasing
+        # it with a 0.0. Never re-raise: a transient price hiccup must not
+        # freeze the system on every tick.
+        peak_eff = max(
+            (float(peak_balance) if peak_balance is not None else balance),
+            balance,
         )
-        return 0.0
+        ledger_only_dd = (
+            -((peak_eff - balance) / peak_eff) if peak_eff > 0 else 0.0
+        )
+        log.warning(
+            "compute_current_portfolio_dd MTM/price snapshot failed for "
+            "tenant_id=%s; degrading to ledger-only DD=%.4f: %s",
+            tenant_id, ledger_only_dd, e, exc_info=True,
+        )
+        return ledger_only_dd

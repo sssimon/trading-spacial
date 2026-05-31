@@ -339,3 +339,36 @@ def test_evaluate_all_symbols_runs_auto_reactivate_for_each(tmp_db, monkeypatch)
         evaluate_all_symbols(cfg)
 
     assert calls == ["AAA", "BBB"]
+
+
+# ── #543: auto-recovery gate fails closed on DD computation failure ──────────
+
+
+def test_is_portfolio_normal_returns_false_when_dd_computation_fails(tmp_db, monkeypatch):
+    """#543: _is_portfolio_normal is the B5 auto-recovery gate. If the live-DD
+    computation hits an unrecoverable ledger-read failure (DB hiccup, malformed
+    capital), the gate must fail CLOSED (return False → block auto-recovery)
+    instead of seeing a permissive phantom 0.0 that reactivates a PAUSED symbol
+    during the failure window.
+
+    Regression: this monkeypatches the LOW-LEVEL ledger read (db_get_capital),
+    not the helper itself. With the pre-#543 swallow-to-0.0 behavior the helper
+    would return 0.0 → tier NORMAL → gate True (test FAILS). With the strict
+    contract the read failure propagates → the gate's outer guard returns False
+    (test PASSES). It pins the end-to-end fail-closed path, not just the guard."""
+    import db.capital as _cap
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    from health import _is_portfolio_normal
+
+    # At least one onboarded tenant so the gate enters its per-tenant loop.
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=8_000.0, peak_balance=10_000.0)
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated ledger read failure")
+
+    monkeypatch.setattr(_cap, "db_get_capital", _boom)
+
+    cfg = {"kill_switch": {"enabled": True, "v2": {}}}
+    assert _is_portfolio_normal(cfg) is False

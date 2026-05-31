@@ -405,6 +405,107 @@ def test_compute_current_portfolio_dd_does_not_double_count_closed_trades(fresh_
     assert dd == pytest.approx(-(10_400.0 - 10_200.0) / 10_400.0, abs=1e-6)
 
 
+# ── #543: _compute_current_portfolio_dd fail-closed contract ────────────────
+
+
+def test_compute_dd_strict_true_reraises_on_ledger_read_failure(fresh_db, monkeypatch):
+    """#543: a ledger-read failure (Phase 1) is unrecoverable — strict=True must
+    re-raise so the safety caller can fail closed, instead of collapsing to a
+    permissive 0.0. strict=False preserves the legacy display behavior (0.0)."""
+    import db.capital as _cap
+    from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated DB hiccup reading capital")
+
+    monkeypatch.setattr(_cap, "db_get_capital", _boom)
+    cfg = {"capital_usd": 1000.0}
+
+    # strict=True → propagate (caller decides; the gate fails closed).
+    with pytest.raises(RuntimeError):
+        _compute_current_portfolio_dd(cfg, tenant_id=1, strict=True)
+
+    # strict=False (default) → legacy permissive 0.0 for display callers.
+    assert _compute_current_portfolio_dd(cfg, tenant_id=1, strict=False) == 0.0
+
+
+def test_compute_dd_price_failure_degrades_to_ledger_only_not_zero(fresh_db, monkeypatch):
+    """#543: a price-snapshot failure (Phase 2) must NOT erase a real realized
+    drawdown. The ledger balance/peak are already known; degrade to ledger-only
+    DD = -(peak-balance)/peak, never 0.0 — even under strict=True (a transient
+    price hiccup must not freeze the system on every tick). Mirrors #542."""
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    import strategy.kill_switch_v2_shadow as _shadow
+    from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+
+    with transaction() as con:
+        # balance 9000 below peak 10000 → realized DD of -10%.
+        db_upsert_capital(con, 1, balance=9_000.0, peak_balance=10_000.0)
+
+    def _price_boom():
+        raise RuntimeError("simulated price-feed outage")
+
+    monkeypatch.setattr(_shadow, "_snapshot_prices", _price_boom)
+    cfg = {"capital_usd": 1000.0}
+
+    expected = -(10_000.0 - 9_000.0) / 10_000.0  # -0.1 ledger-only
+
+    # Even strict=True degrades (does not re-raise) for the price-feed sub-class.
+    dd_strict = _compute_current_portfolio_dd(cfg, tenant_id=1, strict=True)
+    assert dd_strict == pytest.approx(expected, abs=1e-6)
+    assert dd_strict != 0.0
+
+    dd_lenient = _compute_current_portfolio_dd(cfg, tenant_id=1, strict=False)
+    assert dd_lenient == pytest.approx(expected, abs=1e-6)
+
+
+def test_degradation_trigger_excludes_failing_tenant(fresh_db, monkeypatch, caplog):
+    """#543: when one tenant's DD computation raises, the calibrator loop must
+    EXCLUDE that tenant from the degradation min() (not inject a phantom 0.0 that
+    masks the other tenants' drawdown), log the exclusion, and not crash."""
+    import logging
+    import threading
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    import strategy.kill_switch_v2_calibrator as cal
+
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=10_000.0, peak_balance=10_000.0)
+        db_upsert_capital(con, 2, balance=9_000.0, peak_balance=10_000.0)
+
+    def _fake_dd(cfg, *, tenant_id, conn=None, strict=False):
+        if tenant_id == 2:
+            raise RuntimeError("simulated DD failure for tenant 2")
+        return -0.02
+
+    # Isolate to the degradation path: silence the other three triggers so the
+    # loop neither persists a recommendation nor reads uninitialised state.
+    monkeypatch.setattr(cal, "_compute_current_portfolio_dd", _fake_dd)
+    monkeypatch.setattr(cal, "should_run_safety_net", lambda *a, **k: False)
+    monkeypatch.setattr(cal, "_load_current_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_load_last_calibration_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_count_symbols_with_recent_alerts", lambda *a, **k: 0)
+
+    stop_event = threading.Event()
+
+    def fake_wait(_seconds):
+        stop_event.set()
+        return True
+
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+
+    cfg = {"kill_switch": {"v2": {"auto_calibrator": {}}}}
+
+    with caplog.at_level(logging.WARNING, logger="kill_switch_v2_calibrator"):
+        cal.kill_switch_calibrator_loop(lambda: cfg, stop_event=stop_event)
+
+    msgs = [r.getMessage() for r in caplog.records]
+    # The failing tenant was excluded with a warning; the loop did not crash.
+    assert any("excluding" in m.lower() and "tenant" in m.lower() for m in msgs), msgs
+    assert not any("iteration failed" in m for m in msgs), msgs
+
+
 # ── B4b.1: POST /kill_switch/recalibrate ────────────────────────────────────
 
 
