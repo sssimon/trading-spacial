@@ -1,9 +1,10 @@
 from tools.ks_stress_replay.metrics import evaluate_gate
 
 
-def test_pareto_dominance_is_strong():
+def test_dd_margin_and_no_pnl_cost_is_strong():
     v1 = {"max_dd": -0.30, "total_pnl": 1000.0}
-    v2 = {50: {"max_dd": -0.20, "total_pnl": 1100.0}}  # lower DD AND higher PnL
+    # 10pp DD cut (clears margin) AND higher PnL (no cost) => STRONG under option C
+    v2 = {50: {"max_dd": -0.20, "total_pnl": 1100.0}}
     verdict, slider = evaluate_gate(v1, v2)
     assert verdict == "STRONG" and slider == 50
 
