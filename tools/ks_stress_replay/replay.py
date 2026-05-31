@@ -16,6 +16,10 @@ def _to_iso(t) -> str:
         dt = t
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
+    # Normalize to UTC so lexicographic string sort == true chronological order.
+    # Without this, a base stream mixing offsets would mis-order ENTRY/CLOSE
+    # events and corrupt the portfolio DD path.
+    dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
 
 
