@@ -429,7 +429,10 @@ def _is_portfolio_normal(cfg: dict[str, Any]) -> bool:
             ).fetchone()[0]
 
         for tid in tenant_ids:
-            portfolio_dd = _compute_current_portfolio_dd(cfg, tenant_id=tid)
+            # #543: strict=True so an unrecoverable DD read failure PROPAGATES to
+            # the outer guard (→ return False) instead of leaking a permissive
+            # 0.0 that would reactivate a PAUSED symbol during the failure window.
+            portfolio_dd = _compute_current_portfolio_dd(cfg, tenant_id=tid, strict=True)
             portfolio = evaluate_portfolio_tier(portfolio_dd, int(n_failures), cfg)
             if portfolio.get("tier") != "NORMAL":
                 return False

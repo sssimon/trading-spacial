@@ -8,7 +8,7 @@ triggers:
   - "kill switch"
   - "compute_portfolio_dd_from_ledger"
   - "dd_formula_version"
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 ---
 
 # Pattern: Computing live portfolio drawdown
@@ -52,6 +52,30 @@ Sign convention: `portfolio_dd` is **negative** when in drawdown. Zero when flat
 | `emit_shadow_decision` | `strategy/kill_switch_v2_shadow.py` |
 | `_compute_current_portfolio_dd` | `strategy/kill_switch_v2_calibrator.py` |
 | `get_dashboard_state` | `health.py` |
+
+### Fail-closed contract for live-DD reads (#543)
+
+`_compute_current_portfolio_dd(cfg, *, tenant_id, conn=None, strict=False)` is the
+helper safety callers go through. `0.0` means "no drawdown" — the **most
+permissive** answer for a circuit-breaker input — so a computation failure must
+never silently return it to a safety path. Two failure sub-classes, handled
+distinctly:
+
+- **Ledger read failure** (capital row / open positions unreadable): nothing can
+  be computed. `strict=True` **propagates** the exception so the caller fails
+  closed; `strict=False` (default, display callers) returns `0.0`.
+- **Price-snapshot / MTM failure**: the realized drawdown is ledger-derived and
+  price-independent. Degrade to the **ledger-only DD** `-(peak - balance)/peak` —
+  never `0.0`, never re-raise (even under `strict`). A transient price hiccup
+  must not erase a real drawdown (#397 class) nor freeze the system every tick.
+
+Caller posture:
+
+| Caller | `strict` | Rationale |
+|---|---|---|
+| `_is_portfolio_normal` (B5 auto-recovery gate) | `True` | outer guard returns `False` → blocks reactivation during a failure window |
+| degradation trigger loop (calibrator) | `True` | a failing tenant is **excluded** from the `min()`, never injected as a phantom `0.0` that masks others' real DD |
+| `get_dashboard_state` | `False` | display-only; a DB blip must not 500 the dashboard |
 
 ## Gotchas
 
