@@ -506,6 +506,118 @@ def test_degradation_trigger_excludes_failing_tenant(fresh_db, monkeypatch, capl
     assert not any("iteration failed" in m for m in msgs), msgs
 
 
+# ── #543 follow-up A: degrade clamp + all-unreadable log.error ──────────────
+
+
+def test_compute_dd_degrade_clamps_at_negative_one(fresh_db, monkeypatch):
+    """#543 follow-up: a NEGATIVE balance would make the ledger-only degrade DD
+    drop below -1.0 (worse than a -100% total loss), which is nonsensical as a
+    drawdown figure. Clamp the degraded value at -1.0."""
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    import strategy.kill_switch_v2_shadow as _shadow
+    from strategy.kill_switch_v2_calibrator import _compute_current_portfolio_dd
+
+    with transaction() as con:
+        # balance below zero, peak 10000 -> raw degrade = -((10000-(-500))/10000)
+        # = -1.05, which must clamp to -1.0.
+        db_upsert_capital(con, 1, balance=-500.0, peak_balance=10_000.0)
+
+    def _price_boom():
+        raise RuntimeError("simulated price-feed outage")
+
+    monkeypatch.setattr(_shadow, "_snapshot_prices", _price_boom)
+    cfg = {"capital_usd": 1000.0}
+
+    dd = _compute_current_portfolio_dd(cfg, tenant_id=1, strict=True)
+    assert dd == pytest.approx(-1.0, abs=1e-9)
+    assert dd >= -1.0
+
+
+def test_calibrator_logs_error_when_all_tenants_unreadable(fresh_db, monkeypatch, caplog):
+    """#543 follow-up: when EVERY active tenant's DD raises, the degradation
+    recommendation is silently suppressed (current_dd falls back to 0.0). Escalate
+    the aggregate blind-safety-input condition to a single log.error naming the
+    count -- not just scattered per-tenant WARN lines."""
+    import logging
+    import threading
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    import strategy.kill_switch_v2_calibrator as cal
+
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=9_000.0, peak_balance=10_000.0)
+        db_upsert_capital(con, 2, balance=8_000.0, peak_balance=10_000.0)
+
+    def _all_boom(cfg, *, tenant_id, conn=None, strict=False):
+        raise RuntimeError(f"simulated DD failure for tenant {tenant_id}")
+
+    monkeypatch.setattr(cal, "_compute_current_portfolio_dd", _all_boom)
+    monkeypatch.setattr(cal, "should_run_safety_net", lambda *a, **k: False)
+    monkeypatch.setattr(cal, "_load_current_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_load_last_calibration_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_count_symbols_with_recent_alerts", lambda *a, **k: 0)
+
+    stop_event = threading.Event()
+
+    def fake_wait(_seconds):
+        stop_event.set()
+        return True
+
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+    cfg = {"kill_switch": {"v2": {"auto_calibrator": {}}}}
+
+    with caplog.at_level(logging.ERROR, logger="kill_switch_v2_calibrator"):
+        cal.kill_switch_calibrator_loop(lambda: cfg, stop_event=stop_event)
+
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1, errors
+    # The error names the all-unreadable condition and the count (2 tenants).
+    assert "2" in errors[0]
+    assert "unreadable" in errors[0].lower() or "all" in errors[0].lower()
+
+
+def test_calibrator_no_error_when_some_tenant_readable(fresh_db, monkeypatch, caplog):
+    """#543 follow-up: if at least one tenant's DD is readable, the aggregate
+    all-unreadable condition does NOT fire -- no log.error."""
+    import logging
+    import threading
+    from db.capital import db_upsert_capital
+    from db.transaction import transaction
+    import strategy.kill_switch_v2_calibrator as cal
+
+    with transaction() as con:
+        db_upsert_capital(con, 1, balance=9_000.0, peak_balance=10_000.0)
+        db_upsert_capital(con, 2, balance=8_000.0, peak_balance=10_000.0)
+
+    def _one_boom(cfg, *, tenant_id, conn=None, strict=False):
+        if tenant_id == 2:
+            raise RuntimeError("simulated DD failure for tenant 2")
+        return -0.02
+
+    monkeypatch.setattr(cal, "_compute_current_portfolio_dd", _one_boom)
+    monkeypatch.setattr(cal, "should_run_safety_net", lambda *a, **k: False)
+    monkeypatch.setattr(cal, "_load_current_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_load_last_calibration_regime_score", lambda: None)
+    monkeypatch.setattr(cal, "_count_symbols_with_recent_alerts", lambda *a, **k: 0)
+    monkeypatch.setattr(cal, "_load_last_applied_recommendation", lambda: None)
+
+    stop_event = threading.Event()
+
+    def fake_wait(_seconds):
+        stop_event.set()
+        return True
+
+    monkeypatch.setattr(stop_event, "wait", fake_wait)
+    cfg = {"kill_switch": {"v2": {"auto_calibrator": {}}}}
+
+    with caplog.at_level(logging.ERROR, logger="kill_switch_v2_calibrator"):
+        cal.kill_switch_calibrator_loop(lambda: cfg, stop_event=stop_event)
+
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == [], errors
+
+
 # ── B4b.1: POST /kill_switch/recalibrate ────────────────────────────────────
 
 

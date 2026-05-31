@@ -77,6 +77,12 @@ Caller posture:
 | degradation trigger loop (calibrator) | `True` | a failing tenant is **excluded** from the `min()`, never injected as a phantom `0.0` that masks others' real DD |
 | `get_dashboard_state` | `False` | display-only; a DB blip must not 500 the dashboard |
 
+Two hardening details (#543 follow-up): the ledger-only degrade is **clamped at
+`-1.0`** (a negative balance would otherwise produce a sub-100% drawdown); and
+when the degradation loop finds **every** active tenant unreadable it emits one
+`log.error` (aggregate "blind safety input") rather than only the scattered
+per-tenant WARN lines — `current_dd` still falls back to `0.0`.
+
 ## Gotchas
 
 - **NEVER pass `closed_trades` to a live-path DD computation.** The anti-pattern is:
