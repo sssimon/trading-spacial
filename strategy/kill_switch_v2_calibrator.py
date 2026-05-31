@@ -466,7 +466,22 @@ def kill_switch_calibrator_loop(cfg_fn, stop_event=None) -> None:
                             "tenant from degradation eval: %s",
                             tid, _dd_err, exc_info=True,
                         )
-                current_dd = min(per_tenant_dd) if per_tenant_dd else 0.0
+                if per_tenant_dd:
+                    current_dd = min(per_tenant_dd)  # most negative = worst DD
+                else:
+                    # #543 follow-up: EVERY active tenant's DD was unreadable.
+                    # current_dd falls back to 0.0 (the trigger only emits an
+                    # operator-reviewed recommendation, not protection — the real
+                    # gate _is_portfolio_normal fails closed independently). But a
+                    # blind safety input is an ERROR-level aggregate condition, not
+                    # just the scattered per-tenant WARN lines above.
+                    log.error(
+                        "portfolio DD unreadable for ALL %d active tenant(s); "
+                        "degradation recommendation suppressed this tick "
+                        "(current_dd=0.0)",
+                        len(tenant_ids),
+                    )
+                    current_dd = 0.0
             else:
                 current_dd = 0.0
             last_applied = _load_last_applied_recommendation()
@@ -663,6 +678,9 @@ def _compute_current_portfolio_dd(
         ledger_only_dd = (
             -((peak_eff - balance) / peak_eff) if peak_eff > 0 else 0.0
         )
+        # #543 follow-up: a negative balance pushes the raw ratio below -1.0
+        # (worse than a -100% total loss), nonsensical as a drawdown. Clamp.
+        ledger_only_dd = max(-1.0, ledger_only_dd)
         log.warning(
             "compute_current_portfolio_dd MTM/price snapshot failed for "
             "tenant_id=%s; degrading to ledger-only DD=%.4f: %s",
