@@ -165,3 +165,15 @@ def test_lock_captures_n_at_lock_on_success(hyp_db):
     r = _all_hyps()[0]
     assert r["status"] == "locked"
     assert r["n_at_lock"] >= 50               # floor active before decay date
+
+
+def test_lock_refuses_when_dsr_undefined(hyp_db):
+    """4b fail-closed: n_returns < 2 makes the PSR/DSR undefined -> refuse, even
+    with a high Sharpe."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg, cand_sharpe=5.0, cand_n_returns=1,
+                 deflated_threshold=0.50)
+    with pytest.raises(HypothesisLockError, match="deflation|degenerate|undefined"):
+        lock_hypothesis(hid, today=_T())

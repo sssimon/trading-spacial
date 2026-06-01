@@ -250,9 +250,14 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     # (selection_population_stats opens its own transaction; must stay outside
     # the write transaction below to avoid nested BEGIN IMMEDIATE deadlock)
     dsr, n_at_lock = _deflation_probability(row, today=today)
-    if dsr is None or dsr < float(row["deflated_threshold"]):
+    if dsr is None:
         raise HypothesisLockError(
-            f"deflation gate: deflated probability {dsr} < threshold "
+            f"deflation gate: DSR undefined for this candidate "
+            f"(cand_n_returns={row['cand_n_returns']}, cand_skew={row['cand_skew']}, "
+            f"cand_kurt_raw={row['cand_kurt_raw']}) — degenerate inputs, refused")
+    if dsr < float(row["deflated_threshold"]):
+        raise HypothesisLockError(
+            f"deflation gate: deflated probability {dsr:.4f} < threshold "
             f"{row['deflated_threshold']} over N={n_at_lock} — "
             "candidate does not survive the best-of-N selection penalty")
 
