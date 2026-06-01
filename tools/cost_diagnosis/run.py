@@ -6,6 +6,7 @@ this driver consumes that JSON offline.
 from __future__ import annotations
 
 import json
+import math
 import os
 from statistics import median
 
@@ -14,6 +15,17 @@ from tools.cost_diagnosis.liquidity import liquidity_series
 from tools.cost_diagnosis.recompute import CORRECTIONS
 from tools.cost_diagnosis.assemble import assemble_per_trade
 from tools.cost_diagnosis.reconcile import reconcile
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN/inf) with None for strict JSON."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    return obj
+
 
 OUT_DIR = os.path.join("data", "retune", "2026-06-01-cost-model-diagnosis")
 CORRECTIONS_FOR_REPORT = CORRECTIONS
@@ -43,6 +55,8 @@ def write_reports(per_trade: list[dict], out_dir: str, corrections=CORRECTIONS):
     branch, winning, results = reconcile(observable, corrections)
     summary = _over_charge_summary(per_trade)
 
+    _ocr = summary["median_over_charge_ratio"]
+    _ocr_str = f"{_ocr:.2f}" if math.isfinite(_ocr) else "N/A (no observable moves)"
     lines = [
         "# Cost-model diagnosis — findings",
         "",
@@ -53,8 +67,7 @@ def write_reports(per_trade: list[dict], out_dir: str, corrections=CORRECTIONS):
         f"- observable trades: {len(observable)} / {len(per_trade)}",
         f"- winners: {summary['winners']}; winners whose model cost exceeds the "
         f"entire price move: {summary['winners_exceeded']}",
-        f"- median over-charge ratio (model cost / observed move): "
-        f"{summary['median_over_charge_ratio']:.2f}",
+        f"- median over-charge ratio (model cost / observed move): {_ocr_str}",
         "",
         "## Per-correction reconcile",
         "| correction | winners exceeded | tier medians (bps) | reconciles |",
@@ -85,7 +98,7 @@ def write_reports(per_trade: list[dict], out_dir: str, corrections=CORRECTIONS):
     with open(os.path.join(out_dir, "findings.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     with open(os.path.join(out_dir, "per_trade.json"), "w", encoding="utf-8") as f:
-        json.dump(per_trade, f, indent=2, default=str)
+        json.dump(_json_safe(per_trade), f, indent=2, default=str)
     return branch, winning
 
 
