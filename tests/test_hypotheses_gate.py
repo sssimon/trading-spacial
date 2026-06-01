@@ -472,3 +472,37 @@ def test_assert_fireable_allows_fired_reread(hyp_db):
     hid = _locked_and_authorized()
     record_fire(hid)
     assert_fireable(hid)                        # must NOT raise
+
+
+# ---------------------------------------------------------------------------
+# Task 8: record_outcome — verdict asymmetry + close read window
+# ---------------------------------------------------------------------------
+
+def test_record_outcome_refuted_when_threshold_not_met(hyp_db):
+    from db.hypotheses import record_fire, record_outcome
+    hid = _locked_and_authorized()        # metric net_pnl, threshold 0.0, direction '>'
+    record_fire(hid)
+    record_outcome(hid, realized_metric=-50.0)
+    r = _all_hyps()[0]
+    assert r["verdict"] == "refuted"
+    assert r["status"] == "refuted"
+    assert r["realized_metric"] == pytest.approx(-50.0)
+
+
+def test_record_outcome_not_refuted_when_threshold_met(hyp_db):
+    from db.hypotheses import record_fire, record_outcome
+    hid = _locked_and_authorized()
+    record_fire(hid)
+    record_outcome(hid, realized_metric=120.0)
+    r = _all_hyps()[0]
+    assert r["verdict"] == "not_refuted"   # NEVER 'confirmed'
+    assert r["status"] == "not_refuted"
+
+
+def test_no_reread_after_outcome(hyp_db):
+    from db.hypotheses import record_fire, record_outcome, assert_fireable, HoldoutFalsificationError
+    hid = _locked_and_authorized()
+    record_fire(hid)
+    record_outcome(hid, realized_metric=120.0)
+    with pytest.raises(HoldoutFalsificationError, match="resolved|closed"):
+        assert_fireable(hid)               # read window closed

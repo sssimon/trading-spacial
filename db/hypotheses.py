@@ -456,3 +456,38 @@ def record_fire(hid: int) -> None:
                 window_label=row["window_label"],
                 study_type="confirmatory",
             )
+
+
+# ---------------------------------------------------------------------------
+# Task 8: record_outcome — verdict asymmetry + close read window
+# ---------------------------------------------------------------------------
+
+def _passes(realized: float, threshold: float, direction: str) -> bool:
+    if direction == ">":
+        return realized > threshold
+    if direction == "<":
+        return realized < threshold
+    raise ValueError(f"unknown direction {direction!r}")
+
+
+def record_outcome(hid: int, *, realized_metric: float) -> None:
+    """Resolve a fired hypothesis. A single shot can only 'refuted' or
+    'not_refuted' — NEVER 'confirmed' (the future distribution stays
+    unobserved). Closes the read window."""
+    _ensure_schema()
+
+    def _do() -> None:
+        with transaction() as con:
+            row = _fetch(con, hid, exc=HoldoutFalsificationError)
+            if row["status"] != "fired":
+                raise HoldoutFalsificationError(
+                    f"hypothesis {hid} is '{row['status']}', not 'fired' — "
+                    "cannot record an outcome")
+            passed = _passes(float(realized_metric), float(row["threshold"]), row["direction"])
+            verdict = "not_refuted" if passed else "refuted"
+            con.execute(
+                "UPDATE hypotheses SET status=?, verdict=?, realized_metric=? WHERE id=?",
+                (verdict, verdict, float(realized_metric), hid),
+            )
+
+    _with_write_retry("record_outcome", _do)
