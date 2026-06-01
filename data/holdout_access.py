@@ -13,7 +13,11 @@ Guard layers (per #247 decision A+B):
 
 There is intentionally no monkey-patch / env var override of A. The only
 ways to read holdout data are:
-  - through `open_holdout(..., evaluation_mode=True)`, or
+  - through `open_holdout(..., evaluation_mode=True)` (custodial reads:
+    manifest, drift, integrity), or
+  - through `open_holdout_for_falsification(rel_path, hypothesis_id=...)`
+    (the ONLY falsification path — requires a locked+authorized hypothesis;
+    see db/hypotheses.py and the firing-the-holdout pattern), or
   - by adding the calling module to HOLDOUT_LEGITIMATE_MODULES in the
     AST test (which is itself reviewed in PRs).
 
@@ -78,6 +82,25 @@ def open_holdout(rel_path: str, *, evaluation_mode: bool) -> Path:
         raise FileNotFoundError(f"holdout file not found: {target}")
 
     return target
+
+
+class HoldoutFalsificationError(HoldoutAccessError):
+    """Falsification access refused: hypothesis not locked/authorized/in-budget,
+    sealed-tamper, or already resolved (status refuted/not_refuted — read window
+    closed). The gate logic lives in db/hypotheses.py; this is the error it raises."""
+
+
+def open_holdout_for_falsification(rel_path: str, *, hypothesis_id: int) -> Path:
+    """The ONLY path to a falsification read of the holdout. Verifies the gate
+    chain, marks the fire BEFORE reading (claim-then-execute / Caveat 5), then
+    delegates path resolution to open_holdout. The db.hypotheses import is LOCAL
+    to avoid a module-load cycle (db.hypotheses imports names from this module)."""
+    from db.hypotheses import assert_fireable, record_fire
+    assert_fireable(hypothesis_id)                       # 1-5: fail fast before any state change
+    record_fire(hypothesis_id)                           # marks the fire BEFORE the read;
+                                                         # record_fire also re-asserts fireable
+                                                         # internally (deliberate belt-and-suspenders)
+    return open_holdout(rel_path, evaluation_mode=True)  # reused path resolution
 
 
 def holdout_root() -> Path:
