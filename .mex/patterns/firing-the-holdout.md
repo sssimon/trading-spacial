@@ -78,6 +78,14 @@ The lifecycle is `draft → locked → fired → refuted/not_refuted` (`db/hypot
   sweeps outside the four wired ones do not enter N, and `n_effective = max(N, 50)`
   until 2026-11-29. The gate raises the floor of rigor; it does not make N omniscient.
   Mitigation is registry discipline ([[registering-a-trial.md]]).
+- **Deflation fails CLOSED on a degenerate population.** If fewer than 2 distinct
+  exploratory configs have a Sharpe (`sigma_sr_trials is None`), the best-of-N penalty
+  is undefined and `lock_hypothesis` REFUSES (the floor protects the count, not the
+  penalty). `deflated_threshold` must be a probability in `(0, 1]` or the lock is refused.
+- **The seal/trigger protect the frozen CLAIM, not the lifecycle.** A direct write to
+  `signals.db` (raw SQL) can forge `status`/`fire_authorized_ts` — that is out of scope
+  (OS file permissions are that boundary). The gate defends the code API, not an operator
+  cheating themselves with raw SQL.
 - **A single shot never `confirms`.** `verdict` is `refuted | not_refuted`. Passing the
   threshold means the shot *failed to refute*, not that edge was established.
 - **Budget = 1** (`HOLDOUT_FIRE_BUDGET`): the locked holdout is a one-shot gate; the
