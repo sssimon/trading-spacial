@@ -50,6 +50,7 @@ def test_claim_hypothesis_inserts_draft_row(hyp_db):
     assert r["status"] == "draft"
     assert r["locked_ts"] is None
     assert r["fired_ts"] is None
+    assert r["fire_authorized_ts"] is None
     assert r["config_hash"]                      # computed at draft
     assert json.loads(r["strategy_config_json"])["atr_sl_mult"] == 1.0
     assert json.loads(r["symbols_json"]) == ["BTCUSDT"]

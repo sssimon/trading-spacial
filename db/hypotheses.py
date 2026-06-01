@@ -59,9 +59,11 @@ def _with_write_retry(label: str, fn):
         try:
             return fn()
         except sqlite3.OperationalError as exc:
-            if "is locked" in str(exc).lower():
+            msg = str(exc).lower()
+            if "database is locked" in msg or "database table is locked" in msg:
                 last_exc = exc
-                log.warning("hypotheses.%s locked on attempt %d; retrying", label, attempt + 1)
+                log.warning("hypotheses.%s locked on attempt %d/%d; retrying",
+                            label, attempt + 1, len(_WRITE_BACKOFFS) + 1)
                 continue
             raise
     assert last_exc is not None
