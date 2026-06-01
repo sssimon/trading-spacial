@@ -241,3 +241,26 @@ def test_lock_succeeds_with_passing_refs(hyp_db):
     hid = _lockable()
     lock_hypothesis(hid, today=_T())
     assert _all_hyps()[0]["status"] == "locked"
+
+
+def test_lock_refuses_non_dict_json_ref(hyp_db):
+    """A valid-but-non-dict JSON ref must raise HypothesisLockError, not leak an
+    AttributeError past the gate."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    hid = _lockable(walkforward_ref=json.dumps("pass"))  # a JSON string, not an object
+    with pytest.raises(HypothesisLockError, match="walk.?forward"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_when_only_drift_ref_missing(hyp_db):
+    """Independent coverage: walk-forward passes, drift_check_ref NULL -> refuse on drift."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                 deflated_threshold=0.50)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=? WHERE id=?", (_attest(), hid))
+        # drift_check_ref left NULL
+    with pytest.raises(HypothesisLockError, match="drift"):
+        lock_hypothesis(hid, today=_T())

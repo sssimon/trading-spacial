@@ -217,13 +217,15 @@ def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None,
 
 
 def _attested_pass(raw: str | None, label: str) -> None:
-    """Refuse unless raw is JSON {verdict:'pass', ...}. label names the criterion."""
+    """Refuse unless raw is JSON object {verdict:'pass', ...}. label names the criterion."""
     if not raw:
         raise HypothesisLockError(f"{label}: evidence ref is missing")
     try:
         obj = json.loads(raw)
     except (TypeError, ValueError):
         raise HypothesisLockError(f"{label}: evidence ref is not valid JSON")
+    if not isinstance(obj, dict):
+        raise HypothesisLockError(f"{label}: evidence ref is not a JSON object")
     if obj.get("verdict") != "pass":
         raise HypothesisLockError(f"{label}: verdict is {obj.get('verdict')!r}, not 'pass'")
 
