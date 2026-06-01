@@ -115,6 +115,37 @@ def _ensure_schema() -> None:
             )
             """
         )
+        con.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS hypotheses_frozen_after_lock
+            BEFORE UPDATE ON hypotheses
+            FOR EACH ROW
+            WHEN OLD.status IN ('locked', 'fired', 'refuted', 'not_refuted')
+              AND (
+                NEW.strategy_config_json IS NOT OLD.strategy_config_json
+                OR NEW.config_hash         IS NOT OLD.config_hash
+                OR NEW.symbols_json        IS NOT OLD.symbols_json
+                OR NEW.window_label        IS NOT OLD.window_label
+                OR NEW.metric              IS NOT OLD.metric
+                OR NEW.threshold           IS NOT OLD.threshold
+                OR NEW.direction           IS NOT OLD.direction
+                OR NEW.deflated_metric     IS NOT OLD.deflated_metric
+                OR NEW.deflated_threshold  IS NOT OLD.deflated_threshold
+                OR NEW.n_at_lock           IS NOT OLD.n_at_lock
+                OR NEW.cand_sharpe         IS NOT OLD.cand_sharpe
+                OR NEW.cand_n_returns      IS NOT OLD.cand_n_returns
+                OR NEW.cand_skew           IS NOT OLD.cand_skew
+                OR NEW.cand_kurt_raw       IS NOT OLD.cand_kurt_raw
+                OR NEW.preholdout_trial_ids_json IS NOT OLD.preholdout_trial_ids_json
+                OR NEW.walkforward_ref     IS NOT OLD.walkforward_ref
+                OR NEW.drift_check_ref     IS NOT OLD.drift_check_ref
+                OR NEW.seal                IS NOT OLD.seal
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'hypothesis frozen fields are immutable after lock');
+            END
+            """
+        )
     _schema_ensured = True
 
 

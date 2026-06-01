@@ -264,3 +264,48 @@ def test_lock_refuses_when_only_drift_ref_missing(hyp_db):
         # drift_check_ref left NULL
     with pytest.raises(HypothesisLockError, match="drift"):
         lock_hypothesis(hid, today=_T())
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Immutability — frozen-field trigger + seal recompute
+# ---------------------------------------------------------------------------
+
+def _now_str():
+    from db.hypotheses import _now
+    return _now()
+
+
+def test_locked_row_frozen_field_update_is_aborted_by_trigger(hyp_db):
+    """Direct UPDATE of a frozen field on a locked row must RAISE (DB trigger).
+    SQLite RAISE(ABORT, ...) surfaces as sqlite3.IntegrityError in Python."""
+    from db.hypotheses import lock_hypothesis
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction() as con:
+            con.execute("UPDATE hypotheses SET threshold=999 WHERE id=?", (hid,))
+
+
+def test_locked_row_lifecycle_field_update_is_allowed(hyp_db):
+    """Lifecycle columns (fire_authorized_ts, fired_ts, status, verdict,
+    realized_metric) must remain writable after lock — the trigger guards only
+    frozen fields."""
+    from db.hypotheses import lock_hypothesis
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    with transaction() as con:                       # must not raise
+        con.execute("UPDATE hypotheses SET fire_authorized_ts=? WHERE id=?",
+                    (_now_str(), hid))
+    assert _all_hyps()[0]["fire_authorized_ts"]
+
+
+def test_seal_detects_tamper_via_recompute(hyp_db):
+    """If a frozen field is changed by a path that bypasses the trigger, the
+    recomputed seal no longer matches the stored seal."""
+    from db.hypotheses import lock_hypothesis, _compute_seal
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    row = _all_hyps()[0]
+    tampered = dict(row)
+    tampered["threshold"] = 999
+    assert _compute_seal(tampered) != row["seal"]
