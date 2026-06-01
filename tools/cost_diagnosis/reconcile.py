@@ -14,6 +14,8 @@ TIER_BAND_BPS = {"major": 30.0, "mid": 30.0, "small": 50.0}
 
 
 def reconcile(per_trade: list[dict], corrections: list) -> tuple[str, list[str], dict]:
+    if not per_trade:
+        raise ValueError("reconcile: no trades to evaluate (empty per_trade)")
     results: dict = {}
     for name, *_ in corrections:
         winners_exceeded = [
@@ -22,6 +24,8 @@ def reconcile(per_trade: list[dict], corrections: list) -> tuple[str, list[str],
         ]
         tier_medians: dict = {}
         ok_band = True
+        # Band is checked only for tiers actually present in the data; a tier
+        # with no trades cannot fail its band.
         for tier, band in TIER_BAND_BPS.items():
             vals = [t["costs"][name] for t in per_trade if t["tier"] == tier]
             if vals:

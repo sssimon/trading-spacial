@@ -1,3 +1,5 @@
+import pytest
+
 from tools.cost_diagnosis.reconcile import reconcile
 
 CORR = [("baseline", 1.0, 1.0), ("daily_basis", 1440.0, 1.0)]
@@ -42,3 +44,29 @@ def test_small_tier_uses_50bps_band():
     _, winning, results = reconcile(per_trade, CORR)
     assert results["daily_basis"]["reconciles"] is True
     assert "daily_basis" in winning
+
+
+def test_empty_per_trade_raises():
+    with pytest.raises(ValueError, match="no trades"):
+        reconcile([], CORR)
+
+
+def test_mixed_tiers_band_aggregation():
+    # major trades fine (20bps < 30), small trades fine (45bps < 50); winners' cost
+    # never exceeds the large move (5%). daily_basis should reconcile across both tiers.
+    per_trade = [
+        _trade("major", 10.0, 5.0, 20.0, 20.0),
+        _trade("major", 8.0, 5.0, 20.0, 20.0),
+        _trade("small", 10.0, 5.0, 45.0, 45.0),
+        _trade("small", 7.0, 5.0, 45.0, 45.0),
+    ]
+    branch, winning, results = reconcile(per_trade, CORR)
+    assert results["daily_basis"]["reconciles"] is True
+    assert "daily_basis" in winning
+    # and if the small-tier median breaks its 50bps band, it must NOT reconcile
+    per_trade_bad = [
+        _trade("small", 10.0, 5.0, 60.0, 60.0),
+        _trade("small", 7.0, 5.0, 60.0, 60.0),
+    ]
+    _, _, results_bad = reconcile(per_trade_bad, CORR)
+    assert results_bad["daily_basis"]["reconciles"] is False
