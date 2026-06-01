@@ -545,5 +545,5 @@ def test_open_for_falsification_refuses_unauthorized(hyp_db):
                                lock_hypothesis)
     hid = _lockable()
     lock_hypothesis(hid, today=_T())             # locked but NOT authorized
-    with pytest.raises(HoldoutFalsificationError):
+    with pytest.raises(HoldoutFalsificationError, match="authorized"):
         open_holdout_for_falsification("fng.parquet", hypothesis_id=hid)
