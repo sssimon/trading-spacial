@@ -142,6 +142,9 @@ def _ensure_schema() -> None:
                 OR NEW.seal                IS NOT OLD.seal
               )
             BEGIN
+                -- RAISE(ABORT, ...) surfaces as sqlite3.IntegrityError in Python
+                -- (SQLITE_CONSTRAINT_TRIGGER), NOT OperationalError. Do not "fix" the
+                -- exception type in tests back to OperationalError.
                 SELECT RAISE(ABORT, 'hypothesis frozen fields are immutable after lock');
             END
             """

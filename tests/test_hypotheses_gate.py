@@ -309,3 +309,24 @@ def test_seal_detects_tamper_via_recompute(hyp_db):
     tampered = dict(row)
     tampered["threshold"] = 999
     assert _compute_seal(tampered) != row["seal"]
+
+
+def test_trigger_guards_exactly_frozen_fields_plus_seal(hyp_db):
+    """The trigger's hard-coded column list must stay in sync with _FROZEN_FIELDS
+    (+ seal). SQLite triggers can't iterate a Python tuple, so this test is the
+    only thing preventing silent divergence between the seal and the trigger."""
+    import re
+    from db.hypotheses import _FROZEN_FIELDS
+    # ensure the schema/trigger exist
+    from db.hypotheses import _ensure_schema
+    _ensure_schema()
+    with transaction() as con:
+        row = con.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='hypotheses_frozen_after_lock'"
+        ).fetchone()
+    assert row is not None, "trigger hypotheses_frozen_after_lock does not exist"
+    found = set(re.findall(r"NEW\.(\w+)\s+IS NOT", row["sql"]))
+    expected = set(_FROZEN_FIELDS) | {"seal"}
+    assert found == expected, (
+        f"trigger guards {found - expected} extra and misses {expected - found}")
