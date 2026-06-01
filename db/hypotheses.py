@@ -335,3 +335,37 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
             )
 
     _with_write_retry("lock_hypothesis", _do)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: authorize_fire — cooldown gate + deliberate act
+# ---------------------------------------------------------------------------
+
+class FireAuthorizationError(RuntimeError):
+    """authorize_fire refused — not locked, or cooldown not elapsed."""
+
+
+def authorize_fire(hid: int, *, now: datetime) -> None:
+    """The SEPARATE deliberate act: lock decides WHAT to falsify, this decides
+    that the moment is NOW. Refuses unless locked and the cooldown elapsed.
+    Logs the authorization (no silent fire)."""
+    _ensure_schema()
+
+    def _do() -> None:
+        with transaction() as con:
+            row = _fetch(con, hid)
+            if row["status"] != "locked":
+                raise FireAuthorizationError(
+                    f"hypothesis {hid} is '{row['status']}', not 'locked' — "
+                    "cannot authorize a fire")
+            locked_at = datetime.fromisoformat(row["locked_ts"])
+            if now - locked_at < HOLDOUT_FIRE_COOLDOWN:
+                raise FireAuthorizationError(
+                    f"cooldown not elapsed: {now - locked_at} < {HOLDOUT_FIRE_COOLDOWN} "
+                    "— deliberation window between lock and fire is mandatory")
+            con.execute("UPDATE hypotheses SET fire_authorized_ts=? WHERE id=?",
+                        (now.isoformat(), hid))
+
+    _with_write_retry("authorize_fire", _do)
+    log.warning("HOLDOUT FIRE AUTHORIZED for hypothesis %d at %s — the bala unica "
+                "is now spendable for this hypothesis. Log via `mex log`.", hid, now.isoformat())

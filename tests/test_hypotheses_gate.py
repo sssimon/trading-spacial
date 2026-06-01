@@ -330,3 +330,35 @@ def test_trigger_guards_exactly_frozen_fields_plus_seal(hyp_db):
     expected = set(_FROZEN_FIELDS) | {"seal"}
     assert found == expected, (
         f"trigger guards {found - expected} extra and misses {expected - found}")
+
+
+# ---------------------------------------------------------------------------
+# Task 6: authorize_fire — cooldown gate + deliberate act
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta
+
+
+def test_authorize_fire_refuses_before_cooldown(hyp_db):
+    from db.hypotheses import lock_hypothesis, authorize_fire, FireAuthorizationError
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    locked_at = datetime.fromisoformat(_all_hyps()[0]["locked_ts"])
+    with pytest.raises(FireAuthorizationError, match="cooldown"):
+        authorize_fire(hid, now=locked_at + timedelta(hours=1))
+
+
+def test_authorize_fire_refuses_unlocked(hyp_db):
+    from db.hypotheses import authorize_fire, FireAuthorizationError
+    hid = _draft(strategy_config={"atr_sl_mult": 1.0})  # still draft
+    with pytest.raises(FireAuthorizationError, match="locked"):
+        authorize_fire(hid, now=_T())
+
+
+def test_authorize_fire_sets_timestamp_after_cooldown(hyp_db):
+    from db.hypotheses import lock_hypothesis, authorize_fire
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    locked_at = datetime.fromisoformat(_all_hyps()[0]["locked_ts"])
+    authorize_fire(hid, now=locked_at + timedelta(hours=25))
+    assert _all_hyps()[0]["fire_authorized_ts"]
