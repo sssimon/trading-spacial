@@ -141,3 +141,27 @@ def test_lock_refuses_relock(hyp_db):
     lock_hypothesis(hid, today=_T())
     with pytest.raises(HypothesisLockError, match="re-lock|not 'draft'"):
         lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_when_deflated_below_threshold(hyp_db):
+    """4b: a weak candidate (low Sharpe vs best-of-N) fails the deflation gate."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    # cand_sharpe barely positive, large selection population -> low DSR
+    hid = _draft(strategy_config=cfg, cand_sharpe=0.05, cand_n_returns=30,
+                 deflated_threshold=0.95)
+    with pytest.raises(HypothesisLockError, match="deflat"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_captures_n_at_lock_on_success(hyp_db):
+    from db.hypotheses import lock_hypothesis
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)            # 5 distinct ok trials registered
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                 deflated_threshold=0.50)
+    lock_hypothesis(hid, today=_T())
+    r = _all_hyps()[0]
+    assert r["status"] == "locked"
+    assert r["n_at_lock"] >= 50               # floor active before decay date

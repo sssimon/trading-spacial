@@ -30,6 +30,7 @@ from db.trials import (
     n_effective,
     selection_population_stats,
 )
+from deflation import deflated_sharpe_ratio
 
 log = logging.getLogger("db.hypotheses")
 
@@ -197,6 +198,24 @@ def _has_provenance(config_hash: str) -> bool:
     return False
 
 
+def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None, int]:
+    """Candidate's deflated-Sharpe probability over the FULL registry N.
+    Returns (probability_or_None, n_at_lock). Opens its own read of the registry
+    (selection_population_stats) and MUST run outside any write transaction."""
+    stats = selection_population_stats(study_type="exploratory")
+    n_at_lock = n_effective(stats["n_registered"], today=today)
+    sigma = stats["sigma_sr_trials"] or 0.0
+    dsr = deflated_sharpe_ratio(
+        sr=float(row["cand_sharpe"]),
+        n_trials=n_at_lock,
+        sigma_sr_trials=sigma,
+        n_returns=int(row["cand_n_returns"]),
+        skew=float(row["cand_skew"]),
+        kurt_raw=float(row["cand_kurt_raw"]),
+    )
+    return dsr, n_at_lock
+
+
 def lock_hypothesis(hid: int, *, today: datetime) -> None:
     """Freeze a draft after enforcing lock criteria. Refuses if not in 'draft'.
 
@@ -227,9 +246,15 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
             "provenance: config_hash matches no exploratory ok trial — "
             "the candidate did not emerge from registered search")
 
-    # (4b deflation THRESHOLD, 4c walk-forward, 4d drift land in Tasks 3-4)
-    n_at_lock = n_effective(
-        selection_population_stats()["n_registered"], today=today)
+    # 4b: deflation gate — single call yields BOTH n_at_lock AND DSR
+    # (selection_population_stats opens its own transaction; must stay outside
+    # the write transaction below to avoid nested BEGIN IMMEDIATE deadlock)
+    dsr, n_at_lock = _deflation_probability(row, today=today)
+    if dsr is None or dsr < float(row["deflated_threshold"]):
+        raise HypothesisLockError(
+            f"deflation gate: deflated probability {dsr} < threshold "
+            f"{row['deflated_threshold']} over N={n_at_lock} — "
+            "candidate does not survive the best-of-N selection penalty")
 
     # --- Write phase ---
     def _do() -> None:
