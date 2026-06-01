@@ -216,6 +216,18 @@ def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None,
     return dsr, n_at_lock
 
 
+def _attested_pass(raw: str | None, label: str) -> None:
+    """Refuse unless raw is JSON {verdict:'pass', ...}. label names the criterion."""
+    if not raw:
+        raise HypothesisLockError(f"{label}: evidence ref is missing")
+    try:
+        obj = json.loads(raw)
+    except (TypeError, ValueError):
+        raise HypothesisLockError(f"{label}: evidence ref is not valid JSON")
+    if obj.get("verdict") != "pass":
+        raise HypothesisLockError(f"{label}: verdict is {obj.get('verdict')!r}, not 'pass'")
+
+
 def lock_hypothesis(hid: int, *, today: datetime) -> None:
     """Freeze a draft after enforcing lock criteria. Refuses if not in 'draft'.
 
@@ -260,6 +272,10 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
             f"deflation gate: deflated probability {dsr:.4f} < threshold "
             f"{row['deflated_threshold']} over N={n_at_lock} — "
             "candidate does not survive the best-of-N selection penalty")
+
+    # 4c / 4d: attested lower-tier evidence
+    _attested_pass(row.get("walkforward_ref"), "walk-forward")
+    _attested_pass(row.get("drift_check_ref"), "drift check")
 
     # --- Write phase ---
     def _do() -> None:

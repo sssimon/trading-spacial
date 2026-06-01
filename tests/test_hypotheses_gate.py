@@ -123,6 +123,9 @@ def test_lock_succeeds_and_seals(hyp_db):
     cfg = {"atr_sl_mult": 1.0}
     _register_matching_ok_trial(cfg)
     hid = _draft(strategy_config=cfg)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid))
     lock_hypothesis(hid, today=_T())
     r = _all_hyps()[0]
     assert r["status"] == "locked"
@@ -138,6 +141,9 @@ def test_lock_refuses_relock(hyp_db):
     cfg = {"atr_sl_mult": 1.0}
     _register_matching_ok_trial(cfg)
     hid = _draft(strategy_config=cfg)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid))
     lock_hypothesis(hid, today=_T())
     with pytest.raises(HypothesisLockError, match="re-lock|not 'draft'"):
         lock_hypothesis(hid, today=_T())
@@ -161,6 +167,9 @@ def test_lock_captures_n_at_lock_on_success(hyp_db):
     _register_matching_ok_trial(cfg)            # 5 distinct ok trials registered
     hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
                  deflated_threshold=0.50)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid))
     lock_hypothesis(hid, today=_T())
     r = _all_hyps()[0]
     assert r["status"] == "locked"
@@ -177,3 +186,58 @@ def test_lock_refuses_when_dsr_undefined(hyp_db):
                  deflated_threshold=0.50)
     with pytest.raises(HypothesisLockError, match="deflation|degenerate|undefined"):
         lock_hypothesis(hid, today=_T())
+
+
+# ---------------------------------------------------------------------------
+# Task 4: lock_hypothesis — walk-forward (4c) + drift (4d) attested refs
+# ---------------------------------------------------------------------------
+
+def _attest(verdict="pass"):
+    return json.dumps({"ref": "data/retune/x/report.md", "verdict": verdict,
+                       "ts": "2026-05-30T00:00:00+00:00"})
+
+
+def _lockable(**overrides):
+    """A draft that passes provenance + deflation, with both attested refs set
+    to 'pass'. Override to break one ref."""
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                 deflated_threshold=0.50)
+    wf = overrides.get("walkforward_ref", _attest())
+    dr = overrides.get("drift_check_ref", _attest())
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (wf, dr, hid))
+    return hid
+
+
+def test_lock_refuses_failed_walkforward(hyp_db):
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    hid = _lockable(walkforward_ref=_attest(verdict="fail"))
+    with pytest.raises(HypothesisLockError, match="walk.?forward"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_failed_drift(hyp_db):
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    hid = _lockable(drift_check_ref=_attest(verdict="fail"))
+    with pytest.raises(HypothesisLockError, match="drift"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_missing_refs(hyp_db):
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                 deflated_threshold=0.50)  # refs never set -> NULL
+    with pytest.raises(HypothesisLockError, match="walk.?forward|drift"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_succeeds_with_passing_refs(hyp_db):
+    from db.hypotheses import lock_hypothesis
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    assert _all_hyps()[0]["status"] == "locked"
