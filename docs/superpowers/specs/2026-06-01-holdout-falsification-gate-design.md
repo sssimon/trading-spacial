@@ -142,6 +142,7 @@ drift_check_ref           TEXT  -- {ref, verdict, ts} for the snapshot re-fetch+
 -- OUTCOME (written after firing):
 realized_metric  REAL
 verdict          TEXT        -- 'refuted' | 'not_refuted'  (a single shot never 'confirms')
+outcome_ts       TEXT        -- when the outcome was recorded (lifecycle audit trail)
 seal             TEXT        -- integrity seal (see below)
 
 -- PROVENANCE:
