@@ -123,3 +123,7 @@ SIGNAL_*.txt
 *.swp
 *.swo
 *~
+
+# Private live production trade data (real positions/P&L) — diagnostic inputs
+data/retune/2026-06-01-cost-model-diagnosis/live_trades.json
+data/retune/2026-06-01-cost-model-diagnosis/per_trade.json
