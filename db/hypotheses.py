@@ -150,3 +150,102 @@ def claim_hypothesis(
             return int(cur.lastrowid)
 
     return _with_write_retry("claim_hypothesis", _do)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: lock_hypothesis — provenance (4a) + complete-claim (4e) + seal
+# ---------------------------------------------------------------------------
+
+class HypothesisLockError(RuntimeError):
+    """A lock criterion (provenance / deflation / walk-forward / drift / claim) failed."""
+
+
+def _fetch(con, hid: int) -> dict:
+    row = con.execute("SELECT * FROM hypotheses WHERE id=?", (hid,)).fetchone()
+    if row is None:
+        raise HypothesisLockError(f"hypothesis {hid} does not exist")
+    return dict(row)
+
+
+def _compute_seal(row: dict) -> str:
+    payload = json.dumps([row.get(f) for f in _FROZEN_FIELDS],
+                         default=str, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _has_provenance(config_hash: str) -> bool:
+    """4a: the config_hash must match >=1 exploratory ok trial. We recompute the
+    hash from each ok trial's combo_json the same way claim_hypothesis did.
+    Opens its own read connection so it can be called outside a write transaction."""
+    from db.trials import _ensure_trials_schema
+    _ensure_trials_schema()
+    with transaction() as con:
+        rows = con.execute(
+            "SELECT combo_json FROM trials WHERE study_type='exploratory' AND status='ok'"
+        ).fetchall()
+    for r in rows:
+        h = hashlib.sha256(r["combo_json"].encode("utf-8")).hexdigest()
+        if h == config_hash:
+            return True
+    return False
+
+
+from db.trials import selection_population_stats, n_effective
+
+
+def lock_hypothesis(hid: int, *, today: datetime) -> None:
+    """Freeze a draft after enforcing lock criteria. Refuses if not in 'draft'.
+
+    All cross-table reads (provenance, population stats) are done BEFORE the
+    hypotheses write transaction opens, avoiding nested BEGIN IMMEDIATE deadlocks.
+    """
+    _ensure_schema()
+
+    # --- Pre-read phase (outside the write transaction) ---
+    # Read the draft row first to run checks before acquiring the writer lock.
+    with transaction() as con:
+        row = _fetch(con, hid)
+
+    if row["status"] != "draft":
+        raise HypothesisLockError(
+            f"hypothesis {hid} is '{row['status']}', not 'draft' — cannot re-lock")
+
+    # 4e: complete claim
+    required = ("metric", "threshold", "direction",
+                "deflated_metric", "deflated_threshold")
+    missing = [f for f in required if row.get(f) is None]
+    if missing:
+        raise HypothesisLockError(f"incomplete claim — missing {missing}")
+
+    # 4a: provenance (opens its own transaction internally)
+    if not _has_provenance(row["config_hash"]):
+        raise HypothesisLockError(
+            "provenance: config_hash matches no exploratory ok trial — "
+            "the candidate did not emerge from registered search")
+
+    # (4b deflation THRESHOLD, 4c walk-forward, 4d drift land in Tasks 3-4)
+    n_at_lock = n_effective(
+        selection_population_stats()["n_registered"], today=today)
+
+    # --- Write phase ---
+    def _do() -> None:
+        with transaction() as con:
+            # Re-fetch under the write lock to guard against concurrent mutations.
+            current = _fetch(con, hid)
+            if current["status"] != "draft":
+                raise HypothesisLockError(
+                    f"hypothesis {hid} status changed to '{current['status']}' "
+                    "between pre-check and write — concurrent lock attempt?")
+
+            locked_ts = _now()
+            sealed = dict(current)
+            sealed["locked_ts"] = locked_ts
+            sealed["n_at_lock"] = n_at_lock
+            seal = _compute_seal(sealed)
+            con.execute(
+                "UPDATE hypotheses SET status='locked', locked_ts=?, seal=?, "
+                "n_at_lock=? WHERE id=?",
+                (locked_ts, seal, n_at_lock, hid),
+            )
+
+    _with_write_retry("lock_hypothesis", _do)
