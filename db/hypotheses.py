@@ -23,10 +23,12 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
+from data.holdout_access import HoldoutAccessError
 from db.schema import _set_wal_mode_idempotent_with_retry
 from db.transaction import transaction
 from db.trials import (
     _ensure_trials_schema,
+    claim_trial,
     n_effective,
     selection_population_stats,
 )
@@ -200,6 +202,10 @@ class HypothesisLockError(RuntimeError):
     """A lock criterion (provenance / deflation / walk-forward / drift / claim) failed."""
 
 
+class HoldoutFalsificationError(HoldoutAccessError):
+    """The falsification gate refused: not lockable/authorized/in-budget, or sealed-tamper."""
+
+
 def _fetch(con, hid: int, *, exc: type[Exception] = HypothesisLockError) -> dict:
     """Fetch a hypothesis row or raise. Callers pass their own `exc` so the
     missing-id error matches their boundary (lock vs authorize vs gate)."""
@@ -371,3 +377,79 @@ def authorize_fire(hid: int, *, now: datetime) -> None:
     _with_write_retry("authorize_fire", _do)
     log.warning("HOLDOUT FIRE AUTHORIZED for hypothesis %d at %s — the bala unica "
                 "is now spendable for this hypothesis. Log via `mex log`.", hid, now.isoformat())
+
+
+# ---------------------------------------------------------------------------
+# Task 7: assert_fireable (gate chain) + record_fire (fire-before-read)
+# ---------------------------------------------------------------------------
+
+def _fired_count(con, window_label: str) -> int:
+    return con.execute(
+        "SELECT COUNT(*) c FROM hypotheses WHERE window_label=? AND fired_ts IS NOT NULL",
+        (window_label,),
+    ).fetchone()["c"]
+
+
+def assert_fireable(hid: int) -> None:
+    """The all-or-nothing gate chain. Raises HoldoutFalsificationError on any
+    failure; the holdout is untouched on any failure."""
+    _ensure_schema()
+    with transaction() as con:
+        row = _fetch(con, hid, exc=HoldoutFalsificationError)
+        # 2: status + no outcome
+        if row["status"] == "draft":
+            raise HoldoutFalsificationError(f"hypothesis {hid} is draft — lock it first")
+        if row["status"] in ("refuted", "not_refuted"):
+            raise HoldoutFalsificationError(
+                f"hypothesis {hid} already resolved ({row['status']}) — read window closed")
+        # 3: deliberate authorization
+        if not row.get("fire_authorized_ts"):
+            raise HoldoutFalsificationError(
+                f"hypothesis {hid} not authorized — call authorize_fire (the shot is a "
+                "deliberate act, not a function side-effect)")
+        # 4: seal intact
+        if _compute_seal(row) != row["seal"]:
+            raise HoldoutFalsificationError(
+                f"hypothesis {hid} seal mismatch — frozen fields were tampered")
+        # 5: budget (a re-read of an already-fired hypothesis is allowed)
+        if row["fired_ts"] is None and _fired_count(con, row["window_label"]) >= HOLDOUT_FIRE_BUDGET:
+            raise HoldoutFalsificationError(
+                f"fire budget {HOLDOUT_FIRE_BUDGET} exhausted for window "
+                f"{row['window_label']!r} — override only via `mex log`")
+
+
+def record_fire(hid: int) -> None:
+    """Mark the fire BEFORE the holdout is read (claim-then-execute / Caveat 5).
+    Idempotent within the crash-recovery window. On the FIRST fire, writes a
+    confirmatory trial so deflation's N sees it."""
+    _ensure_schema()
+
+    def _do() -> None:
+        with transaction() as con:
+            row = _fetch(con, hid, exc=HoldoutFalsificationError)
+            if row["fired_ts"] is not None:
+                return  # already fired — re-read, do not double count
+            now = _now()
+            con.execute(
+                "UPDATE hypotheses SET status='fired', fired_ts=? WHERE id=?",
+                (now, hid),
+            )
+
+    _with_write_retry("record_fire", _do)
+    # confirmatory trial only if this call actually set fired_ts (first fire)
+    with transaction() as con:
+        row = _fetch(con, hid, exc=HoldoutFalsificationError)
+    if row["fired_ts"]:
+        with transaction() as con:
+            already = con.execute(
+                "SELECT COUNT(*) c FROM trials WHERE study_type='confirmatory' "
+                "AND combo_json = ?",
+                (row["strategy_config_json"],),
+            ).fetchone()["c"]
+        if not already:
+            claim_trial(
+                source="holdout_falsification",
+                combo=json.loads(row["strategy_config_json"]),
+                window_label=row["window_label"],
+                study_type="confirmatory",
+            )

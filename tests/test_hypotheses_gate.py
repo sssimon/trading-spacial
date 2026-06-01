@@ -367,3 +367,82 @@ def test_authorize_fire_refuses_nonexistent(hyp_db):
     _ensure_schema()
     with pytest.raises(FireAuthorizationError, match="does not exist"):
         authorize_fire(99999, now=_T())
+
+
+# ---------------------------------------------------------------------------
+# Task 7: assert_fireable (gate chain) + record_fire (fire-before-read)
+# ---------------------------------------------------------------------------
+
+def _locked_and_authorized():
+    """Helper: lock + authorize past cooldown. Returns hid."""
+    from db.hypotheses import lock_hypothesis, authorize_fire
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())
+    locked_at = datetime.fromisoformat(_all_hyps()[0]["locked_ts"])
+    authorize_fire(hid, now=locked_at + timedelta(hours=25))
+    return hid
+
+
+def test_assert_fireable_refuses_unauthorized(hyp_db):
+    """Locked + sealed + in budget, but NOT authorized -> refuse (impatient-owner gate)."""
+    from db.hypotheses import lock_hypothesis, assert_fireable, HoldoutFalsificationError
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())            # no authorize_fire
+    with pytest.raises(HoldoutFalsificationError, match="authorized"):
+        assert_fireable(hid)
+
+
+def test_assert_fireable_refuses_draft(hyp_db):
+    from db.hypotheses import assert_fireable, HoldoutFalsificationError
+    hid = _draft(strategy_config={"atr_sl_mult": 1.0})
+    with pytest.raises(HoldoutFalsificationError, match="locked|lock it"):
+        assert_fireable(hid)
+
+
+def test_record_fire_sets_fired_ts_and_writes_confirmatory_trial(hyp_db):
+    from db.hypotheses import assert_fireable, record_fire
+    hid = _locked_and_authorized()
+    assert_fireable(hid)
+    record_fire(hid)
+    r = _all_hyps()[0]
+    assert r["status"] == "fired"
+    assert r["fired_ts"]
+    with transaction() as con:
+        confirmatory = con.execute(
+            "SELECT COUNT(*) c FROM trials WHERE study_type='confirmatory'"
+        ).fetchone()["c"]
+    assert confirmatory == 1
+
+
+def test_record_fire_idempotent_within_window(hyp_db):
+    from db.hypotheses import record_fire
+    hid = _locked_and_authorized()
+    record_fire(hid)
+    first = _all_hyps()[0]["fired_ts"]
+    record_fire(hid)                              # re-read, same test
+    assert _all_hyps()[0]["fired_ts"] == first    # unchanged
+    with transaction() as con:
+        c = con.execute("SELECT COUNT(*) c FROM trials WHERE study_type='confirmatory'").fetchone()["c"]
+    assert c == 1                                 # not double-counted
+
+
+def test_budget_blocks_second_distinct_fire(hyp_db):
+    """With HOLDOUT_FIRE_BUDGET=1, a second DISTINCT hypothesis over the same
+    window cannot fire."""
+    from db.hypotheses import (assert_fireable, record_fire, HoldoutFalsificationError,
+                               lock_hypothesis, authorize_fire)
+    hid1 = _locked_and_authorized()
+    record_fire(hid1)
+    cfg2 = {"atr_sl_mult": 2.0}
+    _register_matching_ok_trial(cfg2)
+    hid2 = _draft(strategy_config=cfg2, cand_sharpe=4.0, cand_n_returns=500,
+                  deflated_threshold=0.50)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid2))
+    lock_hypothesis(hid2, today=_T())
+    locked_at = datetime.fromisoformat(
+        [r for r in _all_hyps() if r["id"] == hid2][0]["locked_ts"])
+    authorize_fire(hid2, now=locked_at + timedelta(hours=25))
+    with pytest.raises(HoldoutFalsificationError, match="budget"):
+        assert_fireable(hid2)
