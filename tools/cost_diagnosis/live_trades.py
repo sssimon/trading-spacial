@@ -15,6 +15,9 @@ _REQUIRED = (
 )
 
 
+# Note: the dump rows also carry scan_id, qty, pnl_pct — intentionally NOT
+# carried here; the diagnostic consumes only the fields below. Add them if a
+# downstream task needs them.
 @dataclass(frozen=True)
 class LiveTrade:
     symbol: str
@@ -32,11 +35,16 @@ class LiveTrade:
 def load_live_trades(path: str) -> list[LiveTrade]:
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
+    if not isinstance(raw, list):
+        raise ValueError(f"expected a JSON array of trades, got {type(raw).__name__}")
     out: list[LiveTrade] = []
     for r in raw:
         for k in _REQUIRED:
-            if r.get(k) is None:
-                raise ValueError(f"live trade {r.get('id')} missing required field {k!r}")
+            if k not in r or r[k] is None:
+                state = "null" if k in r else "missing"
+                raise ValueError(
+                    f"live trade {r.get('id')}: required field {k!r} is {state}"
+                )
         sp = r.get("scan_price")
         out.append(LiveTrade(
             symbol=str(r["symbol"]), direction=str(r["direction"]),
