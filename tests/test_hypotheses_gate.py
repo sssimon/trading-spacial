@@ -547,3 +547,74 @@ def test_open_for_falsification_refuses_unauthorized(hyp_db):
     lock_hypothesis(hid, today=_T())             # locked but NOT authorized
     with pytest.raises(HoldoutFalsificationError, match="authorized"):
         open_holdout_for_falsification("fng.parquet", hypothesis_id=hid)
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-audit hardening: sigma fail-closed (A), deflated_threshold range
+# (B), budget recheck under write-lock (C), direction validation (D)
+# ---------------------------------------------------------------------------
+
+def test_lock_refuses_when_selection_population_degenerate(hyp_db):
+    """FIX A: fail-closed when <2 distinct exploratory configs (sigma undefined)."""
+    from db.hypotheses import claim_hypothesis, lock_hypothesis, HypothesisLockError
+    from db.trials import claim_trial, finalize_trial
+    cfg = {"atr_sl_mult": 1.0}
+    # register ONLY the candidate's own trial -> 1 distinct config -> sigma is None
+    tid = claim_trial(source="grid_search_tf", combo=cfg, symbol="BTCUSDT", window_label="w")
+    finalize_trial(tid, status="ok", metrics={"sharpe_ratio": 3.0})
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500, deflated_threshold=0.50)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid))
+    with pytest.raises(HypothesisLockError, match="selection population|fail-closed"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_nonprobability_deflated_threshold(hyp_db):
+    """FIX B: deflated_threshold outside (0,1] is refused."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    for bad in (0.0, -0.1, 1.5):
+        hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                     deflated_threshold=bad)
+        with transaction() as con:
+            con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                        (_attest(), _attest(), hid))
+        with pytest.raises(HypothesisLockError, match="0, 1|threshold"):
+            lock_hypothesis(hid, today=_T())
+
+
+def test_lock_refuses_invalid_direction(hyp_db):
+    """FIX D: direction not in '>'/'<' refused at lock (not at outcome)."""
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg, cand_sharpe=4.0, cand_n_returns=500,
+                 deflated_threshold=0.50, direction="x")
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid))
+    with pytest.raises(HypothesisLockError, match="direction"):
+        lock_hypothesis(hid, today=_T())
+
+
+def test_record_fire_budget_recheck_under_write_lock(hyp_db):
+    """FIX C: a direct record_fire on a second distinct hypothesis is refused once
+    budget is spent (the in-write-transaction re-check)."""
+    from db.hypotheses import (record_fire, lock_hypothesis, authorize_fire,
+                               HoldoutFalsificationError)
+    hid1 = _locked_and_authorized()
+    record_fire(hid1)
+    cfg2 = {"atr_sl_mult": 2.0}
+    _register_matching_ok_trial(cfg2)
+    hid2 = _draft(strategy_config=cfg2, cand_sharpe=4.0, cand_n_returns=500,
+                  deflated_threshold=0.50)
+    with transaction() as con:
+        con.execute("UPDATE hypotheses SET walkforward_ref=?, drift_check_ref=? WHERE id=?",
+                    (_attest(), _attest(), hid2))
+    lock_hypothesis(hid2, today=_T())
+    locked_at = datetime.fromisoformat([r for r in _all_hyps() if r["id"] == hid2][0]["locked_ts"])
+    authorize_fire(hid2, now=locked_at + timedelta(hours=25))
+    with pytest.raises(HoldoutFalsificationError, match="budget"):
+        record_fire(hid2)

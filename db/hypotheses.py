@@ -243,7 +243,15 @@ def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None,
     (selection_population_stats) and MUST run outside any write transaction."""
     stats = selection_population_stats(study_type="exploratory")
     n_at_lock = n_effective(stats["n_registered"], today=today)
-    sigma = stats["sigma_sr_trials"] or 0.0
+    sigma = stats["sigma_sr_trials"]
+    if sigma is None:
+        # Fewer than 2 distinct exploratory configs with a Sharpe -> the best-of-N
+        # selection penalty is undefined. Fail CLOSED: you have not earned the shot
+        # if the selection population cannot be measured. (Mirrors the dsr-None path.)
+        raise HypothesisLockError(
+            "deflation gate: selection population has <2 distinct exploratory "
+            "configs (sigma_sr_trials undefined) — cannot compute the best-of-N "
+            "penalty; lock refused (fail-closed)")
     dsr = deflated_sharpe_ratio(
         sr=float(row["cand_sharpe"]),
         n_trials=n_at_lock,
@@ -292,6 +300,9 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     missing = [f for f in required if row.get(f) is None]
     if missing:
         raise HypothesisLockError(f"incomplete claim — missing {missing}")
+    if row["direction"] not in (">", "<"):
+        raise HypothesisLockError(
+            f"incomplete claim — direction {row['direction']!r} must be '>' or '<'")
 
     # 4a: provenance (opens its own transaction internally)
     if not _has_provenance(row["config_hash"]):
@@ -302,13 +313,21 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     # 4b: deflation gate — single call yields BOTH n_at_lock AND DSR
     # (selection_population_stats opens its own transaction; must stay outside
     # the write transaction below to avoid nested BEGIN IMMEDIATE deadlock)
+    # Validate the threshold first: a DSR is a probability in (0, 1]; a non-(0,1]
+    # threshold neuters the gate even on a degenerate registry, so reject it BEFORE
+    # the _deflation_probability call.
+    dt = float(row["deflated_threshold"])
+    if not (0.0 < dt <= 1.0):
+        raise HypothesisLockError(
+            f"deflation gate: deflated_threshold {dt} is outside (0, 1] — "
+            "a DSR is a probability; a non-(0,1] threshold neuters the gate")
     dsr, n_at_lock = _deflation_probability(row, today=today)
     if dsr is None:
         raise HypothesisLockError(
             f"deflation gate: DSR undefined for this candidate "
             f"(cand_n_returns={row['cand_n_returns']}, cand_skew={row['cand_skew']}, "
             f"cand_kurt_raw={row['cand_kurt_raw']}) — degenerate inputs, refused")
-    if dsr < float(row["deflated_threshold"]):
+    if dsr < dt:
         raise HypothesisLockError(
             f"deflation gate: deflated probability {dsr:.4f} < threshold "
             f"{row['deflated_threshold']} over N={n_at_lock} — "
@@ -429,6 +448,15 @@ def record_fire(hid: int) -> None:
             row = _fetch(con, hid, exc=HoldoutFalsificationError)
             if row["fired_ts"] is not None:
                 return  # already fired — re-read, do not double count
+            # Authoritative budget check under the write lock (BEGIN IMMEDIATE
+            # serializes writers, so a racing second hypothesis sees the first's
+            # committed fire). Closes the TOCTOU between assert_fireable's read
+            # transaction and this write transaction.
+            if _fired_count(con, row["window_label"]) >= HOLDOUT_FIRE_BUDGET:
+                raise HoldoutFalsificationError(
+                    f"fire budget {HOLDOUT_FIRE_BUDGET} exhausted for window "
+                    f"{row['window_label']!r} (checked under write lock) — "
+                    "override only via `mex log`")
             now = _now()
             con.execute(
                 "UPDATE hypotheses SET status='fired', fired_ts=? WHERE id=?",
