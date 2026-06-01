@@ -395,6 +395,7 @@ def assert_fireable(hid: int) -> None:
     failure; the holdout is untouched on any failure."""
     _ensure_schema()
     with transaction() as con:
+        # 1: exists
         row = _fetch(con, hid, exc=HoldoutFalsificationError)
         # 2: status + no outcome
         if row["status"] == "draft":
@@ -420,8 +421,10 @@ def assert_fireable(hid: int) -> None:
 
 def record_fire(hid: int) -> None:
     """Mark the fire BEFORE the holdout is read (claim-then-execute / Caveat 5).
+    Self-defending: re-runs the gate chain so a direct call cannot bypass it.
     Idempotent within the crash-recovery window. On the FIRST fire, writes a
     confirmatory trial so deflation's N sees it."""
+    assert_fireable(hid)            # self-defense: never fire what the gate would refuse
     _ensure_schema()
 
     def _do() -> None:

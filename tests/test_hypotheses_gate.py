@@ -446,3 +446,29 @@ def test_budget_blocks_second_distinct_fire(hyp_db):
     authorize_fire(hid2, now=locked_at + timedelta(hours=25))
     with pytest.raises(HoldoutFalsificationError, match="budget"):
         assert_fireable(hid2)
+
+
+def test_record_fire_refuses_draft_directly(hyp_db):
+    """A direct record_fire on a draft must be refused by the self-defense gate."""
+    from db.hypotheses import record_fire, HoldoutFalsificationError
+    hid = _draft(strategy_config={"atr_sl_mult": 1.0})
+    with pytest.raises(HoldoutFalsificationError, match="lock it|draft"):
+        record_fire(hid)
+
+
+def test_record_fire_refuses_unauthorized_directly(hyp_db):
+    """A direct record_fire on a locked-but-unauthorized hypothesis is refused."""
+    from db.hypotheses import lock_hypothesis, record_fire, HoldoutFalsificationError
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())            # not authorized
+    with pytest.raises(HoldoutFalsificationError, match="authorized"):
+        record_fire(hid)
+
+
+def test_assert_fireable_allows_fired_reread(hyp_db):
+    """Crash-recovery: an already-fired hypothesis (no outcome yet) is still fireable
+    (re-read allowed)."""
+    from db.hypotheses import assert_fireable, record_fire
+    hid = _locked_and_authorized()
+    record_fire(hid)
+    assert_fireable(hid)                        # must NOT raise
