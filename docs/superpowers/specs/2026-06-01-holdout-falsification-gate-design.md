@@ -1,8 +1,14 @@
 # Holdout Falsification Gate — Design
 
 **Date:** 2026-06-01
-**Status:** Design approved, pending implementation plan
+**Status:** Design approved + amended after second Voronov critique, pending implementation plan
 **Scope:** Capa 2 of the edge-discovery decomposition (the falsification gate). NOT cost-model v3 (Capa 0), NOT edge-search methodology (Capa 1).
+
+**Amendments (2026-06-01, post-Voronov review of the first draft):**
+1. `verdict` is `refuted | not_refuted`, never `confirmed` — a single shot can refute, never confirm (estimator-vs-estimand category error caught in the output column).
+2. Deflation is a hard **lock criterion (4b)**, in the machine — not delegated to operator judgment. Provenance (4a) is reframed as necessary-not-sufficient (rigor-of-existence vs rigor-of-selection); its known limits (N is a lower bound; floor=50) are documented.
+3. "Renewable bullet" renamed to **continuous out-of-sample stream**; live-shadow optional-stopping bias is named and deferred to epic B, not claimed resolved.
+4. Lock and fire are **two decisions**: `authorize_fire` is a separate deliberate act with a cooldown (`HOLDOUT_FIRE_COOLDOWN`), logged via `mex` — the gate against the "impatient owner with the legitimate key." Post-outcome re-reads are refused (bounding look-many-times bias).
 
 ## Origin / decision chain
 
@@ -32,17 +38,17 @@ The "what is the bala única" question resolved to a **hybrid tier ladder**, not
 
 ```
 backtest (search)    →  pre-holdout         →  HOLDOUT locked      →  live shadow        →  active
-instrument, broken      out-of-sample           ONE shot              RENEWABLE bullet      production
+instrument, broken      out-of-sample           ONE shot              continuous OOS stream  production
 (Capa 0 fixes)          intermediate, repeatable (conception 1)        (conception 3)
                                                  final pre-shadow gate  weeks/months
 ──────────────── deflation + pre-registration accounting at EVERY tier (conception 2) ────────────────
 ```
 
 - The **locked holdout = conception 1** (one shot), repositioned: it is the **one-shot final gate** a candidate crosses only after surviving everything cheaper. Fired rarely.
-- The **renewable resource is live shadow = conception 3.** Time, not the file, is the scarce thing; every day produces fresh out-of-sample data. This is what the system already does (KS v2 shadow→active; live reconciliation in FINDINGS).
+- The **continuous out-of-sample stream is live shadow = conception 3.** Time, not the file, is the scarce thing; every day produces fresh out-of-sample data. This is what the system already does (KS v2 shadow→active; live reconciliation in FINDINGS). **"Renewable bullet" was the wrong word** (a bullet is defined by its consumption; shadow is not fired, it accumulates). It is a continuous sampling stream — and watching it daily carries *optional-stopping bias* (the same selection bias deflation corrects in search), which is **not corrected today** and is deferred to epic B, not resolved.
 - The **honesty of conception 2** (count fires, deflate) is the *accounting* that applies at every tier — not a rival conception.
 
-The gate is the machine that governs ascent between tiers. Selected enforcement model: **Approach A (the keystone)** — code-enforce only the irreversible step (the locked holdout); everything renewable/judgment stays protocol. Rationale: build machinery only where failure is irreversible (process-proportionality). Approach B (full ladder code-enforced) is gold-plating until a deployable candidate exists; Approach C (protocol-first) under-protects the bullet (AST scanner detects illegitimate access but does not force a legitimate access to have a pre-registered hypothesis behind it).
+The gate is the machine that governs ascent between tiers. Selected enforcement model: **Approach A (the keystone)** — code-enforce only the irreversible step (the locked holdout); everything continuous-stream/judgment stays protocol. Rationale: build machinery only where failure is irreversible (process-proportionality). Approach B (full ladder code-enforced) is gold-plating until a deployable candidate exists; Approach C (protocol-first) under-protects the bullet (AST scanner detects illegitimate access but does not force a legitimate access to have a pre-registered hypothesis behind it).
 
 ## Non-negotiables honored
 
@@ -77,10 +83,13 @@ open_holdout_for_falsification(rel_path, hypothesis_id=…) ← NEW. The only pa
         │
         └─► the gate verifies BEFORE returning the Path (full chain in Section 3):
               1. a hypothesis row with that id exists
-              2. its status is 'locked' (frozen) or 'fired' (re-read allowed)
-              3. the integrity seal matches (covers the lower-tier evidence, which
+              2. its status is 'locked' or 'fired', and no outcome is recorded yet
+                 (re-reads allowed only in the crash-recovery window)
+              3. the fire was deliberately authorized (authorize_fire ran, cooldown
+                 elapsed) — the shot is a separate act, not a function side-effect
+              4. the integrity seal matches (covers the lower-tier evidence, which
                  was validated and sealed at lock time — Section 4)
-              4. the fire budget is not exceeded (default 1 — conception 1)
+              5. the fire budget is not exceeded (default 1 — conception 1)
             any failure → HoldoutFalsificationError; the bullet is not touched
 ```
 
@@ -96,25 +105,29 @@ Layering: `data/holdout_access.py` → imports `db/hypotheses.py` → imports `d
 
 ## Section 2 — The hypothesis ledger (`db/hypotheses.py`)
 
-A hypothesis is a **frozen confirmatory study**: the punctual claim the shot will kill or confirm. It lives in its own table because its lifecycle (`draft → locked → fired → confirmed/refuted`) differs from `trials` (`pending → ok/failed`). It links to `trials` for provenance.
+A hypothesis is a **frozen confirmatory study**: the punctual claim the shot will try to kill. Falsification is asymmetric — a single shot can *refute*, never *confirm* (the future distribution stays unobserved; passing the threshold means the shot **failed to refute**, not that edge was established). It lives in its own table because its lifecycle (`draft → locked → fired → refuted/not_refuted`) differs from `trials` (`pending → ok/failed`). It links to `trials` for provenance.
 
 **Schema (`hypotheses` table in `signals.db`):**
 
 ```
 id              INTEGER PK
-created_ts      TEXT        -- draft created
-locked_ts       TEXT        -- frozen (null until lock)
-fired_ts        TEXT        -- holdout read for falsification (null until fire)
-status          TEXT        -- 'draft' | 'locked' | 'fired' | 'confirmed' | 'refuted'
+created_ts        TEXT        -- draft created
+locked_ts         TEXT        -- frozen (null until lock)
+fire_authorized_ts TEXT       -- deliberate authorize_fire() ran + cooldown elapsed (null until authorized)
+fired_ts          TEXT        -- holdout read for falsification (null until fire)
+status            TEXT        -- 'draft' | 'locked' | 'fired' | 'refuted' | 'not_refuted'
 
 -- THE FROZEN CLAIM (immutable after lock):
 strategy_config_json  TEXT  -- exact config to test
 config_hash           TEXT  -- sha256(strategy_config_json) — the seal anchor
 symbols_json          TEXT  -- symbol universe
 window_label          TEXT  -- the holdout window [2025-04-30, 2026-04-30]
-metric                TEXT  -- e.g. 'sharpe_deflated' | 'net_pnl' | 'prob_sr_gt_0'
+metric                TEXT  -- e.g. 'net_pnl' | 'sharpe_ratio' — the OUTCOME metric tested on the shot
 threshold             REAL  -- the pre-registered threshold
-direction             TEXT  -- '>' | '<'  (passes if realized_metric <direction> threshold)
+direction             TEXT  -- '>' | '<'  (refuted unless realized_metric <direction> threshold)
+deflated_metric       TEXT  -- the SELECTION-gate metric, e.g. 'sharpe_deflated' (criterion 4b)
+deflated_threshold    REAL  -- lock refuses if deflated_metric over full-registry N is below this
+n_at_lock             INTEGER -- registry N (selection_population_stats) captured at lock time
 
 -- LOWER-TIER EVIDENCE (required to lock):
 preholdout_trial_ids_json TEXT  -- refs to exploratory trials that passed pre-holdout
@@ -123,7 +136,7 @@ drift_check_ref           TEXT  -- {ref, verdict, ts} for the snapshot re-fetch+
 
 -- OUTCOME (written after firing):
 realized_metric  REAL
-verdict          TEXT        -- 'confirmed' | 'refuted'
+verdict          TEXT        -- 'refuted' | 'not_refuted'  (a single shot never 'confirms')
 seal             TEXT        -- integrity seal (see below)
 
 -- PROVENANCE:
@@ -133,18 +146,20 @@ source_note      TEXT        -- where the candidate came from + operator note
 **Lock semantics (what makes the thing immutable):**
 
 - **`draft`** — mutable. Assemble the hypothesis and gather evidence.
-- **`lock_hypothesis(id)`** — the freeze. Validates that all required evidence is present (the three refs non-null and valid per Section 4), computes `config_hash` and `seal = sha256(all frozen fields + config_hash)`, sets `status='locked'`, `locked_ts`. The row is now immutable.
-- **`record_fire(id)`** — called by the gate when opening for falsification. Sets `fired_ts`. Idempotent per hypothesis (re-reads for crash recovery are fine — same test).
-- **`record_outcome(id, realized_metric)`** — computes `verdict` against `threshold`/`direction`, sets terminal `status`.
+- **`lock_hypothesis(id)`** — the freeze. Validates all FIVE lock criteria (Section 4): config provenance, deflation gate, walk-forward verdict, drift verdict, complete claim. Captures `n_at_lock`, computes `config_hash` and `seal = sha256(all frozen fields + config_hash)`, sets `status='locked'`, `locked_ts`. The row is now immutable.
+- **`authorize_fire(id)`** — a SEPARATE deliberate act, distinct from the lock and from the read. The lock decides *what* to falsify; the authorization decides *that the moment is now* — that no cheaper experiment is pending. Refuses unless `now - locked_ts >= HOLDOUT_FIRE_COOLDOWN`. Sets `fire_authorized_ts` and logs the authorization via `mex log`. The fire stops being a function side-effect; it becomes a verdict.
+- **`record_fire(id)`** — called by the gate when opening for falsification. Refuses unless `fire_authorized_ts` is set. Sets `fired_ts` (only if null). Idempotent per hypothesis **only within the crash-recovery window** (status `'fired'`, no outcome yet); once `record_outcome` runs the status is terminal and further reads are refused — bounding post-fire re-inspection.
+- **`record_outcome(id, realized_metric)`** — sets `verdict = 'refuted'` if `realized_metric` did NOT satisfy `threshold`/`direction`, else `'not_refuted'` (never `'confirmed'`), sets terminal `status`, closes the read window.
 
 **Immutability enforcement (guardrail-critical — machine, not trust):**
 
 - Mutation functions refuse if `status != 'draft'` (except `record_fire`/`record_outcome`, which write only their designated fields).
 - **Double lock: seal + trigger.** `lock_hypothesis` writes the `seal`. The gate, before each fire, **recomputes the seal over the frozen fields and compares** — if the row was edited outside the API (direct UPDATE), the seal mismatches → the bullet is not touched. Plus a SQLite `BEFORE UPDATE` trigger that aborts if a frozen field changes while `status='locked'`. The seal detects; the trigger prevents. Both, because it is irreversible.
 
-**Fire budget (conception 1 = one shot):**
+**Fire budget + cooldown (conception 1 = one shot, deliberately fired):**
 
 - Config `HOLDOUT_FIRE_BUDGET = 1`. The gate counts rows with `fired_ts NOT NULL` over `window_label`; if the budget is reached and this hypothesis is not among the fired ones → refuse.
+- Config `HOLDOUT_FIRE_COOLDOWN` — the minimum interval between `locked_ts` and `authorize_fire`. Friction against the "impatient owner with the legitimate key": the most likely cause of death of the bullet is not an illegitimate peek (the AST scanner catches that) but a perfectly legitimate, perfectly premature shot. The cooldown forces deliberation time between *what* and *now*.
 - Exceeding the budget requires explicit operator override, logged via `mex log` — same discipline as admin-merge (#7). No silent bypass.
 
 **Link to deflation:** on fire, `record_fire` also writes a `trials` row with `study_type='confirmatory'`, so #278's N sees it and the second-order deflation (how many confirmatory hypotheses were fired) is accounted. Each table keeps one responsibility.
@@ -160,7 +175,7 @@ class HoldoutFalsificationError(HoldoutAccessError):
 
 def open_holdout_for_falsification(rel_path: str, *, hypothesis_id: int) -> Path:
     from db.hypotheses import assert_fireable, record_fire
-    assert_fireable(hypothesis_id)          # 1-4: refuse BEFORE touching anything
+    assert_fireable(hypothesis_id)          # 1-5: refuse BEFORE touching anything
     record_fire(hypothesis_id)              # mark the fire BEFORE returning the path
     return open_holdout(rel_path, evaluation_mode=True)   # reused path resolution
 ```
@@ -168,15 +183,16 @@ def open_holdout_for_falsification(rel_path: str, *, hypothesis_id: int) -> Path
 **The chain inside `assert_fireable(hypothesis_id)`** (all-or-nothing — any failure, the bullet is untouched):
 
 1. **Exists** — a row with that id, else error.
-2. **`status in ('locked', 'fired')`** — if `draft`, error: "lock it first." (`'fired'` allowed for re-reads.)
-3. **Seal intact** — recompute `sha256(frozen fields + config_hash)` and compare to `seal`. Mismatch → tamper error. (Lower-tier evidence was sealed at lock, so this covers it.)
-4. **Budget** — count rows with `fired_ts NOT NULL` over `window_label`. If `HOLDOUT_FIRE_BUDGET` reached and this hypothesis not among them → error (override only via `mex log`).
+2. **`status in ('locked', 'fired')` and no outcome recorded** — if `draft`, error "lock it first"; if terminal (`refuted`/`not_refuted`), error "shot already resolved — read window closed." `'fired'` is allowed only for crash-recovery re-reads before the outcome.
+3. **Fire authorized** — `fire_authorized_ts` is set (the separate `authorize_fire` act ran and the cooldown elapsed). If not → error: the shot has not been deliberately authorized. This is the gate against the impatient-owner failure mode.
+4. **Seal intact** — recompute `sha256(frozen fields + config_hash)` and compare to `seal`. Mismatch → tamper error. (Lower-tier evidence was sealed at lock, so this covers it.)
+5. **Budget** — count rows with `fired_ts NOT NULL` over `window_label`. If `HOLDOUT_FIRE_BUDGET` reached and this hypothesis not among them → error (override only via `mex log`).
 
 **The point that honors Caveat 5 — the fire is marked BEFORE reading:**
 
 `record_fire` runs *before* returning the Path, not after. Deliberate: claim-then-execute applied to the bullet. *"A partial peek burns the bala única just as surely as a full run"* (Caveat 5). If the process reads the first frame and crashes mid-evaluation, **the fire is already recorded** — correct, because the peek happened. Marking after would let a crash "undo" a peek that did occur.
 
-- `record_fire` is **idempotent** per hypothesis: sets `fired_ts` only if null; multiple `rel_path` reads of the same hypothesis = one fire. On that first call it writes the confirmatory `trials` row for deflation.
+- `record_fire` is **idempotent** per hypothesis *only within the crash-recovery window*: sets `fired_ts` only if null; multiple `rel_path` reads of the same hypothesis = one fire, but only while `status='fired'` and no outcome is recorded. Once `record_outcome` runs, the status is terminal and the read window closes — post-outcome re-inspection is refused (bounding the look-many-times bias). On the first fire it writes the confirmatory `trials` row for deflation.
 
 **Compatibility:**
 
@@ -188,37 +204,42 @@ def open_holdout_for_falsification(rel_path: str, *, hypothesis_id: int) -> Path
 
 Today A.4-3 is blocked *"until #322 closure criteria are all met"* — prose someone must remember and judge. With the keystone, **"criteria met" = `lock_hypothesis` succeeded.** The blockage goes from decree to verifiable state.
 
-The three #322 criteria (Caveat 5: *"re-tune produces candidates AND walk-forward passes AND drift check completed"*) become validations `lock_hypothesis` enforces before freezing:
+The #322 criteria (Caveat 5: *"re-tune produces candidates AND walk-forward passes AND drift check completed"*) **plus the selection-bias correction** become FIVE validations `lock_hypothesis` enforces before freezing:
 
-**a. Config provenance — the strongest check, 100% machine.**
-`lock_hypothesis` refuses unless `config_hash` matches **at least one exploratory `trials` row with `status='ok'`**. The config you are about to fire **must be one that actually emerged from registered search** — not hand-tuned after peeking, not invented at lock time. This closes the p-hacking path Voronov worried about at the root: the candidate is, at minimum, **counted in the deflation N**. The keystone of the keystone.
+**a. Config provenance — necessary, not sufficient.**
+`lock_hypothesis` refuses unless `config_hash` matches **at least one exploratory `trials` row with `status='ok'`**. The config you are about to fire **must be one that actually emerged from registered search** — not hand-tuned after peeking, not invented at lock time. This closes *naive* p-hacking (post-peek hand-tuning). It does **not** by itself close *competent* selection bias (search cheap, register selectively): provenance proves the candidate is a registered point, not that the whole search universe entered N. That is what (b) is for. The two are ontologically distinct — provenance is **rigor-of-existence**; deflation is **rigor-of-selection**. The first draft oversold (a) as closing p-hacking "at the root"; it does not.
 
-**b. Walk-forward passed — attested ref with verdict.**
+**b. Deflation gate — selection bias, in the machine.**
+`lock_hypothesis` refuses unless `deflated_metric` (e.g. `sharpe_deflated`), computed over the **full registry N** via `selection_population_stats()` + `deflation.py`, exceeds the pre-registered `deflated_threshold`. It captures `n_at_lock`. This moves the anti-selection rigor that would otherwise be operator judgment INTO the code: the best-of-N penalty must be paid before the bullet is reachable.
+
+  **Known limits of (b), documented not hidden** (`docs/deflation.md`): N is a *lower bound* — trials that crashed (`pending`, no sharpe) or sweeps outside the four wired ones do not enter N; and `n_effective = max(N, 50)` until 2026-11-29, so a sub-50-trial search is indistinguishable from any other. The deflation gate raises the floor of rigor; it does **not** make N omniscient. A search run outside the registered sweeps can still under-count its own degrees of freedom. The mitigation is registry discipline (`.mex/patterns/registering-a-trial.md`), not this gate.
+
+**c. Walk-forward passed — attested ref with verdict.**
 `walkforward_ref` is structured JSON `{ref, verdict, ts}`. `lock_hypothesis` refuses if `verdict != 'pass'`. The operator fills the ref from the real A.4-2 run; the machine enforces presence + verdict; the real ref is reviewed by a human in the locking PR (same "human gate" as the allow-list).
 
-**c. Drift check completed — attested ref with verdict.**
+**d. Drift check completed — attested ref with verdict.**
 `drift_check_ref` likewise: `{ref, verdict, ts}`, refuses if `verdict != 'pass'` (drift in the F&G/funding snapshots). The re-fetch+diff runs via the **custodial** path (`open_holdout(evaluation_mode=True)`), before and without spending the bullet.
 
-**d. Complete claim.** `metric`, `threshold`, `direction` set (you cannot lock a hypothesis without saying what counts as passing).
+**e. Complete claim.** `metric`, `threshold`, `direction`, AND `deflated_metric`/`deflated_threshold` set (you cannot lock a hypothesis without saying what counts as failing-to-refute *and* what selection penalty it already survived).
 
-All four pass → compute seal, `status='locked'`. Else → `HypothesisLockError` naming the missing criterion.
+All five pass → compute seal, `status='locked'`. Else → `HypothesisLockError` naming the missing criterion.
 
 **Deliberately outside the machine lock:**
 
-- *What threshold* counts as "pre-holdout passed" is operator judgment, pre-registered in the hypothesis via `preholdout_trial_ids` (the machine verifies the refs are real `ok` trials with matching config; it does not opine on whether the threshold was wise).
-- Renewable-tier transitions (shadow→active) — Section 5, protocol, not code.
+- *What threshold* counts as "pre-holdout passed" (the candidate's promotion into the lockable set) is operator judgment, pre-registered via `preholdout_trial_ids` (the machine verifies the refs are real `ok` trials with matching config; it does not opine on whether the threshold was wise). Note this is distinct from (b): (b) is a hard machine gate on the *deflated* metric; the pre-holdout threshold is the softer judgment about *which* candidate to even promote.
+- Continuous-stream-tier transitions (shadow→active) — Section 5, protocol, not code.
 
-Net effect: a falsification access to the holdout is **impossible** without a row proving, by machine, that the candidate came from registered search, that walk-forward passed, and that there is no drift.
+Net effect: a falsification access to the holdout is **impossible** without a row proving, by machine, that the candidate came from registered search, survived the best-of-N deflation penalty, that walk-forward passed, and that there is no drift.
 
-## Section 5 — What stays protocol (the renewable tiers)
+## Section 5 — What stays protocol (the continuous-stream tiers)
 
-Deliberate, not laziness: **machine only where failure is irreversible.** An error in the renewable tiers is recoverable (wait for more shadow data; demote from active). So for this spec they are documented, not coded.
+Deliberate, not laziness: **machine only where failure is irreversible.** An error in the continuous-stream tiers is recoverable (wait for more shadow data; demote from active). So for this spec they are documented, not coded.
 
-- **Pre-holdout threshold** (what promotes search → lockable candidate): runbook + operator judgment, pre-registered in the hypothesis's `preholdout_trial_ids`. The machine already verifies those refs are real `ok` trials (4a); it does not opine on the threshold.
-- **Shadow → active**: documented protocol pointing at the **existing** KS v2 shadow→active machinery. Promotion to shadow *should* register confirmatory trials to keep renewable deflation honest — but enforcing that is **future epic B** (the full code-enforced ladder), explicitly parked, not forgotten.
-- **The gate runbook** materializes as pattern `.mex/patterns/firing-the-holdout.md` (GROW step) — the draft → gather evidence → lock → fire → outcome sequence with its failure modes.
+- **Pre-holdout threshold** (what promotes search → lockable candidate): runbook + operator judgment, pre-registered in the hypothesis's `preholdout_trial_ids`. The machine already verifies those refs are real `ok` trials (4a) and applies the deflation gate (4b); it does not opine on the softer promotion threshold.
+- **Shadow → active**: documented protocol pointing at the **existing** KS v2 shadow→active machinery. Live shadow is a *continuous sampling stream*, not a "renewable bullet" — and watching it daily to decide promotion is textbook **optional stopping**: the day it crosses your threshold, you promote. That is an un-corrected selection bias (the live +$30/27-trades in FINDINGS is exactly such an unpowered, optionally-stopped sample). Promotion to shadow *should* register confirmatory trials and the stopping rule *should* be pre-registered to tame this — but enforcing it is **future epic B** (the full code-enforced ladder), explicitly parked. The bias is deferred, not resolved.
+- **The gate runbook** materializes as pattern `.mex/patterns/firing-the-holdout.md` (GROW step) — the draft → gather evidence → lock → **(cooldown)** → authorize_fire → fire → outcome sequence with its failure modes. Lock and fire are two decisions, not one: lock answers *what* to falsify, fire answers *that the moment is now*. The cooldown is the friction between them.
 
-Boundary in one line: **this spec code-enforces the single irreversible shot (the locked holdout); everything renewable and judgment-based stays protocol + existing infra, with epic B parked for when a deployable candidate exists.**
+Boundary in one line: **this spec code-enforces the single irreversible shot (the locked holdout) — including the deliberation gate on *when* it is fired; everything continuous-stream and judgment-based stays protocol + existing infra, with epic B parked for when a deployable candidate exists.**
 
 ## Section 6 — Testing (test the gate without ever touching the bullet)
 
@@ -227,13 +248,17 @@ Principle: **all gate logic is tested against a throwaway `hypotheses` table + a
 **Contract-pinning tests (`tests/test_hypotheses_gate.py`, new):**
 
 - `lock` refuses if `config_hash` matches no `ok` exploratory trial → **provenance (4a)**.
-- `lock` refuses if `walkforward_ref` or `drift_check_ref` have `verdict != 'pass'` → **(4b/4c)**.
-- `lock` refuses if `metric`/`threshold`/`direction` missing → **(4d)**.
+- `lock` refuses if `deflated_metric` over the registry N is below `deflated_threshold` → **deflation gate (4b)**; on success `n_at_lock` is captured.
+- `lock` refuses if `walkforward_ref` or `drift_check_ref` have `verdict != 'pass'` → **(4c/4d)**.
+- `lock` refuses if `metric`/`threshold`/`direction`/`deflated_metric`/`deflated_threshold` missing → **(4e)**.
 - A `locked` hypothesis is **immutable**: mutating a frozen field is refused; editing the row by direct UPDATE makes the seal mismatch and the gate refuses → **tamper**.
+- **`authorize_fire` refuses before cooldown**: with `now - locked_ts < HOLDOUT_FIRE_COOLDOWN`, authorization is refused; after the cooldown it succeeds, sets `fire_authorized_ts`, and the authorization is logged.
+- **`record_fire`/gate refuses an unauthorized fire**: `assert_fireable` refuses if `fire_authorized_ts` is null even when locked + sealed + in budget (the impatient-owner gate).
 - `assert_fireable` refuses `draft` / nonexistent id / broken seal.
 - **Budget**: with `HOLDOUT_FIRE_BUDGET=1`, a second fire of a distinct hypothesis is refused.
-- `record_fire` **idempotent**: re-reading the same hypothesis does not count twice.
+- `record_fire` **idempotent within the crash-recovery window**: re-reading the same hypothesis before the outcome does not count twice; **after `record_outcome`, re-reads are refused** (read window closed → look-many-times bound).
 - **Claim-then-execute (the Caveat 5 test)**: `record_fire` sets `fired_ts` *before* returning the path — verified by simulating a read failure after the fire and asserting `fired_ts` is already recorded. A partial peek counts as a fire.
+- **Verdict asymmetry**: `record_outcome` writes only `refuted` or `not_refuted` — assert no code path can write `confirmed`.
 - `record_fire` writes the confirmatory `trials` row → deflation sees it.
 
 **Holdout isolation stays green:**
@@ -257,4 +282,4 @@ Principle: **all gate logic is tested against a throwaway `hypotheses` table + a
 
 ## Pre-push (guardrail-critical)
 
-The gate guards the irreplaceable resource. Per the project's adversarial-audit-before-push pattern: with all commits green locally, dispatch an independent adversarial audit (separate from the implementer) on the diff before pushing. Lenses: (1) can falsification access succeed without a locked hypothesis? (2) does a partial peek truly record a fire (fire-before-read)? (3) can the seal/trigger be bypassed by a direct UPDATE? (4) does the budget count fires correctly across distinct hypotheses? (5) does `test_holdout_isolation` stay green and does the AST scanner truly recognize the new entry point? Amend on findings, then push and open the PR.
+The gate guards the irreplaceable resource. Per the project's adversarial-audit-before-push pattern: with all commits green locally, dispatch an independent adversarial audit (separate from the implementer) on the diff before pushing. Lenses: (1) can falsification access succeed without a locked hypothesis? (2) does a partial peek truly record a fire (fire-before-read)? (3) can the seal/trigger be bypassed by a direct UPDATE? (4) does the budget count fires correctly across distinct hypotheses? (5) does `test_holdout_isolation` stay green and does the AST scanner truly recognize the new entry point? (6) can a fire be executed without `authorize_fire` / before the cooldown (the impatient-owner path)? (7) can the deflation gate (4b) be passed with an under-registered N, and is that limit documented rather than hidden? (8) can any path write `verdict='confirmed'` or re-read the holdout after the outcome is recorded? Amend on findings, then push and open the PR.
