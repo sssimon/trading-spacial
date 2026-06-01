@@ -112,6 +112,7 @@ def _ensure_schema() -> None:
                 drift_check_ref TEXT,
                 realized_metric REAL,
                 verdict TEXT,
+                outcome_ts TEXT,
                 seal TEXT,
                 source_note TEXT
             )
@@ -485,9 +486,12 @@ def record_outcome(hid: int, *, realized_metric: float) -> None:
                     "cannot record an outcome")
             passed = _passes(float(realized_metric), float(row["threshold"]), row["direction"])
             verdict = "not_refuted" if passed else "refuted"
+            # status and verdict intentionally mirror: status drives the lifecycle
+            # state machine; verdict is the auditable falsification label.
             con.execute(
-                "UPDATE hypotheses SET status=?, verdict=?, realized_metric=? WHERE id=?",
-                (verdict, verdict, float(realized_metric), hid),
+                "UPDATE hypotheses SET status=?, verdict=?, realized_metric=?, "
+                "outcome_ts=? WHERE id=?",
+                (verdict, verdict, float(realized_metric), _now(), hid),
             )
 
     _with_write_retry("record_outcome", _do)

@@ -497,6 +497,7 @@ def test_record_outcome_not_refuted_when_threshold_met(hyp_db):
     r = _all_hyps()[0]
     assert r["verdict"] == "not_refuted"   # NEVER 'confirmed'
     assert r["status"] == "not_refuted"
+    assert r["outcome_ts"]            # resolution is timestamped
 
 
 def test_no_reread_after_outcome(hyp_db):
@@ -506,3 +507,14 @@ def test_no_reread_after_outcome(hyp_db):
     record_outcome(hid, realized_metric=120.0)
     with pytest.raises(HoldoutFalsificationError, match="resolved|closed"):
         assert_fireable(hid)               # read window closed
+
+
+def test_record_outcome_refuted_at_exact_threshold(hyp_db):
+    """Strict '>' falsification: realized == threshold is a refutation, not a pass
+    (the pre-registered claim was that the metric strictly EXCEEDS the threshold)."""
+    from db.hypotheses import record_fire, record_outcome
+    hid = _locked_and_authorized()        # threshold 0.0, direction '>'
+    record_fire(hid)
+    record_outcome(hid, realized_metric=0.0)
+    r = _all_hyps()[0]
+    assert r["verdict"] == "refuted"
