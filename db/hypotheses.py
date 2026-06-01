@@ -25,6 +25,11 @@ from datetime import datetime, timedelta, timezone
 
 from db.schema import _set_wal_mode_idempotent_with_retry
 from db.transaction import transaction
+from db.trials import (
+    _ensure_trials_schema,
+    n_effective,
+    selection_population_stats,
+)
 
 log = logging.getLogger("db.hypotheses")
 
@@ -168,16 +173,18 @@ def _fetch(con, hid: int) -> dict:
 
 
 def _compute_seal(row: dict) -> str:
-    payload = json.dumps([row.get(f) for f in _FROZEN_FIELDS],
-                         default=str, sort_keys=True)
+    # ordering is fixed by _FROZEN_FIELDS; values are scalars (no dict keys to sort)
+    payload = json.dumps([row.get(f) for f in _FROZEN_FIELDS], default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _has_provenance(config_hash: str) -> bool:
-    """4a: the config_hash must match >=1 exploratory ok trial. We recompute the
+    """4a: the config_hash must match >=1 exploratory ok trial. Recomputes the
     hash from each ok trial's combo_json the same way claim_hypothesis did.
-    Opens its own read connection so it can be called outside a write transaction."""
-    from db.trials import _ensure_trials_schema
+
+    Opens its OWN transaction() (BEGIN IMMEDIATE) and returns before
+    lock_hypothesis opens its write transaction — they never nest (nesting two
+    BEGIN IMMEDIATE connections in one call would deadlock on busy_timeout)."""
     _ensure_trials_schema()
     with transaction() as con:
         rows = con.execute(
@@ -188,9 +195,6 @@ def _has_provenance(config_hash: str) -> bool:
         if h == config_hash:
             return True
     return False
-
-
-from db.trials import selection_population_stats, n_effective
 
 
 def lock_hypothesis(hid: int, *, today: datetime) -> None:

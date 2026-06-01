@@ -129,3 +129,15 @@ def test_lock_succeeds_and_seals(hyp_db):
     assert r["locked_ts"]
     assert r["seal"]                         # sealed
     assert r["n_at_lock"] is not None        # N captured
+    from db.hypotheses import _compute_seal
+    assert r["seal"] == _compute_seal(r)
+
+
+def test_lock_refuses_relock(hyp_db):
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+    cfg = {"atr_sl_mult": 1.0}
+    _register_matching_ok_trial(cfg)
+    hid = _draft(strategy_config=cfg)
+    lock_hypothesis(hid, today=_T())
+    with pytest.raises(HypothesisLockError, match="re-lock|not 'draft'"):
+        lock_hypothesis(hid, today=_T())
