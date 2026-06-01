@@ -80,6 +80,23 @@ def open_holdout(rel_path: str, *, evaluation_mode: bool) -> Path:
     return target
 
 
+class HoldoutFalsificationError(HoldoutAccessError):
+    """Falsification access refused: hypothesis not locked/authorized/in-budget,
+    sealed-tamper, or its read window is closed. The gate logic lives in
+    db/hypotheses.py; this is the error it raises."""
+
+
+def open_holdout_for_falsification(rel_path: str, *, hypothesis_id: int) -> Path:
+    """The ONLY path to a falsification read of the holdout. Verifies the gate
+    chain, marks the fire BEFORE reading (claim-then-execute / Caveat 5), then
+    delegates path resolution to open_holdout. The db.hypotheses import is LOCAL
+    to avoid a module-load cycle (db.hypotheses imports names from this module)."""
+    from db.hypotheses import assert_fireable, record_fire
+    assert_fireable(hypothesis_id)                       # 1-5: refuse before touching anything
+    record_fire(hypothesis_id)                           # mark the fire BEFORE the read
+    return open_holdout(rel_path, evaluation_mode=True)  # reused path resolution
+
+
 def holdout_root() -> Path:
     """Return the holdout root path. For tooling that needs to know the
     location (e.g. the AST scanner whitelist) without reading any file."""

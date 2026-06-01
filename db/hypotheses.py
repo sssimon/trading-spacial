@@ -23,7 +23,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
-from data.holdout_access import HoldoutAccessError
+from data.holdout_access import HoldoutFalsificationError, open_holdout_for_falsification
 from db.schema import _set_wal_mode_idempotent_with_retry
 from db.transaction import transaction
 from db.trials import (
@@ -201,10 +201,6 @@ def claim_hypothesis(
 
 class HypothesisLockError(RuntimeError):
     """A lock criterion (provenance / deflation / walk-forward / drift / claim) failed."""
-
-
-class HoldoutFalsificationError(HoldoutAccessError):
-    """The falsification gate refused: not lockable/authorized/in-budget, or sealed-tamper."""
 
 
 def _fetch(con, hid: int, *, exc: type[Exception] = HypothesisLockError) -> dict:

@@ -518,3 +518,32 @@ def test_record_outcome_refuted_at_exact_threshold(hyp_db):
     record_outcome(hid, realized_metric=0.0)
     r = _all_hyps()[0]
     assert r["verdict"] == "refuted"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: open_holdout_for_falsification — fire-before-read entry point
+# ---------------------------------------------------------------------------
+
+def test_open_for_falsification_records_fire_before_read(hyp_db, monkeypatch):
+    """The gate must mark the fire BEFORE resolving the path. Sabotage open_holdout
+    so the read explodes; fired_ts must already be set."""
+    import data.holdout_access as ha
+    from db.hypotheses import open_holdout_for_falsification
+    hid = _locked_and_authorized()
+
+    def _explode(rel_path, *, evaluation_mode):
+        raise AssertionError("read reached")
+
+    monkeypatch.setattr(ha, "open_holdout", _explode)
+    with pytest.raises(AssertionError, match="read reached"):
+        open_holdout_for_falsification("fng.parquet", hypothesis_id=hid)
+    assert _all_hyps()[0]["fired_ts"]            # fire recorded before the read blew up
+
+
+def test_open_for_falsification_refuses_unauthorized(hyp_db):
+    from db.hypotheses import (open_holdout_for_falsification, HoldoutFalsificationError,
+                               lock_hypothesis)
+    hid = _lockable()
+    lock_hypothesis(hid, today=_T())             # locked but NOT authorized
+    with pytest.raises(HoldoutFalsificationError):
+        open_holdout_for_falsification("fng.parquet", hypothesis_id=hid)
