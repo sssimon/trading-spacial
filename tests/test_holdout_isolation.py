@@ -384,6 +384,23 @@ def test_wrapper_module_exists_and_exposes_open_holdout():
     assert "evaluation_mode" in text
 
 
+def test_wrapper_exposes_falsification_entry_point():
+    """The gate's falsification entry point must exist in the access wrapper and
+    be recognized as a legitimate way to reach the holdout."""
+    wrapper_path = REPO_ROOT / "data/holdout_access.py"
+    text = wrapper_path.read_text()
+    assert "def open_holdout_for_falsification(" in text
+    assert "class HoldoutFalsificationError" in text
+
+
+def test_hypotheses_module_does_not_reference_holdout_path():
+    """db/hypotheses.py must touch NO holdout path — it only manages signals.db
+    state, so it needs no whitelist entry. If this fails, the gate module grew a
+    direct holdout reference and the isolation contract is at risk."""
+    findings = _scan(REPO_ROOT / "db/hypotheses.py")
+    assert findings == [], f"db/hypotheses.py references holdout: {findings}"
+
+
 def test_wrapper_raises_without_evaluation_mode():
     """The wrapper itself must refuse access if evaluation_mode is not literally True."""
     from data.holdout_access import HoldoutAccessError, open_holdout
