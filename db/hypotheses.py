@@ -200,10 +200,12 @@ class HypothesisLockError(RuntimeError):
     """A lock criterion (provenance / deflation / walk-forward / drift / claim) failed."""
 
 
-def _fetch(con, hid: int) -> dict:
+def _fetch(con, hid: int, *, exc: type[Exception] = HypothesisLockError) -> dict:
+    """Fetch a hypothesis row or raise. Callers pass their own `exc` so the
+    missing-id error matches their boundary (lock vs authorize vs gate)."""
     row = con.execute("SELECT * FROM hypotheses WHERE id=?", (hid,)).fetchone()
     if row is None:
-        raise HypothesisLockError(f"hypothesis {hid} does not exist")
+        raise exc(f"hypothesis {hid} does not exist")
     return dict(row)
 
 
@@ -353,7 +355,7 @@ def authorize_fire(hid: int, *, now: datetime) -> None:
 
     def _do() -> None:
         with transaction() as con:
-            row = _fetch(con, hid)
+            row = _fetch(con, hid, exc=FireAuthorizationError)
             if row["status"] != "locked":
                 raise FireAuthorizationError(
                     f"hypothesis {hid} is '{row['status']}', not 'locked' — "

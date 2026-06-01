@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -336,9 +336,6 @@ def test_trigger_guards_exactly_frozen_fields_plus_seal(hyp_db):
 # Task 6: authorize_fire — cooldown gate + deliberate act
 # ---------------------------------------------------------------------------
 
-from datetime import timedelta
-
-
 def test_authorize_fire_refuses_before_cooldown(hyp_db):
     from db.hypotheses import lock_hypothesis, authorize_fire, FireAuthorizationError
     hid = _lockable()
@@ -362,3 +359,11 @@ def test_authorize_fire_sets_timestamp_after_cooldown(hyp_db):
     locked_at = datetime.fromisoformat(_all_hyps()[0]["locked_ts"])
     authorize_fire(hid, now=locked_at + timedelta(hours=25))
     assert _all_hyps()[0]["fire_authorized_ts"]
+
+
+def test_authorize_fire_refuses_nonexistent(hyp_db):
+    from db.hypotheses import authorize_fire, FireAuthorizationError
+    from db.hypotheses import _ensure_schema
+    _ensure_schema()
+    with pytest.raises(FireAuthorizationError, match="does not exist"):
+        authorize_fire(99999, now=_T())
