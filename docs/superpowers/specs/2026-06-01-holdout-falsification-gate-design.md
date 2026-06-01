@@ -125,9 +125,14 @@ window_label          TEXT  -- the holdout window [2025-04-30, 2026-04-30]
 metric                TEXT  -- e.g. 'net_pnl' | 'sharpe_ratio' — the OUTCOME metric tested on the shot
 threshold             REAL  -- the pre-registered threshold
 direction             TEXT  -- '>' | '<'  (refuted unless realized_metric <direction> threshold)
-deflated_metric       TEXT  -- the SELECTION-gate metric, e.g. 'sharpe_deflated' (criterion 4b)
-deflated_threshold    REAL  -- lock refuses if deflated_metric over full-registry N is below this
-n_at_lock             INTEGER -- registry N (selection_population_stats) captured at lock time
+deflated_metric       TEXT  -- the SELECTION-gate metric name, e.g. 'sharpe_deflated' (criterion 4b)
+deflated_threshold    REAL  -- lock refuses if the deflated metric over full-registry N is below this
+n_at_lock             INTEGER -- registry N_effective (selection_population_stats) captured at lock time
+-- deflation INPUTS for the candidate (the gate is decoupled from metrics_json schema):
+cand_sharpe           REAL  -- candidate's annualized Sharpe (from its winning exploratory trial)
+cand_n_returns        INTEGER -- candidate's per-trade sample size (T) for the PSR variance term
+cand_skew             REAL  -- candidate's return skew
+cand_kurt_raw         REAL  -- candidate's RAW (Pearson) kurtosis (normal = 3.0; add 3.0 to pandas excess)
 
 -- LOWER-TIER EVIDENCE (required to lock):
 preholdout_trial_ids_json TEXT  -- refs to exploratory trials that passed pre-holdout
