@@ -98,6 +98,16 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # report fixtures. Pre-emptive whitelist (same near-miss rule as
     # the commit-4 entry above).
     "tests/test_walk_forward_aggregate.py",
+    # KS stress-replay base stream (#187 stress-replay; PARKED/superseded). The
+    # literal 'holdout' appears only in the AssertionError that ENFORCES the
+    # cutoff — it raises if any requested frame exceeds HOLDOUT_CUTOFF, forbidding
+    # holdout-window reads (Non-Negotiable #3). Reads data/ohlcv.db via
+    # _load_frames with a hard `< 2025-04-30` cutoff; never opens data/holdout/.
+    "tools/ks_stress_replay/base_stream.py",
+    # KS stress-replay Approach-C driver (PARKED). References 'holdout' only in a
+    # console/report label "Cutoff (holdout-safe): <ts>" documenting that the run
+    # stays below the cutoff. No data/holdout/ access.
+    "tools/ks_stress_replay/run.py",
 }
 
 # Directories that don't contain trading code; scanning them would be noise
