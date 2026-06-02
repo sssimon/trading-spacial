@@ -685,3 +685,24 @@ def test_seal_covers_selection_fingerprint(hyp_db):
     s2 = H._compute_seal({**base, "selection_fingerprint": "FP_B"})
     assert "selection_fingerprint" in H._FROZEN_FIELDS
     assert s1 != s2
+
+
+# ---------------------------------------------------------------------------
+# Task 8: lock 4f — cost-model / selection-world consistency
+# ---------------------------------------------------------------------------
+
+def test_lock_refuses_on_cost_model_drift(hyp_db, monkeypatch):
+    """4f: if the active selection world changes between claim and lock, refuse."""
+    import selection_provenance
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+
+    # establish the original fingerprint and build a lockable hypothesis under it
+    selection_provenance._clear_cache()
+    hid = _lockable()   # claim + provenance ok-trials + attested refs, same world
+
+    # drift the active selection world AFTER claim/setup, BEFORE lock
+    selection_provenance._clear_cache()
+    monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
+
+    with pytest.raises(HypothesisLockError, match="selection-world|cost-model|fingerprint|drift"):
+        lock_hypothesis(hid, today=_T())

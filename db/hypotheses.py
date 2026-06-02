@@ -254,10 +254,13 @@ def _has_provenance(config_hash: str) -> bool:
 
 
 def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None, int]:
-    """Candidate's deflated-Sharpe probability over the FULL registry N.
+    """Candidate's deflated-Sharpe probability over the same-world registry N.
     Returns (probability_or_None, n_at_lock). Opens its own read of the registry
-    (selection_population_stats) and MUST run outside any write transaction."""
-    stats = selection_population_stats(study_type="exploratory")
+    (selection_population_stats) and MUST run outside any write transaction.
+    Restricts the pool to same-fingerprint trials so the best-of-N penalty is
+    computed against a coherent population (no cross-world contamination)."""
+    stats = selection_population_stats(study_type="exploratory",
+                                       selection_fingerprint=row["selection_fingerprint"])
     n_at_lock = n_effective(stats["n_registered"], today=today)
     sigma = stats["sigma_sr_trials"]
     if sigma is None:
@@ -319,6 +322,17 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     if row["direction"] not in (">", "<"):
         raise HypothesisLockError(
             f"incomplete claim — direction {row['direction']!r} must be '>' or '<'")
+
+    # 4f: cost-model / selection-world consistency. The candidate was selected under
+    # the world stamped at claim; locking under a drifted world would freeze a deflation
+    # computed against a population (and a fire later) that no longer matches. Refuse.
+    from selection_provenance import selection_fingerprint
+    active_fp, _ = selection_fingerprint()
+    if row["selection_fingerprint"] != active_fp:
+        raise HypothesisLockError(
+            f"selection-world drift: hypothesis frozen under "
+            f"{row['selection_fingerprint']!r} but the active selection world is "
+            f"{active_fp!r} — re-claim under the active cost-model before locking")
 
     # 4a: provenance (opens its own transaction internally)
     if not _has_provenance(row["config_hash"]):
