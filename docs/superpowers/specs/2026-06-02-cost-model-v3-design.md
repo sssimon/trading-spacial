@@ -436,12 +436,17 @@ debe rutear por ese guard o agregar uno explícito.
   (setea `cfg.regime_allocation.enabled=True`) → SIEMPRE pega `:737`; hacerlo calibration-driven
   para que no haya flip sin test que lo guarde.
 
-**BLOCKER funding LRC vs RA (resuelto en spec):** el path LRC NO precia funding hoy (no threadea
-`holding_hours`, y `_costs_active` en `:1003` EXCLUYE `enable_funding` — contrasta con el path RA en
-`:656` que lo incluye). Un floor cuyo valor depende de qué rama del simulador llamas NO es una cota
-bien definida. **Resolución:** threadear `holding_hours` + `enable_funding` + `model` por
-`_apply_costs_to_trade` (`:495-528`) Y agregar `enable_funding` al guard `_costs_active` del LRC en
-`:1003`, para que el término funding del floor aplique en AMBOS paths.
+**BLOCKER funding LRC vs RA (resuelto):** el path LRC NO preciaba funding (no threadeaba
+`holding_hours` ni `model` por `_apply_costs_to_trade`). **Resolución (refinada en implementación):**
+el fix REAL es **threadear `holding_hours` + `enable_funding` + `model` + `global_params` por
+`_apply_costs_to_trade`** y por sus dos callsites (`:1169`, `:1474`). Eso hace que LRC precie funding
+v3 en prod, donde `_costs_active` ya es True vía los otros flags. **NO se agrega `enable_funding` al
+guard `_costs_active` del LRC:** se intentó y se revirtió — como `enable_funding` defaultea a True,
+incluirlo en el guard activa el path de costos en runs "costs-off" que solo apagan los otros tres
+flags, rompiendo el idiom de tres flags de toda la suite (`test_backtest_with_costs`,
+`test_backtest_bankruptcy`, parity). El bound en prod (todos los costos on) es idéntico con o sin esa
+inclusión. Queda una asimetría residual LRC vs RA SOLO en el config degenerado "solo-funding"
+(slippage/spread/fees=False, funding=True), que ningún run real usa; se acepta como edge irrelevante.
 
 **Tests a actualizar (refs verificadas):**
 - `test_backtest_costs_v2.py:516-526` `test_unknown_model_raises` usa `model="v3"` como sentinel
