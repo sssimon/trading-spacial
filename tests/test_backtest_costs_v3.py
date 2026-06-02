@@ -241,3 +241,38 @@ class TestComputeTradeCostsV3:
         )
         assert c["tail_bps"] == 0.0
         assert c["total_cost_bps"] == pytest.approx(18.0, abs=0.01)  # spread+fee only
+
+
+class TestVersionAwareLoader:
+    def test_v2_sibling_loads_flat(self):
+        from backtest_costs import load_calibration
+        cal = load_calibration(path="costs_calibration.v2.json")
+        assert cal.version == 2
+        assert cal.active_model == "v2"   # absent in v2 JSON -> defaults to "v2"
+        mid = cal.tiers["mid"]
+        assert mid.size_factor == pytest.approx(1423.02)  # v2 field present
+        assert math.isnan(mid.stress_mult)                # v3 field poisoned
+
+    def test_v3_fixture_loads_nested(self, tmp_path):
+        import json
+        from backtest_costs import load_calibration
+        v3 = {
+            "version": 3, "model": "two-body", "active_model": "v3",
+            "global": {"Y_impact_constant": 1.5, "total_cost_cap_bps": 1000.0,
+                       "liquidity_fallback_floor_bps": 100.0,
+                       "v_daily_minutes_per_day": 1440},
+            "tiers": {"mid": {"symbols": ["ADAUSDT"],
+                "floor": {"half_spread_bps": 4.0, "fee_bps_per_side": 5.0,
+                          "funding_rate_bps_per_8h": 2.0, "stress_mult": 1.0},
+                "impact_tail": {"sigma_daily_bps": 500.0}}},
+            "sources": {}, "sensitivity_note": "x",
+        }
+        p = tmp_path / "v3.json"
+        p.write_text(json.dumps(v3))
+        cal = load_calibration(path=str(p))
+        assert cal.version == 3
+        assert cal.active_model == "v3"
+        assert cal.global_.Y_impact_constant == 1.5
+        mid = cal.tiers["mid"]
+        assert mid.sigma_daily_bps == 500.0
+        assert math.isnan(mid.size_factor)  # v2 field poisoned

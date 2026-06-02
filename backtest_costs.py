@@ -324,35 +324,58 @@ class Calibration:
     tiers: dict[str, TierParams]
     sources: dict[str, str]
     sensitivity_note: str
+    active_model: str = "v2"
+    global_: "GlobalParams | None" = None
 
 
 _CALIBRATION_PATH = Path(__file__).resolve().parent / "costs_calibration.json"
 
 
 def load_calibration(path: str | Path | None = None) -> Calibration:
-    """Load and validate costs_calibration.json. Raises FileNotFoundError if
-    missing — refuses to silently fall back to hardcoded defaults."""
+    """Load + validate calibration. version==2 -> flat parser (byte-identical to
+    legacy); version==3 -> nested floor/impact_tail + global block. Refuses to
+    silently fall back to hardcoded defaults (FileNotFoundError propagates)."""
     p = Path(path) if path is not None else _CALIBRATION_PATH
     with p.open() as f:
         raw = json.load(f)
+    version = int(raw["version"])
+
+    if version >= 3:
+        gb = raw["global"]
+        tiers = {
+            name: TierParams.from_v3_tier(floor=t["floor"], impact_tail=t["impact_tail"])
+            for name, t in raw["tiers"].items()
+        }
+        return Calibration(
+            version=version, model=raw["model"],
+            v2_planned=raw.get("v3_planned", raw.get("v2_planned", "")),
+            tiers=tiers, sources=dict(raw["sources"]),
+            sensitivity_note=raw["sensitivity_note"],
+            active_model=raw.get("active_model", "v3"),
+            global_=GlobalParams(
+                Y_impact_constant=float(gb["Y_impact_constant"]),
+                total_cost_cap_bps=float(gb["total_cost_cap_bps"]),
+                liquidity_fallback_floor_bps=float(gb["liquidity_fallback_floor_bps"]),
+                v_daily_minutes_per_day=float(gb["v_daily_minutes_per_day"]),
+            ),
+        )
 
     tiers = {
-        name: TierParams(
-            base_bps=float(t["base_bps"]),
-            size_factor=float(t["size_factor"]),
-            half_spread_bps=float(t["half_spread_bps"]),
-            fee_bps_per_side=float(t["fee_bps_per_side"]),
-            funding_rate_bps_per_8h=float(t.get("funding_rate_bps_per_8h", 0.0)),
+        name: TierParams.from_v2_flat(
+            base_bps=t["base_bps"], size_factor=t["size_factor"],
+            half_spread_bps=t["half_spread_bps"],
+            fee_bps_per_side=t["fee_bps_per_side"],
+            funding_rate_bps_per_8h=t.get("funding_rate_bps_per_8h", 0.0),
         )
         for name, t in raw["tiers"].items()
     }
     return Calibration(
-        version=int(raw["version"]),
-        model=raw["model"],
+        version=version, model=raw["model"],
         v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),
-        tiers=tiers,
-        sources=dict(raw["sources"]),
+        tiers=tiers, sources=dict(raw["sources"]),
         sensitivity_note=raw["sensitivity_note"],
+        active_model=raw.get("active_model", "v2"),
+        global_=None,
     )
 
 
