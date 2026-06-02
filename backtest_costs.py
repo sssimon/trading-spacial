@@ -192,6 +192,35 @@ def compute_slippage_bps(
         raise ValueError(f"Unknown cost model {model!r}; expected 'v1' or 'v2'")
 
 
+def compute_tail_bps(
+    *,
+    order_usd: float,
+    liquidity_usd_per_min: float,
+    sigma_daily_bps: float,
+    Y: float,
+    v_daily_minutes_per_day: float,
+) -> float:
+    """v3 impact tail (per fill), in bps. sqrt on the DAILY participation basis.
+
+    tail = Y * sigma_daily_bps * sqrt(order_usd / (liquidity_usd_per_min * v_daily_minutes_per_day))
+
+    Returns NaN when liquidity is non-positive/non-finite — the caller
+    (`compute_trade_costs` v3 branch) detects NaN and applies the floor-anchored
+    leg fallback. Negative participation (degenerate input) is clamped to 0.
+    """
+    if (
+        liquidity_usd_per_min is None
+        or not math.isfinite(liquidity_usd_per_min)
+        or liquidity_usd_per_min <= 0.0
+    ):
+        return float("nan")
+    v_daily = liquidity_usd_per_min * v_daily_minutes_per_day
+    participation = order_usd / v_daily
+    if participation < 0.0:
+        participation = 0.0
+    return Y * sigma_daily_bps * math.sqrt(participation)
+
+
 def compute_funding_cost_bps(
     *,
     holding_hours: float,
