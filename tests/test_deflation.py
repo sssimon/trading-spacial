@@ -57,3 +57,9 @@ def test_deflated_sharpe_decreases_with_more_trials():
 def test_psr_degenerate_variance_returns_none():
     # If the variance term is non-positive, the PSR is undefined -> None (not a crash).
     assert probabilistic_sharpe_ratio(sr=10.0, sr_benchmark=0.0, n_returns=120, skew=5.0, kurt_raw=1.0) is None
+
+
+def test_algo_version_present():
+    import deflation
+    assert isinstance(deflation.ALGO_VERSION, int)
+    assert deflation.ALGO_VERSION >= 1
