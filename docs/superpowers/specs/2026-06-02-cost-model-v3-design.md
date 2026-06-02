@@ -235,7 +235,10 @@ vivo".
 **Contrato de salida (add-only, no se remueve nada):** mismas keys que v2 —
 `entry_slippage_bps`, `exit_slippage_bps` (cargan `tail_entry`/`tail_exit`), `entry_spread_bps`,
 `exit_spread_bps` (cargan los legs de spread del floor), `fee_bps`, `funding_cost_bps`,
-`total_cost_bps`, `total_cost_usd`. **Agrega** `floor_bps`, `tail_bps`, `cap_hit` (bool).
+`total_cost_bps`, `total_cost_usd`. **Agrega** `floor_bps`, `tail_bps`, `cap_hit` (bool),
+`fallback_hit` (bool — algún leg cayó en el fallback de liquidez). Un `TierParams` con campos
+v3 NaN (p.ej. uno de v2/envenenado) metido al branch v3 **lanza `ValueError`** (simétrico al
+poison v3→v2): el NaN se vuelve ruidoso, no un fallback de liquidez disfrazado.
 
 ---
 
@@ -519,3 +522,11 @@ precondición, no un pase débil.
    backtests v3 en el entorno de diseño (y medirlas no validaría la cota, por R1).
 4. **Vol-blindness fuera de stress-replay.** Un backtest normal de un régimen de alta vol no infla la
    cota salvo que el operador suba `stress_mult`. El default 1.0 es para régimen normal por diseño.
+5. **El cap puede quedar por debajo del floor bajo `stress_mult` alto.** Con `stress_mult` suficientemente
+   grande, `floor_bps` solo puede exceder el `total_cost_cap_bps` (1000), y el `min(uncapped, cap)`
+   recorta el total por debajo de su propio floor. Es **intencional** (el cap es un backstop de
+   pesimismo, §4): en stress-replay el cap, no el floor, se vuelve la cota vinculante — justo el régimen
+   para el que el cap existe. A `stress_mult=1.0` (default) NO puede ocurrir para ningún tier
+   (floor máximo = small 30 << 1000). `enable_slippage=False` (modo gross-probe) omite el tail y el
+   exceso de fallback de liquidez por diseño, consistente con v2; la garantía de cota aplica a la
+   configuración por defecto con todos los costos activos.
