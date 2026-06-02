@@ -704,5 +704,5 @@ def test_lock_refuses_on_cost_model_drift(hyp_db, monkeypatch):
     selection_provenance._clear_cache()
     monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
 
-    with pytest.raises(HypothesisLockError, match="selection-world|cost-model|fingerprint|drift"):
+    with pytest.raises(HypothesisLockError, match="selection-world drift"):
         lock_hypothesis(hid, today=_T())

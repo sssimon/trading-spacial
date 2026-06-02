@@ -330,9 +330,9 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     active_fp, _ = selection_fingerprint()
     if row["selection_fingerprint"] != active_fp:
         raise HypothesisLockError(
-            f"selection-world drift: hypothesis frozen under "
+            f"hypothesis {hid}: selection-world drift — frozen under "
             f"{row['selection_fingerprint']!r} but the active selection world is "
-            f"{active_fp!r} — re-claim under the active cost-model before locking")
+            f"{active_fp!r}; re-claim under the active cost-model before locking")
 
     # 4a: provenance (opens its own transaction internally)
     if not _has_provenance(row["config_hash"]):
