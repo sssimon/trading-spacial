@@ -522,7 +522,7 @@ class TestModelDispatch:
                 liquidity_usd_per_min=1_000_000.0,
                 base_bps=5.0,
                 size_factor=25_000.0,
-                model="v3",  # noqa
+                model="v9",  # invalid sentinel (v3 is now a real model)
             )
 
     def test_v1_and_v2_both_accepted(self):
