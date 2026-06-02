@@ -81,13 +81,16 @@ Binance API (Bybit fallback)
 
 Signal generation is automatic; entry/close decisions require manual approval via CLI or frontend (Telegram is outbound only — no inbound bot for trade approval). Exclusions E2–E5 in `btc_scanner.py:305-335` are manual-check by design — see `docs/superpowers/specs/es/2026-05-01-operational-model-manual-gating.md` for the full classification and the backtest-vs-live distinction.
 
-## Cost model v2 (post-Phase 0 of epic #338)
+## Cost model v3 (two-body upper bound)
 
-- **Slippage formula:** sqrt-participation (Almgren-Chriss family). `slippage_bps = base_bps + size_factor × sqrt(notional/liquidity_per_min)`, capped at `EXTREME_PARTICIPATION_CAP_BPS = 500` (5%) per fill. Migration from v1 linear in `backtest_costs.py` (PR #341). v1 linear path still available via `model='v1'` for parity testing.
-- **Anchor parity preserved:** at 0.1% participation, v2 and v1 produce identical total slippage per tier (calibration design invariant tested in `test_backtest_costs_v2.py::TestAnchorParity`).
-- **Funding-rate accounting:** per-tier conservative bps per 8h (`major=1.0`, `mid=2.0`, `small=5.0` in `costs_calibration.json`). Charged on every 8h funding interval the position is held (floor semantics: 7h pays 0, 8h pays 1, 24h pays 3). Conservative mode = always positive cost regardless of position direction.
-- **Forensic mitigation:** the DOGE -$30K single-trade case from audit H8 (#323) is mitigated >1000× under v2. v1 produced unbounded ~$19.8M per-fill cost on the catastrophically thin bar; v2 caps at $1,050. Vol-targeting in the new strategy class (below) prevents the $21K notional from being placed in the first place.
-- **Calibration sources cited in `costs_calibration.json`:** Almgren-Chriss (2001), Donier-Bonart (2015), Tóth et al (2011).
+The backtest cost model is an intentional conservative UPPER BOUND, not an unbiased estimator — it can be falsified, not fit to live (full design: `docs/superpowers/specs/2026-06-02-cost-model-v3-design.md`). v3 decomposes it into two DECOUPLED bodies, replacing v2's single-anchor coupling.
+
+- **FLOOR (the body):** `stress_mult × (2×half_spread + 2×fee_per_side) + funding`. Size-INDEPENDENT, the dominant cost in the operating regime. RT floor: major 13, mid 18, small 30 bps. Calibrated conservatively to public Binance USDT-M perp facts, NOT fit to live. `fee_bps_per_side = 5.0` (published taker, no cushion; v2's 10.0 removed).
+- **IMPACT TAIL (the guardrail):** `Y × sigma_daily_bps × sqrt(order_usd / (liquidity_per_min × 1440))`, `Y=1.5`. DAILY participation basis (the ~38× base correction vs v2's per-minute) with a decoupled anchor (`Y·sigma`, not anchor-parity-with-v1). Inert (floor-dominated) at the operating regime, a real guardrail for large fills in thin alts. The square-root law (Almgren-Chriss 2001, Donier-Bonart 2015, Tóth et al 2011) is reserved for the TAIL — the metaorder regime where it applies — NOT the body (the strategy fires near-instantaneous fills, so the body is spread+fee, which the law does not contain).
+- **Total-cost cap** `total_cost_cap_bps = 1000` (round-trip; v2's 500 was per-leg) + per-leg liquidity fallback (floor-anchored). Bound guarantee rests on non-negativity + total-cap + `stress_mult`, NOT on floor>tail dominance. `stress_mult` default 1.0 (mandatory >1 in stress-replay).
+- **Versioning:** `active_model` in `costs_calibration.json` drives the live model (now `v3`); v1/v2 stay callable byte-identical for parity (v2 frozen in `costs_calibration.v2.json`). `compute_trade_costs(model='v3', ...)` in `backtest_costs.py`. A v2/poisoned `TierParams` into v3 raises (NaN poison, both directions).
+- **Funding-rate accounting:** per-tier conservative bps per 8h (`major=1.0`, `mid=2.0`, `small=5.0`), floor semantics (7h pays 0, 8h pays 1, 24h pays 3), threaded through both the LRC and RA simulator paths in v3. Structurally zero in the operating regime (mean hold 5.3h).
+- **An unbiased empirical cost estimator (from real fills) is a SEPARATE future epic** that would live BESIDE this bound, never replace it.
 
 ## Regime-allocation strategy class (epic #338, post-Phase 1)
 
