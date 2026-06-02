@@ -65,3 +65,44 @@ class TestFalsifyHarness:
         summary = assert_no_sign_inversion(score_positions(rows))
         assert "AVAXUSDT" in summary["skipped_noise"]
         assert summary["checked"] == []
+
+
+class TestHarnessEntrypoint:
+    def test_load_closed_shorts_case_insensitive_and_window(self, tmp_path):
+        import sqlite3
+        from tools.ks_stress_replay.falsify_cost_bound import _load_closed_shorts_from_db
+        db = tmp_path / "signals.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE positions (symbol TEXT, direction TEXT, status TEXT, "
+                    "pnl_usd REAL, pnl_pct REAL, size_usd REAL, entry_ts TEXT, exit_ts TEXT)")
+        # closed short in-window (lowercase direction), an open one, a long, an out-of-window one
+        con.executemany(
+            "INSERT INTO positions VALUES (?,?,?,?,?,?,?,?)",
+            [
+                ("AVAXUSDT", "short", "closed", 5.0, 0.5, 644.0, "2026-05-22", "2026-05-23"),
+                ("AVAXUSDT", "short", "open",   0.0, 0.0, 644.0, "2026-05-22", None),
+                ("BTCUSDT",  "long",  "closed", 5.0, 0.5, 644.0, "2026-05-22", "2026-05-23"),
+                ("XLMUSDT",  "short", "closed", 1.0, 0.2, 644.0, "2025-01-01", "2025-01-02"),  # pre-window
+            ],
+        )
+        con.commit(); con.close()
+        rows = _load_closed_shorts_from_db(str(db))
+        # only the in-window closed short survives the filter
+        syms = [r["symbol"] for r in rows]
+        assert syms == ["AVAXUSDT"]
+        assert rows[0]["direction"].upper() == "SHORT"
+
+    def test_liquidity_proxy_at_returns_value_or_nan(self):
+        import math
+        import pandas as pd
+        from tools.ks_stress_replay.falsify_cost_bound import _liquidity_proxy_at
+        idx = pd.date_range("2026-05-01", periods=800, freq="1h", tz="UTC")
+        df = pd.DataFrame({"close": [100.0]*800, "volume": [6000.0]*800}, index=idx)
+        # at a ts well past min_periods, proxy ~ (100*6000)/60 = 10000 usd/min
+        ts = idx[799]
+        v = _liquidity_proxy_at(df, ts)
+        assert v == pytest.approx(10000.0, rel=1e-6)
+        # before min_periods (bar 10) -> NaN
+        assert math.isnan(_liquidity_proxy_at(df, idx[10]))
+        # empty df -> NaN
+        assert math.isnan(_liquidity_proxy_at(pd.DataFrame(), ts))

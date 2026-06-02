@@ -130,3 +130,90 @@ def assert_no_sign_inversion(scored: list[dict]) -> dict:
             raise BoundFalsifiedError(
                 f"{symbol}: v3 cost causes sign inversion (gross {gross:.2f} -> net {net:.2f})")
     return {"n": n, "checked": checked, "skipped_noise": skipped_noise}
+
+
+def _liquidity_proxy_at(df1h, ts) -> float:
+    """30d rolling per-minute USD liquidity proxy at-or-before ts, mirroring the
+    backtest (backtest.py): (close*volume)/60, rolling(720, min_periods=120).mean().
+    Returns NaN if df is empty or no bar at/<= ts has a valid rolling value."""
+    if df1h is None or len(df1h) == 0:
+        return float("nan")
+    usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
+    proxy = usd_per_min.rolling(720, min_periods=120).mean()
+    mask = proxy.index <= ts
+    if not mask.any():
+        return float("nan")
+    val = proxy[mask].iloc[-1]
+    return float(val) if val == val else float("nan")  # NaN stays NaN
+
+
+def _load_closed_shorts_from_db(db_path: str):
+    """Read-only load of CLOSED SHORT positions in the post-cutoff window
+    (>= 2026-05-21, well past the holdout cutoff 2025-04-29). Case-insensitive
+    on direction. NN#3: reads only signals.db (mode=ro), no holdout frames."""
+    import sqlite3
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        cur = con.execute(
+            "SELECT symbol, direction, pnl_usd, pnl_pct, size_usd, entry_ts, exit_ts "
+            "FROM positions WHERE status='closed' AND UPPER(direction)='SHORT' "
+            "AND exit_ts >= '2026-05-21' ORDER BY exit_ts")
+        return [
+            {"symbol": r["symbol"], "direction": r["direction"],
+             "pnl_usd": r["pnl_usd"], "pnl_pct": r["pnl_pct"],
+             "size_usd": r["size_usd"], "entry_ts": r["entry_ts"], "exit_ts": r["exit_ts"]}
+            for r in cur.fetchall()
+        ]
+    finally:
+        con.close()
+
+
+def main(signals_db: str = "signals.db"):
+    """Run the falsification gate against the server signals.db (read-only).
+    Resolves real per-minute liquidity from cached OHLCV; rows whose liquidity
+    cannot be resolved are EXCLUDED and reported as 'unresolved' (NOT scored with
+    NaN, which would hit the model fallback and spuriously falsify). MERGE
+    PRECONDITION (spec §9): needs the server DB with >= EXPECTED_MIN closed shorts."""
+    import pandas as pd  # noqa
+    from datetime import datetime, timezone
+    from backtest import get_cached_data
+
+    rows = _load_closed_shorts_from_db(signals_db)
+    data_start = datetime(2026, 1, 1, tzinfo=timezone.utc)  # post-cutoff; NN#3-clean
+    ohlcv_cache: dict = {}
+    scoreable, unresolved = [], []
+    for r in rows:
+        sym = r["symbol"]
+        if sym not in ohlcv_cache:
+            ohlcv_cache[sym] = get_cached_data(sym, "1h", start_date=data_start)
+        import pandas as pd
+        ts = pd.Timestamp(r["entry_ts"])
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        liq = _liquidity_proxy_at(ohlcv_cache[sym], ts)
+        if liq != liq or liq <= 0.0:  # NaN or non-positive -> cannot score
+            unresolved.append(r)
+            continue
+        scoreable.append({**r, "liquidity_per_min": liq})
+
+    print(f"loaded {len(rows)} closed shorts; scoreable={len(scoreable)} "
+          f"unresolved(liquidity)={len(unresolved)}")
+    for u in unresolved:
+        print(f"  UNRESOLVED (no liquidity): {u['symbol']} entry={u['entry_ts']}")
+
+    scored = score_positions(scoreable)
+    summary = assert_no_sign_inversion(scored)  # raises BoundFalsifiedError / InsufficientDataError
+    print(f"checked symbols: {summary['checked']}")
+    print(f"skipped (noise band): {summary['skipped_noise']}")
+    print("SCOPE CAVEAT: SHORT-only, ~$644 notional, NORMAL regime May-2026, low "
+          "participation. Does NOT license long cost, crisis/wide-spread regimes, "
+          "high-participation fills, any edge claim, or 'validated'.")
+    print("PASS: v3 preserves all per-symbol price-winner signs (no sign inversion, "
+          "fee floor intact).")
+    return summary
+
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "signals.db")
