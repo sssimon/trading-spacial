@@ -48,12 +48,19 @@ class TestComputeTailBps:
 
     def test_bad_liquidity_returns_nan(self):
         from backtest_costs import compute_tail_bps
-        for bad in (0.0, -5.0, float("nan"), float("inf")):
+        for bad in (0.0, -5.0, float("nan"), float("inf"), float("-inf")):
             r = compute_tail_bps(
                 order_usd=1_000.0, liquidity_usd_per_min=bad,
                 sigma_daily_bps=300.0, Y=1.5, v_daily_minutes_per_day=1440.0,
             )
             assert math.isnan(r)
+
+    def test_zero_v_daily_minutes_returns_nan(self):
+        from backtest_costs import compute_tail_bps
+        assert math.isnan(compute_tail_bps(
+            order_usd=1_000.0, liquidity_usd_per_min=1_000_000.0,
+            sigma_daily_bps=300.0, Y=1.5, v_daily_minutes_per_day=0.0,
+        ))
 
     def test_negative_participation_clamped(self):
         from backtest_costs import compute_tail_bps

@@ -214,6 +214,8 @@ def compute_tail_bps(
         or liquidity_usd_per_min <= 0.0
     ):
         return float("nan")
+    if not math.isfinite(v_daily_minutes_per_day) or v_daily_minutes_per_day <= 0.0:
+        return float("nan")
     v_daily = liquidity_usd_per_min * v_daily_minutes_per_day
     participation = order_usd / v_daily
     if participation < 0.0:
