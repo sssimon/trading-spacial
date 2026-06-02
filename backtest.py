@@ -1008,7 +1008,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     # entirely. `_costs_active` short-circuits the per-trade augmentation when
     # all flags are False — preserving byte-identical behavior on the
     # legacy path.
-    _costs_active = bool(enable_slippage or enable_spread or enable_fees or enable_funding)
+    _costs_active = bool(enable_slippage or enable_spread or enable_fees)
     _tier_params = None
     _liquidity_per_min = None
     if _costs_active:
