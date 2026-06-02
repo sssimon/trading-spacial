@@ -71,6 +71,7 @@ def test_simulate_strategy_parity_without_kill_switch(tmp_path, monkeypatch):
         sim_start=start, sim_end=end,
         df1d=df1d,
         enable_slippage=False, enable_spread=False, enable_fees=False,
+        enable_funding=False,
     )
 
     # Pinned from a pre-refactor capture (committed at the start of Task 6).
@@ -127,12 +128,14 @@ def test_simulate_strategy_dynamic_exit_flag_off_real_data_parity(tmp_path, monk
         sim_start=start, sim_end=end, df1d=df1d.copy(),
         cfg=cfg_no_field,
         enable_slippage=False, enable_spread=False, enable_fees=False,
+        enable_funding=False,
     )
     trades_flag_off, equity_flag_off = simulate_strategy(
         df1h.copy(), df4h.copy(), df5m.copy(), symbol,
         sim_start=start, sim_end=end, df1d=df1d.copy(),
         cfg=cfg_flag_off,
         enable_slippage=False, enable_spread=False, enable_fees=False,
+        enable_funding=False,
     )
 
     assert len(trades_baseline) == len(trades_flag_off), (
@@ -301,6 +304,7 @@ def test_simulate_strategy_parity_doge_2024_h1(tmp_path, monkeypatch):
         cfg=cfg, symbol_overrides=symbol_overrides,
         # A.0.2 (#277): pin is pre-cost; explicit flags=False preserves it.
         enable_slippage=False, enable_spread=False, enable_fees=False,
+        enable_funding=False,
     )
 
     # Pinned 2026-04-27 with main commit 664e85a (precision fix merged).
@@ -370,6 +374,7 @@ def test_simulate_strategy_parity_xlm_2024_h1(tmp_path, monkeypatch):
         cfg=cfg, symbol_overrides=symbol_overrides,
         # A.0.2 (#277): pin is pre-cost; explicit flags=False preserves it.
         enable_slippage=False, enable_spread=False, enable_fees=False,
+        enable_funding=False,
     )
 
     # Pinned 2026-04-27 with main commit 664e85a (precision fix merged).
