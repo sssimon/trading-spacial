@@ -316,3 +316,38 @@ class TestBacktestPathsUseV3:
         assert floor_rt("major") == pytest.approx(13.0)
         assert floor_rt("mid") == pytest.approx(18.0)
         assert floor_rt("small") == pytest.approx(30.0)
+
+
+class TestV3Invariants:
+    def _tiers(self):
+        from backtest_costs import load_calibration
+        return load_calibration()
+
+    def test_every_component_non_negative(self):
+        from backtest_costs import compute_trade_costs
+        cal = self._tiers()
+        for t in ("major", "mid", "small"):
+            c = compute_trade_costs(
+                entry_notional_usd=644.0, exit_notional_usd=644.0,
+                entry_liquidity_usd_per_min=500_000.0,
+                exit_liquidity_usd_per_min=500_000.0,
+                tier_params=cal.tiers[t], model="v3", global_params=cal.global_)
+            for k in ("floor_bps", "tail_bps", "fee_bps", "total_cost_bps"):
+                assert c[k] >= 0.0
+
+    def test_fee_floor_meets_published_taker(self):
+        from backtest_costs import PUBLISHED_TAKER_FEE_BPS
+        cal = self._tiers()
+        for t in ("major", "mid", "small"):
+            assert cal.tiers[t].fee_bps_per_side >= PUBLISHED_TAKER_FEE_BPS
+
+    def test_tail_reduction_vs_v2_at_y15(self):
+        # Spec §3: at Y=1.5 the slope-source change is ~1.7-2.0x; with the
+        # sqrt(1440)=37.95x base correction, total tail reduction is ~65-75x.
+        # Pin the major slope factor: size_factor_v2 / (Y*sigma) = 885.44/(1.5*300).
+        cal = self._tiers()
+        v2_major_sf = 885.44
+        slope_factor = v2_major_sf / (cal.global_.Y_impact_constant
+                                      * cal.tiers["major"].sigma_daily_bps)
+        assert slope_factor == pytest.approx(1.97, abs=0.02)
+        assert slope_factor * 37.95 == pytest.approx(74.7, abs=0.5)
