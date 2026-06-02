@@ -7,6 +7,8 @@ OHLCV only; NEVER pre-2025-04-29 frames; NEVER imports holdout access.
 """
 from __future__ import annotations
 
+import math
+
 from backtest_costs import (
     load_calibration, tier_for_symbol, compute_trade_costs, PUBLISHED_TAKER_FEE_BPS,
 )
@@ -18,6 +20,28 @@ MANDATORY_LOWER_BOUND_BPS = 2 * PUBLISHED_TAKER_FEE_BPS   # 10.0 RT bps, exchang
 
 class InsufficientDataError(RuntimeError):
     pass
+
+
+class BoundFalsifiedError(AssertionError):
+    """The v3 bound failed falsification (mandatory fee floor breached, or a
+    per-symbol price-winner inverted to a net loser). Subclasses AssertionError
+    so existing pytest.raises(AssertionError, ...) still matches, but is a real
+    raise that SURVIVES `python -O` (a bare assert would be silently stripped)."""
+
+
+_REQUIRED_KEYS = ("symbol", "pnl_usd", "size_usd", "liquidity_per_min")
+
+
+def _validate_row(r: dict) -> None:
+    missing = [k for k in _REQUIRED_KEYS if k not in r]
+    if missing:
+        raise ValueError(f"position row missing required keys {missing}: {r}")
+    size = r["size_usd"]
+    if not (isinstance(size, (int, float)) and math.isfinite(size) and size > 0):
+        raise ValueError(f"position row has non-positive/non-finite size_usd={size!r}: {r}")
+    pnl = r["pnl_usd"]
+    if not (isinstance(pnl, (int, float)) and math.isfinite(pnl)):
+        raise ValueError(f"position row has non-finite pnl_usd={pnl!r}: {r}")
 
 
 def _v3_cost_usd(symbol: str, size_usd: float, liq: float, *, force_cost_bps=None) -> float:
@@ -42,6 +66,7 @@ def score_positions(rows: list[dict], *, force_cost_bps=None) -> list[dict]:
     """Attach v3 cost to each closed-short row. Returns list of scored dicts."""
     scored = []
     for r in rows:
+        _validate_row(r)
         cost_usd = _v3_cost_usd(
             r["symbol"], r["size_usd"], r["liquidity_per_min"],
             force_cost_bps=force_cost_bps,
@@ -51,7 +76,7 @@ def score_positions(rows: list[dict], *, force_cost_bps=None) -> list[dict]:
     return scored
 
 
-def assert_no_sign_inversion(scored: list[dict]) -> None:
+def assert_no_sign_inversion(scored: list[dict]) -> dict:
     """Raise if the v3 cost model inverts any per-symbol winner or violates the fee floor.
 
     Two checks are performed in order:
@@ -59,14 +84,21 @@ def assert_no_sign_inversion(scored: list[dict]) -> None:
     1. **Precondition guard** — aborts with ``InsufficientDataError`` when the
        sample is too small to be meaningful (< ``EXPECTED_MIN`` rows).
 
-    2. **Mandatory fee-floor tripwire** — asserts that every scored position has
-       a v3 cost >= ``MANDATORY_LOWER_BOUND_BPS`` (= 2 × published taker fee,
-       10.0 RT bps).  This is an *external* reference, independent of the model's
-       own internal floor, so it cannot be silently lowered by a calibration edit.
+    2. **Mandatory fee-floor tripwire** — raises ``BoundFalsifiedError`` if any
+       scored position has a v3 cost < ``MANDATORY_LOWER_BOUND_BPS`` (= 2 ×
+       published taker fee, 10.0 RT bps).  This is an *external* reference,
+       independent of the model's own internal floor, so it cannot be silently
+       lowered by a calibration edit.
 
     3. **No per-symbol sign inversion** — for each symbol whose aggregate gross
-       P&L exceeds ``NOISE_BAND_USD`` (to filter statistical noise), asserts that
-       the sign of net P&L (gross minus v3 cost) matches the sign of gross P&L.
+       P&L exceeds ``NOISE_BAND_USD`` (to filter statistical noise), raises
+       ``BoundFalsifiedError`` if the sign of net P&L (gross minus v3 cost) does
+       not match the sign of gross P&L.  Granularity is per-symbol SUM: this
+       guarantees no per-symbol NET sign inversion, not that no individual trade
+       inverted.
+
+    Returns a summary dict ``{"n": int, "checked": [...], "skipped_noise": [...]}``
+    listing symbols that were evaluated vs. skipped for noise.
     """
     n = len(scored)
     if n < EXPECTED_MIN:
@@ -76,22 +108,25 @@ def assert_no_sign_inversion(scored: list[dict]) -> None:
 
     # Secondary tripwire: model never sits below the external mandatory fee floor.
     for s in scored:
-        assert s["v3_cost_bps"] >= MANDATORY_LOWER_BOUND_BPS, (
-            f"{s['symbol']}: v3 cost {s['v3_cost_bps']:.2f}bps below mandatory "
-            f"{MANDATORY_LOWER_BOUND_BPS}bps (fee mis-config)"
-        )
+        if s["v3_cost_bps"] < MANDATORY_LOWER_BOUND_BPS:
+            raise BoundFalsifiedError(
+                f"{s['symbol']}: v3 cost {s['v3_cost_bps']:.2f}bps below mandatory "
+                f"{MANDATORY_LOWER_BOUND_BPS}bps (fee mis-config)")
 
     # Primary test: no per-symbol sign inversion.
     by_symbol: dict[str, list] = {}
     for s in scored:
         by_symbol.setdefault(s["symbol"], []).append(s)
 
+    checked, skipped_noise = [], []
     for symbol, ss in by_symbol.items():
         gross = sum(s["pnl_usd"] for s in ss)
         if abs(gross) <= NOISE_BAND_USD:
-            continue  # too noisy to distinguish real edge from rounding
+            skipped_noise.append(symbol)
+            continue
+        checked.append(symbol)
         net = sum(s["pnl_usd"] - s["v3_cost_usd"] for s in ss)
-        assert (gross > 0) == (net > 0), (
-            f"{symbol}: v3 cost causes sign inversion "
-            f"(gross {gross:.2f} -> net {net:.2f})"
-        )
+        if (gross > 0) != (net > 0):
+            raise BoundFalsifiedError(
+                f"{symbol}: v3 cost causes sign inversion (gross {gross:.2f} -> net {net:.2f})")
+    return {"n": n, "checked": checked, "skipped_noise": skipped_noise}

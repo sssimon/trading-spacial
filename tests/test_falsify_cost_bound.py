@@ -6,7 +6,7 @@ import math
 import pytest
 from tools.ks_stress_replay.falsify_cost_bound import (
     score_positions, assert_no_sign_inversion, MANDATORY_LOWER_BOUND_BPS,
-    EXPECTED_MIN, InsufficientDataError,
+    EXPECTED_MIN, InsufficientDataError, BoundFalsifiedError,
 )
 
 
@@ -42,3 +42,26 @@ class TestFalsifyHarness:
         scored = score_positions(rows, force_cost_bps=500.0)  # v2-like overcharge
         with pytest.raises(AssertionError, match="sign inversion"):
             assert_no_sign_inversion(scored)
+
+    def test_falsification_error_is_assertionerror(self):
+        from tools.ks_stress_replay.falsify_cost_bound import BoundFalsifiedError
+        assert issubclass(BoundFalsifiedError, AssertionError)
+
+    def test_nan_pnl_rejected(self):
+        with pytest.raises(ValueError, match="non-finite pnl_usd"):
+            score_positions([_pos("AVAXUSDT", float("nan"), 0.5)])
+
+    def test_zero_size_rejected(self):
+        with pytest.raises(ValueError, match="size_usd"):
+            score_positions([_pos("AVAXUSDT", 5.0, 0.5, size_usd=0.0)])
+
+    def test_missing_key_rejected(self):
+        with pytest.raises(ValueError, match="missing required keys"):
+            score_positions([{"symbol": "AVAXUSDT", "pnl_usd": 5.0}])
+
+    def test_unscored_noise_symbols_reported(self):
+        # 20 rows, gross 20*0.1=2.0 < NOISE_BAND 5.0 -> symbol skipped & REPORTED
+        rows = [_pos("AVAXUSDT", 0.1, 0.01) for _ in range(20)]
+        summary = assert_no_sign_inversion(score_positions(rows))
+        assert "AVAXUSDT" in summary["skipped_noise"]
+        assert summary["checked"] == []
