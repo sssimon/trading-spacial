@@ -502,6 +502,9 @@ def _apply_costs_to_trade(
     enable_slippage: bool,
     enable_spread: bool,
     enable_fees: bool,
+    enable_funding: bool = True,
+    model: str = "v2",
+    global_params=None,
 ) -> None:
     """Mutate `trade` in place: append cost-component fields and reduce
     pnl_usd by total_cost_usd (preserving the original gross value as
@@ -524,6 +527,10 @@ def _apply_costs_to_trade(
         enable_slippage=enable_slippage,
         enable_spread=enable_spread,
         enable_fees=enable_fees,
+        enable_funding=enable_funding,
+        holding_hours=float(trade.get("duration_hours", 0.0) or 0.0),
+        model=model,
+        global_params=global_params,
     )
     trade.update(cost)
     trade["gross_pnl_usd"] = trade["pnl_usd"]
@@ -734,7 +741,8 @@ def _simulate_strategy_regime_allocation(
                 enable_fees=enable_fees,
                 enable_funding=enable_funding,
                 holding_hours=holding_hours,
-                model="v2",
+                model=_calibration.active_model,
+                global_params=_calibration.global_,
             )
             net_pnl_usd = gross_pnl_usd - cost["total_cost_usd"]
         else:
@@ -1000,7 +1008,7 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     # entirely. `_costs_active` short-circuits the per-trade augmentation when
     # all flags are False — preserving byte-identical behavior on the
     # legacy path.
-    _costs_active = bool(enable_slippage or enable_spread or enable_fees)
+    _costs_active = bool(enable_slippage or enable_spread or enable_fees or enable_funding)
     _tier_params = None
     _liquidity_per_min = None
     if _costs_active:
@@ -1170,6 +1178,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                         trade, position, exit_price, _exit_liq,
                         compute_trade_costs, _tier_params,
                         enable_slippage, enable_spread, enable_fees,
+                        enable_funding=enable_funding,
+                        model=_calibration.active_model,
+                        global_params=_calibration.global_,
                     )
                 trades.append(trade)
                 capital += trade["pnl_usd"]
@@ -1475,6 +1486,9 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
                 trade, position, exit_price, _exit_liq_final,
                 compute_trade_costs, _tier_params,
                 enable_slippage, enable_spread, enable_fees,
+                enable_funding=enable_funding,
+                model=_calibration.active_model,
+                global_params=_calibration.global_,
             )
         trades.append(trade)
         capital += trade["pnl_usd"]

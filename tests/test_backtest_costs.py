@@ -152,16 +152,18 @@ class TestLoadCalibration:
 
     def test_loads_committed_calibration(self):
         """The committed costs_calibration.json must load and expose tier params
-        for major / mid / small."""
+        for major / mid / small. Updated for v3: checks v3-shape fields."""
         from backtest_costs import load_calibration
 
         cal = load_calibration()
+        assert cal.version == 3
+        assert "two-body" in cal.model.lower()
         assert set(cal.tiers.keys()) == {"major", "mid", "small"}
         for tier_name, params in cal.tiers.items():
-            assert params.base_bps > 0, f"{tier_name} base_bps must be positive"
-            assert params.size_factor > 0, f"{tier_name} size_factor must be positive"
             assert params.half_spread_bps > 0, f"{tier_name} half_spread_bps must be positive"
             assert params.fee_bps_per_side > 0, f"{tier_name} fee_bps_per_side must be positive"
+            assert params.stress_mult > 0, f"{tier_name} stress_mult must be positive"
+            assert params.sigma_daily_bps > 0, f"{tier_name} sigma_daily_bps must be positive"
 
     def test_calibration_covers_all_curated_symbols(self):
         """Every curated symbol must have resolvable params via tier_for_symbol →
@@ -175,10 +177,11 @@ class TestLoadCalibration:
 
     def test_calibration_documents_source_per_param(self):
         """Spec §1: every parameter must cite its source in costs_calibration.json
-        ('Not acceptable: a number invented to match desired output')."""
+        ('Not acceptable: a number invented to match desired output').
+        Re-pointed to v2 sibling (v3 sources use different key names)."""
         from backtest_costs import load_calibration
 
-        cal = load_calibration()
+        cal = load_calibration(path="costs_calibration.v2.json")
         # `sources` is a dict keyed by parameter name with a non-empty string value.
         assert "base_bps" in cal.sources and cal.sources["base_bps"].strip()
         assert "size_factor" in cal.sources and cal.sources["size_factor"].strip()
@@ -193,17 +196,17 @@ class TestLoadCalibration:
         cal = load_calibration()
         assert cal.sensitivity_note and len(cal.sensitivity_note) > 0
 
-    def test_calibration_records_v2_model_marker(self):
-        """Post-#340: calibration JSON is v2. Active model must be sqrt-participation.
+    def test_calibration_records_v3_model_marker(self):
+        """Post-cost-model-v3 atomic swap: committed calibration JSON is now v3.
+        Active model must be the two-body bound.
 
-        The v1 'linear' marker was correct under #277; v2 migrated per epic #338
-        Phase 0. test_v2_calibration_anchor_parity_matches_v1 covers numerical
-        continuity at the anchor."""
+        For the frozen v2 marker, see test_backtest_costs_v2.py::TestAnchorParity
+        which re-points to costs_calibration.v2.json."""
         from backtest_costs import load_calibration
 
         cal = load_calibration()
-        assert cal.version == 2
-        assert "sqrt-participation" in cal.model.lower()
+        assert cal.version == 3
+        assert "two-body" in cal.model.lower()
 
     def test_calibration_includes_funding_rate_field_v2(self):
         """Post-#340: each tier exposes funding_rate_bps_per_8h (NEW in v2).

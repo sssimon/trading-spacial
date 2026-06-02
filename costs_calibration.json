@@ -1,40 +1,41 @@
 {
-  "version": 2,
-  "model": "sqrt-participation (Almgren-Chriss)",
-  "v2_planned": "Phase 0 of epic #338 — DONE. Migrated from v1 linear to v2 sqrt-participation per #340. Future v3 may add per-bar funding rate from Binance API + permanent/temporary impact decomposition.",
+  "version": 3,
+  "model": "two-body bound: floor(spread+fee+funding) + decoupled daily-basis sqrt impact-tail",
+  "active_model": "v3",
+  "v3_planned": "Reemplaza el acople de ancla-unica v2 por dos cuerpos desacoplados. Futuro: sigma_daily rolling por simbolo; ESTIMADOR empirico de costo separado (epic distinto, vive AL LADO de esta cota, nunca la reemplaza).",
+  "global": {
+    "Y_impact_constant": 1.5,
+    "total_cost_cap_bps": 1000.0,
+    "liquidity_fallback_floor_bps": 100.0,
+    "v_daily_minutes_per_day": 1440
+  },
   "tiers": {
     "major": {
       "symbols": ["BTCUSDT", "ETHUSDT"],
-      "base_bps": 2.0,
-      "size_factor": 885.44,
-      "half_spread_bps": 1.5,
-      "fee_bps_per_side": 10.0,
-      "funding_rate_bps_per_8h": 1.0
+      "floor": { "half_spread_bps": 1.5, "fee_bps_per_side": 5.0, "funding_rate_bps_per_8h": 1.0, "stress_mult": 1.0 },
+      "impact_tail": { "sigma_daily_bps": 300.0 }
     },
     "mid": {
       "symbols": ["ADAUSDT", "AVAXUSDT", "DOGEUSDT", "UNIUSDT", "XLMUSDT"],
-      "base_bps": 5.0,
-      "size_factor": 1423.02,
-      "half_spread_bps": 7.5,
-      "fee_bps_per_side": 10.0,
-      "funding_rate_bps_per_8h": 2.0
+      "floor": { "half_spread_bps": 4.0, "fee_bps_per_side": 5.0, "funding_rate_bps_per_8h": 2.0, "stress_mult": 1.0 },
+      "impact_tail": { "sigma_daily_bps": 500.0 }
     },
     "small": {
       "symbols": ["PENDLEUSDT", "JUPUSDT", "RUNEUSDT"],
-      "base_bps": 10.0,
-      "size_factor": 2055.59,
-      "half_spread_bps": 15.0,
-      "fee_bps_per_side": 10.0,
-      "funding_rate_bps_per_8h": 5.0
+      "floor": { "half_spread_bps": 10.0, "fee_bps_per_side": 5.0, "funding_rate_bps_per_8h": 5.0, "stress_mult": 1.0 },
+      "impact_tail": { "sigma_daily_bps": 800.0 }
     }
   },
   "sources": {
-    "model_choice_v2": "v2 sqrt-participation matches the academic literature on market impact: Almgren & Chriss (2001) 'Optimal Execution of Portfolio Transactions' Journal of Risk 3:5-39 derives sqrt impact from the temporary-permanent impact framework; Donier & Bonart (2015) 'A million metaorder analysis of market impact on the Bitcoin' Market Microstructure and Liquidity 1(02) empirically validates sqrt scaling specifically for crypto; Tóth et al (2011) 'Anomalous price impact and the critical nature of liquidity in financial markets' Physical Review X 1:021006 establishes the square-root law as universal across asset classes. v1 linear was a placeholder that explodes super-linearly for high-participation trades (R3 forensic DOGE -$30K case); v2 is the empirically-correct baseline.",
-    "base_bps": "Conservative Q3 of typical observed minimum slippage on Binance perp for tier-equivalent symbols (unchanged from v1). Choice of 'conservative' = lean toward worst-quartile so the validation bar is calibrated against pessimistic costs rather than optimistic ones. Specific empirical paper not cited because crypto perp slippage literature is sparse and venue-specific; the v3 plan includes systematic Binance post-trade slippage data collection.",
-    "size_factor": "Calibrated so that v2 produces the SAME total slippage as v1 at the anchor (0.1% participation = 30 bps total on majors, 50 mid, 75 small). Conversion: size_factor_v2 = (target_total - base_bps) / sqrt(anchor_participation). With anchor=0.001: 1/sqrt(0.001) ≈ 31.623. Concrete: majors 28/sqrt(0.001) = 885.44; mid 45/sqrt(0.001) = 1423.02; small 65/sqrt(0.001) = 2055.59. Anchor parity preserves continuity with v1's calibration source (worst-quartile Kaiko/Coinmetrics depth tables) while correcting the formula. At non-anchor participation: v2 < v1 above anchor (correct — sqrt sub-linear), v2 > v1 below anchor (correct — small orders aren't free).",
-    "half_spread_bps": "Public typical-spread bands for Binance USDT-M perp, conservative quartile (unchanged from v1): majors 1-2 bps → 1.5, mid-cap 5-10 bps → 7.5, small-cap 10-20 bps → 15. v1 used spot; v2 uses perp because epic #338 §8.5 locked SHORT bidirectional which requires perps. Perp spreads typically tighter than spot on Binance for majors; using spot-level conservative numbers keeps the validation bar pessimistic.",
-    "fee_bps_per_side": "Binance USDT-M perp retail taker fee = 0.04% per trade = 4 bps per side as of 2026. v1 used 10 bps (spot). Keeping 10 bps in v2 as conservative cushion (overstates fee cost by ~6 bps per side); if production switches to maker-fee execution or VIP tier, this calibration is even more conservative.",
-    "funding_rate_bps_per_8h": "NEW in v2 (epic #338 §8.5 SHORT requires perps). Conservative absolute estimate per 8h interval. Binance USDT-M perp funding rates typically: BTC/ETH ±0.01-0.02% per 8h (0.01% = 1 bp; conservative side); mid-cap ADA/DOGE/AVAX etc ±0.02-0.05% per 8h (mean ~0.02% = 2 bps); small-cap PENDLE/JUP/RUNE ±0.05-0.2% per 8h (mean ~0.05% = 5 bps; can spike >0.5% in events but cap by conservative mean). Charged regardless of position direction (worst-case assumption per `conservative=True` in compute_funding_cost_bps). Per-bar funding from Binance API is deferred to v3."
+    "model_choice_v3": "Two-body upper bound (NOT an estimator). The cost model is an intentional conservative ceiling, falsifiable but not fit to live. Body = floor (spread+fee+funding), size-independent, the dominant cost at operating sizes. Guardrail = decoupled sqrt impact tail (Toth 2011 PRX 1:021006; Donier-Bonart 2015 MM&L 1(02); Almgren-Chriss 2001), reserved for the metaorder regime where the sqrt law actually applies. Replaces v2 single-anchor coupling. See docs/superpowers/specs/2026-06-02-cost-model-v3-design.md.",
+    "floor": "FLOOR_bps[tier] = stress_mult*(2*half_spread + 2*fee_per_side) + funding(holding_hours). Size-INDEPENDENT, the dominant bound in the operating regime. Calibrated independently and conservatively to public Binance USDT-M perp facts; NOT fit to live realized P&L. RT floor: major 13.0, mid 18.0, small 30.0 bps.",
+    "fee_bps_per_side": "5.0 = Binance USDT-M perp STANDARD published taker fee (0.05%), no VIP/BNB/maker discount. Exact deterministic cost, NO cushion. v2 used 10.0 (a non-physical inflation); v3 removes it. The published taker fee also serves as the model-independent mandatory lower bound in the falsification harness.",
+    "half_spread_bps": "Conservative quartile of public Binance USDT-M perp top-of-book spread, rounded up over typical: BTC/ETH ~0.1bps typical -> 1.5; mid ~1-4 -> 4.0; small ~5-10 -> 10.0. Lower than v2's spot proxy (1.5/7.5/15) on purpose (v2 carried a non-physical spot cushion for perps) but each stays above the typical perp spread, so still a bound.",
+    "funding_rate_bps_per_8h": "Value unchanged from v2 (conservative absolute estimate per 8h interval, floor semantics). Structurally ZERO in the operating regime (mean hold 5.3h -> floor(5.3/8)=0); an add-on that only fires on holds >=8h. NOTE: the LRC path now prices funding in v3 (v2 LRC excluded it), so v2-priced LRC numbers are not funding-comparable.",
+    "stress_mult": "Operator pessimism dial for stress-replay runs (LUNA/FTX). Default 1.0. The ONLY lever that widens the bound under a volatility/liquidity event, because no body responds to sigma on its own. NOT fit to data. Stress-replay harness must set this explicitly (>1) or refuse to run.",
+    "impact_tail": "tail_bps_per_fill = Y * sigma_daily_bps * sqrt(order_usd / (liquidity_usd_per_min * 1440)). DAILY participation basis (the ~38x base correction vs v2's per-minute). sigma_daily_bps {major 300, mid 500, small 800} is a STATIC conservative fallback for launch; a rolling 30d per-symbol sigma is a fast-follow. The tail is inert (floor-dominated) at the ~$644 average trade and a real guardrail for large fills in thin alts. Total tail reduction vs v2 at Y=1.5 is ~65-75x = sqrt(1440)=37.95x (base) x ~1.7-2.0x (slope source change size_factor -> Y*sigma).",
+    "Y_impact_constant": "1.5 = top of the empirical O(1) band (0.3-1.5; Toth 2011, Donier-Bonart 2015). Fixed by TYPE COHERENCE, not preference: a bound errs upward, so only the upper edge of the band preserves the bound type; a central Y would make the tail a central estimate wearing a bound label.",
+    "total_cost_cap_bps": "1000.0 = total round-trip cap (re-spec: v2's 500 was applied per-leg, never a total ceiling). Above the plausible worst-case event slippage; an explicit backtest-pessimism backstop, NOT a physical 5%-adverse claim. Stress widening lives in stress_mult, not the cap."
   },
-  "sensitivity_note": "v2 sensitivities differ from v1 because slippage growth is sub-linear: doubling base_bps adds ~4 bps per trade on majors (entry+exit), same as v1. Doubling size_factor has more nuanced impact: at anchor (0.1% participation), doubling adds 28 bps majors / 45 mid / 65 small (same as v1 by construction); at 1% participation (10x anchor), v2 adds 88.5 bps majors but v1 would have added 280 bps — v2 sensitivity is √10x = 3.16x rather than 10x. Funding rate sensitivity is linear in holding_hours: a position held 24h pays 3 × funding_rate_bps_per_8h (3 bps majors, 6 mid, 15 small under conservative defaults); a position held 72h pays 9x. Calmar (CAGR/|MaxDD|) under v2 should be HIGHER than under v1 for the same strategy because catastrophic single-trade losses are bounded by EXTREME_PARTICIPATION_CAP_BPS=500 (5%) plus sqrt-growth ceiling — the DOGE -$30K case from R3 forensic is expected to reduce to <$5K total cost under v2."
+  "sensitivity_note": "Floor = operating-regime bound (size-indep), dominant cost at ~$644. Tail inert (floor-dominated) ONLY at the average trade; a real guardrail in participation 1e-3..1e-1 for large fills in thin alts; co-dominant for small at backtest notional. Bound guarantee rests on non-negativity + total-cost cap + stress_mult, NOT on floor>tail dominance. stress_mult + per-symbol sigma are the volatility levers. v2 numbers are frozen in costs_calibration.v2.json for parity tests."
 }

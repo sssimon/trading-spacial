@@ -294,3 +294,25 @@ class TestVersionAwareLoader:
                                  "tiers": {}, "sources": {}, "sensitivity_note": "y"}))
         with pytest.raises(KeyError, match="missing the required 'global'"):
             load_calibration(path=str(p))
+
+
+class TestBacktestPathsUseV3:
+    def test_loaded_main_calibration_is_v3(self):
+        from backtest_costs import load_calibration
+        cal = load_calibration()
+        assert cal.version == 3
+        assert cal.active_model == "v3"
+        assert cal.global_ is not None and cal.global_.Y_impact_constant == 1.5
+        assert cal.tiers["major"].half_spread_bps == 1.5
+        assert cal.tiers["major"].fee_bps_per_side == 5.0
+        assert cal.tiers["mid"].sigma_daily_bps == 500.0
+
+    def test_floor_rt_values(self):
+        from backtest_costs import load_calibration
+        cal = load_calibration()
+        def floor_rt(t):
+            return cal.tiers[t].stress_mult * (2*cal.tiers[t].half_spread_bps
+                                               + 2*cal.tiers[t].fee_bps_per_side)
+        assert floor_rt("major") == pytest.approx(13.0)
+        assert floor_rt("mid") == pytest.approx(18.0)
+        assert floor_rt("small") == pytest.approx(30.0)
