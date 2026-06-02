@@ -40,7 +40,7 @@ extensible *dentro del digest*, nunca por acreción de columnas.
 | Decisión | Valor |
 |---|---|
 | Unidad de provenance | **Un `selection_fingerprint`** (sha256 sobre el world-state de selección). El cost-model es el **primer ingrediente del digest**, no su nombre |
-| Alcance del digest HOY | Sembrado con lo capturable-limpio y que demostrablemente afecta la selección: **cost-model + params de deflación + cutoff del holdout**. `strategy_code_sha` y `ohlcv_version` documentados como ingredientes FUTUROS que el digest acepta sin churn (caveat bala única hasta que entren) |
+| Alcance del digest HOY | Sembrado con lo capturable-limpio y genuinamente mutable: **cost-model + params de deflación** (`A03_DECAY_DATE`/`A03_N_FLOOR` + `deflation.ALGO_VERSION`). `strategy_code_sha`, `ohlcv_version` y un `holdout_window_id` documentados como ingredientes FUTUROS que el digest acepta sin churn (caveat bala única hasta que entren). El cutoff del holdout es inmutable hoy (NN#3, dataset locked) → no es eje de drift, fuera del set sembrado |
 | Guard de disparo del holdout | **Rechazo HARD** on mismatch; `selection_fingerprint` es campo FROZEN (seal + trigger) |
 | Origen del stamp | **Auto-stamp** en el módulo db (cierra el footgun de raíz) |
 
@@ -57,13 +57,14 @@ def selection_fingerprint() -> tuple[str, dict]:
     Dos artefactos con fingerprints distintos NO son comparables. Coordenadas
     sembradas (extensible: coordenadas nuevas se añaden AQUÍ, jamás como columnas
     de schema / campos frozen / cláusulas de trigger nuevas):
-      - cost_model:  (active_model, calibration_identity_hash)         [backtest_costs]
-      - deflation:   (A03_DECAY_DATE, A03_N_FLOOR, deflation_algo_version) [db.trials + deflation]
-      - holdout:     (cutoff_date, window scheme)                      [holdout]
+      - cost_model:  (active_model, calibration_identity_hash)            [backtest_costs]
+      - deflation:   (A03_DECAY_DATE, A03_N_FLOOR, deflation.ALGO_VERSION) [db.trials + deflation]
     Ingredientes FUTUROS (mecanismo de captura TBD; hasta que entren, el fire-guard
     es CIEGO al drift en estos ejes — ver §6 caveat bala única):
-      - strategy_code: git HEAD SHA
-      - ohlcv:         descriptor de rango/versión de datos
+      - strategy_code:   git HEAD SHA
+      - ohlcv:           descriptor de rango/versión de datos
+      - holdout_window:  un id de ventana (hoy el cutoff es inmutable, NN#3 — no
+                         drifta; entra solo si se define una ventana de otra época)
     """
 ```
 
@@ -106,10 +107,16 @@ def selection_fingerprint() -> tuple[str, dict]:
 - **`assert_fireable` (chequeo 6, nuevo):** `selection_fingerprint()[0] == row['selection_fingerprint']`
   o `HoldoutFalsificationError`, holdout intacto.
 
-**Invariante:** claim → lock → fire, toda la cadena bajo un solo mundo de selección, enforced en cada
-transición. Corolario gratis: como hoy hay ~0 trials v3, una hipótesis bajo un mundo-v3 no puede
-lockear (su población de deflación estaría vacía → `sigma_sr_trials None` → fail-closed YA existente).
-El diseño **fuerza construir población bajo el mundo nuevo antes de afirmar bajo él** — sin código nuevo.
+**Invariante (alcance acotado):** para la **puerta de falsación** (`open_holdout_for_falsification` →
+`assert_fireable` check 6, y `lock_hypothesis` 4f), claim → lock → fire corre toda la cadena bajo un
+solo mundo de selección, enforced en cada transición. **NO** gobierna la **segunda puerta**
+(`walk_forward.evaluate_winner_on_holdout`, la puerta #322): esa lee vía `open_holdout` SIN check de
+fingerprint — hoy está doble-bloqueada (`_HOLDOUT_322_CLOSED=False` + un `NotImplementedError` antes
+del read) y su migración al gate está **diferida** (PR de cierre de #322, fuera de scope). Cuando #322
+abra esa puerta, deberá heredar el check de fingerprint o quedará fuera del invariante. Corolario
+gratis: como hoy hay ~0 trials v3, una hipótesis bajo un mundo-v3 no puede lockear (su población de
+deflación estaría vacía → `sigma_sr_trials None` → fail-closed YA existente). El diseño **fuerza
+construir población bajo el mundo nuevo antes de afirmar bajo él** — sin código nuevo.
 
 ## 4. Migración (idempotente)
 
@@ -136,14 +143,29 @@ Todo idempotente.
 ## 6. El caveat de la bala única (residual honesto)
 
 El fire-guard solo puede disparar sobre drift que el fingerprint **puede ver**. Con el set sembrado
-(cost-model + deflación + cutoff), el gate es honesto sobre esos ejes y **CIEGO** a la versión del
-código de estrategia y la versión del OHLCV. Voronov: *el día que alguien dispare una hipótesis
-congelada-bajo-v2 tras desplegar v3, "redespliega v2 para disparar", el cost-model hace match, pero
-OHLCV y código se movieron desde el lock — un fingerprint parcial gasta la bala en una re-selección
-que el gate certifica como falsación.* **Residual aceptado y documentado:** hasta que `strategy_code_sha`
-y `ohlcv_version` entren al digest, el operador NO debe disparar una hipótesis cuyo lock sea anterior a
-cualquier cambio de código/datos sin re-claim manual. El `_DIGEST_VERSION` está para que añadir esas
-coordenadas sea un cambio de digest (no de schema) que re-versiona los fingerprints correctamente.
+(cost-model + deflación — el cutoff del holdout es inmutable hoy, NN#3, así que NO está en el digest),
+el gate es honesto sobre esos ejes y **CIEGO** a TRES ejes de drift no-vistos:
+
+1. **versión del código de estrategia** (git SHA — diferido).
+2. **versión/rango del OHLCV** (diferido).
+3. **`_TIER_BY_SYMBOL`** (el routing symbol→tier en `backtest_costs.py`) — **un eje ciego que se
+   esconde DENTRO de la coordenada "sembrada" cost-model.** `calibration_identity_hash` hashea los
+   NÚMEROS de la calibración pero NO el dict de routing; re-asignar un símbolo de tier `mid`→`small`
+   re-precia qué candidatos ganan la selección, con un fingerprint **byte-idéntico** que el check 6
+   leería como "no-drift". Mitigación HOY: el dict no se ha tocado desde #277 (git lo confirma:
+   introducido una vez, nunca editado) y la ceguera está documentada en `backtest_costs.py` — pero
+   **el operador lee este §6, no el comentario inline**, así que se enumera aquí explícitamente.
+
+Voronov: *el día que alguien dispare una hipótesis congelada-bajo-v2 tras desplegar v3, "redespliega
+v2 para disparar", el cost-model hace match, pero OHLCV/código/tier-routing se movieron desde el lock
+— un fingerprint parcial gasta la bala en una re-selección que el gate certifica como falsación.* Un
+fingerprint que **atesta MATCH afirmativamente sobre ejes que no puede ver** no se abstiene: produce
+luz verde falsa. Es DEFENSIBLE-by-design SOLO mientras este caveat enumere TODOS los ejes ciegos (los
+tres de arriba). **Residual aceptado y documentado:** hasta que esos ejes entren al digest, el operador
+NO debe disparar una hipótesis cuyo lock sea anterior a cualquier cambio de código/datos/tier-routing
+sin re-claim manual. El `_DIGEST_VERSION` NO "cierra" el residual: convierte un eje ciego en un re-claim
+forzado cuando entra al digest — sigue dependiendo de la disciplina "no dispares una hipótesis vieja
+tras un cambio". Aceptable y honesto, siempre que el spec lo diga sin overclaim.
 
 ## 7. Non-Negotiables / seguridad
 

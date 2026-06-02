@@ -102,6 +102,17 @@ The lifecycle is `draft → locked → fired → refuted/not_refuted` (`db/hypot
   Firing across a drifted world is re-selection disguised as falsification — the bala única
   is irreversible. To fire after a world change you must re-claim and re-lock under the new
   world. See `docs/superpowers/specs/2026-06-02-cost-model-provenance-design.md`.
+- **The fingerprint is BLIND to three axes** (spec §6): strategy-code version, OHLCV version,
+  and `_TIER_BY_SYMBOL` (symbol→tier routing, which hides *inside* the cost-model coordinate —
+  a re-tiering re-prices selection with a byte-identical fingerprint). Until those enter the
+  digest, do NOT fire a hypothesis whose lock predates a code/data/tier-routing change without
+  a manual re-claim — the gate would certify a re-selection as a falsification.
+- **The active world is memoized per process** (`selection_provenance._cache`). The gate is
+  one-shot operator-driven and the 24h cooldown forces lock and fire into separate process runs,
+  so each computes a fresh world — safe today. WARNING for a future daemon-builder: a long-lived
+  process spanning claim→hot-edit-calibration→fire would NOT see the new world (the memo froze
+  it), defeating check 6. A resident gate runner must `_clear_cache()` (or restart) after any
+  calibration change before firing.
 
 ## Verify Checklist
 
