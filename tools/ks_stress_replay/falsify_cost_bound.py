@@ -1,9 +1,15 @@
-"""Falsify the v3 cost bound against live realized P&L (read-only).
+"""Falsify the v3 cost bound against live realized P&L.
 
 R1: live data is a sanity CEILING, never a fit target. The bound is falsified
 ONLY when it underestimates an indisputable cost, or when it INVERTS a per-symbol
 price-winner into a backtest loser. NN#3: reads prod signals.db (mode=ro) + 2026
 OHLCV only; NEVER pre-2025-04-29 frames; NEVER imports holdout access.
+
+READ-ONLY scope clarification: signals.db is opened in read-only mode (mode=ro)
+and is never written. However, the OHLCV path (via get_cached_data) MAY WRITE the
+local SQLite cache and MAY make NETWORK calls when provider failover triggers. Run
+against a pre-warmed cache or a copy of the OHLCV db to avoid side-effects;
+"read-only" applies only to signals.db, NOT to the OHLCV cache layer.
 """
 from __future__ import annotations
 
@@ -32,7 +38,11 @@ class BoundFalsifiedError(AssertionError):
     raise that SURVIVES `python -O` (a bare assert would be silently stripped)."""
 
 
-_REQUIRED_KEYS = ("symbol", "pnl_usd", "size_usd", "liquidity_per_min")
+# Published per-tier round-trip spread band (bps) — context for the looseness
+# diagnostic. NOT a gate (R1: tightness cannot be validated against live data).
+_SPREAD_BAND_RT_BPS = {"major": 3.0, "mid": 8.0, "small": 20.0}
+
+_REQUIRED_KEYS = ("symbol", "pnl_usd", "size_usd", "entry_liquidity_per_min")
 
 
 def _validate_row(r: dict) -> None:
@@ -45,10 +55,18 @@ def _validate_row(r: dict) -> None:
     pnl = r["pnl_usd"]
     if not (isinstance(pnl, (int, float)) and math.isfinite(pnl)):
         raise ValueError(f"position row has non-finite pnl_usd={pnl!r}: {r}")
+    # entry_liquidity_per_min: presence is enforced by _REQUIRED_KEYS; NaN is
+    # allowed here (main() already excludes unresolved rows before scoring).
 
 
-def _v3_cost_usd(symbol: str, size_usd: float, liq: float, *, force_cost_bps=None) -> float:
+def _v3_cost_usd(
+    symbol: str, size_usd: float, entry_liq: float, exit_liq: float,
+    *, force_cost_bps=None,
+) -> float:
     """Return round-trip cost in USD for one position.
+
+    Entry and exit legs are priced with their respective liquidity proxies so
+    the exit fill is not costed at stale entry-bar liquidity.
 
     ``force_cost_bps`` is an escape hatch for unit tests that want to inject
     an artificially high cost without touching the calibration file.
@@ -59,19 +77,27 @@ def _v3_cost_usd(symbol: str, size_usd: float, liq: float, *, force_cost_bps=Non
     tp = cal.tiers[tier_for_symbol(symbol)]
     c = compute_trade_costs(
         entry_notional_usd=size_usd, exit_notional_usd=size_usd,
-        entry_liquidity_usd_per_min=liq, exit_liquidity_usd_per_min=liq,
+        entry_liquidity_usd_per_min=entry_liq,
+        exit_liquidity_usd_per_min=exit_liq,
         tier_params=tp, model=cal.active_model, global_params=cal.global_,
     )
     return c["total_cost_usd"]
 
 
 def score_positions(rows: list[dict], *, force_cost_bps=None) -> list[dict]:
-    """Attach v3 cost to each closed-short row. Returns list of scored dicts."""
+    """Attach v3 cost to each closed-short row. Returns list of scored dicts.
+
+    Each row must carry ``entry_liquidity_per_min``; ``exit_liquidity_per_min``
+    defaults to the entry value when absent (backward-compat for rows that only
+    have one liquidity proxy).
+    """
     scored = []
     for r in rows:
         _validate_row(r)
+        entry_liq = r["entry_liquidity_per_min"]
+        exit_liq = r.get("exit_liquidity_per_min", entry_liq)
         cost_usd = _v3_cost_usd(
-            r["symbol"], r["size_usd"], r["liquidity_per_min"],
+            r["symbol"], r["size_usd"], entry_liq, exit_liq,
             force_cost_bps=force_cost_bps,
         )
         cost_bps = cost_usd / r["size_usd"] * 10_000.0
@@ -100,8 +126,10 @@ def assert_no_sign_inversion(scored: list[dict]) -> dict:
        guarantees no per-symbol NET sign inversion, not that no individual trade
        inverted.
 
-    Returns a summary dict ``{"n": int, "checked": [...], "skipped_noise": [...]}``
-    listing symbols that were evaluated vs. skipped for noise.
+    Returns a summary dict
+    ``{"n": int, "checked": [...], "skipped_noise": [...], "per_symbol_counts": {...}}``
+    listing symbols that were evaluated vs. skipped for noise, plus per-symbol
+    row counts across all symbols (regardless of noise-band status).
     """
     n = len(scored)
     if n < EXPECTED_MIN:
@@ -121,6 +149,8 @@ def assert_no_sign_inversion(scored: list[dict]) -> dict:
     for s in scored:
         by_symbol.setdefault(s["symbol"], []).append(s)
 
+    per_symbol_counts = {sym: len(ss) for sym, ss in by_symbol.items()}
+
     checked, skipped_noise = [], []
     for symbol, ss in by_symbol.items():
         gross = sum(s["pnl_usd"] for s in ss)
@@ -132,7 +162,42 @@ def assert_no_sign_inversion(scored: list[dict]) -> dict:
         if (gross > 0) != (net > 0):
             raise BoundFalsifiedError(
                 f"{symbol}: v3 cost causes sign inversion (gross {gross:.2f} -> net {net:.2f})")
-    return {"n": n, "checked": checked, "skipped_noise": skipped_noise}
+    return {"n": n, "checked": checked, "skipped_noise": skipped_noise,
+            "per_symbol_counts": per_symbol_counts}
+
+
+def looseness_report(scored: list[dict]) -> dict:
+    """DIAGNOSTIC (never raises): how loose is the v3 bound vs the realized ceiling?
+
+    For each WINNER (pnl_usd > 0 with a non-zero price move), R_i = v3_cost_bps /
+    realized_move_bps, where realized_move_bps = |pnl_pct| * 100 is the gross
+    favorable price move. R_i >= 1 means modeled cost would eat the entire gross
+    move — the per-trade analogue of a sign inversion. (v2 ran R_i ~1-5 with real
+    inversions; v3 should be << 1.) v3_cost_bps is fee-inclusive while the realized
+    move is fee/funding-EXCLUSIVE, so R_i is a slight OVER-estimate of looseness
+    (conservative for a diagnostic). The published per-tier spread band is reported
+    as context. This is the §6 tightness instrument; it informs, it does not gate."""
+    winners = [s for s in scored
+               if s["pnl_usd"] > 0 and abs(s.get("pnl_pct") or 0.0) > 0.0]
+    per_winner = []
+    for s in winners:
+        move_bps = abs(s["pnl_pct"]) * 100.0
+        per_winner.append({
+            "symbol": s["symbol"],
+            "v3_cost_bps": round(s["v3_cost_bps"], 2),
+            "realized_move_bps": round(move_bps, 2),
+            "R_i": round(s["v3_cost_bps"] / move_bps, 3),
+            "spread_band_bps": _SPREAD_BAND_RT_BPS.get(tier_for_symbol(s["symbol"])),
+        })
+    ratios = sorted(x["R_i"] for x in per_winner)
+    median = ratios[len(ratios) // 2] if ratios else None
+    return {
+        "n_winners": len(winners),
+        "R_i_max": max(ratios) if ratios else None,
+        "R_i_median": median,
+        "n_winners_inverting_per_trade": sum(1 for r in ratios if r >= 1.0),
+        "per_winner": per_winner,
+    }
 
 
 def _liquidity_proxy_at(df1h, ts) -> float:
@@ -184,11 +249,16 @@ def _load_closed_shorts_from_db(db_path: str) -> list[dict]:
 
 
 def main(signals_db: str = "signals.db"):
-    """Run the falsification gate against the server signals.db (read-only).
-    Resolves real per-minute liquidity from cached OHLCV; rows whose liquidity
-    cannot be resolved are EXCLUDED and reported as 'unresolved' (NOT scored with
-    NaN, which would hit the model fallback and spuriously falsify). MERGE
-    PRECONDITION (spec §9): needs the server DB with >= EXPECTED_MIN closed shorts."""
+    """Run the falsification gate against the server signals.db.
+
+    signals.db is opened read-only (mode=ro). The OHLCV path (get_cached_data)
+    MAY WRITE the local SQLite cache and MAY make NETWORK calls — run against a
+    pre-warmed cache or a copy to avoid side-effects. Rows whose entry OR exit
+    liquidity cannot be resolved are EXCLUDED and reported as 'unresolved' (NOT
+    scored with NaN, which would hit the model fallback and spuriously falsify).
+    NN#3: post-cutoff frames only (>= 2026-01-01); NEVER holdout. MERGE
+    PRECONDITION (spec §9): needs the server DB with >= EXPECTED_MIN closed shorts.
+    """
     import pandas as pd  # noqa
     from backtest import get_cached_data
 
@@ -200,14 +270,29 @@ def main(signals_db: str = "signals.db"):
         sym = r["symbol"]
         if sym not in ohlcv_cache:
             ohlcv_cache[sym] = get_cached_data(sym, "1h", start_date=data_start)
-        ts = pd.Timestamp(r["entry_ts"])
-        if ts.tzinfo is None:
-            ts = ts.tz_localize("UTC")
-        liq = _liquidity_proxy_at(ohlcv_cache[sym], ts)
-        if liq != liq or liq <= 0.0:  # NaN or non-positive -> cannot score
+
+        # Entry timestamp
+        entry_ts = pd.Timestamp(r["entry_ts"])
+        if entry_ts.tzinfo is None:
+            entry_ts = entry_ts.tz_localize("UTC")
+        entry_liq = _liquidity_proxy_at(ohlcv_cache[sym], entry_ts)
+
+        # Exit timestamp — use the same tz-normalization as entry
+        exit_ts = pd.Timestamp(r["exit_ts"])
+        if exit_ts.tzinfo is None:
+            exit_ts = exit_ts.tz_localize("UTC")
+        exit_liq = _liquidity_proxy_at(ohlcv_cache[sym], exit_ts)
+
+        # A row is unresolved if EITHER leg's liquidity cannot be determined
+        if (entry_liq != entry_liq or entry_liq <= 0.0
+                or exit_liq != exit_liq or exit_liq <= 0.0):
             unresolved.append(r)
             continue
-        scoreable.append({**r, "liquidity_per_min": liq})
+        scoreable.append({
+            **r,
+            "entry_liquidity_per_min": entry_liq,
+            "exit_liquidity_per_min": exit_liq,
+        })
 
     print(f"loaded {len(rows)} closed shorts; scoreable={len(scoreable)} "
           f"unresolved(liquidity)={len(unresolved)}")
@@ -218,6 +303,16 @@ def main(signals_db: str = "signals.db"):
     summary = assert_no_sign_inversion(scored)  # raises BoundFalsifiedError / InsufficientDataError
     print(f"checked symbols: {summary['checked']}")
     print(f"skipped (noise band): {summary['skipped_noise']}")
+
+    loose = looseness_report(scored)
+    print(f"LOOSENESS (diagnostic, not a gate): {loose['n_winners']} winners, "
+          f"R_i median={loose['R_i_median']} max={loose['R_i_max']} "
+          f"(R_i = v3_cost / gross_move; >=1 would invert a winner; "
+          f"{loose['n_winners_inverting_per_trade']} winners at R_i>=1)")
+    print(f"per-symbol counts: {summary['per_symbol_counts']} (n>=20 is a TOTAL floor; "
+          f"per-symbol n is small, so the sign check is a weak per-symbol signal — "
+          f"the R_i diagnostic above is the per-trade looseness measure)")
+
     print("SCOPE CAVEAT: SHORT-only, ~$644 notional, NORMAL regime May-2026, low "
           "participation. Does NOT license long cost, crisis/wide-spread regimes, "
           "high-participation fills, any edge claim, or 'validated'.")
