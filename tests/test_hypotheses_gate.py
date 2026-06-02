@@ -21,6 +21,8 @@ def hyp_db(tmp_path, monkeypatch):
     import db.trials
     monkeypatch.setattr(db.hypotheses, "_schema_ensured", False)
     monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    import selection_provenance
+    monkeypatch.setattr(selection_provenance, "_cache", None)
     return db_path
 
 
@@ -472,6 +474,41 @@ def test_assert_fireable_allows_fired_reread(hyp_db):
     hid = _locked_and_authorized()
     record_fire(hid)
     assert_fireable(hid)                        # must NOT raise
+
+
+# ---------------------------------------------------------------------------
+# Task 6 (this PR): provenance columns + idempotent migration + trigger guard
+# ---------------------------------------------------------------------------
+
+def test_hypotheses_has_provenance_columns(hyp_db):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")}
+    assert "cost_model" in cols and "selection_fingerprint" in cols
+
+
+def test_trigger_blocks_selection_fingerprint_mutation_after_lock(hyp_db):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        con.execute(
+            "INSERT INTO hypotheses (created_ts, status, strategy_config_json, "
+            "config_hash, window_label, selection_fingerprint, seal) "
+            "VALUES ('t','locked','{}','h','w','FP_OLD','seal')")
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction() as con:
+            con.execute("UPDATE hypotheses SET selection_fingerprint='FP_NEW' WHERE id=1")
+
+
+def test_hyp_migration_idempotent(hyp_db, monkeypatch):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    monkeypatch.setattr(db.hypotheses, "_schema_ensured", False)
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        names = [r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")]
+    assert names.count("selection_fingerprint") == 1
 
 
 # ---------------------------------------------------------------------------

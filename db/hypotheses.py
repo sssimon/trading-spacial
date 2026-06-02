@@ -50,6 +50,7 @@ _FROZEN_FIELDS = (
     "deflated_metric", "deflated_threshold", "n_at_lock",
     "cand_sharpe", "cand_n_returns", "cand_skew", "cand_kurt_raw",
     "preholdout_trial_ids_json", "walkforward_ref", "drift_check_ref",
+    "selection_fingerprint",
 )
 
 
@@ -114,13 +115,21 @@ def _ensure_schema() -> None:
                 verdict TEXT,
                 outcome_ts TEXT,
                 seal TEXT,
-                source_note TEXT
+                source_note TEXT,
+                cost_model TEXT,
+                selection_fingerprint TEXT
             )
             """
         )
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")}
+        if "cost_model" not in cols:
+            con.execute("ALTER TABLE hypotheses ADD COLUMN cost_model TEXT")
+        if "selection_fingerprint" not in cols:
+            con.execute("ALTER TABLE hypotheses ADD COLUMN selection_fingerprint TEXT")
+        con.execute("DROP TRIGGER IF EXISTS hypotheses_frozen_after_lock")
         con.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS hypotheses_frozen_after_lock
+            CREATE TRIGGER hypotheses_frozen_after_lock
             BEFORE UPDATE ON hypotheses
             FOR EACH ROW
             WHEN OLD.status IN ('locked', 'fired', 'refuted', 'not_refuted')
@@ -142,6 +151,7 @@ def _ensure_schema() -> None:
                 OR NEW.preholdout_trial_ids_json IS NOT OLD.preholdout_trial_ids_json
                 OR NEW.walkforward_ref     IS NOT OLD.walkforward_ref
                 OR NEW.drift_check_ref     IS NOT OLD.drift_check_ref
+                OR NEW.selection_fingerprint IS NOT OLD.selection_fingerprint
                 OR NEW.seal                IS NOT OLD.seal
               )
             BEGIN
