@@ -14,6 +14,7 @@ last_updated: 2026-05-26
 | Register a trial in a parameter/window sweep (#278) | [registering-a-trial.md](registering-a-trial.md) |
 | Fire a falsification read of the locked holdout (A.4-3, #322) | [firing-the-holdout.md](firing-the-holdout.md) |
 | Compute live portfolio drawdown / equity (kill-switch, shadow, dashboard) | [computing-portfolio-dd.md](computing-portfolio-dd.md) |
+| Touch the backtest cost model / calibration (v3 two-body bound) | [cost-model-v3.md](cost-model-v3.md) |
 
 ## How to grow this index
 
