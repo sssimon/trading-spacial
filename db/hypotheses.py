@@ -458,6 +458,9 @@ def assert_fireable(hid: int) -> None:
         if _compute_seal(row) != row["seal"]:
             raise HoldoutFalsificationError(
                 f"hypothesis {hid} seal mismatch — frozen fields were tampered")
+        # NOTE: runtime order is seal(4) -> world(6) -> budget(5) BY DESIGN — report the
+        # specific/severe reason first (tamper, then this hypothesis's world drift, then the
+        # shared-window budget). Do NOT reorder to make the numbers sequential.
         # 6: selection-world match. Firing under a different world than the one the
         # hypothesis was frozen under is re-selection, not falsification — and the bala
         # unica is irreversible. (Local import: keep db acyclic re: provenance.)
