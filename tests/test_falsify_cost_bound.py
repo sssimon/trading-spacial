@@ -106,3 +106,14 @@ class TestHarnessEntrypoint:
         assert math.isnan(_liquidity_proxy_at(df, idx[10]))
         # empty df -> NaN
         assert math.isnan(_liquidity_proxy_at(pd.DataFrame(), ts))
+
+    def test_liquidity_proxy_at_handles_tz_mismatch(self):
+        # get_cached_data returns a tz-NAIVE index; main() passes a tz-AWARE ts.
+        # _liquidity_proxy_at must normalize and NOT raise.
+        import pandas as pd
+        from tools.ks_stress_replay.falsify_cost_bound import _liquidity_proxy_at
+        idx = pd.date_range("2026-05-01", periods=800, freq="1h")  # tz-NAIVE
+        df = pd.DataFrame({"close": [100.0]*800, "volume": [6000.0]*800}, index=idx)
+        ts_aware = pd.Timestamp("2026-06-01", tz="UTC")  # tz-AWARE
+        v = _liquidity_proxy_at(df, ts_aware)
+        assert v == pytest.approx(10000.0, rel=1e-6)

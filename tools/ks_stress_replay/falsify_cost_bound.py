@@ -8,6 +8,8 @@ OHLCV only; NEVER pre-2025-04-29 frames; NEVER imports holdout access.
 from __future__ import annotations
 
 import math
+import sqlite3
+from datetime import datetime, timezone
 
 from backtest_costs import (
     load_calibration, tier_for_symbol, compute_trade_costs, PUBLISHED_TAKER_FEE_BPS,
@@ -16,6 +18,7 @@ from backtest_costs import (
 EXPECTED_MIN = 20
 NOISE_BAND_USD = 5.0
 MANDATORY_LOWER_BOUND_BPS = 2 * PUBLISHED_TAKER_FEE_BPS   # 10.0 RT bps, exchange-published
+_WINDOW_START = "2026-05-21"  # post-cutoff (>> holdout 2025-04-29); NN#3
 
 
 class InsufficientDataError(RuntimeError):
@@ -135,30 +138,41 @@ def assert_no_sign_inversion(scored: list[dict]) -> dict:
 def _liquidity_proxy_at(df1h, ts) -> float:
     """30d rolling per-minute USD liquidity proxy at-or-before ts, mirroring the
     backtest (backtest.py): (close*volume)/60, rolling(720, min_periods=120).mean().
-    Returns NaN if df is empty or no bar at/<= ts has a valid rolling value."""
+    Returns NaN if df is empty or no bar at/<= ts has a valid rolling value.
+
+    Robust to tz-state mismatch: get_cached_data returns a tz-NAIVE index while
+    callers may pass a tz-AWARE ts (or vice versa); ts is normalized to the
+    index's tz-state before comparison so neither shape raises TypeError."""
+    import math
+    import pandas as pd
     if df1h is None or len(df1h) == 0:
         return float("nan")
+    ts = pd.Timestamp(ts)
+    idx_tz = getattr(df1h.index, "tz", None)
+    if idx_tz is None and ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    elif idx_tz is not None and ts.tzinfo is None:
+        ts = ts.tz_localize(idx_tz)
     usd_per_min = (df1h["close"] * df1h["volume"]) / 60.0
     proxy = usd_per_min.rolling(720, min_periods=120).mean()
     mask = proxy.index <= ts
     if not mask.any():
         return float("nan")
     val = proxy[mask].iloc[-1]
-    return float(val) if val == val else float("nan")  # NaN stays NaN
+    return float(val) if val == val else float("nan")
 
 
-def _load_closed_shorts_from_db(db_path: str):
+def _load_closed_shorts_from_db(db_path: str) -> list[dict]:
     """Read-only load of CLOSED SHORT positions in the post-cutoff window
     (>= 2026-05-21, well past the holdout cutoff 2025-04-29). Case-insensitive
     on direction. NN#3: reads only signals.db (mode=ro), no holdout frames."""
-    import sqlite3
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     try:
         cur = con.execute(
             "SELECT symbol, direction, pnl_usd, pnl_pct, size_usd, entry_ts, exit_ts "
             "FROM positions WHERE status='closed' AND UPPER(direction)='SHORT' "
-            "AND exit_ts >= '2026-05-21' ORDER BY exit_ts")
+            f"AND exit_ts >= '{_WINDOW_START}' ORDER BY exit_ts")
         return [
             {"symbol": r["symbol"], "direction": r["direction"],
              "pnl_usd": r["pnl_usd"], "pnl_pct": r["pnl_pct"],
@@ -176,7 +190,6 @@ def main(signals_db: str = "signals.db"):
     NaN, which would hit the model fallback and spuriously falsify). MERGE
     PRECONDITION (spec §9): needs the server DB with >= EXPECTED_MIN closed shorts."""
     import pandas as pd  # noqa
-    from datetime import datetime, timezone
     from backtest import get_cached_data
 
     rows = _load_closed_shorts_from_db(signals_db)
@@ -187,7 +200,6 @@ def main(signals_db: str = "signals.db"):
         sym = r["symbol"]
         if sym not in ohlcv_cache:
             ohlcv_cache[sym] = get_cached_data(sym, "1h", start_date=data_start)
-        import pandas as pd
         ts = pd.Timestamp(r["entry_ts"])
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
