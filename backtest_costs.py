@@ -394,7 +394,15 @@ def calibration_identity_hash(cal: Calibration) -> str:
     admits (version, active_model, global, per-tier floor+tail / v2 base+size_factor).
     Excludes prose (model/sources/sensitivity_note). Computed on the parsed
     Calibration, so JSON whitespace does not affect it. NaN cross-version fields
-    serialize deterministically as 'NaN' — fine for a stable digest."""
+    serialize as the bare `NaN` token (Python json `allow_nan=True` default) —
+    non-standard JSON, valid only for SAME-PROCESS hashing (never round-tripped
+    through a strict parser). Deterministic within CPython.
+
+    LIMITATION: covers the calibration NUMBERS only; the symbol→tier routing
+    (`_TIER_BY_SYMBOL`) is NOT hashed (a deferred selection coordinate — see
+    spec §6/§9). Adding a new selector field to TierParams/GlobalParams requires
+    updating this payload (a test guards this — see
+    test_identity_hash_covers_all_dataclass_fields)."""
     tiers = {
         name: {
             "base_bps": tp.base_bps, "size_factor": tp.size_factor,
@@ -419,7 +427,10 @@ def calibration_identity_hash(cal: Calibration) -> str:
 
 
 def active_cost_model_id() -> tuple[str, str]:
-    """(active_model, calibration_identity_hash) of the ACTIVE calibration."""
+    """(active_model, calibration_identity_hash) of the ACTIVE calibration.
+
+    Loads the calibration fresh each call (no caching here) — callers needing
+    memoization use selection_provenance.selection_fingerprint()."""
     cal = load_calibration()
     return cal.active_model, calibration_identity_hash(cal)
 
