@@ -187,7 +187,7 @@ def compute_slippage_bps(
         if participation < 0.0:
             participation = 0.0
         slippage = base_bps + size_factor * math.sqrt(participation)
-        return min(slippage, EXTREME_PARTICIPATION_CAP_BPS)
+        return min(slippage, EXTREME_PARTICIPATION_CAP_BPS)  # NaN MUST stay first arg: min(nan,x)=nan, min(x,nan)=x — preserves the v3 poison signal
     else:
         raise ValueError(f"Unknown cost model {model!r}; expected 'v1' or 'v2'")
 

@@ -106,6 +106,15 @@ class TestTierParamsDual:
         assert tp.base_bps == 5.0
         assert math.isnan(tp.stress_mult)
         assert math.isnan(tp.sigma_daily_bps)
+        assert tp.half_spread_bps == 7.5
+        assert tp.fee_bps_per_side == 10.0
+        assert tp.funding_rate_bps_per_8h == 2.0
+
+    def test_from_v2_flat_funding_defaults_zero(self):
+        from backtest_costs import TierParams
+        tp = TierParams.from_v2_flat(
+            base_bps=5.0, size_factor=1.0, half_spread_bps=1.0, fee_bps_per_side=1.0)
+        assert tp.funding_rate_bps_per_8h == 0.0
 
     def test_v3_params_in_v2_slippage_is_nan_not_zero(self):
         from backtest_costs import TierParams, compute_slippage_bps
