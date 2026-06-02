@@ -276,3 +276,21 @@ class TestVersionAwareLoader:
         mid = cal.tiers["mid"]
         assert mid.sigma_daily_bps == 500.0
         assert math.isnan(mid.size_factor)  # v2 field poisoned
+
+    def test_missing_version_key_raises_with_path(self, tmp_path):
+        import json
+        from backtest_costs import load_calibration
+        p = tmp_path / "noversion.json"
+        p.write_text(json.dumps({"model": "x", "tiers": {}, "sources": {},
+                                 "sensitivity_note": "y"}))
+        with pytest.raises(KeyError, match="missing the required 'version'"):
+            load_calibration(path=str(p))
+
+    def test_v3_missing_global_block_raises(self, tmp_path):
+        import json
+        from backtest_costs import load_calibration
+        p = tmp_path / "noglobal.json"
+        p.write_text(json.dumps({"version": 3, "model": "x", "active_model": "v3",
+                                 "tiers": {}, "sources": {}, "sensitivity_note": "y"}))
+        with pytest.raises(KeyError, match="missing the required 'global'"):
+            load_calibration(path=str(p))

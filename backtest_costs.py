@@ -338,9 +338,18 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
     p = Path(path) if path is not None else _CALIBRATION_PATH
     with p.open() as f:
         raw = json.load(f)
+    if "version" not in raw:
+        raise KeyError(
+            f"costs_calibration at {p!r} is missing the required 'version' key "
+            "(expected int, e.g. 2 or 3)."
+        )
     version = int(raw["version"])
 
     if version >= 3:
+        if "global" not in raw:
+            raise KeyError(
+                f"costs_calibration v3+ at {p!r} is missing the required 'global' block."
+            )
         gb = raw["global"]
         tiers = {
             name: TierParams.from_v3_tier(floor=t["floor"], impact_tail=t["impact_tail"])
@@ -348,7 +357,7 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
         }
         return Calibration(
             version=version, model=raw["model"],
-            v2_planned=raw.get("v3_planned", raw.get("v2_planned", "")),
+            v2_planned=raw.get("v3_planned", raw.get("v2_planned", "")),  # v3 JSON uses "v3_planned" as primary
             tiers=tiers, sources=dict(raw["sources"]),
             sensitivity_note=raw["sensitivity_note"],
             active_model=raw.get("active_model", "v3"),
@@ -371,7 +380,7 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
     }
     return Calibration(
         version=version, model=raw["model"],
-        v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),
+        v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),  # v2 JSON uses "v2_planned" as primary
         tiers=tiers, sources=dict(raw["sources"]),
         sensitivity_note=raw["sensitivity_note"],
         active_model=raw.get("active_model", "v2"),
