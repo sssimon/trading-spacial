@@ -1008,6 +1008,13 @@ def simulate_strategy(df1h: pd.DataFrame, df4h: pd.DataFrame, df5m: pd.DataFrame
     # entirely. `_costs_active` short-circuits the per-trade augmentation when
     # all flags are False — preserving byte-identical behavior on the
     # legacy path.
+    # NOTE (cost-v3): enable_funding is DELIBERATELY excluded from this guard
+    # (unlike the RA path, which includes it). enable_funding defaults True, so
+    # including it here would activate costs in the three-flag "costs-off" idiom
+    # used across the suite. Funding is still priced in prod (all flags True ->
+    # _costs_active True) via the model/holding_hours threaded into
+    # _apply_costs_to_trade. The residual LRC/RA asymmetry only shows in the
+    # never-used "funding-only" config. See specs/2026-06-02-cost-model-v3-design.md §8.
     _costs_active = bool(enable_slippage or enable_spread or enable_fees)
     _tier_params = None
     _liquidity_per_min = None
