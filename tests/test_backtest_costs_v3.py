@@ -128,3 +128,87 @@ class TestTierParamsDual:
             base_bps=tp.base_bps, size_factor=tp.size_factor, model="v2",
         )
         assert math.isnan(slip)
+
+
+class TestComputeTradeCostsV3:
+    def _v3_mid(self):
+        from backtest_costs import TierParams
+        return TierParams.from_v3_tier(
+            floor={"half_spread_bps": 4.0, "fee_bps_per_side": 5.0,
+                   "funding_rate_bps_per_8h": 2.0, "stress_mult": 1.0},
+            impact_tail={"sigma_daily_bps": 500.0},
+        )
+
+    def test_floor_dominates_at_operating_size(self):
+        from backtest_costs import compute_trade_costs, GlobalParams
+        c = compute_trade_costs(
+            entry_notional_usd=644.0, exit_notional_usd=644.0,
+            entry_liquidity_usd_per_min=1_000_000.0,
+            exit_liquidity_usd_per_min=1_000_000.0,
+            tier_params=self._v3_mid(), model="v3",
+            global_params=GlobalParams(), holding_hours=5.3,
+        )
+        assert c["floor_bps"] == pytest.approx(18.0, abs=0.01)
+        assert c["tail_bps"] < c["floor_bps"]
+        assert c["total_cost_bps"] == pytest.approx(c["floor_bps"] + c["tail_bps"], abs=1e-6)
+        assert c["cap_hit"] is False
+
+    def test_funding_charged_only_past_8h(self):
+        from backtest_costs import compute_trade_costs, GlobalParams
+        c = compute_trade_costs(
+            entry_notional_usd=644.0, exit_notional_usd=644.0,
+            entry_liquidity_usd_per_min=1_000_000.0,
+            exit_liquidity_usd_per_min=1_000_000.0,
+            tier_params=self._v3_mid(), model="v3",
+            global_params=GlobalParams(), holding_hours=24.0,
+        )
+        assert c["funding_cost_bps"] == pytest.approx(6.0)
+        assert c["floor_bps"] == pytest.approx(24.0, abs=0.01)
+
+    def test_total_cap_binds(self):
+        from backtest_costs import TierParams, compute_trade_costs, GlobalParams
+        small = TierParams.from_v3_tier(
+            floor={"half_spread_bps": 10.0, "fee_bps_per_side": 5.0,
+                   "funding_rate_bps_per_8h": 5.0, "stress_mult": 1.0},
+            impact_tail={"sigma_daily_bps": 800.0},
+        )
+        c = compute_trade_costs(
+            entry_notional_usd=5_000_000.0, exit_notional_usd=5_000_000.0,
+            entry_liquidity_usd_per_min=10_000.0,
+            exit_liquidity_usd_per_min=10_000.0,
+            tier_params=small, model="v3", global_params=GlobalParams(),
+        )
+        assert c["total_cost_bps"] == pytest.approx(1000.0)
+        assert c["cap_hit"] is True
+
+    def test_leg_fallback_composes_above_floor(self):
+        from backtest_costs import compute_trade_costs, GlobalParams
+        c = compute_trade_costs(
+            entry_notional_usd=644.0, exit_notional_usd=644.0,
+            entry_liquidity_usd_per_min=float("nan"),
+            exit_liquidity_usd_per_min=1_000_000.0,
+            tier_params=self._v3_mid(), model="v3", global_params=GlobalParams(),
+        )
+        assert c["total_cost_bps"] > 100.0
+        assert c["total_cost_bps"] >= 100.0
+
+    def test_default_model_is_still_v2(self):
+        from backtest_costs import compute_trade_costs, TierParams
+        c = compute_trade_costs(
+            entry_notional_usd=1_000.0, exit_notional_usd=1_000.0,
+            entry_liquidity_usd_per_min=1_000_000.0,
+            exit_liquidity_usd_per_min=1_000_000.0,
+            tier_params=TierParams(5.0, 1423.02, 7.5, 10.0, 2.0),
+            enable_spread=False, enable_fees=False, enable_funding=False,
+        )
+        assert c["entry_slippage_bps"] == pytest.approx(50.0, abs=0.1)
+
+    def test_unknown_model_raises_in_trade_costs(self):
+        from backtest_costs import compute_trade_costs, TierParams
+        with pytest.raises(ValueError, match="Unknown cost model"):
+            compute_trade_costs(
+                entry_notional_usd=1_000.0, exit_notional_usd=1_000.0,
+                entry_liquidity_usd_per_min=1e6, exit_liquidity_usd_per_min=1e6,
+                tier_params=TierParams(5.0, 1423.02, 7.5, 10.0, 2.0),
+                model="bogus",
+            )

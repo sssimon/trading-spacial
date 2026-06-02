@@ -130,6 +130,9 @@ class GlobalParams:
     v_daily_minutes_per_day: float = DEFAULT_V_DAILY_MINUTES_PER_DAY
 
 
+_DEFAULT_GLOBAL = GlobalParams()
+
+
 def compute_slippage_bps(
     *,
     order_usd: float,
@@ -353,6 +356,26 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
     )
 
 
+def _v3_leg_cost(order_usd, liquidity_usd_per_min, tp, g):
+    """Return (leg_bps, slip_component_bps, is_fallback) for one v3 fill.
+
+    Normal leg:   floor_leg(spread+fee, stress-scaled) + tail.
+    Fallback leg: max(floor_leg, fallback_floor) when liquidity is unusable.
+    slip_component_bps is the portion reported as *_slippage_bps (the tail, or
+    the fallback excess above the floor leg) so the output dict still sums.
+    """
+    floor_leg = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
+    tail = compute_tail_bps(
+        order_usd=order_usd, liquidity_usd_per_min=liquidity_usd_per_min,
+        sigma_daily_bps=tp.sigma_daily_bps, Y=g.Y_impact_constant,
+        v_daily_minutes_per_day=g.v_daily_minutes_per_day,
+    )
+    if math.isnan(tail):
+        leg = max(floor_leg, g.liquidity_fallback_floor_bps)
+        return leg, max(0.0, leg - floor_leg), True
+    return floor_leg + tail, tail, False
+
+
 def compute_trade_costs(
     *,
     entry_notional_usd: float,
@@ -365,7 +388,8 @@ def compute_trade_costs(
     enable_fees: bool = True,
     enable_funding: bool = True,
     holding_hours: float = 0.0,
-    model: Literal["v1", "v2"] = "v2",
+    model: Literal["v1", "v2", "v3"] = "v2",
+    global_params: "GlobalParams | None" = None,
 ) -> dict:
     """Compute per-component cost dict for a single round-trip trade.
 
@@ -389,6 +413,43 @@ def compute_trade_costs(
     regardless of enable_funding — preserves v1 test expectations for callers
     that don't yet supply holding_hours.
     """
+    if model not in ("v1", "v2", "v3"):
+        raise ValueError(f"Unknown cost model {model!r}; expected 'v1', 'v2', or 'v3'")
+
+    if model == "v3":
+        g = global_params if global_params is not None else _DEFAULT_GLOBAL
+        entry_leg, entry_slip, _ = _v3_leg_cost(
+            entry_notional_usd, entry_liquidity_usd_per_min, tier_params, g)
+        exit_leg, exit_slip, _ = _v3_leg_cost(
+            exit_notional_usd, exit_liquidity_usd_per_min, tier_params, g)
+        sm = tier_params.stress_mult
+        entry_spread = sm * tier_params.half_spread_bps if enable_spread else 0.0
+        exit_spread = sm * tier_params.half_spread_bps if enable_spread else 0.0
+        fee_bps = sm * 2.0 * tier_params.fee_bps_per_side if enable_fees else 0.0
+        funding_bps = (
+            compute_funding_cost_bps(
+                holding_hours=holding_hours,
+                funding_rate_bps_per_8h=tier_params.funding_rate_bps_per_8h,
+            )
+            if (enable_funding and holding_hours > 0.0) else 0.0
+        )
+        entry_tail = entry_slip if enable_slippage else 0.0
+        exit_tail = exit_slip if enable_slippage else 0.0
+        floor_bps = entry_spread + exit_spread + fee_bps + funding_bps
+        tail_bps = entry_tail + exit_tail
+        uncapped = floor_bps + tail_bps
+        cap_hit = uncapped >= g.total_cost_cap_bps
+        total_cost_bps = min(uncapped, g.total_cost_cap_bps)
+        avg_notional = 0.5 * (entry_notional_usd + exit_notional_usd)
+        return {
+            "entry_slippage_bps": entry_tail, "exit_slippage_bps": exit_tail,
+            "entry_spread_bps": entry_spread, "exit_spread_bps": exit_spread,
+            "fee_bps": fee_bps, "funding_cost_bps": funding_bps,
+            "floor_bps": floor_bps, "tail_bps": tail_bps, "cap_hit": cap_hit,
+            "total_cost_bps": total_cost_bps,
+            "total_cost_usd": total_cost_bps * avg_notional / 10_000.0,
+        }
+
     if enable_slippage:
         entry_slip = compute_slippage_bps(
             order_usd=entry_notional_usd,
