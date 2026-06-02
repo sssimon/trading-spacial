@@ -655,3 +655,33 @@ def test_record_fire_budget_recheck_under_write_lock(hyp_db):
     authorize_fire(hid2, now=locked_at + timedelta(hours=25))
     with pytest.raises(HoldoutFalsificationError, match="budget"):
         record_fire(hid2)
+
+
+# ---------------------------------------------------------------------------
+# Task 7: claim_hypothesis auto-stamps cost_model + selection_fingerprint
+# ---------------------------------------------------------------------------
+
+def test_claim_hypothesis_auto_stamps_fingerprint(hyp_db):
+    import selection_provenance
+    from db.hypotheses import claim_hypothesis
+    selection_provenance._clear_cache()
+    fp, _ = selection_provenance.selection_fingerprint()
+    hid = claim_hypothesis(
+        strategy_config={"atr_sl_mult": 1.0}, symbols=["BTCUSDT"],
+        window_label="w", metric="net_pnl", threshold=0.0, direction=">",
+        deflated_metric="sharpe_deflated", deflated_threshold=0.95,
+        cand_sharpe=1.4, cand_n_returns=120, cand_skew=0.1, cand_kurt_raw=3.5)
+    with transaction() as con:
+        row = dict(con.execute(
+            "SELECT cost_model, selection_fingerprint FROM hypotheses WHERE id=?", (hid,)).fetchone())
+    assert row["cost_model"] == "v3"
+    assert row["selection_fingerprint"] == fp
+
+
+def test_seal_covers_selection_fingerprint(hyp_db):
+    import db.hypotheses as H
+    base = {f: None for f in H._FROZEN_FIELDS}
+    s1 = H._compute_seal({**base, "selection_fingerprint": "FP_A"})
+    s2 = H._compute_seal({**base, "selection_fingerprint": "FP_B"})
+    assert "selection_fingerprint" in H._FROZEN_FIELDS
+    assert s1 != s2

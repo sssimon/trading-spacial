@@ -187,6 +187,11 @@ def claim_hypothesis(
     config_hash = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
     now = _now()
 
+    from selection_provenance import selection_fingerprint as _sel_fp
+    from backtest_costs import active_cost_model_id
+    fp, _ = _sel_fp()
+    active_model, _h = active_cost_model_id()
+
     def _do() -> int:
         with transaction() as con:
             cur = con.execute(
@@ -194,11 +199,12 @@ def claim_hypothesis(
                 "(created_ts, status, strategy_config_json, config_hash, symbols_json, "
                 " window_label, metric, threshold, direction, deflated_metric, "
                 " deflated_threshold, cand_sharpe, cand_n_returns, cand_skew, "
-                " cand_kurt_raw, source_note) "
-                "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " cand_kurt_raw, source_note, cost_model, selection_fingerprint) "
+                "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (now, cfg_json, config_hash, json.dumps(symbols), window_label,
                  metric, threshold, direction, deflated_metric, deflated_threshold,
-                 cand_sharpe, cand_n_returns, cand_skew, cand_kurt_raw, source_note),
+                 cand_sharpe, cand_n_returns, cand_skew, cand_kurt_raw, source_note,
+                 active_model, fp),
             )
             return int(cur.lastrowid)
 
