@@ -706,3 +706,29 @@ def test_lock_refuses_on_cost_model_drift(hyp_db, monkeypatch):
 
     with pytest.raises(HypothesisLockError, match="selection-world drift"):
         lock_hypothesis(hid, today=_T())
+
+
+# ---------------------------------------------------------------------------
+# Task 9: assert_fireable check 6 — hard-refuse fire on selection-world mismatch
+# ---------------------------------------------------------------------------
+
+def test_fire_refused_on_cost_model_mismatch(hyp_db, monkeypatch):
+    """Check 6: if the active selection world drifts AFTER authorization but BEFORE
+    fire, assert_fireable must refuse without touching the holdout. Firing under a
+    different world than the frozen one is re-selection masquerading as falsification
+    — the bala única is irreversible."""
+    import selection_provenance
+    from db.hypotheses import assert_fireable
+    from data.holdout_access import HoldoutFalsificationError
+
+    # Build locked + authorized hypothesis under the CURRENT (unmodified) world
+    selection_provenance._clear_cache()
+    hid = _locked_and_authorized()   # claim -> lock -> authorize_fire (cooldown passed)
+
+    # The world drifts AFTER authorization, BEFORE fire
+    selection_provenance._clear_cache()
+    monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
+
+    with pytest.raises(HoldoutFalsificationError,
+                       match="selection world|cost-model|fingerprint|re-claim"):
+        assert_fireable(hid)

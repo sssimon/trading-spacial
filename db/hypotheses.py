@@ -458,6 +458,16 @@ def assert_fireable(hid: int) -> None:
         if _compute_seal(row) != row["seal"]:
             raise HoldoutFalsificationError(
                 f"hypothesis {hid} seal mismatch — frozen fields were tampered")
+        # 6: selection-world match. Firing under a different world than the one the
+        # hypothesis was frozen under is re-selection, not falsification — and the bala
+        # unica is irreversible. (Local import: keep db acyclic re: provenance.)
+        from selection_provenance import selection_fingerprint
+        active_fp, _ = selection_fingerprint()
+        if row["selection_fingerprint"] != active_fp:
+            raise HoldoutFalsificationError(
+                f"hypothesis {hid} frozen under selection world "
+                f"{row['selection_fingerprint']!r} but the active world is {active_fp!r} "
+                "— firing now would be re-selection, not falsification; re-claim/re-lock")
         # 5: budget (a re-read of an already-fired hypothesis is allowed)
         if row["fired_ts"] is None and _fired_count(con, row["window_label"]) >= HOLDOUT_FIRE_BUDGET:
             raise HoldoutFalsificationError(
