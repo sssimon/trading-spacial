@@ -8,7 +8,7 @@ triggers:
   - "A.4-3"
   - "#322"
   - "hypothesis lock"
-last_updated: 2026-06-01
+last_updated: 2026-06-02
 ---
 
 # Pattern: Firing the holdout (the falsification gate)
@@ -95,6 +95,13 @@ The lifecycle is `draft → locked → fired → refuted/not_refuted` (`db/hypot
   bypass the gate.
 - **The locked row is immutable**: a SQLite trigger aborts any UPDATE of a frozen field
   after lock, and `assert_fireable` recomputes the seal to detect tampering.
+- **A hypothesis carries a frozen `selection_fingerprint`** (auto-stamped at claim,
+  sealed + trigger-guarded alongside the claim fields). `lock_hypothesis` (criterion 4f)
+  and `assert_fireable` (check 6) **HARD-REFUSE** if the active selection world (cost-model
+  version + deflation parameters) differs from the fingerprint frozen at claim time.
+  Firing across a drifted world is re-selection disguised as falsification — the bala única
+  is irreversible. To fire after a world change you must re-claim and re-lock under the new
+  world. See `docs/superpowers/specs/2026-06-02-cost-model-provenance-design.md`.
 
 ## Verify Checklist
 
