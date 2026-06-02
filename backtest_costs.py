@@ -55,6 +55,7 @@ Each parameter cites its source — invented numbers are not allowed (#277, #340
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -386,6 +387,41 @@ def load_calibration(path: str | Path | None = None) -> Calibration:
         active_model=raw.get("active_model", "v2"),
         global_=None,
     )
+
+
+def calibration_identity_hash(cal: Calibration) -> str:
+    """sha256 of the SELECTOR — the numbers that decide which params the bound
+    admits (version, active_model, global, per-tier floor+tail / v2 base+size_factor).
+    Excludes prose (model/sources/sensitivity_note). Computed on the parsed
+    Calibration, so JSON whitespace does not affect it. NaN cross-version fields
+    serialize deterministically as 'NaN' — fine for a stable digest."""
+    tiers = {
+        name: {
+            "base_bps": tp.base_bps, "size_factor": tp.size_factor,
+            "half_spread_bps": tp.half_spread_bps, "fee_bps_per_side": tp.fee_bps_per_side,
+            "funding_rate_bps_per_8h": tp.funding_rate_bps_per_8h,
+            "stress_mult": tp.stress_mult, "sigma_daily_bps": tp.sigma_daily_bps,
+        }
+        for name, tp in cal.tiers.items()
+    }
+    g = cal.global_
+    glob = None if g is None else {
+        "Y_impact_constant": g.Y_impact_constant,
+        "total_cost_cap_bps": g.total_cost_cap_bps,
+        "liquidity_fallback_floor_bps": g.liquidity_fallback_floor_bps,
+        "v_daily_minutes_per_day": g.v_daily_minutes_per_day,
+    }
+    payload = {"version": cal.version, "active_model": cal.active_model,
+               "global": glob, "tiers": tiers}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def active_cost_model_id() -> tuple[str, str]:
+    """(active_model, calibration_identity_hash) of the ACTIVE calibration."""
+    cal = load_calibration()
+    return cal.active_model, calibration_identity_hash(cal)
 
 
 def _v3_leg_cost(order_usd, liquidity_usd_per_min, tp, g):
