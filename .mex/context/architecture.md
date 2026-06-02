@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Signal flow, components, key backend logic, API surface, frontend layout, cost model v2, and the regime-allocation strategy class. Load when working on system design, signal generation, sizing/costs, or the regime detector.
+description: Signal flow, components, key backend logic, API surface, frontend layout, cost model v3, and the regime-allocation strategy class. Load when working on system design, signal generation, sizing/costs, or the regime detector.
 triggers:
   - "architecture"
   - "signal flow"
@@ -116,7 +116,7 @@ Structurally distinct alternative strategy class to the LRC architecture. Mutual
 - When flag is off: LRC path is byte-identical (confirmed by `test_strategy_core` + `test_backtest_*` regression).
 - Single-symbol scope in `_simulate_strategy_regime_allocation`. Portfolio-level orchestration (n_active_symbols, leverage cap across symbols) is the caller's responsibility — not built in Phase 1.
 - Warmup: 390 daily bars required (longest lookback 360 + vol window 30). Symbols with shorter history return NONE with `regime_allocation_warmup` reason.
-- Cost model v2 + funding rate is the default for the regime-allocation path. Funding accrues per 8h interval the position is held (epic §8.5 SHORT bidirectional → perp dependency).
+- Cost model v3 (two-body bound) + funding is the default for the regime-allocation path (the RA close path reads `active_model`). Funding accrues per 8h interval the position is held (epic §8.5 SHORT bidirectional → perp dependency).
 
 **Authoritative spec doc:** `docs/superpowers/specs/es/2026-05-13-epic-regime-allocation-strategy-pivot.md` — read this before touching anything under the `regime_allocation` flag.
 
