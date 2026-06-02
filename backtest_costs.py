@@ -110,6 +110,25 @@ _DEFAULT_LIQUIDITY_FALLBACK_BPS = 100.0
 # residual single-trade catastrophes even under the sqrt model.
 EXTREME_PARTICIPATION_CAP_BPS = 500.0
 
+# ── v3 two-body upper bound ─────────────────────────────────────────────────
+# Exchange-published taker fee, used as the model-INDEPENDENT mandatory lower
+# bound in the falsification harness (NOT read from calibration).
+PUBLISHED_TAKER_FEE_BPS = 5.0
+
+DEFAULT_Y_IMPACT = 1.5                   # top of the empirical O(1) band (type-coherent bound)
+DEFAULT_TOTAL_COST_CAP_BPS = 1000.0      # total round-trip cap (re-spec; v2's 500 was per-leg)
+DEFAULT_LIQUIDITY_FALLBACK_FLOOR_BPS = 100.0
+DEFAULT_V_DAILY_MINUTES_PER_DAY = 1440.0
+
+
+@dataclass(frozen=True)
+class GlobalParams:
+    """v3 calibration globals (the `global` block of costs_calibration.json)."""
+    Y_impact_constant: float = DEFAULT_Y_IMPACT
+    total_cost_cap_bps: float = DEFAULT_TOTAL_COST_CAP_BPS
+    liquidity_fallback_floor_bps: float = DEFAULT_LIQUIDITY_FALLBACK_FLOOR_BPS
+    v_daily_minutes_per_day: float = DEFAULT_V_DAILY_MINUTES_PER_DAY
+
 
 def compute_slippage_bps(
     *,
