@@ -89,9 +89,10 @@ mid (18) y small (30) sí acotan limpio. Esto se documenta, no se esconde.
 **Fuentes (por parámetro, sin lavado):**
 - **half_spread** = cuartil conservador del spread top-of-book público de Binance USDT-M perp,
   redondeado hacia arriba sobre el típico (BTC/ETH ~0.1bps típico → 1.5; mid ~1-4 → 4.0; small
-  ~5-10 → 10.0). Son **menores** que el proxy spot de v2 (1.5/7.5/15) a propósito — v2 cargaba un
-  colchón spot no físico para perps — pero cada uno queda por encima del spread perp típico, así
-  que sigue siendo cota.
+  ~5-10 → 10.0). **major queda IGUAL que v2 (1.5 → 1.5)** — ya estaba en el cuartil perp, no había
+  colchón spot que quitar. **Solo mid (7.5→4.0) y small (15→10) bajaron** — v2 les cargaba un
+  colchón spot no físico para perps. Cada uno queda por encima del spread perp típico, así que
+  sigue siendo cota. (NO afirmar "todos menores que v2": major no cambió.)
 - **fee_bps_per_side = 5.0 = taker ESTÁNDAR publicado de Binance USDT-M (0.05%), sin VIP/BNB/maker.**
   Re-citado honestamente: el 0.04% del JSON v2 es la tasa con descuento BNB; el taker estándar
   no descontado **es** 0.05% = 5.0 bps. Es el costo determinístico exacto, **sin colchón**. v2
@@ -525,8 +526,13 @@ precondición, no un pase débil.
    extrapolada, con la garantía de cota en los tres guardianes — no en la fidelidad física.
 3. **Cifras de cobertura/tightness proyectadas, no medidas.** No se ejecutó el harness ni los
    backtests v3 en el entorno de diseño (y medirlas no validaría la cota, por R1).
-4. **Vol-blindness fuera de stress-replay.** Un backtest normal de un régimen de alta vol no infla la
-   cota salvo que el operador suba `stress_mult`. El default 1.0 es para régimen normal por diseño.
+4. **Vol-blindness fuera de stress-replay + `stress_mult` ships INERTE.** Un backtest normal de un
+   régimen de alta vol no infla la cota salvo que el operador suba `stress_mult`. El default 1.0 es
+   para régimen normal por diseño — **pero NADA en este PR pone `stress_mult` > 1** (el acople con
+   el harness de stress-replay es un epic aparte, §10). Consecuencia honesta: `stress_mult` es uno
+   de los tres guardianes nombrados en §1, y embarca como **no-op**. La cota **NO está demostrada
+   crisis-survivable** (LUNA/FTX) por nada de este PR; esa afirmación espera a que el stress-replay
+   jale el lever. No vender supervivencia a crisis hasta entonces.
 5. **El cap puede quedar por debajo del floor bajo `stress_mult` alto.** Con `stress_mult` suficientemente
    grande, `floor_bps` solo puede exceder el `total_cost_cap_bps` (1000), y el `min(uncapped, cap)`
    recorta el total por debajo de su propio floor. Es **intencional** (el cap es un backstop de
