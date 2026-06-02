@@ -311,3 +311,38 @@ def test_migration_idempotent(trials_db, monkeypatch):
     with transaction() as con:
         names = [r["name"] for r in con.execute("PRAGMA table_info(trials)")]
     assert names.count("selection_fingerprint") == 1
+
+
+def test_claim_trial_auto_stamps_fingerprint(trials_db):
+    import db.trials, selection_provenance
+    selection_provenance._clear_cache()
+    db.trials.claim_trial(source="auto_tune", combo={"a": 1}, window_label="w")
+    fp, _ = selection_provenance.selection_fingerprint()
+    with transaction() as con:
+        row = dict(con.execute("SELECT cost_model, selection_fingerprint FROM trials").fetchone())
+    assert row["cost_model"] == "v3"
+    assert row["selection_fingerprint"] == fp
+
+
+def test_population_stats_filters_by_fingerprint(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+    ids = [claim_trial(source="auto_tune", combo={"a": i}, window_label="w") for i in range(5)]
+    for i, tid in enumerate(ids):
+        finalize_trial(tid, status="ok", metrics={"sharpe": 1.0 + i})
+    with transaction() as con:
+        for tid in ids[:3]:
+            con.execute("UPDATE trials SET selection_fingerprint='AAA' WHERE id=?", (tid,))
+        for tid in ids[3:]:
+            con.execute("UPDATE trials SET selection_fingerprint='BBB' WHERE id=?", (tid,))
+    a = selection_population_stats(selection_fingerprint="AAA")
+    b = selection_population_stats(selection_fingerprint="BBB")
+    assert a["n_registered"] == 3
+    assert b["n_registered"] == 2
+
+
+def test_population_stats_none_pools_all_legacy(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+    for i in range(4):
+        tid = claim_trial(source="auto_tune", combo={"a": i}, window_label="w")
+        finalize_trial(tid, status="ok", metrics={"sharpe": 1.0 + i})
+    assert selection_population_stats()["n_registered"] == 4
