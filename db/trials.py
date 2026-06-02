@@ -84,9 +84,23 @@ def _ensure_trials_schema() -> None:
                 status TEXT NOT NULL DEFAULT 'pending',
                 sharpe REAL,
                 metrics_json TEXT,
-                error TEXT
+                error TEXT,
+                cost_model TEXT,
+                selection_fingerprint TEXT
             )
             """
+        )
+        # provenance migration (idempotent): add columns if absent, backfill pre-v3 rows
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(trials)")}
+        if "cost_model" not in cols:
+            con.execute("ALTER TABLE trials ADD COLUMN cost_model TEXT")
+        if "selection_fingerprint" not in cols:
+            con.execute("ALTER TABLE trials ADD COLUMN selection_fingerprint TEXT")
+        from selection_provenance import fingerprint_for_v2_sibling  # leaf, no cycle
+        con.execute(
+            "UPDATE trials SET cost_model='v2', selection_fingerprint=? "
+            "WHERE selection_fingerprint IS NULL",
+            (fingerprint_for_v2_sibling(),),
         )
     _schema_ensured = True
 
