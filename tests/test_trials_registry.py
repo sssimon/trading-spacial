@@ -14,6 +14,8 @@ def trials_db(tmp_path, monkeypatch):
     monkeypatch.setattr("btc_api.DB_FILE", str(db_path))
     import db.trials
     monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    import selection_provenance
+    monkeypatch.setattr(selection_provenance, "_cache", None)
     return db_path
 
 
@@ -268,3 +270,79 @@ def test_n_effective_floor_active_then_decayed(trials_db):
     after = datetime(2026, 12, 1, tzinfo=timezone.utc)
     assert n_effective(n_registered=10, today=after, decay_date=decay) == 10
     assert n_effective(n_registered=0, today=after, decay_date=decay) == 0
+
+
+def test_new_db_has_provenance_columns(trials_db):
+    import db.trials
+    db.trials._ensure_trials_schema()
+    with transaction() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(trials)")}
+    assert "cost_model" in cols and "selection_fingerprint" in cols
+
+
+def test_migration_adds_columns_and_backfills_v2(trials_db, monkeypatch):
+    import db.trials, selection_provenance
+    selection_provenance._clear_cache()
+    with transaction() as con:
+        con.execute(
+            "CREATE TABLE trials (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "claimed_ts TEXT NOT NULL, finalized_ts TEXT, source TEXT NOT NULL, "
+            "study_type TEXT NOT NULL DEFAULT 'exploratory', symbol TEXT, "
+            "combo_json TEXT NOT NULL, window_label TEXT, "
+            "status TEXT NOT NULL DEFAULT 'pending', sharpe REAL, "
+            "metrics_json TEXT, error TEXT)")
+        con.execute("INSERT INTO trials (claimed_ts, source, combo_json, status, sharpe) "
+                    "VALUES ('2026-05-01T00:00:00+00:00', 'auto_tune', '{\"a\":1}', 'ok', 1.2)")
+    monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    db.trials._ensure_trials_schema()
+    with transaction() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(trials)")}
+        row = dict(con.execute("SELECT cost_model, selection_fingerprint FROM trials").fetchone())
+    assert "selection_fingerprint" in cols
+    assert row["cost_model"] == "v2"
+    assert row["selection_fingerprint"] == selection_provenance.fingerprint_for_v2_sibling()
+
+
+def test_migration_idempotent(trials_db, monkeypatch):
+    import db.trials
+    db.trials._ensure_trials_schema()
+    monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    db.trials._ensure_trials_schema()
+    with transaction() as con:
+        names = [r["name"] for r in con.execute("PRAGMA table_info(trials)")]
+    assert names.count("selection_fingerprint") == 1
+
+
+def test_claim_trial_auto_stamps_fingerprint(trials_db):
+    import db.trials, selection_provenance
+    selection_provenance._clear_cache()
+    db.trials.claim_trial(source="auto_tune", combo={"a": 1}, window_label="w")
+    fp, _ = selection_provenance.selection_fingerprint()
+    with transaction() as con:
+        row = dict(con.execute("SELECT cost_model, selection_fingerprint FROM trials").fetchone())
+    assert row["cost_model"] == "v3"
+    assert row["selection_fingerprint"] == fp
+
+
+def test_population_stats_filters_by_fingerprint(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+    ids = [claim_trial(source="auto_tune", combo={"a": i}, window_label="w") for i in range(5)]
+    for i, tid in enumerate(ids):
+        finalize_trial(tid, status="ok", metrics={"sharpe": 1.0 + i})
+    with transaction() as con:
+        for tid in ids[:3]:
+            con.execute("UPDATE trials SET selection_fingerprint='AAA' WHERE id=?", (tid,))
+        for tid in ids[3:]:
+            con.execute("UPDATE trials SET selection_fingerprint='BBB' WHERE id=?", (tid,))
+    a = selection_population_stats(selection_fingerprint="AAA")
+    b = selection_population_stats(selection_fingerprint="BBB")
+    assert a["n_registered"] == 3
+    assert b["n_registered"] == 2
+
+
+def test_population_stats_none_pools_all_legacy(trials_db):
+    from db.trials import claim_trial, finalize_trial, selection_population_stats
+    for i in range(4):
+        tid = claim_trial(source="auto_tune", combo={"a": i}, window_label="w")
+        finalize_trial(tid, status="ok", metrics={"sharpe": 1.0 + i})
+    assert selection_population_stats()["n_registered"] == 4

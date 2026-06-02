@@ -50,6 +50,7 @@ _FROZEN_FIELDS = (
     "deflated_metric", "deflated_threshold", "n_at_lock",
     "cand_sharpe", "cand_n_returns", "cand_skew", "cand_kurt_raw",
     "preholdout_trial_ids_json", "walkforward_ref", "drift_check_ref",
+    "selection_fingerprint",
 )
 
 
@@ -114,13 +115,21 @@ def _ensure_schema() -> None:
                 verdict TEXT,
                 outcome_ts TEXT,
                 seal TEXT,
-                source_note TEXT
+                source_note TEXT,
+                cost_model TEXT,
+                selection_fingerprint TEXT
             )
             """
         )
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")}
+        if "cost_model" not in cols:
+            con.execute("ALTER TABLE hypotheses ADD COLUMN cost_model TEXT")
+        if "selection_fingerprint" not in cols:
+            con.execute("ALTER TABLE hypotheses ADD COLUMN selection_fingerprint TEXT")
+        con.execute("DROP TRIGGER IF EXISTS hypotheses_frozen_after_lock")
         con.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS hypotheses_frozen_after_lock
+            CREATE TRIGGER hypotheses_frozen_after_lock
             BEFORE UPDATE ON hypotheses
             FOR EACH ROW
             WHEN OLD.status IN ('locked', 'fired', 'refuted', 'not_refuted')
@@ -142,6 +151,7 @@ def _ensure_schema() -> None:
                 OR NEW.preholdout_trial_ids_json IS NOT OLD.preholdout_trial_ids_json
                 OR NEW.walkforward_ref     IS NOT OLD.walkforward_ref
                 OR NEW.drift_check_ref     IS NOT OLD.drift_check_ref
+                OR NEW.selection_fingerprint IS NOT OLD.selection_fingerprint
                 OR NEW.seal                IS NOT OLD.seal
               )
             BEGIN
@@ -177,6 +187,11 @@ def claim_hypothesis(
     config_hash = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
     now = _now()
 
+    from selection_provenance import selection_fingerprint as _sel_fp
+    from backtest_costs import active_cost_model_id
+    fp, _ = _sel_fp()
+    active_model, _h = active_cost_model_id()
+
     def _do() -> int:
         with transaction() as con:
             cur = con.execute(
@@ -184,11 +199,12 @@ def claim_hypothesis(
                 "(created_ts, status, strategy_config_json, config_hash, symbols_json, "
                 " window_label, metric, threshold, direction, deflated_metric, "
                 " deflated_threshold, cand_sharpe, cand_n_returns, cand_skew, "
-                " cand_kurt_raw, source_note) "
-                "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " cand_kurt_raw, source_note, cost_model, selection_fingerprint) "
+                "VALUES (?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (now, cfg_json, config_hash, json.dumps(symbols), window_label,
                  metric, threshold, direction, deflated_metric, deflated_threshold,
-                 cand_sharpe, cand_n_returns, cand_skew, cand_kurt_raw, source_note),
+                 cand_sharpe, cand_n_returns, cand_skew, cand_kurt_raw, source_note,
+                 active_model, fp),
             )
             return int(cur.lastrowid)
 
@@ -238,10 +254,13 @@ def _has_provenance(config_hash: str) -> bool:
 
 
 def _deflation_probability(row: dict, *, today: datetime) -> tuple[float | None, int]:
-    """Candidate's deflated-Sharpe probability over the FULL registry N.
+    """Candidate's deflated-Sharpe probability over the same-world registry N.
     Returns (probability_or_None, n_at_lock). Opens its own read of the registry
-    (selection_population_stats) and MUST run outside any write transaction."""
-    stats = selection_population_stats(study_type="exploratory")
+    (selection_population_stats) and MUST run outside any write transaction.
+    Restricts the pool to same-fingerprint trials so the best-of-N penalty is
+    computed against a coherent population (no cross-world contamination)."""
+    stats = selection_population_stats(study_type="exploratory",
+                                       selection_fingerprint=row["selection_fingerprint"])
     n_at_lock = n_effective(stats["n_registered"], today=today)
     sigma = stats["sigma_sr_trials"]
     if sigma is None:
@@ -303,6 +322,17 @@ def lock_hypothesis(hid: int, *, today: datetime) -> None:
     if row["direction"] not in (">", "<"):
         raise HypothesisLockError(
             f"incomplete claim — direction {row['direction']!r} must be '>' or '<'")
+
+    # 4f: cost-model / selection-world consistency. The candidate was selected under
+    # the world stamped at claim; locking under a drifted world would freeze a deflation
+    # computed against a population (and a fire later) that no longer matches. Refuse.
+    from selection_provenance import selection_fingerprint
+    active_fp, _ = selection_fingerprint()
+    if row["selection_fingerprint"] != active_fp:
+        raise HypothesisLockError(
+            f"hypothesis {hid}: selection-world drift — frozen under "
+            f"{row['selection_fingerprint']!r} but the active selection world is "
+            f"{active_fp!r}; re-claim under the active cost-model before locking")
 
     # 4a: provenance (opens its own transaction internally)
     if not _has_provenance(row["config_hash"]):
@@ -428,6 +458,19 @@ def assert_fireable(hid: int) -> None:
         if _compute_seal(row) != row["seal"]:
             raise HoldoutFalsificationError(
                 f"hypothesis {hid} seal mismatch — frozen fields were tampered")
+        # NOTE: runtime order is seal(4) -> world(6) -> budget(5) BY DESIGN — report the
+        # specific/severe reason first (tamper, then this hypothesis's world drift, then the
+        # shared-window budget). Do NOT reorder to make the numbers sequential.
+        # 6: selection-world match. Firing under a different world than the one the
+        # hypothesis was frozen under is re-selection, not falsification — and the bala
+        # unica is irreversible. (Local import: keep db acyclic re: provenance.)
+        from selection_provenance import selection_fingerprint
+        active_fp, _ = selection_fingerprint()
+        if row["selection_fingerprint"] != active_fp:
+            raise HoldoutFalsificationError(
+                f"hypothesis {hid} frozen under selection world "
+                f"{row['selection_fingerprint']!r} but the active world is {active_fp!r} "
+                "— firing now would be re-selection, not falsification; re-claim/re-lock")
         # 5: budget (a re-read of an already-fired hypothesis is allowed)
         if row["fired_ts"] is None and _fired_count(con, row["window_label"]) >= HOLDOUT_FIRE_BUDGET:
             raise HoldoutFalsificationError(

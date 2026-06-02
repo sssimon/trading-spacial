@@ -21,6 +21,8 @@ def hyp_db(tmp_path, monkeypatch):
     import db.trials
     monkeypatch.setattr(db.hypotheses, "_schema_ensured", False)
     monkeypatch.setattr(db.trials, "_schema_ensured", False)
+    import selection_provenance
+    monkeypatch.setattr(selection_provenance, "_cache", None)
     return db_path
 
 
@@ -475,6 +477,41 @@ def test_assert_fireable_allows_fired_reread(hyp_db):
 
 
 # ---------------------------------------------------------------------------
+# Task 6 (this PR): provenance columns + idempotent migration + trigger guard
+# ---------------------------------------------------------------------------
+
+def test_hypotheses_has_provenance_columns(hyp_db):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")}
+    assert "cost_model" in cols and "selection_fingerprint" in cols
+
+
+def test_trigger_blocks_selection_fingerprint_mutation_after_lock(hyp_db):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        con.execute(
+            "INSERT INTO hypotheses (created_ts, status, strategy_config_json, "
+            "config_hash, window_label, selection_fingerprint, seal) "
+            "VALUES ('t','locked','{}','h','w','FP_OLD','seal')")
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction() as con:
+            con.execute("UPDATE hypotheses SET selection_fingerprint='FP_NEW' WHERE id=1")
+
+
+def test_hyp_migration_idempotent(hyp_db, monkeypatch):
+    import db.hypotheses
+    db.hypotheses._ensure_schema()
+    monkeypatch.setattr(db.hypotheses, "_schema_ensured", False)
+    db.hypotheses._ensure_schema()
+    with transaction() as con:
+        names = [r["name"] for r in con.execute("PRAGMA table_info(hypotheses)")]
+    assert names.count("selection_fingerprint") == 1
+
+
+# ---------------------------------------------------------------------------
 # Task 8: record_outcome — verdict asymmetry + close read window
 # ---------------------------------------------------------------------------
 
@@ -618,3 +655,80 @@ def test_record_fire_budget_recheck_under_write_lock(hyp_db):
     authorize_fire(hid2, now=locked_at + timedelta(hours=25))
     with pytest.raises(HoldoutFalsificationError, match="budget"):
         record_fire(hid2)
+
+
+# ---------------------------------------------------------------------------
+# Task 7: claim_hypothesis auto-stamps cost_model + selection_fingerprint
+# ---------------------------------------------------------------------------
+
+def test_claim_hypothesis_auto_stamps_fingerprint(hyp_db):
+    import selection_provenance
+    from db.hypotheses import claim_hypothesis
+    selection_provenance._clear_cache()
+    fp, _ = selection_provenance.selection_fingerprint()
+    hid = claim_hypothesis(
+        strategy_config={"atr_sl_mult": 1.0}, symbols=["BTCUSDT"],
+        window_label="w", metric="net_pnl", threshold=0.0, direction=">",
+        deflated_metric="sharpe_deflated", deflated_threshold=0.95,
+        cand_sharpe=1.4, cand_n_returns=120, cand_skew=0.1, cand_kurt_raw=3.5)
+    with transaction() as con:
+        row = dict(con.execute(
+            "SELECT cost_model, selection_fingerprint FROM hypotheses WHERE id=?", (hid,)).fetchone())
+    assert row["cost_model"] == "v3"
+    assert row["selection_fingerprint"] == fp
+
+
+def test_seal_covers_selection_fingerprint(hyp_db):
+    import db.hypotheses as H
+    base = {f: None for f in H._FROZEN_FIELDS}
+    s1 = H._compute_seal({**base, "selection_fingerprint": "FP_A"})
+    s2 = H._compute_seal({**base, "selection_fingerprint": "FP_B"})
+    assert "selection_fingerprint" in H._FROZEN_FIELDS
+    assert s1 != s2
+
+
+# ---------------------------------------------------------------------------
+# Task 8: lock 4f — cost-model / selection-world consistency
+# ---------------------------------------------------------------------------
+
+def test_lock_refuses_on_cost_model_drift(hyp_db, monkeypatch):
+    """4f: if the active selection world changes between claim and lock, refuse."""
+    import selection_provenance
+    from db.hypotheses import lock_hypothesis, HypothesisLockError
+
+    # establish the original fingerprint and build a lockable hypothesis under it
+    selection_provenance._clear_cache()
+    hid = _lockable()   # claim + provenance ok-trials + attested refs, same world
+
+    # drift the active selection world AFTER claim/setup, BEFORE lock
+    selection_provenance._clear_cache()
+    monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
+
+    with pytest.raises(HypothesisLockError, match="selection-world drift"):
+        lock_hypothesis(hid, today=_T())
+
+
+# ---------------------------------------------------------------------------
+# Task 9: assert_fireable check 6 — hard-refuse fire on selection-world mismatch
+# ---------------------------------------------------------------------------
+
+def test_fire_refused_on_cost_model_mismatch(hyp_db, monkeypatch):
+    """Check 6: if the active selection world drifts AFTER authorization but BEFORE
+    fire, assert_fireable must refuse without touching the holdout. Firing under a
+    different world than the frozen one is re-selection masquerading as falsification
+    — the bala única is irreversible."""
+    import selection_provenance
+    from db.hypotheses import assert_fireable
+    from data.holdout_access import HoldoutFalsificationError
+
+    # Build locked + authorized hypothesis under the CURRENT (unmodified) world
+    selection_provenance._clear_cache()
+    hid = _locked_and_authorized()   # claim -> lock -> authorize_fire (cooldown passed)
+
+    # The world drifts AFTER authorization, BEFORE fire
+    selection_provenance._clear_cache()
+    monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
+
+    with pytest.raises(HoldoutFalsificationError,
+                       match="selection world|cost-model|fingerprint|re-claim"):
+        assert_fireable(hid)

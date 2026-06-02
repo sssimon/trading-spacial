@@ -1,7 +1,7 @@
 ---
 name: registering-a-trial
 description: Claim-then-execute contract for recording backtest trials in the `trials` ledger (#278 Part 1). Use when wiring a parameter/window SWEEP so its runs count toward the deflation denominator N.
-last_updated: 2026-05-29
+last_updated: 2026-06-02
 ---
 
 # Registering a trial
@@ -86,6 +86,11 @@ MUST be wired into the registry (`source="tune_per_direction"`, exploratory
 - **`db/trials.py` writes ONLY to `signals.db`.** It must never import
   `open_holdout` or touch `data/holdout/` (Non-Negotiable #2/#3). It is correctly
   absent from `HOLDOUT_LEGITIMATE_MODULES`.
+- **`claim_trial` auto-stamps `cost_model` + `selection_fingerprint`.** The deflation N
+  computed by `selection_population_stats()` pools ONLY same-fingerprint trials — trials
+  run under a different cost-model version or deflation parameters never contaminate the
+  same selection population. New world-coordinates (e.g. a new cost-model param) belong
+  INSIDE `selection_provenance._build()` (+ bump `_DIGEST_VERSION`), never as new columns.
 - **N is DISTINCT `(source, combo_json, window_label)`, not raw `COUNT(*)`.**
   Some sweeps legitimately re-run an identical configuration, producing duplicate
   rows for the SAME selection candidate. `regime_allocation_sweep`'s sensitivity

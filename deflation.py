@@ -21,6 +21,11 @@ from __future__ import annotations
 
 import math
 
+# Version of the deflation algorithm. Bumped when the formula changes; an
+# ingredient of the selection fingerprint (selection_provenance.py), so a change
+# to how the deflated metric is computed re-versions every evaluation artifact.
+ALGO_VERSION = 1
+
 _EULER_MASCHERONI = 0.5772156649015329
 
 

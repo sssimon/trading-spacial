@@ -84,9 +84,23 @@ def _ensure_trials_schema() -> None:
                 status TEXT NOT NULL DEFAULT 'pending',
                 sharpe REAL,
                 metrics_json TEXT,
-                error TEXT
+                error TEXT,
+                cost_model TEXT,
+                selection_fingerprint TEXT
             )
             """
+        )
+        # provenance migration (idempotent): add columns if absent, backfill pre-v3 rows
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(trials)")}
+        if "cost_model" not in cols:
+            con.execute("ALTER TABLE trials ADD COLUMN cost_model TEXT")
+        if "selection_fingerprint" not in cols:
+            con.execute("ALTER TABLE trials ADD COLUMN selection_fingerprint TEXT")
+        from selection_provenance import fingerprint_for_v2_sibling  # leaf, no cycle
+        con.execute(
+            "UPDATE trials SET cost_model='v2', selection_fingerprint=? "
+            "WHERE selection_fingerprint IS NULL",
+            (fingerprint_for_v2_sibling(),),
         )
     _schema_ensured = True
 
@@ -133,14 +147,20 @@ def claim_trial(
     _ensure_trials_schema()
     now = datetime.now(timezone.utc).isoformat()
     combo_json = json.dumps(combo, default=str, sort_keys=True)
+    from selection_provenance import selection_fingerprint as _sfp
+    from backtest_costs import active_cost_model_id as _acm
+    fp, _ = _sfp()
+    active_model, _ = _acm()
 
     def _do() -> int:
         with transaction() as con:
             cur = con.execute(
                 "INSERT INTO trials "
-                "(claimed_ts, source, study_type, symbol, combo_json, window_label, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-                (now, source, study_type, symbol, combo_json, window_label),
+                "(claimed_ts, source, study_type, symbol, combo_json, window_label, "
+                " status, cost_model, selection_fingerprint) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                (now, source, study_type, symbol, combo_json, window_label,
+                 active_model, fp),
             )
             return int(cur.lastrowid)
 
@@ -183,22 +203,29 @@ A03_DECAY_DATE = datetime(2026, 11, 29, tzinfo=timezone.utc)
 A03_N_FLOOR = 50
 
 
-def selection_population_stats(*, study_type: str = "exploratory") -> dict:
+def selection_population_stats(*, study_type: str = "exploratory",
+                               selection_fingerprint: str | None = None) -> dict:
     """Aggregate the selection-trial population for deflation.
 
     Over all trials of the given study_type with a non-NULL sharpe, deduplicated
     by DISTINCT (source, combo_json, window_label) — identical configs re-run by
     a sensitivity pass count once (see registering-a-trial.md). Returns
     {"n_registered": int, "sigma_sr_trials": float | None}. sigma is the
-    population stdev of the per-distinct-config annualized Sharpes (None if < 2)."""
+    population stdev of the per-distinct-config annualized Sharpes (None if < 2).
+
+    When selection_fingerprint is given, restricts to trials of that selection
+    world (homogeneous pool — different cost-model/world worlds must not pool
+    together). None pools all (legacy)."""
     _ensure_trials_schema()
+    sql = ("SELECT AVG(sharpe) AS s FROM trials "
+           "WHERE study_type = ? AND sharpe IS NOT NULL ")
+    params: list = [study_type]
+    if selection_fingerprint is not None:
+        sql += "AND selection_fingerprint = ? "
+        params.append(selection_fingerprint)
+    sql += "GROUP BY source, combo_json, window_label"
     with transaction() as con:
-        rows = con.execute(
-            "SELECT AVG(sharpe) AS s FROM trials "
-            "WHERE study_type = ? AND sharpe IS NOT NULL "
-            "GROUP BY source, combo_json, window_label",
-            (study_type,),
-        ).fetchall()
+        rows = con.execute(sql, tuple(params)).fetchall()
     sharpes = [float(r["s"]) for r in rows if r["s"] is not None]
     n = len(sharpes)
     sigma = statistics.pstdev(sharpes) if n >= 2 else None
