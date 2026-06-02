@@ -389,25 +389,33 @@ def compute_trade_costs(
     enable_funding: bool = True,
     holding_hours: float = 0.0,
     model: Literal["v1", "v2", "v3"] = "v2",
-    global_params: "GlobalParams | None" = None,
+    global_params: GlobalParams | None = None,
 ) -> dict:
     """Compute per-component cost dict for a single round-trip trade.
 
-    Returns keys: entry_slippage_bps, exit_slippage_bps, entry_spread_bps,
-    exit_spread_bps, fee_bps (round-trip), funding_cost_bps (NEW in v2),
-    total_cost_bps, total_cost_usd.
+    Returns keys (all models): entry_slippage_bps, exit_slippage_bps,
+    entry_spread_bps, exit_spread_bps, fee_bps (round-trip),
+    funding_cost_bps, total_cost_bps, total_cost_usd.
+
+    v3 ADDS: floor_bps, tail_bps, cap_hit (bool), fallback_hit (bool).
+    v1/v2 do NOT have these keys.
 
     Notional is the position USD value at fill time. Liquidity is a 30-day
     rolling proxy of (volume × price) per minute on the bar's timeframe.
 
-    Args (v2-specific):
+    Args:
+        model: 'v1' (legacy linear slippage), 'v2' (sqrt + cap, default),
+            or 'v3' (two-body floor+tail+cap). v3 uses stress-scaled spread
+            + fee as a floor, an Almgren-Chriss tail on the daily participation
+            basis, and a hard total round-trip cap (GlobalParams.total_cost_cap_bps).
+        global_params: v3 calibration globals. Uses _DEFAULT_GLOBAL when None.
+            Ignored by v1/v2.
         enable_funding: Include funding-rate cost for perp positions held
             across funding intervals. Default True (matches epic #338 §8.5
             which locked SHORT bidirectional → perp dependency).
         holding_hours: How long the position was held end-to-end. Funding
             costs accrue per 8h interval (floor). Zero by default for
             backward-compat with v1 callers.
-        model: 'v1' (legacy linear slippage) or 'v2' (sqrt + cap, default).
 
     Backward compat: if `holding_hours=0` (default), funding_cost_bps=0
     regardless of enable_funding — preserves v1 test expectations for callers
@@ -418,9 +426,14 @@ def compute_trade_costs(
 
     if model == "v3":
         g = global_params if global_params is not None else _DEFAULT_GLOBAL
-        entry_leg, entry_slip, _ = _v3_leg_cost(
+        if not (math.isfinite(tier_params.stress_mult)
+                and math.isfinite(tier_params.sigma_daily_bps)):
+            raise ValueError(
+                "v3 cost requires finite stress_mult and sigma_daily_bps; got a "
+                "v2/poisoned TierParams (construct via TierParams.from_v3_tier)")
+        _, entry_slip, entry_fb = _v3_leg_cost(
             entry_notional_usd, entry_liquidity_usd_per_min, tier_params, g)
-        exit_leg, exit_slip, _ = _v3_leg_cost(
+        _, exit_slip, exit_fb = _v3_leg_cost(
             exit_notional_usd, exit_liquidity_usd_per_min, tier_params, g)
         sm = tier_params.stress_mult
         entry_spread = sm * tier_params.half_spread_bps if enable_spread else 0.0
@@ -433,8 +446,12 @@ def compute_trade_costs(
             )
             if (enable_funding and holding_hours > 0.0) else 0.0
         )
+        # The liquidity fallback excess rides on the slippage component (consistent
+        # with v2), so enable_slippage=False omits both tail and fallback excess —
+        # the bound guarantee applies to the default all-costs-on config.
         entry_tail = entry_slip if enable_slippage else 0.0
         exit_tail = exit_slip if enable_slippage else 0.0
+        fallback_hit = entry_fb or exit_fb
         floor_bps = entry_spread + exit_spread + fee_bps + funding_bps
         tail_bps = entry_tail + exit_tail
         uncapped = floor_bps + tail_bps
@@ -445,7 +462,8 @@ def compute_trade_costs(
             "entry_slippage_bps": entry_tail, "exit_slippage_bps": exit_tail,
             "entry_spread_bps": entry_spread, "exit_spread_bps": exit_spread,
             "fee_bps": fee_bps, "funding_cost_bps": funding_bps,
-            "floor_bps": floor_bps, "tail_bps": tail_bps, "cap_hit": cap_hit,
+            "floor_bps": floor_bps, "tail_bps": tail_bps,
+            "cap_hit": cap_hit, "fallback_hit": fallback_hit,
             "total_cost_bps": total_cost_bps,
             "total_cost_usd": total_cost_bps * avg_notional / 10_000.0,
         }

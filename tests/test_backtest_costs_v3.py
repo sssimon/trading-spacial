@@ -189,8 +189,15 @@ class TestComputeTradeCostsV3:
             exit_liquidity_usd_per_min=1_000_000.0,
             tier_params=self._v3_mid(), model="v3", global_params=GlobalParams(),
         )
-        assert c["total_cost_bps"] > 100.0
-        assert c["total_cost_bps"] >= 100.0
+        # entry leg dead -> fallback max(1*(4+5)=9, 100)=100 (excess 91 in slippage)
+        # exit leg live: floor 9 + tiny tail ~0.50 ; spread/fee reported separately
+        assert c["total_cost_bps"] == pytest.approx(109.50, abs=0.05)
+        assert c["fallback_hit"] is True
+        # dict components must reconstruct the total in the fallback case
+        recon = (c["entry_slippage_bps"] + c["exit_slippage_bps"]
+                 + c["entry_spread_bps"] + c["exit_spread_bps"]
+                 + c["fee_bps"] + c["funding_cost_bps"])
+        assert recon == pytest.approx(c["total_cost_bps"], abs=1e-6)
 
     def test_default_model_is_still_v2(self):
         from backtest_costs import compute_trade_costs, TierParams
@@ -212,3 +219,25 @@ class TestComputeTradeCostsV3:
                 tier_params=TierParams(5.0, 1423.02, 7.5, 10.0, 2.0),
                 model="bogus",
             )
+
+    def test_v2_params_in_v3_raises(self):
+        from backtest_costs import TierParams, compute_trade_costs, GlobalParams
+        v2tp = TierParams(5.0, 1423.02, 7.5, 10.0, 2.0)  # stress_mult/sigma are NaN
+        with pytest.raises(ValueError, match="finite stress_mult"):
+            compute_trade_costs(
+                entry_notional_usd=644.0, exit_notional_usd=644.0,
+                entry_liquidity_usd_per_min=1e6, exit_liquidity_usd_per_min=1e6,
+                tier_params=v2tp, model="v3", global_params=GlobalParams())
+
+    def test_v3_enable_slippage_false_omits_tail_and_fallback(self):
+        from backtest_costs import compute_trade_costs, GlobalParams
+        # Even with dead entry liquidity, enable_slippage=False -> spread+fee+funding only.
+        c = compute_trade_costs(
+            entry_notional_usd=644.0, exit_notional_usd=644.0,
+            entry_liquidity_usd_per_min=float("nan"),
+            exit_liquidity_usd_per_min=1_000_000.0,
+            tier_params=self._v3_mid(), model="v3", global_params=GlobalParams(),
+            enable_slippage=False, holding_hours=0.0,
+        )
+        assert c["tail_bps"] == 0.0
+        assert c["total_cost_bps"] == pytest.approx(18.0, abs=0.01)  # spread+fee only
