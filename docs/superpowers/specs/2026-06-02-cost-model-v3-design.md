@@ -376,14 +376,22 @@ for S in symbols_with_closed_shorts:
     if abs(sum_i pnl_usd_i) > NOISE_BAND_USD:     # skip simbolos ~cero-net
         assert sign(sum_i (pnl_usd_i - v3_cost_usd_i)) == sign(sum_i pnl_usd_i)
 
-# DIAGNOSTICO (NO gate): looseness ratio reportado, nunca falla la cota
-R_i = MODEL_COST_BPS_i / REALIZED_CEILING_BPS_i   # v2 hoy ~30-40x; v3 esperado acotado, solo se imprime
+# DIAGNOSTICO (NO gate): looseness ratio por GANADOR, reportado, nunca falla la cota.
+# Implementado en `looseness_report(scored)`. Para cada ganador (pnl_usd>0, move!=0):
+R_i = v3_cost_bps_i / (abs(pnl_pct_i) * 100)      # = costo modelado / movimiento bruto favorable (C1)
+# R_i >= 1  <=>  ese ganador se invierte a nivel de trade (el costo se come el movimiento entero).
+# v2 corria R_i ~1-5 con inversiones reales; v3 esperado << 1. Se reporta n_winners, R_i_max,
+# R_i_median, n_winners_inverting_per_trade, y la banda C2 {major 3, mid 8, small 20} como contexto.
 ```
 
-`MODEL_COST_BPS` incluye fee+funding; el techo C1 es fee/funding-EXCLUSIVE. Como `R_i` ya no decide
-membresía, la asimetría no cambia el conjunto asertado; para el reporte diagnóstico se compara
-like-for-like (restar fee+funding del floor de `MODEL_COST` antes de dividir, o sumar la banda de
-fee publicada al techo).
+**Denominador = C1 (techo del ganador), no `MIN(C1,C2)`.** El diseño original proponía
+`MIN(C1,C2)`, pero como `v3_cost_bps` es fee+funding-INCLUSIVE y el movimiento bruto (C1) es
+fee/funding-EXCLUSIVE, mezclar C2 (la banda de spread, ~3-20 bps) en un `MIN` producía un R_i
+dominado por la asimetría de fee, no por la holgura real. El R_i embarcado usa C1 directamente
+(la pregunta que importa: *¿el costo modelado se come el movimiento bruto del ganador?* — el
+análogo per-trade exacto del check de no-inversión-de-signo). La inclusión de fee hace que R_i
+**sobre-estime** ligeramente la holgura → conservador para un diagnóstico. C2 se reporta solo como
+referencia de contexto. `R_i` informa, NUNCA gatea (R1: la tightness no se valida contra live).
 
 **SCOPE CAVEAT impreso IN-BAND con el veredicto (no solo en docs):** dominio = SOLO SHORT, ~$644
 notional, régimen NORMAL mayo-2026, baja participación (~1e-6). NO licencia: costo long, regímenes
@@ -395,6 +403,15 @@ silencioso.
 **Lectura plain:** ningún símbolo que hizo dinero en precio en la cinta live se convierte en
 "perdedor" de backtest por costo v3 solo. v2 FALLA en AVAX-short (live +$35 → net negativo vía
 ~159bps). v3 PASA sii el costo floor-dominado deja intactos los signos de los ganadores live.
+
+**Honestidad sobre la fuerza del gate (R1):** el check binario de no-inversión-de-signo es una
+condición NECESARIA DÉBIL — a tamaños de régimen normal el costo v3 floor-dominado (~13-30 bps) está
+muy por debajo del movimiento bruto típico, así que el PASS binario se cumple para *cualquier* modelo
+no-insano (un modelo que cobrara cero también pasaría). Eso NO es un defecto a arreglar: por R1, la
+tightness de una cota **no se puede validar** contra data live de un solo régimen (lo intentaría es
+fitting). El gate binario solo descarta lo absurdo (inversión de signo, costo bajo el fee publicado);
+**el `R_i` diagnóstico es la señal continua real** de qué tan ajustada está la cota (se reporta, no
+gatea). No vender el PASS binario como "prueba de que la cota es ajustada" — no lo es ni puede serlo.
 
 ---
 
