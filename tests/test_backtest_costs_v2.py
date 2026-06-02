@@ -90,15 +90,15 @@ class TestAnchorParity:
         )
 
     def test_committed_calibration_v2_anchor_parity_with_v1_baseline(self):
-        """The committed costs_calibration.json v2 size_factors must produce the
+        """The frozen v2 costs_calibration.v2.json size_factors must produce the
         same total slippage as the v1 baseline at 0.1% participation. Anchors:
         major=30, mid=50, small=75.
 
-        This is the integration test that asserts the JSON is in sync with the
-        formula — if anyone changes either size_factor or the formula without
-        re-deriving the other, this test catches it.
+        This is the integration test that asserts the v2 sibling JSON is in sync
+        with the formula — re-pointed to costs_calibration.v2.json after the v3
+        atomic swap (main JSON is now v3).
         """
-        cal = load_calibration()
+        cal = load_calibration(path="costs_calibration.v2.json")
         order = self.LIQUIDITY * self.ANCHOR_PARTICIPATION
 
         expected_anchors = {"major": 30.0, "mid": 50.0, "small": 75.0}
@@ -522,7 +522,7 @@ class TestModelDispatch:
                 liquidity_usd_per_min=1_000_000.0,
                 base_bps=5.0,
                 size_factor=25_000.0,
-                model="v3",  # noqa
+                model="v9",  # invalid sentinel (v3 is now a real model)
             )
 
     def test_v1_and_v2_both_accepted(self):

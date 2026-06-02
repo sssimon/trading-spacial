@@ -10,7 +10,7 @@ from dataclasses import replace
 
 from backtest_costs import tier_for_symbol, load_calibration, compute_trade_costs
 
-_CAL = load_calibration()
+_CAL = load_calibration(path="costs_calibration.v2.json")
 
 # (name, liq_mult, sf_div) — pre-registered, NOT fit to the answer.
 CORRECTIONS = [

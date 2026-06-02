@@ -110,6 +110,28 @@ _DEFAULT_LIQUIDITY_FALLBACK_BPS = 100.0
 # residual single-trade catastrophes even under the sqrt model.
 EXTREME_PARTICIPATION_CAP_BPS = 500.0
 
+# ── v3 two-body upper bound ─────────────────────────────────────────────────
+# Exchange-published taker fee, used as the model-INDEPENDENT mandatory lower
+# bound in the falsification harness (NOT read from calibration).
+PUBLISHED_TAKER_FEE_BPS = 5.0
+
+DEFAULT_Y_IMPACT = 1.5                   # top of the empirical O(1) band (type-coherent bound)
+DEFAULT_TOTAL_COST_CAP_BPS = 1000.0      # total round-trip cap (re-spec; v2's 500 was per-leg)
+DEFAULT_LIQUIDITY_FALLBACK_FLOOR_BPS = 100.0
+DEFAULT_V_DAILY_MINUTES_PER_DAY = 1440.0
+
+
+@dataclass(frozen=True)
+class GlobalParams:
+    """v3 calibration globals (the `global` block of costs_calibration.json)."""
+    Y_impact_constant: float = DEFAULT_Y_IMPACT
+    total_cost_cap_bps: float = DEFAULT_TOTAL_COST_CAP_BPS
+    liquidity_fallback_floor_bps: float = DEFAULT_LIQUIDITY_FALLBACK_FLOOR_BPS
+    v_daily_minutes_per_day: float = DEFAULT_V_DAILY_MINUTES_PER_DAY
+
+
+_DEFAULT_GLOBAL = GlobalParams()
+
 
 def compute_slippage_bps(
     *,
@@ -168,9 +190,40 @@ def compute_slippage_bps(
         if participation < 0.0:
             participation = 0.0
         slippage = base_bps + size_factor * math.sqrt(participation)
-        return min(slippage, EXTREME_PARTICIPATION_CAP_BPS)
+        return min(slippage, EXTREME_PARTICIPATION_CAP_BPS)  # NaN MUST stay first arg: min(nan,x)=nan, min(x,nan)=x — preserves the v3 poison signal
     else:
         raise ValueError(f"Unknown cost model {model!r}; expected 'v1' or 'v2'")
+
+
+def compute_tail_bps(
+    *,
+    order_usd: float,
+    liquidity_usd_per_min: float,
+    sigma_daily_bps: float,
+    Y: float,
+    v_daily_minutes_per_day: float,
+) -> float:
+    """v3 impact tail (per fill), in bps. sqrt on the DAILY participation basis.
+
+    tail = Y * sigma_daily_bps * sqrt(order_usd / (liquidity_usd_per_min * v_daily_minutes_per_day))
+
+    Returns NaN when liquidity is non-positive/non-finite — the caller
+    (`compute_trade_costs` v3 branch) detects NaN and applies the floor-anchored
+    leg fallback. Negative participation (degenerate input) is clamped to 0.
+    """
+    if (
+        liquidity_usd_per_min is None
+        or not math.isfinite(liquidity_usd_per_min)
+        or liquidity_usd_per_min <= 0.0
+    ):
+        return float("nan")
+    if not math.isfinite(v_daily_minutes_per_day) or v_daily_minutes_per_day <= 0.0:
+        return float("nan")
+    v_daily = liquidity_usd_per_min * v_daily_minutes_per_day
+    participation = order_usd / v_daily
+    if participation < 0.0:
+        participation = 0.0
+    return Y * sigma_daily_bps * math.sqrt(participation)
 
 
 def compute_funding_cost_bps(
@@ -218,15 +271,48 @@ def compute_funding_cost_bps(
 
 @dataclass(frozen=True)
 class TierParams:
-    """Per-tier cost parameters loaded from costs_calibration.json.
+    """Per-tier cost parameters. Dual-shaped to carry BOTH v2 and v3 fields.
+
+    v2 fields: base_bps, size_factor (NaN when loaded from a v3 calibration).
+    v3 fields: stress_mult, sigma_daily_bps (NaN when loaded from v2).
+    Shared:    half_spread_bps, fee_bps_per_side, funding_rate_bps_per_8h.
+
+    Cross-version fields default to NaN ("poison"): a v3-loaded TierParams fed to
+    the v2 slippage path yields NaN cost (loud, detectable) rather than 0.0
+    (silent split-brain). Construct via from_v2_flat / from_v3_tier; the 5-arg
+    positional form is preserved for legacy v2 tests.
 
     The funding_rate_bps_per_8h field is new in v2 (#340); defaults to 0.0 for
-    backward compat with v1 callers that constructed TierParams manually."""
+    backward compat with v1 callers that constructed TierParams manually.
+    """
     base_bps: float
     size_factor: float
     half_spread_bps: float
     fee_bps_per_side: float
     funding_rate_bps_per_8h: float = 0.0
+    stress_mult: float = float("nan")
+    sigma_daily_bps: float = float("nan")
+
+    @classmethod
+    def from_v2_flat(cls, *, base_bps, size_factor, half_spread_bps,
+                     fee_bps_per_side, funding_rate_bps_per_8h=0.0):
+        return cls(
+            base_bps=float(base_bps), size_factor=float(size_factor),
+            half_spread_bps=float(half_spread_bps),
+            fee_bps_per_side=float(fee_bps_per_side),
+            funding_rate_bps_per_8h=float(funding_rate_bps_per_8h),
+        )
+
+    @classmethod
+    def from_v3_tier(cls, *, floor: dict, impact_tail: dict):
+        return cls(
+            base_bps=float("nan"), size_factor=float("nan"),
+            half_spread_bps=float(floor["half_spread_bps"]),
+            fee_bps_per_side=float(floor["fee_bps_per_side"]),
+            funding_rate_bps_per_8h=float(floor["funding_rate_bps_per_8h"]),
+            stress_mult=float(floor["stress_mult"]),
+            sigma_daily_bps=float(impact_tail["sigma_daily_bps"]),
+        )
 
 
 @dataclass(frozen=True)
@@ -238,36 +324,88 @@ class Calibration:
     tiers: dict[str, TierParams]
     sources: dict[str, str]
     sensitivity_note: str
+    active_model: str = "v2"
+    global_: "GlobalParams | None" = None
 
 
 _CALIBRATION_PATH = Path(__file__).resolve().parent / "costs_calibration.json"
 
 
 def load_calibration(path: str | Path | None = None) -> Calibration:
-    """Load and validate costs_calibration.json. Raises FileNotFoundError if
-    missing — refuses to silently fall back to hardcoded defaults."""
+    """Load + validate calibration. version==2 -> flat parser (byte-identical to
+    legacy); version==3 -> nested floor/impact_tail + global block. Refuses to
+    silently fall back to hardcoded defaults (FileNotFoundError propagates)."""
     p = Path(path) if path is not None else _CALIBRATION_PATH
     with p.open() as f:
         raw = json.load(f)
+    if "version" not in raw:
+        raise KeyError(
+            f"costs_calibration at {p!r} is missing the required 'version' key "
+            "(expected int, e.g. 2 or 3)."
+        )
+    version = int(raw["version"])
+
+    if version >= 3:
+        if "global" not in raw:
+            raise KeyError(
+                f"costs_calibration v3+ at {p!r} is missing the required 'global' block."
+            )
+        gb = raw["global"]
+        tiers = {
+            name: TierParams.from_v3_tier(floor=t["floor"], impact_tail=t["impact_tail"])
+            for name, t in raw["tiers"].items()
+        }
+        return Calibration(
+            version=version, model=raw["model"],
+            v2_planned=raw.get("v3_planned", raw.get("v2_planned", "")),  # v3 JSON uses "v3_planned" as primary
+            tiers=tiers, sources=dict(raw["sources"]),
+            sensitivity_note=raw["sensitivity_note"],
+            active_model=raw.get("active_model", "v3"),
+            global_=GlobalParams(
+                Y_impact_constant=float(gb["Y_impact_constant"]),
+                total_cost_cap_bps=float(gb["total_cost_cap_bps"]),
+                liquidity_fallback_floor_bps=float(gb["liquidity_fallback_floor_bps"]),
+                v_daily_minutes_per_day=float(gb["v_daily_minutes_per_day"]),
+            ),
+        )
 
     tiers = {
-        name: TierParams(
-            base_bps=float(t["base_bps"]),
-            size_factor=float(t["size_factor"]),
-            half_spread_bps=float(t["half_spread_bps"]),
-            fee_bps_per_side=float(t["fee_bps_per_side"]),
-            funding_rate_bps_per_8h=float(t.get("funding_rate_bps_per_8h", 0.0)),
+        name: TierParams.from_v2_flat(
+            base_bps=t["base_bps"], size_factor=t["size_factor"],
+            half_spread_bps=t["half_spread_bps"],
+            fee_bps_per_side=t["fee_bps_per_side"],
+            funding_rate_bps_per_8h=t.get("funding_rate_bps_per_8h", 0.0),
         )
         for name, t in raw["tiers"].items()
     }
     return Calibration(
-        version=int(raw["version"]),
-        model=raw["model"],
-        v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),
-        tiers=tiers,
-        sources=dict(raw["sources"]),
+        version=version, model=raw["model"],
+        v2_planned=raw.get("v2_planned", raw.get("v3_planned", "")),  # v2 JSON uses "v2_planned" as primary
+        tiers=tiers, sources=dict(raw["sources"]),
         sensitivity_note=raw["sensitivity_note"],
+        active_model=raw.get("active_model", "v2"),
+        global_=None,
     )
+
+
+def _v3_leg_cost(order_usd, liquidity_usd_per_min, tp, g):
+    """Return (leg_bps, slip_component_bps, is_fallback) for one v3 fill.
+
+    Normal leg:   floor_leg(spread+fee, stress-scaled) + tail.
+    Fallback leg: max(floor_leg, fallback_floor) when liquidity is unusable.
+    slip_component_bps is the portion reported as *_slippage_bps (the tail, or
+    the fallback excess above the floor leg) so the output dict still sums.
+    """
+    floor_leg = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
+    tail = compute_tail_bps(
+        order_usd=order_usd, liquidity_usd_per_min=liquidity_usd_per_min,
+        sigma_daily_bps=tp.sigma_daily_bps, Y=g.Y_impact_constant,
+        v_daily_minutes_per_day=g.v_daily_minutes_per_day,
+    )
+    if math.isnan(tail):
+        leg = max(floor_leg, g.liquidity_fallback_floor_bps)
+        return leg, max(0.0, leg - floor_leg), True
+    return floor_leg + tail, tail, False
 
 
 def compute_trade_costs(
@@ -282,30 +420,86 @@ def compute_trade_costs(
     enable_fees: bool = True,
     enable_funding: bool = True,
     holding_hours: float = 0.0,
-    model: Literal["v1", "v2"] = "v2",
+    model: Literal["v1", "v2", "v3"] = "v2",
+    global_params: GlobalParams | None = None,
 ) -> dict:
     """Compute per-component cost dict for a single round-trip trade.
 
-    Returns keys: entry_slippage_bps, exit_slippage_bps, entry_spread_bps,
-    exit_spread_bps, fee_bps (round-trip), funding_cost_bps (NEW in v2),
-    total_cost_bps, total_cost_usd.
+    Returns keys (all models): entry_slippage_bps, exit_slippage_bps,
+    entry_spread_bps, exit_spread_bps, fee_bps (round-trip),
+    funding_cost_bps, total_cost_bps, total_cost_usd.
+
+    v3 ADDS: floor_bps, tail_bps, cap_hit (bool), fallback_hit (bool).
+    v1/v2 do NOT have these keys.
 
     Notional is the position USD value at fill time. Liquidity is a 30-day
     rolling proxy of (volume × price) per minute on the bar's timeframe.
 
-    Args (v2-specific):
+    Args:
+        model: 'v1' (legacy linear slippage), 'v2' (sqrt + cap, default),
+            or 'v3' (two-body floor+tail+cap). v3 uses stress-scaled spread
+            + fee as a floor, an Almgren-Chriss tail on the daily participation
+            basis, and a hard total round-trip cap (GlobalParams.total_cost_cap_bps).
+        global_params: v3 calibration globals. Uses _DEFAULT_GLOBAL when None.
+            Ignored by v1/v2.
         enable_funding: Include funding-rate cost for perp positions held
             across funding intervals. Default True (matches epic #338 §8.5
             which locked SHORT bidirectional → perp dependency).
         holding_hours: How long the position was held end-to-end. Funding
             costs accrue per 8h interval (floor). Zero by default for
             backward-compat with v1 callers.
-        model: 'v1' (legacy linear slippage) or 'v2' (sqrt + cap, default).
 
     Backward compat: if `holding_hours=0` (default), funding_cost_bps=0
     regardless of enable_funding — preserves v1 test expectations for callers
     that don't yet supply holding_hours.
     """
+    if model not in ("v1", "v2", "v3"):
+        raise ValueError(f"Unknown cost model {model!r}; expected 'v1', 'v2', or 'v3'")
+
+    if model == "v3":
+        g = global_params if global_params is not None else _DEFAULT_GLOBAL
+        if not (math.isfinite(tier_params.stress_mult)
+                and math.isfinite(tier_params.sigma_daily_bps)):
+            raise ValueError(
+                "v3 cost requires finite stress_mult and sigma_daily_bps; got a "
+                "v2/poisoned TierParams (construct via TierParams.from_v3_tier)")
+        _, entry_slip, entry_fb = _v3_leg_cost(
+            entry_notional_usd, entry_liquidity_usd_per_min, tier_params, g)
+        _, exit_slip, exit_fb = _v3_leg_cost(
+            exit_notional_usd, exit_liquidity_usd_per_min, tier_params, g)
+        sm = tier_params.stress_mult
+        entry_spread = sm * tier_params.half_spread_bps if enable_spread else 0.0
+        exit_spread = sm * tier_params.half_spread_bps if enable_spread else 0.0
+        fee_bps = sm * 2.0 * tier_params.fee_bps_per_side if enable_fees else 0.0
+        funding_bps = (
+            compute_funding_cost_bps(
+                holding_hours=holding_hours,
+                funding_rate_bps_per_8h=tier_params.funding_rate_bps_per_8h,
+            )
+            if (enable_funding and holding_hours > 0.0) else 0.0
+        )
+        # The liquidity fallback excess rides on the slippage component (consistent
+        # with v2), so enable_slippage=False omits both tail and fallback excess —
+        # the bound guarantee applies to the default all-costs-on config.
+        entry_tail = entry_slip if enable_slippage else 0.0
+        exit_tail = exit_slip if enable_slippage else 0.0
+        fallback_hit = entry_fb or exit_fb
+        floor_bps = entry_spread + exit_spread + fee_bps + funding_bps
+        tail_bps = entry_tail + exit_tail
+        uncapped = floor_bps + tail_bps
+        cap_hit = uncapped >= g.total_cost_cap_bps
+        total_cost_bps = min(uncapped, g.total_cost_cap_bps)
+        avg_notional = 0.5 * (entry_notional_usd + exit_notional_usd)
+        return {
+            "entry_slippage_bps": entry_tail, "exit_slippage_bps": exit_tail,
+            "entry_spread_bps": entry_spread, "exit_spread_bps": exit_spread,
+            "fee_bps": fee_bps, "funding_cost_bps": funding_bps,
+            "floor_bps": floor_bps, "tail_bps": tail_bps,
+            "cap_hit": cap_hit, "fallback_hit": fallback_hit,
+            "total_cost_bps": total_cost_bps,
+            "total_cost_usd": total_cost_bps * avg_notional / 10_000.0,
+        }
+
     if enable_slippage:
         entry_slip = compute_slippage_bps(
             order_usd=entry_notional_usd,
