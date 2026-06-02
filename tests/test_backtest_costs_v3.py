@@ -68,3 +68,54 @@ class TestComputeTailBps:
             order_usd=-1_000.0, liquidity_usd_per_min=1_000_000.0,
             sigma_daily_bps=300.0, Y=1.5, v_daily_minutes_per_day=1440.0,
         ) == 0.0
+
+
+class TestTierParamsDual:
+    def test_v2_positional_still_works(self):
+        from backtest_costs import TierParams
+        tp = TierParams(5.0, 1423.02, 7.5, 10.0, 2.0)
+        assert tp.base_bps == 5.0
+        assert tp.size_factor == 1423.02
+        assert tp.half_spread_bps == 7.5
+        assert tp.fee_bps_per_side == 10.0
+        assert tp.funding_rate_bps_per_8h == 2.0
+        assert math.isnan(tp.stress_mult)
+        assert math.isnan(tp.sigma_daily_bps)
+
+    def test_from_v3_tier_poisons_v2_fields(self):
+        from backtest_costs import TierParams
+        tp = TierParams.from_v3_tier(
+            floor={"half_spread_bps": 1.5, "fee_bps_per_side": 5.0,
+                   "funding_rate_bps_per_8h": 1.0, "stress_mult": 1.0},
+            impact_tail={"sigma_daily_bps": 300.0},
+        )
+        assert tp.half_spread_bps == 1.5
+        assert tp.fee_bps_per_side == 5.0
+        assert tp.funding_rate_bps_per_8h == 1.0
+        assert tp.stress_mult == 1.0
+        assert tp.sigma_daily_bps == 300.0
+        assert math.isnan(tp.base_bps)
+        assert math.isnan(tp.size_factor)
+
+    def test_from_v2_flat_poisons_v3_fields(self):
+        from backtest_costs import TierParams
+        tp = TierParams.from_v2_flat(
+            base_bps=5.0, size_factor=1423.02, half_spread_bps=7.5,
+            fee_bps_per_side=10.0, funding_rate_bps_per_8h=2.0,
+        )
+        assert tp.base_bps == 5.0
+        assert math.isnan(tp.stress_mult)
+        assert math.isnan(tp.sigma_daily_bps)
+
+    def test_v3_params_in_v2_slippage_is_nan_not_zero(self):
+        from backtest_costs import TierParams, compute_slippage_bps
+        tp = TierParams.from_v3_tier(
+            floor={"half_spread_bps": 1.5, "fee_bps_per_side": 5.0,
+                   "funding_rate_bps_per_8h": 1.0, "stress_mult": 1.0},
+            impact_tail={"sigma_daily_bps": 300.0},
+        )
+        slip = compute_slippage_bps(
+            order_usd=1_000.0, liquidity_usd_per_min=1_000_000.0,
+            base_bps=tp.base_bps, size_factor=tp.size_factor, model="v2",
+        )
+        assert math.isnan(slip)

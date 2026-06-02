@@ -268,15 +268,48 @@ def compute_funding_cost_bps(
 
 @dataclass(frozen=True)
 class TierParams:
-    """Per-tier cost parameters loaded from costs_calibration.json.
+    """Per-tier cost parameters. Dual-shaped to carry BOTH v2 and v3 fields.
+
+    v2 fields: base_bps, size_factor (NaN when loaded from a v3 calibration).
+    v3 fields: stress_mult, sigma_daily_bps (NaN when loaded from v2).
+    Shared:    half_spread_bps, fee_bps_per_side, funding_rate_bps_per_8h.
+
+    Cross-version fields default to NaN ("poison"): a v3-loaded TierParams fed to
+    the v2 slippage path yields NaN cost (loud, detectable) rather than 0.0
+    (silent split-brain). Construct via from_v2_flat / from_v3_tier; the 5-arg
+    positional form is preserved for legacy v2 tests.
 
     The funding_rate_bps_per_8h field is new in v2 (#340); defaults to 0.0 for
-    backward compat with v1 callers that constructed TierParams manually."""
+    backward compat with v1 callers that constructed TierParams manually.
+    """
     base_bps: float
     size_factor: float
     half_spread_bps: float
     fee_bps_per_side: float
     funding_rate_bps_per_8h: float = 0.0
+    stress_mult: float = float("nan")
+    sigma_daily_bps: float = float("nan")
+
+    @classmethod
+    def from_v2_flat(cls, *, base_bps, size_factor, half_spread_bps,
+                     fee_bps_per_side, funding_rate_bps_per_8h=0.0):
+        return cls(
+            base_bps=float(base_bps), size_factor=float(size_factor),
+            half_spread_bps=float(half_spread_bps),
+            fee_bps_per_side=float(fee_bps_per_side),
+            funding_rate_bps_per_8h=float(funding_rate_bps_per_8h),
+        )
+
+    @classmethod
+    def from_v3_tier(cls, *, floor: dict, impact_tail: dict):
+        return cls(
+            base_bps=float("nan"), size_factor=float("nan"),
+            half_spread_bps=float(floor["half_spread_bps"]),
+            fee_bps_per_side=float(floor["fee_bps_per_side"]),
+            funding_rate_bps_per_8h=float(floor["funding_rate_bps_per_8h"]),
+            stress_mult=float(floor["stress_mult"]),
+            sigma_daily_bps=float(impact_tail["sigma_daily_bps"]),
+        )
 
 
 @dataclass(frozen=True)
