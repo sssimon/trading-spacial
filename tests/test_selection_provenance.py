@@ -61,3 +61,44 @@ class TestCalibrationIdentity:
         cal3 = dataclasses.replace(cal, tiers={
             **cal.tiers, "major": dataclasses.replace(cal.tiers["major"], stress_mult=99.0)})
         assert calibration_identity_hash(cal3) != h1
+
+
+class TestSelectionFingerprint:
+    def setup_method(self):
+        import selection_provenance
+        selection_provenance._clear_cache()
+
+    def test_fingerprint_shape_and_components(self):
+        import selection_provenance, deflation
+        fp, comp = selection_provenance.selection_fingerprint()
+        assert isinstance(fp, str) and len(fp) == 64
+        assert comp["_digest_version"] == selection_provenance._DIGEST_VERSION
+        assert comp["cost_model"]["active_model"] == "v3"
+        assert len(comp["cost_model"]["calibration_hash"]) == 64
+        assert comp["deflation"]["algo_version"] == deflation.ALGO_VERSION
+
+    def test_memoized(self):
+        import selection_provenance
+        a = selection_provenance.selection_fingerprint()
+        b = selection_provenance.selection_fingerprint()
+        assert a is b
+
+    def test_clear_cache_recomputes(self):
+        import selection_provenance
+        a = selection_provenance.selection_fingerprint()
+        selection_provenance._clear_cache()
+        b = selection_provenance.selection_fingerprint()
+        assert a is not b and a[0] == b[0]
+
+    def test_changing_an_ingredient_changes_the_digest(self, monkeypatch):
+        import selection_provenance
+        base = selection_provenance.selection_fingerprint()[0]
+        selection_provenance._clear_cache()
+        monkeypatch.setattr(selection_provenance, "_DIGEST_VERSION", 999)
+        assert selection_provenance.selection_fingerprint()[0] != base
+
+    def test_v2_sibling_fingerprint_differs(self):
+        import selection_provenance
+        active = selection_provenance.selection_fingerprint()[0]
+        v2 = selection_provenance.fingerprint_for_v2_sibling()
+        assert v2 != active
