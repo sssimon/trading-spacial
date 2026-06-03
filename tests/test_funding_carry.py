@@ -200,3 +200,18 @@ def test_run_kill_required_keys():
     rec = {"symbol": "BTCUSDT", "net_with_kill": 0.06, "net_no_kill": 0.05,
            "n_kills": 1, "max_dd": 100.0, "churn_cost": 50.0}
     assert run_kill.REQUIRED_KILL_KEYS <= set(rec.keys())
+
+def test_shadow_constants_frozen():
+    from tools.funding_carry import constants as C
+    # The 9-symbol universe is exactly the verdict's symbols_used (LINK/SOL dropped).
+    assert C.SHADOW_SYMBOLS == (
+        "BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT",
+        "UNIUSDT", "XLMUSDT", "RUNEUSDT", "PENDLEUSDT",
+    )
+    assert "LINKUSDT" not in C.SHADOW_SYMBOLS and "SOLUSDT" not in C.SHADOW_SYMBOLS
+    assert C.DECAY_CI_LO == 0.0502           # backtest gate_a ci_lo (in-sample anchor)
+    assert C.SHADOW_VERSION == "v0.1"
+    assert C.FAPI_MARK_KLINES.startswith("https://fapi.binance.com")
+    assert C.FAPI_SPOT.startswith("https://")
+    assert C.DECAY_WEEKS_W >= 1 and C.DECAY_KILL_N >= 1
+    assert C.FUNDING_FETCH_LIMIT >= 100
