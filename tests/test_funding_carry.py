@@ -210,7 +210,6 @@ def test_shadow_constants_frozen():
         "UNIUSDT", "XLMUSDT", "RUNEUSDT", "PENDLEUSDT",
     )
     assert "LINKUSDT" not in C.SHADOW_SYMBOLS and "SOLUSDT" not in C.SHADOW_SYMBOLS
-    assert C.DECAY_CI_LO == 0.0502           # backtest gate_a ci_lo (in-sample anchor)
     assert C.SHADOW_VERSION == "v0.1"
     assert C.FAPI_MARK_KLINES.startswith("https://fapi.binance.com")
     assert C.FAPI_SPOT.startswith("https://")
@@ -384,11 +383,11 @@ def test_run_once_counter_advances_only_on_new_block(tmp_path, monkeypatch):
     shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+1000, w_weeks=1)
     shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+2000, w_weeks=1)
     st = json.loads((out_dir / "funding_carry_state.json").read_text())
-    assert st["blocks_below"] == 1     # same block, counted once
+    assert st["blocks_below_floor"] == 1     # same block, counted once
     # Run in the NEXT block -> counter advances to 2.
     shadow.run_once(out_dir=str(out_dir), now_ms=6*WK+1000, w_weeks=1)
     st = json.loads((out_dir / "funding_carry_state.json").read_text())
-    assert st["blocks_below"] == 2
+    assert st["blocks_below_floor"] == 2
     # jsonl is append-only: 3 lines.
     lines = (out_dir / "funding_carry_signals.jsonl").read_text().strip().splitlines()
     assert len(lines) == 3
@@ -408,6 +407,31 @@ def test_run_once_failsoft_error(tmp_path, monkeypatch):
     assert res["decay_state"] == "ERROR"
     st = json.loads((out_dir / "funding_carry_state.json").read_text())
     assert st["decay_state"] == "ERROR" and "db gone" in st["error"]
+
+
+def test_run_once_error_preserves_last_block(tmp_path, monkeypatch):
+    import json
+    from tools.funding_carry import shadow
+    from tools.funding_carry.constants import T_FLOOR
+    out_dir = tmp_path / "shadow"; WK = 7*24*3_600_000
+    monkeypatch.setattr(shadow, "_ingest_funding", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
+    monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0, 1])
+    monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: True)
+    below = {"mean": -0.05, "ci_lo": -0.1, "ci_hi": T_FLOOR-0.001, "n": 9, "dropped": [], "per_symbol": {}}
+    monkeypatch.setattr(shadow, "pooled_rate", lambda *a, **k: below)
+    shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+1000, w_weeks=1)   # block counted -> count 1
+    # error mid-run, SAME block
+    def boom(*a, **k): raise RuntimeError("x")
+    monkeypatch.setattr(shadow, "pooled_rate", boom)
+    shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+2000, w_weeks=1)   # ERROR, same block
+    st = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert st["last_counted_block"] == 5*WK   # block identity survived the error
+    # recovery, SAME block -> must NOT double-count
+    monkeypatch.setattr(shadow, "pooled_rate", lambda *a, **k: below)
+    shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+3000, w_weeks=1)
+    st = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert st["blocks_below_floor"] == 1   # still 1, not 2 (same block already counted)
 
 
 def test_min_window_weeks_monotone():

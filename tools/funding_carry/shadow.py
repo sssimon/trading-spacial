@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from . import simulate, evaluate
 from .constants import (SHADOW_SYMBOLS, SHADOW_OUTPUT_DIR, SHADOW_VERSION,
                         DECAY_WEEKS_W, DECAY_KILL_N, FUNDING_DB, FUNDING_FETCH_LIMIT,
-                        INTERVALS_PER_YEAR, R_FOSSIL_LO, R_FOSSIL_HI, T_FLOOR)
+                        INTERVALS_PER_YEAR, R_FOSSIL_LO, R_FOSSIL_HI, T_FLOOR,
+                        H_REF_YEARS)
 
 log = logging.getLogger("funding_carry.shadow")
 
@@ -128,7 +129,7 @@ def _read_prev_state(path: str) -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-    return {"blocks_below": 0}
+    return {"blocks_below_floor": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +164,7 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
                              start_ms=win_start, end_ms=now_ms)
 
         last_block = prev.get("last_counted_block")
-        blocks_below = int(prev.get("blocks_below", 0))
+        blocks_below = int(prev.get("blocks_below_floor", 0))
         is_new_block = (last_block is None) or (block != last_block)
 
         if not complete:
@@ -204,7 +205,7 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
             "t_floor": T_FLOOR,
             "window_complete": complete,
             "decay_state": decay,
-            "blocks_below": new_blocks_below,
+            "blocks_below_floor": new_blocks_below,
             "calibration_identity_hash": cal,
             "shadow_version": SHADOW_VERSION,
         }
@@ -212,7 +213,10 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
             f.write(json.dumps(line) + "\n")
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump({**line, "last_counted_block": new_last_block,
-                       "decay_weeks_w": int(w_weeks)}, f, indent=2)
+                       "decay_weeks_w": int(w_weeks),
+                       "R_fossil_hi": R_FOSSIL_HI,
+                       "h_ref_years": H_REF_YEARS,
+                       "decay_kill_n": DECAY_KILL_N}, f, indent=2)
         return line
 
     except Exception as e:                               # noqa: BLE001 — fail-soft
@@ -221,7 +225,8 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
             "run_ts_utc": run_ts,
             "decay_state": "ERROR",
             "error": str(e),
-            "blocks_below": int(prev.get("blocks_below", 0)),
+            "blocks_below_floor": int(prev.get("blocks_below_floor", 0)),
+            "last_counted_block": prev.get("last_counted_block"),
             "shadow_version": SHADOW_VERSION,
         }
         try:

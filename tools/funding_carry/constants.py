@@ -42,8 +42,6 @@ SHADOW_SYMBOLS = (
 FAPI_MARK_KLINES = "https://fapi.binance.com/fapi/v1/markPriceKlines"
 FAPI_SPOT = "https://api.binance.com/api/v3/ticker/price"
 
-DECAY_CI_LO = 0.0502           # backtest gate_a ci_lo — kept for legacy tests (RT2 retires it)
-
 # --- Power v2 anchors (REV 5) — computed by power.py, FROZEN 2026-06-03 ---
 # Unit: ANNUALIZED (mean per-settlement rate × 1095). Both anchors in the same unit.
 # fossil_rate_band: gate_a bootstrap CI on 9-symbol mean(fundingRate)×1095 over 2024-01→2026-05.
