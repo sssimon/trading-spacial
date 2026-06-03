@@ -112,3 +112,16 @@ def test_gate_b_synthetic_shock_kills_thin_carry():
     fat = evaluate.gate_b2(mean_net_return=0.20)
     assert fat["pass_b2"] is True
     assert fat["shock_bleed"] == pytest.approx(0.075)
+
+def test_verdict_requires_both_gates():
+    a_pass = {"pass_a": True}; a_fail = {"pass_a": False}
+    b_pass = {"pass_b2": True}; b_fail = {"pass_b2": False}
+    assert evaluate.verdict(a_pass, b_pass)["verdict"] == "PASS"
+    assert evaluate.verdict(a_fail, b_pass)["verdict"] == "FAIL"
+    assert evaluate.verdict(a_pass, b_fail)["verdict"] == "FAIL"
+
+def test_required_artifact_keys():
+    from tools.funding_carry import run
+    rec = {"symbol": "BTCUSDT", "net_return_annual": 0.1, "net": 1000.0,
+           "funding_pnl": 1200.0, "basis_pnl": 0.0, "cost_v3": 200.0}
+    assert run.REQUIRED_SYMBOL_KEYS <= set(rec.keys())

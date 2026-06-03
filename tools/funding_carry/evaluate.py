@@ -34,3 +34,9 @@ def gate_b2(mean_net_return: float) -> dict:
     return {"shock_bleed": shock_bleed,
             "post_shock_return": mean_net_return - shock_bleed,
             "pass_b2": bool(mean_net_return - shock_bleed >= 0.0)}
+
+
+def verdict(a: dict, b2: dict) -> dict:
+    """PASS iff Gate A and Gate B2 both pass (spec §7). $-denominated, no mirage."""
+    v = "PASS" if (a.get("pass_a") and b2.get("pass_b2")) else "FAIL"
+    return {"verdict": v, "pass_a": bool(a.get("pass_a")), "pass_b2": bool(b2.get("pass_b2"))}
