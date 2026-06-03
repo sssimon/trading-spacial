@@ -79,7 +79,8 @@ def main():
                         "shock": {"funding_per_8h": SHOCK_FUNDING_PER_8H, "days": SHOCK_DAYS},
                         "cost_model": {"active_model": cal.active_model,
                                        "calibration_identity_hash": calibration_identity_hash(cal)},
-                        "symbols_kept": symbols, "symbols_dropped": sorted(set(dropped)),
+                        "symbols_used": [r["symbol"] for r in records],
+                        "symbols_coverage_passed": symbols, "symbols_dropped": sorted(set(dropped)),
                         "generated_utc": datetime.now(timezone.utc).isoformat()}}
     with open(os.path.join(OUTPUT_DIR, "per_symbol.json"), "w") as f:
         json.dump(records, f, indent=2)
@@ -88,7 +89,8 @@ def main():
     lines = [
         "# Funding-carry falsification: VERDICT", "",
         f"**Verdict: {v['verdict']}**  (Gate A: {v['pass_a']}, Gate B2: {v['pass_b2']})", "",
-        f"- Symbols kept {len(symbols)}: {', '.join(symbols)}",
+        f"- Symbols used {len(records)}: {', '.join(r['symbol'] for r in records)} "
+        f"(dropped {sorted(set(dropped))})",
         f"- Gate A (ANNUALIZED net return): mean {a['mean']:.4f}, CI95 [{a['ci_lo']:.4f}, {a['ci_hi']:.4f}], LOO min {a['loo_min_mean']:.4f}",
         f"- Gate B1 max drawdown of pooled funding equity (TIME-ordered, $): {b1['max_drawdown']:.2f}; worst single settlement {b1['worst_interval']:.2f}",
         f"- Gate B2 (TOTAL-window return vs one-time shock): bleed {b2['shock_bleed']:.4f}, post-shock {b2['post_shock_return']:.4f}", "",
