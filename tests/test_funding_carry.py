@@ -161,6 +161,10 @@ def test_simulate_with_kill_exits_on_K_negatives():
     assert r["n_tramos"] == 2
     assert r["n_kills"] == 1
     assert r["churn_cost"] == pytest.approx(10.0)
+    assert len(r["equity_curve"]) == 8                 # one point per settlement, kills included
+    # 3 pos (+0.06) + 3 neg accrued through the kill (-0.12) + 1 post-reentry pos (+0.02) = -0.04
+    # gross; the re-entry tick (i=6) is NOT collected; net = gross - churn 10.0
+    assert r["net"] == pytest.approx(-0.04 - 10.0)
 
 def test_with_kill_no_negatives_equals_no_kill():
     funding = [(i, 0.0001) for i in range(10)]

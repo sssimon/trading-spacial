@@ -136,4 +136,6 @@ def funding_pnl_per_interval(funding: list[tuple[int, float]], *, marks: list[fl
                              units: float) -> float:
     """Funding the short collects, marked PER SETTLEMENT: sum(rate_i * mark_i * units).
     More accurate than the constant-entry-mark approximation (spec §2)."""
+    assert len(marks) == len(funding), \
+        f"marks/funding length mismatch: {len(marks)} vs {len(funding)}"
     return sum(rate * mark * units for (_, rate), mark in zip(funding, marks))
