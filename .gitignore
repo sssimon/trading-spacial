@@ -36,6 +36,8 @@ data/ohlcv.db-shm
 data/funding.db
 data/funding.db-wal
 data/funding.db-shm
+# Funding-carry shadow monitor runtime output (paper-only signals + state)
+data/shadow/
 
 # ── Holdout dataset: large OHLCV slice exceeds GitHub's 100 MB per-file limit ──
 # Manifest captures sha256 + lock commit so the slice can be regenerated bit-for-bit

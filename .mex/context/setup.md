@@ -69,6 +69,17 @@ python -m pytest tests/test_api.py -v       # API endpoints only
 - `scripts/REINICIAR_SERVICIOS.ps1` — restart all services
 - Batch scripts `INICIAR_API.bat` / `INICIAR_SCANNER.bat` for manual start
 
+### Funding-carry shadow (paper-only, daily)
+
+`python -m tools.funding_carry.shadow` — recomputes the funding-carry decay statistic over
+the trailing W-week window from live FAPI data and appends to `data/shadow/`. Schedule 1x/day
+post-funding-settlement via watchdog/cron. SEPARATE process from `btc_scanner.py`; reads/writes
+only `data/funding.db` + `data/shadow/`. Paper-only: no positions, no orders, no holdout.
+A `decay_state=REFUTED` means the live carry CI fell below the backtest CI-lo (0.0502) for
+N consecutive windows — the edge is arbitraged; do NOT escalate to v0.2/#4. NOTE: false-REFUTED
+control comes from the live bootstrap CI (computed from live data), not the W-sizing heuristic;
+W=1 is intentionally conservative (wider per-window CI, N=4 consecutive windows = a high bar).
+
 ## Logs & Data
 
 - `logs/signals_log.txt` — human-readable signal entries/exits
