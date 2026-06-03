@@ -215,3 +215,23 @@ def test_shadow_constants_frozen():
     assert C.FAPI_SPOT.startswith("https://")
     assert C.DECAY_WEEKS_W >= 1 and C.DECAY_KILL_N >= 1
     assert C.FUNDING_FETCH_LIMIT >= 100
+
+
+def test_parse_fapi_funding_rows():
+    from tools.funding_carry.live_ingest import parse_fapi_funding
+    # FAPI /fapi/v1/fundingRate returns a JSON list of dicts.
+    payload = [
+        {"symbol": "BTCUSDT", "fundingTime": 1700000000000, "fundingRate": "0.0001"},
+        {"symbol": "BTCUSDT", "fundingTime": 1700028800000, "fundingRate": "-0.00005"},
+    ]
+    rows = parse_fapi_funding(payload)
+    assert rows == [(1700000000000, 0.0001), (1700028800000, -0.00005)]
+
+
+def test_fetch_recent_funding_failsoft(monkeypatch):
+    from tools.funding_carry import live_ingest
+    def boom(url, **kw):
+        raise OSError("network down")
+    monkeypatch.setattr(live_ingest, "_get_json", boom)
+    # Fail-soft: a down symbol returns [] (logged), never raises.
+    assert live_ingest.fetch_recent_funding("BTCUSDT", limit=10) == []
