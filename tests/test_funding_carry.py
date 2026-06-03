@@ -141,3 +141,30 @@ def test_funding_pnl_per_interval_uses_each_mark():
     marks = [100.0, 200.0]    # mark doubles on the 2nd settlement
     pnl = simulate.funding_pnl_per_interval(funding, marks=marks, units=2.0)
     assert pnl == pytest.approx(0.0001 * 100.0 * 2.0 + (-0.0002) * 200.0 * 2.0)
+
+from tools.funding_carry import kill_rule
+
+def test_simulate_no_kill_one_tramo():
+    funding = [(i, 0.0001) for i in range(10)]
+    marks = [100.0] * 10
+    r = kill_rule.simulate_no_kill(funding, marks=marks, units=2.0, rt_cost=5.0)
+    assert r["n_tramos"] == 1
+    assert r["churn_cost"] == pytest.approx(5.0)
+    assert r["net"] == pytest.approx(sum(0.0001 * 100.0 * 2.0 for _ in range(10)) - 5.0)
+    assert len(r["equity_curve"]) == 10
+
+def test_simulate_with_kill_exits_on_K_negatives():
+    funding = [(i, 0.0001) for i in range(3)] + [(i + 3, -0.0002) for i in range(3)] \
+              + [(i + 6, 0.0001) for i in range(2)]
+    marks = [100.0] * 8
+    r = kill_rule.simulate_with_kill(funding, marks=marks, units=2.0, rt_cost=5.0, k=3)
+    assert r["n_tramos"] == 2
+    assert r["n_kills"] == 1
+    assert r["churn_cost"] == pytest.approx(10.0)
+
+def test_with_kill_no_negatives_equals_no_kill():
+    funding = [(i, 0.0001) for i in range(10)]
+    marks = [100.0] * 10
+    wk = kill_rule.simulate_with_kill(funding, marks=marks, units=2.0, rt_cost=5.0, k=3)
+    nk = kill_rule.simulate_no_kill(funding, marks=marks, units=2.0, rt_cost=5.0)
+    assert wk["net"] == pytest.approx(nk["net"])
