@@ -39,7 +39,10 @@ def simulate_chandelier(
     SHORT: stop = running_trough + mult*ATR, exit when bar high >= stop.
     Stop is monotone (LONG: non-decreasing). `fill` decides intra-bar order when
     both the favorable extreme (updating the stop) and the adverse extreme (crossing
-    it) live in the same bar."""
+    it) live in the same bar.
+
+    Precondition: `path` is sorted ascending by open_time (the cap `break` relies on it;
+    the runner queries OHLCV with ORDER BY open_time)."""
     cap_ms = _cap_ms(path)
     long = direction == "LONG"
     peak = entry_price                       # running favorable extreme
@@ -74,7 +77,9 @@ def simulate_giveback(
     *, frac: float = GIVEBACK_FRAC, fill: str = "pessimistic",
 ) -> tuple[float, int, bool]:
     """Confirmatory rule (DESCRIPTIVE only — spec §6). Exit when price retraces
-    `frac` of the running favorable move from entry. LONG: stop = peak - frac*(peak-entry)."""
+    `frac` of the running favorable move from entry. LONG: stop = peak - frac*(peak-entry).
+
+    Precondition: `path` is sorted ascending by open_time (same as simulate_chandelier)."""
     cap_ms = _cap_ms(path)
     long = direction == "LONG"
     peak = entry_price

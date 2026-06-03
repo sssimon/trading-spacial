@@ -32,6 +32,18 @@ def test_wilder_atr_needs_enough_bars():
     with pytest.raises(ValueError):
         exit_rules.wilder_atr(bars, period=22)
 
+def test_wilder_atr_uses_gap_component():
+    # Alternating bars so the TR is driven by |high - prev_close| (the gap branch),
+    # not just high-low. Odd cur (prev close 11): TR=1. Even cur (prev close 10):
+    # TR=max(12-11, |12-10|=2, |11-10|)=2. 22 pairs alternate 1,2 -> mean ATR=1.5.
+    bars = []
+    for i in range(23):
+        if i % 2 == 0:
+            bars.append({"high": 12.0, "low": 11.0, "close": 11.0})
+        else:
+            bars.append({"high": 11.0, "low": 10.0, "close": 10.0})
+    assert exit_rules.wilder_atr(bars, period=22) == pytest.approx(1.5, abs=1e-9)
+
 
 def _bar(t, o, h, l, c):
     return {"open_time": t, "open": o, "high": h, "low": l, "close": c}
@@ -101,8 +113,24 @@ def test_giveback_long_exits_after_retrace():
     assert cap is False
 
 
+def test_giveback_short_exits_after_retrace():
+    # SHORT mirror: favorable = price down. bar0 low=entry (unarmed); bar1 trough 90
+    # (move 10, giveback stop 90 + 0.38*10 = 93.8), high 100 not tested same-bar under
+    # pessimistic; bar2 high 94 >= 93.8 -> exit at 93.8.
+    path = [
+        _bar(0,   100, 100, 100, 100),   # low == entry -> no favorable move
+        _bar(300, 100, 100, 90,  91),    # trough 90, giveback stop = 93.8
+        _bar(600, 91,  94,  91,  92),    # high 94 >= 93.8 -> exit at 93.8
+    ]
+    px, ts, cap = exit_rules.simulate_giveback(path, "SHORT", entry_price=100.0, fill="pessimistic")
+    assert px == pytest.approx(93.8)
+    assert cap is False
+
+
 def test_giveback_never_favorable_rides_to_cap():
     # price never exceeds entry -> no favorable move -> giveback stop never arms -> cap.
     path = [_bar(i * 300_000, 100, 100, 99.8, 99.9) for i in range(5)]
     px, ts, cap = exit_rules.simulate_giveback(path, "LONG", 100.0, fill="pessimistic")
     assert cap is True
+    assert px == pytest.approx(99.9)          # close of the last bar within cap
+    assert ts == 4 * 300_000
