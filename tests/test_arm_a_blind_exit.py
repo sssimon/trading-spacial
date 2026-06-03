@@ -31,3 +31,58 @@ def test_wilder_atr_needs_enough_bars():
     bars = [{"high": 1.0, "low": 0.0, "close": 0.5} for _ in range(10)]
     with pytest.raises(ValueError):
         exit_rules.wilder_atr(bars, period=22)
+
+
+def _bar(t, o, h, l, c):
+    return {"open_time": t, "open": o, "high": h, "low": l, "close": c}
+
+def test_chandelier_long_trails_up_and_stops():
+    atr = 1.0
+    path = [
+        _bar(0,   100, 101, 99,  100),
+        _bar(300, 100, 110, 100, 109),   # peak 110 -> stop = 110 - 3*1 = 107
+        _bar(600, 109, 109, 106, 108),   # low 106 <= 107 -> exit at 107
+    ]
+    px, ts, cap = exit_rules.simulate_chandelier(
+        path, "LONG", entry_price=100.0, atr=atr, fill="pessimistic")
+    assert px == pytest.approx(107.0)
+    assert ts == 600
+    assert cap is False
+
+def test_chandelier_short_mirrors():
+    atr = 1.0
+    path = [
+        _bar(0,   100, 101, 99,  100),
+        _bar(300, 100, 100, 90,  91),    # trough 90 -> stop = 90 + 3 = 93
+        _bar(600, 91,  94,  91,  92),    # high 94 >= 93 -> exit at 93
+    ]
+    px, ts, cap = exit_rules.simulate_chandelier(
+        path, "SHORT", entry_price=100.0, atr=atr, fill="pessimistic")
+    assert px == pytest.approx(93.0)
+    assert cap is False
+
+def test_chandelier_pessimistic_vs_optimistic_same_bar():
+    atr = 1.0
+    path = [
+        _bar(0,   100, 101, 99,  100),
+        _bar(300, 100, 108, 104, 105),
+    ]
+    px_p, _, _ = exit_rules.simulate_chandelier(path, "LONG", 100.0, atr, fill="pessimistic")
+    px_o, _, _ = exit_rules.simulate_chandelier(path, "LONG", 100.0, atr, fill="optimistic")
+    assert px_p == pytest.approx(105.0)
+    assert px_o == pytest.approx(105.0)
+    assert px_p <= px_o + 1e-9
+
+def test_chandelier_hits_cap_when_never_stopped():
+    # monotone tiny uptrend that never retraces 3*ATR; path spans 250h but the cap is
+    # 200h, so the rule falls through and exits at the LAST bar WITHIN the cap window.
+    atr = 1.0
+    from tools.arm_a_blind_exit.constants import MAX_HOLD_H
+    path = [_bar(i * 300_000, 100 + i * 0.01, 100 + i * 0.01 + 0.005,
+                 100 + i * 0.01 - 0.001, 100 + i * 0.01) for i in range(3000)]
+    px, ts, cap = exit_rules.simulate_chandelier(path, "LONG", 100.0, atr, fill="pessimistic")
+    cap_ms = path[0]["open_time"] + int(MAX_HOLD_H * 3600 * 1000)
+    within = [b for b in path if b["open_time"] <= cap_ms]
+    assert cap is True
+    assert px == pytest.approx(within[-1]["close"])
+    assert ts == within[-1]["open_time"]

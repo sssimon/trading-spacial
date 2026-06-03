@@ -334,13 +334,18 @@ def test_chandelier_pessimistic_vs_optimistic_same_bar():
     assert px_p <= px_o + 1e-9
 
 def test_chandelier_hits_cap_when_never_stopped():
+    # monotone tiny uptrend that never retraces 3*ATR; path spans 250h but cap is 200h,
+    # so the rule falls through and exits at the LAST bar WITHIN the cap window.
     atr = 1.0
-    # monotone tiny uptrend that never retraces 3*ATR; 5m bars; cap at 200h.
+    from tools.arm_a_blind_exit.constants import MAX_HOLD_H
     path = [_bar(i * 300_000, 100 + i * 0.01, 100 + i * 0.01 + 0.005,
                  100 + i * 0.01 - 0.001, 100 + i * 0.01) for i in range(3000)]
     px, ts, cap = exit_rules.simulate_chandelier(path, "LONG", 100.0, atr, fill="pessimistic")
+    cap_ms = path[0]["open_time"] + int(MAX_HOLD_H * 3600 * 1000)
+    within = [b for b in path if b["open_time"] <= cap_ms]
     assert cap is True
-    assert px == pytest.approx(path[-1]["close"])
+    assert px == pytest.approx(within[-1]["close"])
+    assert ts == within[-1]["open_time"]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
