@@ -1,0 +1,191 @@
+{
+  "primary": {
+    "verdict": "FAIL",
+    "pessimistic_ci": {
+      "lo": -2.9134751612815792,
+      "mean": 0.06472532139095051,
+      "hi": 3.6848078719569086,
+      "excludes_zero": false
+    },
+    "optimistic_ci": {
+      "lo": -2.9134751612815792,
+      "mean": 0.06472532139095051,
+      "hi": 3.6848078719569086,
+      "excludes_zero": false
+    },
+    "loo_survives_top_influencer": false,
+    "loo_top_influencer_id": 43,
+    "loo": [
+      {
+        "dropped_id": 43,
+        "mean": -0.9789484394963702
+      },
+      {
+        "dropped_id": 28,
+        "mean": -0.9333494766761375
+      },
+      {
+        "dropped_id": 18,
+        "mean": -0.15064023130069693
+      },
+      {
+        "dropped_id": 30,
+        "mean": -0.11786657414022102
+      },
+      {
+        "dropped_id": 17,
+        "mean": -0.06840894678914637
+      },
+      {
+        "dropped_id": 34,
+        "mean": -0.005062919165211519
+      },
+      {
+        "dropped_id": 42,
+        "mean": 0.022182599895983684
+      },
+      {
+        "dropped_id": 7,
+        "mean": 0.05943229168067669
+      },
+      {
+        "dropped_id": 27,
+        "mean": 0.06721475682906385
+      },
+      {
+        "dropped_id": 36,
+        "mean": 0.06721475682906385
+      },
+      {
+        "dropped_id": 32,
+        "mean": 0.06721475682906398
+      },
+      {
+        "dropped_id": 41,
+        "mean": 0.06721475682906398
+      },
+      {
+        "dropped_id": 45,
+        "mean": 0.08100582857286599
+      },
+      {
+        "dropped_id": 40,
+        "mean": 0.14542870873735964
+      },
+      {
+        "dropped_id": 29,
+        "mean": 0.1488228614122849
+      },
+      {
+        "dropped_id": 23,
+        "mean": 0.1502592443851532
+      },
+      {
+        "dropped_id": 24,
+        "mean": 0.17737279169495324
+      },
+      {
+        "dropped_id": 39,
+        "mean": 0.19418376450913685
+      },
+      {
+        "dropped_id": 33,
+        "mean": 0.19563165152149167
+      },
+      {
+        "dropped_id": 26,
+        "mean": 0.21031491031948646
+      },
+      {
+        "dropped_id": 1,
+        "mean": 0.21906137509630158
+      },
+      {
+        "dropped_id": 35,
+        "mean": 0.22053647011147917
+      },
+      {
+        "dropped_id": 25,
+        "mean": 0.23235878174579483
+      },
+      {
+        "dropped_id": 38,
+        "mean": 0.2615885398119614
+      },
+      {
+        "dropped_id": 37,
+        "mean": 0.2930730071193836
+      },
+      {
+        "dropped_id": 31,
+        "mean": 0.38074723302534746
+      },
+      {
+        "dropped_id": 47,
+        "mean": 0.7410011781675289
+      }
+    ]
+  },
+  "confirmatory_descriptive": {
+    "pess_mean_delta": -2.1165078366382803,
+    "opt_mean_delta": -2.2633429135401486,
+    "note": "DESCRIPTIVE ONLY \u2014 barred from any edge-existence claim (spec \u00a76, Adrian F-4)"
+  },
+  "manifest": {
+    "experiment": "arm-a-reformulado-blind-exit",
+    "spec_commit": "370f1d5",
+    "frozen_params": {
+      "atr_period": 22,
+      "atr_tf": "1h",
+      "price_tf": "5m",
+      "chandelier_mult": 3.0,
+      "giveback_frac": 0.38,
+      "max_hold_h": 200.0,
+      "bootstrap_seed": 20260603
+    },
+    "cost_model": {
+      "active_model": "v3",
+      "calibration_identity_hash": "1b616f742ed2eec7c00e09a78d2dd796dad79ba3d771175a39cda512d38c0d4d"
+    },
+    "population": {
+      "kept": 27,
+      "dropped": [
+        {
+          "symbol": "LINKUSDT",
+          "n": 1
+        },
+        {
+          "symbol": "SOLUSDT",
+          "n": 1
+        },
+        {
+          "symbol": "TONUSDT",
+          "n": 2
+        },
+        {
+          "symbol": "TRXUSDT",
+          "n": 4
+        },
+        {
+          "symbol": "XAUTUSDT",
+          "n": 3
+        },
+        {
+          "symbol": "ZECUSDT",
+          "n": 5
+        }
+      ],
+      "keep_symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "RUNEUSDT",
+        "XLMUSDT",
+        "PENDLEUSDT",
+        "UNIUSDT",
+        "DOGEUSDT",
+        "AVAXUSDT"
+      ]
+    },
+    "generated_utc": "2026-06-03T08:14:14.124151+00:00"
+  }
+}
