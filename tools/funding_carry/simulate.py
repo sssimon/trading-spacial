@@ -125,3 +125,15 @@ def spot_liquidity(ohlcv_db: str, symbol: str, ts_ms: int) -> float:
     if len(rows) < 120:
         return float("nan")
     return sum(c * v / 60.0 for c, v in rows) / len(rows)
+
+
+def perp_mark_series(funding_db: str, symbol: str, times_ms: list[int]) -> list[float]:
+    """Perp mark close at or before each funding settlement time (NaN if none)."""
+    return [perp_price_at(funding_db, symbol, t) for t in times_ms]
+
+
+def funding_pnl_per_interval(funding: list[tuple[int, float]], *, marks: list[float],
+                             units: float) -> float:
+    """Funding the short collects, marked PER SETTLEMENT: sum(rate_i * mark_i * units).
+    More accurate than the constant-entry-mark approximation (spec §2)."""
+    return sum(rate * mark * units for (_, rate), mark in zip(funding, marks))

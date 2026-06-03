@@ -130,3 +130,14 @@ def test_required_artifact_keys():
     rec = {"symbol": "BTCUSDT", "net_return_annual": 0.1, "net": 1000.0,
            "funding_pnl": 1200.0, "basis_pnl": 0.0, "cost_v3": 200.0}
     assert run.REQUIRED_SYMBOL_KEYS <= set(rec.keys())
+
+def test_perp_mark_series_lookup(tmp_path):
+    db = str(tmp_path / "f.db"); _mk_funding_db(db)   # perp close=100 at each hour
+    marks = simulate.perp_mark_series(db, "BTCUSDT", [0, 28_800_000, 57_600_000])
+    assert marks == [pytest.approx(100.0)] * 3
+
+def test_funding_pnl_per_interval_uses_each_mark():
+    funding = [(0, 0.0001), (1, -0.0002)]
+    marks = [100.0, 200.0]    # mark doubles on the 2nd settlement
+    pnl = simulate.funding_pnl_per_interval(funding, marks=marks, units=2.0)
+    assert pnl == pytest.approx(0.0001 * 100.0 * 2.0 + (-0.0002) * 200.0 * 2.0)
