@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
+import urllib.error
 import urllib.request
 import zipfile
 from contextlib import closing
@@ -19,8 +20,14 @@ _RATE_KEYS = ("funding_rate", "fundingrate", "last_funding_rate", "lastfundingra
 def parse_funding_rows(header: list[str], rows: list[list[str]]) -> list[tuple[int, float]]:
     """Map a funding CSV (any known schema) to [(funding_time_ms, funding_rate)]."""
     norm = [h.strip().lower() for h in header]
-    ti = next(i for i, h in enumerate(norm) if h in _TIME_KEYS)
-    ri = next(i for i, h in enumerate(norm) if h in _RATE_KEYS)
+    try:
+        ti = next(i for i, h in enumerate(norm) if h in _TIME_KEYS)
+    except StopIteration:
+        raise ValueError(f"no time column in funding header: {header}") from None
+    try:
+        ri = next(i for i, h in enumerate(norm) if h in _RATE_KEYS)
+    except StopIteration:
+        raise ValueError(f"no rate column in funding header: {header}") from None
     out = []
     for r in rows:
         out.append((int(float(r[ti])), float(r[ri])))
@@ -49,9 +56,14 @@ def _fetch_zip_csv(url: str) -> tuple[list[str], list[list[str]]] | None:
         if e.code == 404:
             return None
         raise
-    with zipfile.ZipFile(io.BytesIO(blob)) as z:
-        name = z.namelist()[0]
-        text = z.read(name).decode("utf-8")
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            names = z.namelist()
+            if not names:                       # legitimately empty archive
+                return None
+            text = z.read(names[0]).decode("utf-8")
+    except zipfile.BadZipFile:                   # CDN 200 with an HTML error page, not a zip
+        return None
     reader = list(csv.reader(io.StringIO(text)))
     if not reader:
         return [], []
@@ -90,8 +102,8 @@ def ingest_all(db_path: str = FUNDING_DB) -> dict:
                         con.execute("INSERT OR IGNORE INTO perp_klines VALUES(?,?,?)",
                                     (sym, int(float(r[0])), float(r[4])))  # open_time, close
                         nk += 1
+            con.commit()                         # per-symbol: a mid-run failure keeps prior work
             summary[sym] = {"funding_rows": nf, "perp_klines": nk}
-        con.commit()
     return summary
 
 
