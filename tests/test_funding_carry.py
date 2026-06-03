@@ -172,3 +172,25 @@ def test_with_kill_no_negatives_equals_no_kill():
     wk = kill_rule.simulate_with_kill(funding, marks=marks, units=2.0, rt_cost=5.0, k=3)
     nk = kill_rule.simulate_no_kill(funding, marks=marks, units=2.0, rt_cost=5.0)
     assert wk["net"] == pytest.approx(nk["net"])
+
+
+def test_kill_vs_nokill_bootstrap_deterministic():
+    wk = [0.06, 0.05, 0.07, 0.04, 0.08, 0.05, 0.06, 0.05, 0.07]
+    nk = [0.05, 0.05, 0.06, 0.04, 0.07, 0.05, 0.05, 0.05, 0.06]
+    a = evaluate.kill_vs_nokill(wk, nk)
+    b = evaluate.kill_vs_nokill(wk, nk)
+    assert a["ci_lo"] == b["ci_lo"]
+    assert a["mean_delta"] == pytest.approx(sum(w - n for w, n in zip(wk, nk)) / len(wk))
+
+def test_inject_shocks_subtracts_worst_points():
+    eq = [1.0, 2.0, 3.0, 4.0, 5.0]
+    final = evaluate.inject_shocks(eq, n_shocks=2, shock_loss=3.0)
+    assert final == pytest.approx(5.0 - 2 * 3.0)
+
+def test_gate_tail_requires_both():
+    g = evaluate.gate_tail(with_kill_net_pooled=0.10, post_shock_net_pooled=0.02)
+    assert g["pass_g1"] and g["pass_g2"] and g["verdict"] == "PASS"
+    g2 = evaluate.gate_tail(with_kill_net_pooled=0.10, post_shock_net_pooled=-0.01)
+    assert g2["verdict"] == "FAIL"
+    g3 = evaluate.gate_tail(with_kill_net_pooled=-0.01, post_shock_net_pooled=0.02)
+    assert g3["verdict"] == "FAIL"
