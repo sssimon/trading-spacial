@@ -134,3 +134,24 @@ def test_giveback_never_favorable_rides_to_cap():
     assert cap is True
     assert px == pytest.approx(99.9)          # close of the last bar within cap
     assert ts == 4 * 300_000
+
+
+from tools.arm_a_blind_exit import evaluate
+
+def test_gross_pnl_long_and_short():
+    assert evaluate.gross_pnl(qty=2.0, entry=100.0, exit=110.0, direction="LONG") == pytest.approx(20.0)
+    assert evaluate.gross_pnl(qty=2.0, entry=100.0, exit=110.0, direction="SHORT") == pytest.approx(-20.0)
+    assert evaluate.gross_pnl(qty=2.0, entry=100.0, exit=90.0,  direction="SHORT") == pytest.approx(20.0)
+
+def test_liquidity_proxy_formula():
+    bars = [{"open_time": i * 3_600_000, "close": 100.0, "volume": 60.0} for i in range(200)]
+    series = evaluate.liquidity_series(bars)
+    assert series[-1][1] == pytest.approx(100.0)
+    assert evaluate.liquidity_at(series, ts_ms=200 * 3_600_000) == pytest.approx(100.0)
+
+def test_v3_recost_is_positive_and_uses_v3():
+    cost = evaluate.recost_v3(
+        symbol="BTCUSDT", entry_notional=10_000.0, exit_notional=10_000.0,
+        entry_liq=5_000_000.0, exit_liq=5_000_000.0, holding_hours=24.0)
+    assert cost > 0.0
+    assert cost < 10_000.0
