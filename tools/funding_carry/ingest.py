@@ -7,6 +7,8 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
+import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -46,16 +48,28 @@ def _months(start: str, end: str) -> list[str]:
     return res
 
 
-def _fetch_zip_csv(url: str) -> tuple[list[str], list[list[str]]] | None:
+def _fetch_zip_csv(url: str, *, retries: int = 4) -> tuple[list[str], list[list[str]]] | None:
     """Download a Binance Vision .zip, return (header, rows) of its single CSV.
-    Returns None on 404 (month not published)."""
-    try:
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            blob = resp.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+    Returns None on 404 (month not published) or after exhausting retries on a
+    transient network error (the CDN resets connections under rapid bursts)."""
+    blob = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                blob = resp.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            if attempt == retries - 1:
+                raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if attempt == retries - 1:
+                print(f"  skip after {retries} retries: {url} ({e})", file=sys.stderr)
+                return None
+        time.sleep(1.5 * (attempt + 1))          # back off; also spaces out CDN bursts
+    if blob is None:
+        return None
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as z:
             names = z.namelist()
