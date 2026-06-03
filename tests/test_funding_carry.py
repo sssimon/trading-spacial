@@ -385,3 +385,46 @@ def test_window_complete_detects_gap():
     assert window_complete(ts_gap, start_ms=0, end_ms=5*H8, max_gap_ms=int(1.5*H8)) is False
     # Fewer than 2 points -> incomplete.
     assert window_complete([0], start_ms=0, end_ms=H8, max_gap_ms=H8) is False
+
+
+def test_run_once_appends_and_writes_state(tmp_path, monkeypatch):
+    import json
+    from tools.funding_carry import shadow
+    out_dir = tmp_path / "shadow"
+    # Stub the moving parts: ingest no-op, a fixed pooled CI (THIN band), a complete window.
+    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "pooled_decay",
+                        lambda *a, **k: {"mean": 0.057, "ci_lo": 0.055, "ci_hi": 0.060,
+                                         "loo_min_mean": 0.055, "pass_a": True, "n": 9,
+                                         "dropped": []})
+    monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0, 1])
+    monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: True)
+    monkeypatch.setattr(shadow, "_cal_hash", lambda: "deadbeef")
+    res1 = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
+    res2 = shadow.run_once(out_dir=str(out_dir), now_ms=10_100_000_000)
+    # .jsonl is append-only: second run adds, never truncates.
+    lines = (out_dir / "funding_carry_signals.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 2
+    state = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert state["decay_state"] == "THIN"          # ci_hi 0.060 in [0.0502, 0.0633)
+    assert state["calibration_identity_hash"] == "deadbeef"
+    assert res2["decay_state"] in {"ALIVE", "THIN", "REFUTED"}
+
+
+def test_run_once_incomplete_window_skips_kill(tmp_path, monkeypatch):
+    import json
+    from tools.funding_carry import shadow
+    out_dir = tmp_path / "shadow"
+    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "pooled_decay",
+                        lambda *a, **k: {"mean": 0.0, "ci_lo": 0.0, "ci_hi": 0.0,
+                                         "loo_min_mean": 0.0, "pass_a": False, "n": 0,
+                                         "dropped": []})
+    monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0])
+    monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: False)
+    monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
+    res = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
+    state = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert state["window_complete"] is False
+    assert state["decay_state"] == "INCOMPLETE"     # not evaluated; counter untouched
+    assert state["weeks_below"] == 0

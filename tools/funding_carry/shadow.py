@@ -94,3 +94,85 @@ def window_complete(settlement_times_ms: list[int], *, start_ms: int, end_ms: in
     if ts[0] - start_ms > max_gap_ms or end_ms - ts[-1] > max_gap_ms:
         return False
     return all((b - a) <= max_gap_ms for a, b in zip(ts, ts[1:]))
+
+
+import json
+import os
+from datetime import datetime, timezone
+from .constants import (SHADOW_SYMBOLS, SHADOW_OUTPUT_DIR, SHADOW_VERSION,
+                        DECAY_WEEKS_W, FUNDING_DB, OHLCV_DB, FUNDING_FETCH_LIMIT)
+
+_WEEK_MS = 7 * 24 * 3_600_000
+_MAX_GAP_MS = int(1.5 * 8 * 3_600_000)        # >1.5 funding intervals = a hole
+
+
+def _ingest(symbols, db, limit):
+    from . import live_ingest
+    live_ingest.ingest_live(symbols, db_path=db, limit=limit)
+
+
+def _cal_hash():
+    from backtest_costs import calibration_identity_hash, load_calibration
+    return calibration_identity_hash(load_calibration())
+
+
+def _window_settlement_times(funding_db, symbols, start_ms, end_ms):
+    """Union of settlement times across symbols in the window (for gap detection)."""
+    ts = set()
+    for s in symbols:
+        ts.update(t for t, _ in simulate.load_funding(funding_db, s, start_ms, end_ms))
+    return sorted(ts)
+
+
+def _read_prev_state(path):
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {"weeks_below": 0}
+
+
+def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
+             funding_db: str = FUNDING_DB, ohlcv_db: str = OHLCV_DB,
+             symbols: tuple = SHADOW_SYMBOLS) -> dict:
+    """One daily shadow cycle: ingest live data, recompute the windowed pooled CI, update
+    the decay state, append a per-symbol line to the immutable .jsonl, write derived state.
+    Fail-soft: never raises into the scheduler. No positions, no orders, no holdout."""
+    os.makedirs(out_dir, exist_ok=True)
+    jsonl = os.path.join(out_dir, "funding_carry_signals.jsonl")
+    state_path = os.path.join(out_dir, "funding_carry_state.json")
+    start_ms, end_ms = now_ms - DECAY_WEEKS_W * _WEEK_MS, now_ms
+    cal = _cal_hash()
+    ts_utc = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+
+    try:
+        _ingest(list(symbols), funding_db, FUNDING_FETCH_LIMIT)
+    except Exception:                            # noqa: BLE001 — fail-soft; eval on what we have
+        pass
+
+    times = _window_settlement_times(funding_db, list(symbols), start_ms, end_ms)
+    complete = window_complete(times, start_ms=start_ms, end_ms=end_ms, max_gap_ms=_MAX_GAP_MS)
+    pooled = pooled_decay(list(symbols), funding_db=funding_db, ohlcv_db=ohlcv_db,
+                          start_ms=start_ms, end_ms=end_ms)
+    prev = _read_prev_state(state_path)
+
+    if complete:
+        ds = decay_state(ci_lo=pooled["ci_lo"], ci_hi=pooled["ci_hi"],
+                         weeks_below=int(prev.get("weeks_below", 0)))
+    else:
+        ds = {"decay_state": "INCOMPLETE", "weeks_below": int(prev.get("weeks_below", 0))}
+
+    line = {"settlement_ts_utc": ts_utc, "window": [start_ms, end_ms],
+            "pooled_mean": pooled["mean"], "ci_lo": pooled["ci_lo"], "ci_hi": pooled["ci_hi"],
+            "n": pooled["n"], "dropped": pooled["dropped"], "window_complete": complete,
+            "decay_state": ds["decay_state"], "weeks_below": ds["weeks_below"],
+            "calibration_identity_hash": cal, "shadow_version": SHADOW_VERSION}
+    with open(jsonl, "a", encoding="utf-8") as f:    # append-only ledger
+        f.write(json.dumps(line) + "\n")
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump({**line, "decay_weeks_w": DECAY_WEEKS_W}, f, indent=2)
+    return line
+
+
+if __name__ == "__main__":
+    import time
+    print(run_once(now_ms=int(time.time() * 1000)))
