@@ -95,8 +95,9 @@ Por cada una de las 27 posiciones:
 
 ## §6 · Criterio KILL (ambas ramas informativas)
 
-- **PASS (existe edge de salida extraíble):** la regla PRIMARIA bate lo realizado — `Δ̄ > 0` con CI bootstrap 95% que excluye cero, **Y** el signo/CI sobrevive el leave-one-out del trade más influyente.
-- **FAIL (no hay edge extraíble):** CI incluye cero, o el signo se voltea al dropear el top-influencer. → **NO limpio** (no "underpowered ritual"): ni la salida trend-following textbook extrae expectativa de este stream.
+- **PASS (existe edge de salida extraíble):** la regla PRIMARIA bate lo realizado — `Δ̄ > 0` con CI bootstrap 95% que excluye cero **bajo AMBAS convenciones de fill** (pesimista Y optimista), **Y** el signo/CI sobrevive el leave-one-out del trade más influyente. (El requisito de ambos fills endurece el gate: un PASS que solo se sostiene bajo la convención optimista-favorable no cuenta. Es estrictamente más conservador que exigir solo el brazo primario — nunca produce un falso-positivo.)
+- **FAIL (no hay edge extraíble):** CI incluye cero (o `Δ̄ ≤ 0`) bajo ambas convenciones, o el signo se voltea al dropear el top-influencer. → **NO limpio** (no "underpowered ritual"): ni la salida trend-following textbook extrae expectativa de este stream.
+- **INDETERMINATE:** el signo del veredicto depende de la convención de fill (pesimista vs optimista discrepan) → indeterminado por granularidad intra-barra, ni PASS ni FAIL limpio.
 - **Confirmatoria:** se reporta su resultado aparte, **descriptivo solamente (Adrian F-4): barrado de CUALQUIER claim de existencia-de-edge**, no solo del gate del veredicto. Su parámetro (38%) viene de la captura 62% de ESTA data → no puede ser evidencia de que existe edge independiente del operador. Sirve únicamente para la lectura cualitativa "¿solo el estilo-operador, o ninguna salida mecánica?".
 
 **Ruteo:** PASS → candidato a producto exit-rule mecánico (con el techo de §9 explícito). FAIL → **Lyra Sage** (double-FAIL con Brazo B: ¿debe existir este producto? ¿el rigor-stack es el deliverable?).

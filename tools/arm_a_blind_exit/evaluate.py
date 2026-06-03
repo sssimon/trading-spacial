@@ -4,9 +4,9 @@ Reuses backtest_costs.compute_trade_costs UNMODIFIED. The active calibration
 (costs_calibration.json) is v3 (version 3); we pass model='v3' explicitly and the
 calibration's own globals."""
 from __future__ import annotations
-import math
 import numpy as np
 from backtest_costs import load_calibration, tier_for_symbol, compute_trade_costs
+from .constants import BOOTSTRAP_N, BOOTSTRAP_SEED
 
 _CAL = load_calibration()                    # active = v3 (costs_calibration.json)
 assert _CAL.active_model == "v3", f"expected v3 active calibration, got {_CAL.active_model}"
@@ -56,9 +56,6 @@ def recost_v3(
     return float(d["total_cost_usd"])
 
 
-from .constants import BOOTSTRAP_N, BOOTSTRAP_SEED
-
-
 def bootstrap_ci(deltas, n: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED):
     """Percentile 95% CI of the paired mean. Returns (lo, mean, hi)."""
     arr = np.asarray(deltas, dtype=float)
@@ -84,7 +81,14 @@ def _ci_excludes_zero_positive(deltas) -> bool:
 
 
 def verdict(*, pess_deltas, opt_deltas, ids) -> dict:
-    """Apply the frozen KILL (spec §6 + §5). Returns full diagnostic dict."""
+    """Apply the frozen KILL (spec §6 + §5). Returns full diagnostic dict.
+
+    PASS requires the CI to exclude zero (positive) under BOTH fill conventions AND
+    to survive dropping the top influencer (spec §6: both-fills gate is the conservative
+    reading — a PASS that holds only under the favorable optimistic fill does not count).
+    FAIL requires both fills non-passing with AGREEING sign; if the two fills disagree
+    in sign the result is INDETERMINATE (granularity-bound). Any other mix (e.g. one
+    fill passes, the other does not, or LOO fails) is INDETERMINATE, never a silent PASS."""
     pess = bootstrap_ci(pess_deltas)
     opt = bootstrap_ci(opt_deltas)
     pess_pass = _ci_excludes_zero_positive(pess_deltas)
@@ -98,7 +102,9 @@ def verdict(*, pess_deltas, opt_deltas, ids) -> dict:
 
     if pess_pass and opt_pass and survives_loo:
         v = "PASS"
-    elif (pess[1] <= 0 or not pess_pass) and (opt[1] <= 0 or not opt_pass):
+    # both fills fail the positive-CI test: clean FAIL if their means agree in sign,
+    # else the verdict flips with the fill convention -> INDETERMINATE (granularity).
+    elif not pess_pass and not opt_pass:
         v = "INDETERMINATE" if (pess[1] > 0) != (opt[1] > 0) else "FAIL"
     else:
         v = "INDETERMINATE"

@@ -181,3 +181,13 @@ def test_verdict_pass_requires_ci_excludes_zero_both_fills():
     assert v2["verdict"] == "FAIL"
     v3 = evaluate.verdict(pess_deltas=[-1.0] * 27, opt_deltas=[1.0] * 27, ids=list(range(27)))
     assert v3["verdict"] == "INDETERMINATE"
+
+def test_verdict_asymmetric_fills_is_indeterminate_not_pass():
+    # primary (pessimistic) passes cleanly, but optimistic CI straddles zero -> the
+    # both-fills gate (spec §6) blocks PASS and yields INDETERMINATE, never a silent PASS.
+    strong = [1.0] * 27
+    weak = [0.01, -0.02, 0.03] * 9
+    v = evaluate.verdict(pess_deltas=strong, opt_deltas=weak, ids=list(range(27)))
+    assert v["verdict"] == "INDETERMINATE"
+    assert v["pessimistic_ci"]["excludes_zero"] is True
+    assert v["optimistic_ci"]["excludes_zero"] is False
