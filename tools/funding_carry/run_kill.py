@@ -10,11 +10,14 @@ import numpy as np
 
 from backtest_costs import calibration_identity_hash, load_calibration
 from . import simulate, evaluate, kill_rule
-from .constants import (OHLCV_DB, FUNDING_DB, OUTPUT_DIR_KILL, CANDIDATE_SYMBOLS,
+from .constants import (OHLCV_DB, FUNDING_DB, OUTPUT_DIR_KILL,
                         WINDOW_START, WINDOW_END, NOTIONAL, KILL_K, K_SENSITIVITY,
-                        N_SHOCKS, SHOCK_FUNDING_PER_8H, SHOCK_DAYS, SHOCK_INTERVALS_PER_DAY)
+                        N_SHOCKS, SHOCK_FUNDING_PER_8H)
 from .run import _ms, _covered_symbols
 
+# G2 shock model (spec §6): a SUSTAINED negative episode longer than KILL_K; the kill fires
+# at K settlements, capping each shock's bleed at KILL_K * SHOCK_FUNDING_PER_8H. (SHOCK_DAYS
+# from the falsification's 5-day B2 is a DIFFERENT shock model and is intentionally unused here.)
 REQUIRED_KILL_KEYS = {"symbol", "net_with_kill", "net_no_kill", "n_kills", "max_dd", "churn_cost"}
 
 
@@ -44,8 +47,9 @@ def _one_symbol(s, w0, w1, k):
     nk = kill_rule.simulate_no_kill(funding, marks=marks, units=units, rt_cost=rt)
     return {"symbol": s, "net_with_kill": wk["net"] / NOTIONAL,
             "net_no_kill": nk["net"] / NOTIONAL, "n_kills": wk["n_kills"],
-            "max_dd": _max_dd(wk["equity_curve"]), "churn_cost": wk["churn_cost"],
-            "equity_curve": wk["equity_curve"]}
+            "max_dd": _max_dd(wk["equity_curve"]),                 # $ (funding-equity DD)
+            "max_dd_no_kill": _max_dd(nk["equity_curve"]),        # $
+            "churn_cost": wk["churn_cost"], "equity_curve": wk["equity_curve"]}
 
 
 def main():
@@ -80,6 +84,9 @@ def main():
                                        "calibration_identity_hash": calibration_identity_hash(cal)},
                         "symbols_used": [r["symbol"] for r in recs],
                         "generated_utc": datetime.now(timezone.utc).isoformat()}}
+    dd_wk = float(np.mean([r["max_dd"] for r in recs])) if recs else 0.0
+    dd_nk = float(np.mean([r["max_dd_no_kill"] for r in recs])) if recs else 0.0
+    out["max_dd_pooled"] = {"with_kill": dd_wk, "no_kill": dd_nk, "kill_lowers_dd": bool(dd_wk < dd_nk)}
     slim = [{kk: r[kk] for kk in REQUIRED_KILL_KEYS} for r in recs]
     with open(os.path.join(OUTPUT_DIR_KILL, "per_symbol.json"), "w") as f:
         json.dump(slim, f, indent=2)
@@ -90,11 +97,12 @@ def main():
         f"**Verdict: {gate['verdict']}**  (G1 in-sample: {gate['pass_g1']}, G2 out-of-sample: {gate['pass_g2']})", "",
         f"- Symbols used {len(recs)}: {', '.join(r['symbol'] for r in recs)}",
         f"- With-kill pooled net: {wk_pooled:.4f}   No-kill pooled net: {out['no_kill_pooled']:.4f}",
-        f"- Kill vs no-kill: mean delta {kvn['mean_delta']:.4f}, CI95 [{kvn['ci_lo']:.4f}, {kvn['ci_hi']:.4f}], adds_value={kvn['kill_adds_value']}",
+        f"- Kill vs no-kill net: mean delta {kvn['mean_delta']:.4f}, CI95 [{kvn['ci_lo']:.4f}, {kvn['ci_hi']:.4f}], net_adds_value={kvn['kill_adds_value']}",
+        f"- Max-DD pooled ($): with-kill {dd_wk:.2f} vs no-kill {dd_nk:.2f}, kill_lowers_dd={dd_wk < dd_nk}",
         f"- Post-{N_SHOCKS}-shock pooled net: {post_pooled:.4f}  (shock_loss/ea {shock_loss:.4f}, kill-capped at K settlements)",
         f"- K-sensitivity (descriptive): " + "; ".join(f"K={k}: net {v['pooled_net']:.4f}, kills {v['mean_kills']:.1f}" for k, v in ksens.items()), "",
-        "Interpretation: kill ADDS value if mean delta > 0 (better net) or lowers max_dd; a PASS",
-        "where kill <= no-kill means the carry is already robust without the kill. Leverage 2x fixed.",
+        "Interpretation: kill adds value if net_adds_value (CI lo > 0) OR kill_lowers_dd; a PASS where",
+        "the kill neither raises net nor lowers DD means the carry is already robust without it. Leverage 2x fixed.",
         "Scope: liquid universe, in-sample 2024-26 + 2 synthetic shocks. NOT production-deployable",
         "(rebalance #2, long-tail #3, live #4 are separate sub-projects).",
     ]

@@ -128,8 +128,22 @@ def spot_liquidity(ohlcv_db: str, symbol: str, ts_ms: int) -> float:
 
 
 def perp_mark_series(funding_db: str, symbol: str, times_ms: list[int]) -> list[float]:
-    """Perp mark close at or before each funding settlement time (NaN if none)."""
-    return [perp_price_at(funding_db, symbol, t) for t in times_ms]
+    """Perp mark close at or before each funding settlement time (NaN if none).
+
+    One query + a pointer walk over the (ascending) klines — O(K+T), not one DB round
+    trip per settlement (the naive version did ~2.6k connections/symbol)."""
+    if not times_ms:
+        return []
+    with closing(sqlite3.connect(f"file:{funding_db}?mode=ro", uri=True)) as con:
+        kl = con.execute(
+            "SELECT open_time, close FROM perp_klines WHERE symbol=? AND open_time<=? "
+            "ORDER BY open_time", (symbol, max(times_ms))).fetchall()
+    out, j, last = [], 0, float("nan")
+    for t in times_ms:                         # times_ms is ascending (funding order)
+        while j < len(kl) and kl[j][0] <= t:
+            last = float(kl[j][1]); j += 1
+        out.append(last)
+    return out
 
 
 def funding_pnl_per_interval(funding: list[tuple[int, float]], *, marks: list[float],

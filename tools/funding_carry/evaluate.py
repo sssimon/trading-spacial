@@ -42,8 +42,6 @@ def verdict(a: dict, b2: dict) -> dict:
     return {"verdict": v, "pass_a": bool(a.get("pass_a")), "pass_b2": bool(b2.get("pass_b2"))}
 
 
-from .constants import N_SHOCKS, SHOCK_FUNDING_PER_8H, SHOCK_DAYS, SHOCK_INTERVALS_PER_DAY
-
 
 def kill_vs_nokill(with_kill: list[float], no_kill: list[float]) -> dict:
     """Paired pooled delta (with_kill - no_kill) net return + bootstrap CI. Does the kill
