@@ -155,3 +155,29 @@ def test_v3_recost_is_positive_and_uses_v3():
         entry_liq=5_000_000.0, exit_liq=5_000_000.0, holding_hours=24.0)
     assert cost > 0.0
     assert cost < 10_000.0
+
+
+def test_bootstrap_ci_is_deterministic_with_seed():
+    deltas = [1.0, -0.5, 2.0, 0.3, -1.2, 0.8] * 5
+    lo1, mean1, hi1 = evaluate.bootstrap_ci(deltas)
+    lo2, mean2, hi2 = evaluate.bootstrap_ci(deltas)
+    assert (lo1, mean1, hi1) == (lo2, mean2, hi2)
+    assert lo1 <= mean1 <= hi1
+
+def test_leave_one_out_drops_each_once():
+    deltas = [1.0, 2.0, 3.0, 4.0]
+    ids = [10, 11, 12, 13]
+    loo = evaluate.leave_one_out(deltas, ids)
+    assert len(loo) == 4
+    by_id = {d["dropped_id"]: d["mean"] for d in loo}
+    assert by_id[13] == pytest.approx((1 + 2 + 3) / 3)
+
+def test_verdict_pass_requires_ci_excludes_zero_both_fills():
+    strong = [1.0] * 27
+    weak = [0.01, -0.02, 0.03] * 9
+    v = evaluate.verdict(pess_deltas=strong, opt_deltas=strong, ids=list(range(27)))
+    assert v["verdict"] == "PASS"
+    v2 = evaluate.verdict(pess_deltas=weak, opt_deltas=weak, ids=list(range(27)))
+    assert v2["verdict"] == "FAIL"
+    v3 = evaluate.verdict(pess_deltas=[-1.0] * 27, opt_deltas=[1.0] * 27, ids=list(range(27)))
+    assert v3["verdict"] == "INDETERMINATE"

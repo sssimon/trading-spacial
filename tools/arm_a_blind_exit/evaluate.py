@@ -54,3 +54,59 @@ def recost_v3(
         global_params=_CAL.global_,
     )
     return float(d["total_cost_usd"])
+
+
+from .constants import BOOTSTRAP_N, BOOTSTRAP_SEED
+
+
+def bootstrap_ci(deltas, n: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED):
+    """Percentile 95% CI of the paired mean. Returns (lo, mean, hi)."""
+    arr = np.asarray(deltas, dtype=float)
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(arr), size=(n, len(arr)))
+    means = arr[idx].mean(axis=1)
+    return float(np.percentile(means, 2.5)), float(arr.mean()), float(np.percentile(means, 97.5))
+
+
+def leave_one_out(deltas, ids):
+    """Mean with each trade dropped once. Returns [{dropped_id, mean}], sorted by mean."""
+    arr = np.asarray(deltas, dtype=float)
+    out = []
+    for i, tid in enumerate(ids):
+        rest = np.delete(arr, i)
+        out.append({"dropped_id": int(tid), "mean": float(rest.mean())})
+    return sorted(out, key=lambda d: d["mean"])
+
+
+def _ci_excludes_zero_positive(deltas) -> bool:
+    lo, mean, hi = bootstrap_ci(deltas)
+    return lo > 0.0 and mean > 0.0
+
+
+def verdict(*, pess_deltas, opt_deltas, ids) -> dict:
+    """Apply the frozen KILL (spec §6 + §5). Returns full diagnostic dict."""
+    pess = bootstrap_ci(pess_deltas)
+    opt = bootstrap_ci(opt_deltas)
+    pess_pass = _ci_excludes_zero_positive(pess_deltas)
+    opt_pass = _ci_excludes_zero_positive(opt_deltas)
+
+    loo = leave_one_out(pess_deltas, ids)
+    worst_drop_id = loo[0]["dropped_id"]
+    i = ids.index(worst_drop_id)
+    survives_loo = _ci_excludes_zero_positive(
+        [d for j, d in enumerate(pess_deltas) if j != i])
+
+    if pess_pass and opt_pass and survives_loo:
+        v = "PASS"
+    elif (pess[1] <= 0 or not pess_pass) and (opt[1] <= 0 or not opt_pass):
+        v = "INDETERMINATE" if (pess[1] > 0) != (opt[1] > 0) else "FAIL"
+    else:
+        v = "INDETERMINATE"
+    return {
+        "verdict": v,
+        "pessimistic_ci": {"lo": pess[0], "mean": pess[1], "hi": pess[2], "excludes_zero": pess_pass},
+        "optimistic_ci": {"lo": opt[0], "mean": opt[1], "hi": opt[2], "excludes_zero": opt_pass},
+        "loo_survives_top_influencer": survives_loo,
+        "loo_top_influencer_id": worst_drop_id,
+        "loo": loo,
+    }
