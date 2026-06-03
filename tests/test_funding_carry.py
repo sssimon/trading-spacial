@@ -372,3 +372,16 @@ def test_reconcile_settlement_one_step():
     assert abs(r["expected_net"] - 0.0001 * 100.0 * 100.0) < 1e-9
     assert abs(r["realized_net"] - 0.00008 * 100.0 * 100.0) < 1e-9
     assert abs(r["drift"] - (r["realized_net"] - r["expected_net"])) < 1e-12
+
+
+def test_window_complete_detects_gap():
+    from tools.funding_carry.shadow import window_complete
+    H8 = 8 * 3_600_000
+    # Contiguous 8h settlements over the window -> complete.
+    ts_ok = [0, H8, 2*H8, 3*H8]
+    assert window_complete(ts_ok, start_ms=0, end_ms=3*H8, max_gap_ms=int(1.5*H8)) is True
+    # A >1.5x8h hole -> incomplete.
+    ts_gap = [0, H8, 5*H8]
+    assert window_complete(ts_gap, start_ms=0, end_ms=5*H8, max_gap_ms=int(1.5*H8)) is False
+    # Fewer than 2 points -> incomplete.
+    assert window_complete([0], start_ms=0, end_ms=H8, max_gap_ms=H8) is False

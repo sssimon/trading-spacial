@@ -81,3 +81,16 @@ def reconcile_settlement(*, prev_rate: float, settled_rate: float,
     realized_net = settled_rate * mark * units
     return {"expected_net": expected_net, "realized_net": realized_net,
             "drift": realized_net - expected_net}
+
+
+def window_complete(settlement_times_ms: list[int], *, start_ms: int, end_ms: int,
+                    max_gap_ms: int) -> bool:
+    """True iff the settlement series covers [start_ms, end_ms] with no gap > max_gap_ms.
+    A gap marks the window incomplete -> the daily job SKIPS the decay-kill eval (spec §4
+    fail-safe: a data hole must not trigger a false REFUTED)."""
+    ts = sorted(t for t in settlement_times_ms if start_ms <= t <= end_ms)
+    if len(ts) < 2:
+        return False
+    if ts[0] - start_ms > max_gap_ms or end_ms - ts[-1] > max_gap_ms:
+        return False
+    return all((b - a) <= max_gap_ms for a, b in zip(ts, ts[1:]))
