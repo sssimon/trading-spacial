@@ -70,3 +70,14 @@ def decay_state(*, ci_lo: float, ci_hi: float, weeks_below: int) -> dict:
     else:
         state = "THIN"            # below once but not yet N — still compressing, not dead
     return {"decay_state": state, "weeks_below": new_count}
+
+
+def reconcile_settlement(*, prev_rate: float, settled_rate: float,
+                         mark: float, units: float) -> dict:
+    """Secondary operational sanity check (spec §5). Measures ONE-STEP surprise, NOT decay
+    (the naive random-walk baseline persists the prior rate, so it absorbs monotone decay —
+    decay is judged in §6 on the pooled CI, not here). Useful only for ingest/mark anomalies."""
+    expected_net = prev_rate * mark * units
+    realized_net = settled_rate * mark * units
+    return {"expected_net": expected_net, "realized_net": realized_net,
+            "drift": realized_net - expected_net}

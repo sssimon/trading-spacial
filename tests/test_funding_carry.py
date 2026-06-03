@@ -361,3 +361,14 @@ def test_decay_state_resets_counter_on_recovery():
     from tools.funding_carry.constants import DECAY_CI_LO
     s = decay_state(ci_lo=0.06, ci_hi=0.08, weeks_below=3)   # recovered above threshold
     assert s["weeks_below"] == 0 and s["decay_state"] == "ALIVE"
+
+
+def test_reconcile_settlement_one_step():
+    from tools.funding_carry.shadow import reconcile_settlement
+    # expected = naive (prev rate persists); realized = actual settled.
+    r = reconcile_settlement(prev_rate=0.0001, settled_rate=0.00008,
+                             mark=100.0, units=100.0)
+    # expected_net = prev_rate * mark * units ; realized_net = settled_rate * mark * units
+    assert abs(r["expected_net"] - 0.0001 * 100.0 * 100.0) < 1e-9
+    assert abs(r["realized_net"] - 0.00008 * 100.0 * 100.0) < 1e-9
+    assert abs(r["drift"] - (r["realized_net"] - r["expected_net"])) < 1e-12
