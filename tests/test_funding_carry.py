@@ -291,3 +291,48 @@ def test_ingest_live_appends_all(tmp_path, monkeypatch):
     assert summary["BTCUSDT"]["funding"] == 1 and summary["BTCUSDT"]["klines"] == 1
     with sqlite3.connect(db) as con:
         assert con.execute("SELECT COUNT(*) FROM funding").fetchone()[0] == 2
+
+
+def test_decay_statistic_matches_carry_for_symbol(tmp_path):
+    """The shadow statistic over a window MUST equal carry_for_symbol on that window —
+    identical method, span-annualized (NOT settlement-count annualized). Guards N1."""
+    import sqlite3
+    from tools.funding_carry import shadow, simulate
+    fdb = str(tmp_path / "f.db"); odb = str(tmp_path / "o.db")
+    # Build a tiny funding.db + ohlcv.db with a known, GAPPED settlement series.
+    with sqlite3.connect(fdb) as con:
+        con.execute("CREATE TABLE funding(symbol TEXT, funding_time_ms INTEGER, funding_rate REAL,"
+                    " PRIMARY KEY(symbol, funding_time_ms))")
+        con.execute("CREATE TABLE perp_klines(symbol TEXT, open_time INTEGER, close REAL,"
+                    " PRIMARY KEY(symbol, open_time))")
+        H = 3_600_000
+        # 4 settlements but with a GAP (skip one 8h slot) so count != span.
+        times = [0, 8*H, 16*H, 40*H]
+        for t in times:
+            con.execute("INSERT INTO funding VALUES('BTCUSDT', ?, 0.0001)", (t,))
+            con.execute("INSERT INTO perp_klines VALUES('BTCUSDT', ?, 100.0)", (t,))
+    with sqlite3.connect(odb) as con:
+        con.execute("CREATE TABLE ohlcv(symbol TEXT, timeframe TEXT, open_time INTEGER,"
+                    " close REAL, volume REAL)")
+        for t in [0, 8*3_600_000, 16*3_600_000, 40*3_600_000]:
+            con.execute("INSERT INTO ohlcv VALUES('BTCUSDT','1h',?,100.0,1000.0)", (t,))
+    # Reference: carry_for_symbol directly over the same window.
+    funding = simulate.load_funding(fdb, "BTCUSDT", 0, 40*3_600_000)
+    ref = simulate.carry_for_symbol(
+        symbol="BTCUSDT", funding=funding,
+        spot_entry=100.0, spot_exit=100.0, perp_entry=100.0, perp_exit=100.0,
+        liq=float("nan"))
+    got = shadow.symbol_window_return(
+        "BTCUSDT", funding_db=fdb, ohlcv_db=odb, start_ms=0, end_ms=40*3_600_000)
+    assert abs(got - ref["net_return_annual"]) < 1e-12
+
+
+def test_pooled_decay_uses_gate_a(tmp_path, monkeypatch):
+    from tools.funding_carry import shadow, evaluate
+    monkeypatch.setattr(shadow, "symbol_window_return",
+                        lambda s, **kw: {"BTCUSDT": 0.06, "ETHUSDT": 0.07}[s])
+    out = shadow.pooled_decay(["BTCUSDT", "ETHUSDT"], funding_db="x", ohlcv_db="y",
+                              start_ms=0, end_ms=1)
+    ref = evaluate.gate_a([0.06, 0.07])
+    assert out["ci_lo"] == ref["ci_lo"] and out["ci_hi"] == ref["ci_hi"]
+    assert out["mean"] == ref["mean"] and out["n"] == 2
