@@ -122,13 +122,13 @@ def main():
         f"mean {v['optimistic_ci']['mean']:.4f}, excludes_zero={v['optimistic_ci']['excludes_zero']}",
         f"- LOO survives top influencer (id={v['loo_top_influencer_id']}): {v['loo_survives_top_influencer']}",
         f"- Blind worse than operator on {n_blind_worse}/{len(records)} trades; cap hits {n_cap}/{len(records)}",
-        f"- Confirmatory 38%-giveback (DESCRIPTIVE): pess mean Δ {confirmatory['pess_mean_delta']:.4f}", "",
+        f"- Confirmatory 38%-giveback (DESCRIPTIVE): pess mean delta {confirmatory['pess_mean_delta']:.4f}", "",
         "Ceiling: n=27, single bull regime, 8 liquid symbols. PASS = in-regime only, not deployable.",
         "FAIL -> Lyra Sage (double-FAIL with Brazo B).",
     ]
     with open(os.path.join(OUTPUT_DIR, "findings.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"VERDICT: {v['verdict']}  (pess mean Δ {v['pessimistic_ci']['mean']:.4f})")
+    print(f"VERDICT: {v['verdict']}  (pess mean delta {v['pessimistic_ci']['mean']:.4f})")
 
 
 if __name__ == "__main__":
