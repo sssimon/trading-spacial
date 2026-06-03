@@ -235,3 +235,28 @@ def test_fetch_recent_funding_failsoft(monkeypatch):
     monkeypatch.setattr(live_ingest, "_get_json", boom)
     # Fail-soft: a down symbol returns [] (logged), never raises.
     assert live_ingest.fetch_recent_funding("BTCUSDT", limit=10) == []
+
+
+def test_parse_mark_klines():
+    from tools.funding_carry.live_ingest import parse_mark_klines
+    # FAPI markPriceKlines: [openTime, open, high, low, close, ...]; we keep (openTime, close).
+    payload = [
+        [1700000000000, "100.0", "101.0", "99.0", "100.5", "0", 0, "0", 0, "0", "0", "0"],
+        [1700003600000, "100.5", "102.0", "100.0", "101.2", "0", 0, "0", 0, "0", "0", "0"],
+    ]
+    assert parse_mark_klines(payload) == [(1700000000000, 100.5), (1700003600000, 101.2)]
+
+
+def test_append_perp_klines_idempotent(tmp_path):
+    from tools.funding_carry import live_ingest
+    db = str(tmp_path / "f.db")
+    import sqlite3
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE perp_klines(symbol TEXT, open_time INTEGER, close REAL,"
+                    " PRIMARY KEY(symbol, open_time))")
+    rows = [(1700000000000, 100.5), (1700003600000, 101.2)]
+    live_ingest.append_perp_klines(db, "BTCUSDT", rows)
+    live_ingest.append_perp_klines(db, "BTCUSDT", rows)   # second call must not double-count
+    with sqlite3.connect(db) as con:
+        n = con.execute("SELECT COUNT(*) FROM perp_klines WHERE symbol='BTCUSDT'").fetchone()[0]
+    assert n == 2

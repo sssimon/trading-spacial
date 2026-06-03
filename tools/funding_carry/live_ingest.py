@@ -37,3 +37,40 @@ def fetch_recent_funding(symbol: str, *, limit: int) -> list[tuple[int, float]]:
     except Exception as e:                       # noqa: BLE001 — fail-soft by contract
         log.warning("fetch_recent_funding(%s) failed: %s", symbol, e)
         return []
+
+
+def parse_mark_klines(payload: list[list]) -> list[tuple[int, float]]:
+    """Map FAPI markPriceKlines to [(open_time_ms, close)], same fields as the bulk
+    ingest keeps (ingest.py:117: open_time index 0, close index 4)."""
+    out = [(int(k[0]), float(k[4])) for k in payload]
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def fetch_mark_klines(symbol: str, *, interval: str = "1h", limit: int = 1000
+                      ) -> list[tuple[int, float]]:
+    """Recent perp mark klines at the SAME grain as the fossil (1h). Fail-soft: []."""
+    url = f"{FAPI_MARK_KLINES}?symbol={symbol}&interval={interval}&limit={int(limit)}"
+    try:
+        return parse_mark_klines(_get_json(url))
+    except Exception as e:                       # noqa: BLE001 — fail-soft
+        log.warning("fetch_mark_klines(%s) failed: %s", symbol, e)
+        return []
+
+
+def append_perp_klines(db_path: str, symbol: str, rows: list[tuple[int, float]]) -> int:
+    """Idempotent append to perp_klines (PK (symbol, open_time)). Returns rows attempted."""
+    with closing(sqlite3.connect(db_path)) as con:
+        con.executemany("INSERT OR IGNORE INTO perp_klines VALUES(?,?,?)",
+                        [(symbol, t, c) for t, c in rows])
+        con.commit()
+    return len(rows)
+
+
+def append_funding(db_path: str, symbol: str, rows: list[tuple[int, float]]) -> int:
+    """Idempotent append to funding (PK (symbol, funding_time_ms)). Returns rows attempted."""
+    with closing(sqlite3.connect(db_path)) as con:
+        con.executemany("INSERT OR IGNORE INTO funding VALUES(?,?,?)",
+                        [(symbol, t, r) for t, r in rows])
+        con.commit()
+    return len(rows)
