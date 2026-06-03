@@ -446,3 +446,13 @@ def test_run_once_failsoft_on_compute_error(tmp_path, monkeypatch):
     assert res["decay_state"] == "ERROR"
     state = json.loads((out_dir / "funding_carry_state.json").read_text())
     assert state["decay_state"] == "ERROR" and "db gone" in state["error"]
+
+
+def test_min_window_weeks_monotone():
+    from tools.funding_carry.power import min_window_weeks
+    # SE shrinks ~1/sqrt(n); a tighter target band needs a larger window. Monotone & >=1.
+    w_loose = min_window_weeks(per_symbol_settlements_per_week=21, n_symbols=9,
+                               sigma_annual=0.05, target_half_band=0.0066)
+    w_tight = min_window_weeks(per_symbol_settlements_per_week=21, n_symbols=9,
+                               sigma_annual=0.05, target_half_band=0.0030)
+    assert w_loose >= 1 and w_tight >= w_loose

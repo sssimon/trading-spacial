@@ -43,8 +43,8 @@ FAPI_MARK_KLINES = "https://fapi.binance.com/fapi/v1/markPriceKlines"
 FAPI_SPOT = "https://api.binance.com/api/v3/ticker/price"
 
 DECAY_CI_LO = 0.0502           # backtest gate_a ci_lo — in-sample-anchored decay threshold
-DECAY_WEEKS_W = 2              # rolling window (PROVISIONAL — frozen by power.py, Task 9/11)
-DECAY_KILL_N = 4              # consecutive non-overlapping windows below threshold (PROVISIONAL)
+DECAY_WEEKS_W = 1              # frozen by power.py 2026-06-03: sigma=0.019, W=1
+DECAY_KILL_N = 4              # frozen by power.py 2026-06-03: confirmatory guard (false-REFUTED target)
 FUNDING_FETCH_LIMIT = 1000     # FAPI fundingRate page size; covers multi-day gaps + back-fill
 
 SHADOW_OUTPUT_DIR = "data/shadow"
