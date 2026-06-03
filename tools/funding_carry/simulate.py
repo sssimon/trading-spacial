@@ -65,3 +65,41 @@ def carry_for_symbol(*, symbol: str, funding: list[tuple[int, float]],
             "net": net, "net_return": net / notional,
             "net_return_annual": (net / notional) / years,
             "n_funding": len(funding), "window_hours": window_hours}
+
+
+def load_funding(funding_db: str, symbol: str, start_ms: int, end_ms: int) -> list[tuple[int, float]]:
+    with closing(sqlite3.connect(f"file:{funding_db}?mode=ro", uri=True)) as con:
+        return [(int(t), float(r)) for t, r in con.execute(
+            "SELECT funding_time_ms, funding_rate FROM funding WHERE symbol=? "
+            "AND funding_time_ms>=? AND funding_time_ms<=? ORDER BY funding_time_ms",
+            (symbol, start_ms, end_ms))]
+
+
+def perp_price_at(funding_db: str, symbol: str, ts_ms: int) -> float:
+    """Last perp close at or before ts_ms (NaN if none)."""
+    with closing(sqlite3.connect(f"file:{funding_db}?mode=ro", uri=True)) as con:
+        row = con.execute(
+            "SELECT close FROM perp_klines WHERE symbol=? AND open_time<=? "
+            "ORDER BY open_time DESC LIMIT 1", (symbol, ts_ms)).fetchone()
+    return float(row[0]) if row else float("nan")
+
+
+def spot_price_at(ohlcv_db: str, symbol: str, ts_ms: int) -> float:
+    """Last spot 1h close at or before ts_ms (NaN if none)."""
+    with closing(sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)) as con:
+        row = con.execute(
+            "SELECT close FROM ohlcv WHERE symbol=? AND timeframe='1h' AND open_time<=? "
+            "ORDER BY open_time DESC LIMIT 1", (symbol, ts_ms)).fetchone()
+    return float(row[0]) if row else float("nan")
+
+
+def spot_liquidity(ohlcv_db: str, symbol: str, ts_ms: int) -> float:
+    """30-day rolling USD/min proxy at ts_ms from spot 1h bars (matches backtest.py:669).
+    Returns NaN -> compute_trade_costs falls back to the v3 floor."""
+    with closing(sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)) as con:
+        rows = con.execute(
+            "SELECT close, volume FROM ohlcv WHERE symbol=? AND timeframe='1h' "
+            "AND open_time<=? ORDER BY open_time DESC LIMIT 720", (symbol, ts_ms)).fetchall()
+    if len(rows) < 120:
+        return float("nan")
+    return sum(c * v / 60.0 for c, v in rows) / len(rows)
