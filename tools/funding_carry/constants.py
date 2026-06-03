@@ -25,3 +25,10 @@ FAPI_FUNDING = "https://fapi.binance.com/fapi/v1/fundingRate"
 OHLCV_DB = "data/ohlcv.db"        # spot klines (reused)
 FUNDING_DB = "data/funding.db"    # produced by ingest
 OUTPUT_DIR = "data/retune/2026-06-03-funding-carry-falsification"
+
+# --- Tail-aware kill rule (sub-project #1, spec 9605758) ---
+KILL_K = 24                       # exit after this many consecutive negative settlements (~8d)
+K_SENSITIVITY = (9, 18, 24, 36)   # DESCRIPTIVE only — does NOT gate the verdict
+N_SHOCKS = 2                      # synthetic out-of-sample shocks (2022 = LUNA + FTX)
+LEVERAGE = 2.0                    # fixed conservative; liquidation needs ~50% adverse (not binding)
+OUTPUT_DIR_KILL = "data/retune/2026-06-03-funding-carry-tail-kill"
