@@ -74,3 +74,26 @@ def append_funding(db_path: str, symbol: str, rows: list[tuple[int, float]]) -> 
                         [(symbol, t, r) for t, r in rows])
         con.commit()
     return len(rows)
+
+
+def fetch_spot(symbol: str) -> float:
+    """Current spot price via Binance spot ticker. Fail-soft: NaN on error."""
+    try:
+        return float(_get_json(f"{FAPI_SPOT}?symbol={symbol}")["price"])
+    except Exception as e:                       # noqa: BLE001 — fail-soft
+        log.warning("fetch_spot(%s) failed: %s", symbol, e)
+        return float("nan")
+
+
+def ingest_live(symbols: list[str], *, db_path: str = FUNDING_DB,
+                limit: int) -> dict:
+    """Fetch + append funding and 1h mark klines for each symbol. Fail-soft per
+    symbol (a down symbol contributes 0 rows, never raises). Returns per-symbol counts."""
+    summary = {}
+    for s in symbols:
+        funding = fetch_recent_funding(s, limit=limit)
+        klines = fetch_mark_klines(s, interval="1h", limit=limit)
+        nf = append_funding(db_path, s, funding) if funding else 0
+        nk = append_perp_klines(db_path, s, klines) if klines else 0
+        summary[s] = {"funding": nf, "klines": nk}
+    return summary

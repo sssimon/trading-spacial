@@ -260,3 +260,34 @@ def test_append_perp_klines_idempotent(tmp_path):
     with sqlite3.connect(db) as con:
         n = con.execute("SELECT COUNT(*) FROM perp_klines WHERE symbol='BTCUSDT'").fetchone()[0]
     assert n == 2
+
+
+def test_fetch_spot_failsoft(monkeypatch):
+    from tools.funding_carry import live_ingest
+    monkeypatch.setattr(live_ingest, "_get_json",
+                        lambda url, **kw: {"symbol": "BTCUSDT", "price": "42000.5"})
+    assert live_ingest.fetch_spot("BTCUSDT") == 42000.5
+    def boom(url, **kw):
+        raise OSError("down")
+    monkeypatch.setattr(live_ingest, "_get_json", boom)
+    import math
+    assert math.isnan(live_ingest.fetch_spot("BTCUSDT"))
+
+
+def test_ingest_live_appends_all(tmp_path, monkeypatch):
+    from tools.funding_carry import live_ingest
+    db = str(tmp_path / "f.db")
+    import sqlite3
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE funding(symbol TEXT, funding_time_ms INTEGER,"
+                    " funding_rate REAL, PRIMARY KEY(symbol, funding_time_ms))")
+        con.execute("CREATE TABLE perp_klines(symbol TEXT, open_time INTEGER, close REAL,"
+                    " PRIMARY KEY(symbol, open_time))")
+    monkeypatch.setattr(live_ingest, "fetch_recent_funding",
+                        lambda s, limit: [(1700000000000, 0.0001)])
+    monkeypatch.setattr(live_ingest, "fetch_mark_klines",
+                        lambda s, interval="1h", limit=1000: [(1700000000000, 100.0)])
+    summary = live_ingest.ingest_live(["BTCUSDT", "ETHUSDT"], db_path=db, limit=10)
+    assert summary["BTCUSDT"]["funding"] == 1 and summary["BTCUSDT"]["klines"] == 1
+    with sqlite3.connect(db) as con:
+        assert con.execute("SELECT COUNT(*) FROM funding").fetchone()[0] == 2
