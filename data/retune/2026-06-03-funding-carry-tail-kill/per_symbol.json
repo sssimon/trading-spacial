@@ -1,0 +1,74 @@
+[
+  {
+    "churn_cost": 30.463123519616833,
+    "net_no_kill": 0.3235278951190277,
+    "net_with_kill": 0.3235278951190277,
+    "n_kills": 0,
+    "symbol": "BTCUSDT",
+    "max_dd": 72.10151351067088
+  },
+  {
+    "churn_cost": 32.122622135180144,
+    "net_no_kill": 0.25412925539876113,
+    "net_with_kill": 0.25412925539876113,
+    "n_kills": 0,
+    "symbol": "ETHUSDT",
+    "max_dd": 54.49336729152992
+  },
+  {
+    "churn_cost": 77.15174560836292,
+    "net_no_kill": 0.19770273755355128,
+    "net_with_kill": 0.19770273755355128,
+    "n_kills": 0,
+    "symbol": "ADAUSDT",
+    "max_dd": 58.555112620448654
+  },
+  {
+    "churn_cost": 109.83978194524155,
+    "net_no_kill": 0.12671964395859453,
+    "net_with_kill": 0.12355681600246264,
+    "n_kills": 1,
+    "symbol": "AVAXUSDT",
+    "max_dd": 89.7152818244831
+  },
+  {
+    "churn_cost": 60.58282640638025,
+    "net_no_kill": 0.40150309965323816,
+    "net_with_kill": 0.40150309965323816,
+    "n_kills": 0,
+    "symbol": "DOGEUSDT",
+    "max_dd": 48.91219206645883
+  },
+  {
+    "churn_cost": 92.63031357468874,
+    "net_no_kill": 0.2623308635588113,
+    "net_with_kill": 0.2623308635588113,
+    "n_kills": 0,
+    "symbol": "UNIUSDT",
+    "max_dd": 10.019167306370946
+  },
+  {
+    "churn_cost": 264.04682825262785,
+    "net_no_kill": 0.10732203730559313,
+    "net_with_kill": 0.09398925521113204,
+    "n_kills": 1,
+    "symbol": "XLMUSDT",
+    "max_dd": 671.7947522343961
+  },
+  {
+    "churn_cost": 112.86075881597198,
+    "net_no_kill": 0.18999951265733092,
+    "net_with_kill": 0.18999951265733092,
+    "n_kills": 0,
+    "symbol": "RUNEUSDT",
+    "max_dd": 19.783245621940296
+  },
+  {
+    "churn_cost": 1253.99974256795,
+    "net_no_kill": 0.5890081502345849,
+    "net_with_kill": 0.5890081502345849,
+    "n_kills": 0,
+    "symbol": "PENDLEUSDT",
+    "max_dd": 325.19960332260644
+  }
+]
