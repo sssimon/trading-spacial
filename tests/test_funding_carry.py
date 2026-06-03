@@ -194,3 +194,9 @@ def test_gate_tail_requires_both():
     assert g2["verdict"] == "FAIL"
     g3 = evaluate.gate_tail(with_kill_net_pooled=-0.01, post_shock_net_pooled=0.02)
     assert g3["verdict"] == "FAIL"
+
+def test_run_kill_required_keys():
+    from tools.funding_carry import run_kill
+    rec = {"symbol": "BTCUSDT", "net_with_kill": 0.06, "net_no_kill": 0.05,
+           "n_kills": 1, "max_dd": 100.0, "churn_cost": 50.0}
+    assert run_kill.REQUIRED_KILL_KEYS <= set(rec.keys())
