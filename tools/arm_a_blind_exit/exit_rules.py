@@ -8,7 +8,10 @@ from .constants import CHANDELIER_MULT, GIVEBACK_FRAC, MAX_HOLD_H
 
 
 def wilder_atr(bars_1h: list[dict], period: int = 22) -> float:
-    """Wilder's ATR over the LAST `period` true ranges ending at the final bar.
+    """Simple-mean ATR: the arithmetic mean of the LAST `period` true ranges ending at
+    the final bar. This is the SMA-of-TR variant (the seed of Wilder's recursion), NOT
+    the EMA-smoothed Wilder series — frozen as pre-registered in the plan. The FAIL
+    verdict is robust to this choice (wide CI dominated by one outlier).
 
     bars_1h: chronological dicts with high/low/close. Needs >= period+1 bars."""
     if len(bars_1h) < period + 1:

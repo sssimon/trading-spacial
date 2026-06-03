@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 import numpy as np
 
@@ -24,14 +25,13 @@ REQUIRED_PER_TRADE_KEYS = {
 
 
 def _bars(ohlcv_db, symbol, tf, start_ms, end_ms, with_volume=False):
-    con = sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)
     cols = "open_time, open, high, low, close" + (", volume" if with_volume else "")
-    rows = con.execute(
-        f"SELECT {cols} FROM ohlcv WHERE symbol=? AND timeframe=? "
-        "AND open_time>=? AND open_time<=? ORDER BY open_time",
-        (symbol, tf, start_ms, end_ms),
-    ).fetchall()
-    con.close()
+    with closing(sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)) as con:
+        rows = con.execute(
+            f"SELECT {cols} FROM ohlcv WHERE symbol=? AND timeframe=? "
+            "AND open_time>=? AND open_time<=? ORDER BY open_time",
+            (symbol, tf, start_ms, end_ms),
+        ).fetchall()
     keys = ["open_time", "open", "high", "low", "close"] + (["volume"] if with_volume else [])
     return [dict(zip(keys, r)) for r in rows]
 
@@ -97,7 +97,7 @@ def main():
         "cost_model": {"active_model": cal.active_model,
                        "calibration_identity_hash": calibration_identity_hash(cal)},
         "population": {"kept": len(kept), "dropped": dropped, "keep_symbols": list(KEEP_SYMBOLS)},
-        "generated_utc": None,   # stamp post-run; Date.now() unavailable in some envs
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
     }
     confirmatory = {
         "pess_mean_delta": float(np.mean([r["giveback_net_v3_pess"] - r["actual_net_v3"] for r in records])),

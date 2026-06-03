@@ -21,7 +21,7 @@ def _has_pre_entry_1h(ohlcv_db: str, symbol: str, entry_ts: datetime) -> bool:
             "SELECT COUNT(*) FROM ohlcv WHERE symbol=? AND timeframe=? AND open_time < ?",
             (symbol, ATR_TF, end_ms),
         ).fetchone()[0]
-    return n >= ATR_PERIOD
+    return n >= ATR_PERIOD + 1          # wilder_atr needs period+1 bars (period TRs)
 
 
 def load_population(papa_db: str, ohlcv_db: str) -> tuple[list[dict], list[dict]]:
