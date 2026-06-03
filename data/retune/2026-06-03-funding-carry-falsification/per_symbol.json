@@ -1,0 +1,101 @@
+[
+  {
+    "symbol": "BTCUSDT",
+    "funding_pnl": 1743.9119136494373,
+    "basis_pnl": 14.024644481026977,
+    "cost_v3": 30.463123519616833,
+    "net": 1727.4734346108476,
+    "net_return": 0.17274734346108475,
+    "net_return_annual": 0.07156955773359357,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "ETHUSDT",
+    "funding_pnl": 1809.474237819918,
+    "basis_pnl": 13.231706026110334,
+    "cost_v3": 32.122622135180144,
+    "net": 1790.5833217108482,
+    "net_return": 0.17905833217108483,
+    "net_return_annual": 0.07418421253399088,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "ADAUSDT",
+    "funding_pnl": 1841.660728343367,
+    "basis_pnl": 7.573841779562894,
+    "cost_v3": 77.15174560836292,
+    "net": 1772.082824514567,
+    "net_return": 0.1772082824514567,
+    "net_return_annual": 0.07341773336524597,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "AVAXUSDT",
+    "funding_pnl": 1056.2971500239405,
+    "basis_pnl": 12.257367745249844,
+    "cost_v3": 54.91989097262078,
+    "net": 1013.6346267965696,
+    "net_return": 0.10136346267965696,
+    "net_return_annual": 0.0419950781816967,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "DOGEUSDT",
+    "funding_pnl": 1882.3501750306136,
+    "basis_pnl": 14.471780028945675,
+    "cost_v3": 60.58282640638025,
+    "net": 1836.239128653179,
+    "net_return": 0.1836239128653179,
+    "net_return_annual": 0.07607574142547223,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "UNIUSDT",
+    "funding_pnl": 2078.8613821960894,
+    "basis_pnl": 14.060453986053249,
+    "cost_v3": 92.63031357468874,
+    "net": 2000.291522607454,
+    "net_return": 0.2000291522607454,
+    "net_return_annual": 0.08287246376296489,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "XLMUSDT",
+    "funding_pnl": 883.9633587461301,
+    "basis_pnl": 15.030185758512614,
+    "cost_v3": 132.02341412631392,
+    "net": 766.9701303783288,
+    "net_return": 0.07669701303783288,
+    "net_return_annual": 0.03177572049808059,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "RUNEUSDT",
+    "funding_pnl": 2042.1360145503663,
+    "basis_pnl": 9.64878425318325,
+    "cost_v3": 112.86075881597198,
+    "net": 1938.9240399875775,
+    "net_return": 0.19389240399875776,
+    "net_return_annual": 0.08032999711639793,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  },
+  {
+    "symbol": "PENDLEUSDT",
+    "funding_pnl": 2097.440992048213,
+    "basis_pnl": 54.00736586590672,
+    "cost_v3": 1253.99974256795,
+    "net": 897.4486153461696,
+    "net_return": 0.08974486153461696,
+    "net_return_annual": 0.037181469307758445,
+    "n_funding": 2644,
+    "window_hours": 21144.0
+  }
+]
