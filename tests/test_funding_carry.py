@@ -336,3 +336,28 @@ def test_pooled_decay_uses_gate_a(tmp_path, monkeypatch):
     ref = evaluate.gate_a([0.06, 0.07])
     assert out["ci_lo"] == ref["ci_lo"] and out["ci_hi"] == ref["ci_hi"]
     assert out["mean"] == ref["mean"] and out["n"] == 2
+
+
+def test_decay_state_three_states():
+    from tools.funding_carry.shadow import decay_state
+    from tools.funding_carry.constants import DECAY_CI_LO, DECAY_KILL_N
+    # ALIVE: CI sits at/above the band.
+    s = decay_state(ci_lo=0.05, ci_hi=0.08, weeks_below=0)
+    assert s["decay_state"] == "ALIVE" and s["weeks_below"] == 0
+    # THIN: CI overlaps [0.0502, 0.0633] (ci_hi >= threshold but ci_lo below the headline).
+    s = decay_state(ci_lo=0.04, ci_hi=0.06, weeks_below=0)
+    assert s["decay_state"] == "THIN" and s["weeks_below"] == 0
+    # Below threshold once: counter increments, not yet REFUTED.
+    s = decay_state(ci_lo=0.01, ci_hi=DECAY_CI_LO - 0.001, weeks_below=0)
+    assert s["weeks_below"] == 1
+    assert s["decay_state"] == ("REFUTED" if DECAY_KILL_N <= 1 else "THIN")
+    # N consecutive below -> REFUTED.
+    s = decay_state(ci_lo=0.01, ci_hi=DECAY_CI_LO - 0.001, weeks_below=DECAY_KILL_N - 1)
+    assert s["weeks_below"] == DECAY_KILL_N and s["decay_state"] == "REFUTED"
+
+
+def test_decay_state_resets_counter_on_recovery():
+    from tools.funding_carry.shadow import decay_state
+    from tools.funding_carry.constants import DECAY_CI_LO
+    s = decay_state(ci_lo=0.06, ci_hi=0.08, weeks_below=3)   # recovered above threshold
+    assert s["weeks_below"] == 0 and s["decay_state"] == "ALIVE"

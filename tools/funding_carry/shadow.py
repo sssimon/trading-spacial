@@ -8,6 +8,7 @@ non-overlapping windows. Paper-only: no positions, no orders, no holdout. The st
 reuses carry_for_symbol verbatim (audit N1) — no new annualization formula."""
 from __future__ import annotations
 from . import simulate, evaluate
+from .constants import DECAY_CI_LO, DECAY_KILL_N
 
 
 def symbol_window_return(symbol: str, *, funding_db: str, ohlcv_db: str,
@@ -44,3 +45,28 @@ def pooled_decay(symbols: list[str], *, funding_db: str, ohlcv_db: str,
         "mean": 0.0, "ci_lo": 0.0, "ci_hi": 0.0, "loo_min_mean": 0.0, "pass_a": False, "n": 0}
     out["dropped"] = dropped
     return out
+
+
+_HEADLINE = 0.0633        # backtest gate_a mean — top of the thin band
+
+
+def decay_state(*, ci_lo: float, ci_hi: float, weeks_below: int) -> dict:
+    """State machine over the live CI vs the in-sample threshold (spec §6).
+
+    REFUTED   : ci_hi < DECAY_CI_LO for DECAY_KILL_N consecutive non-overlapping windows.
+    THIN      : CI overlaps [DECAY_CI_LO, headline] — compressing, not dead.
+    ALIVE     : CI sits at/above the band.
+
+    `weeks_below` is the prior consecutive count; this call updates it. A window whose
+    ci_hi recovers to/above the threshold RESETS the counter (consecutive, not cumulative)."""
+    below = ci_hi < DECAY_CI_LO
+    new_count = (weeks_below + 1) if below else 0
+    if new_count >= DECAY_KILL_N:
+        state = "REFUTED"
+    elif ci_hi >= _HEADLINE:
+        state = "ALIVE"
+    elif ci_hi >= DECAY_CI_LO:
+        state = "THIN"            # CI overlaps [DECAY_CI_LO, headline] — compressing, not dead
+    else:
+        state = "THIN"            # below once but not yet N — still compressing, not dead
+    return {"decay_state": state, "weeks_below": new_count}
