@@ -5,7 +5,8 @@ KEEP_SYMBOLS (full 5m coverage) AND it has ≥ATR_PERIOD 1h bars before entry_ts
 The keep-set is MANUAL+SL_HIT only (the 2 TP_HIT fall on dropped symbols)."""
 from __future__ import annotations
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from contextlib import closing
+from datetime import datetime
 from .constants import KEEP_SYMBOLS, ATR_PERIOD, ATR_TF
 
 
@@ -14,13 +15,12 @@ def _parse_ts(s: str) -> datetime:
 
 
 def _has_pre_entry_1h(ohlcv_db: str, symbol: str, entry_ts: datetime) -> bool:
-    con = sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)
     end_ms = int(entry_ts.timestamp() * 1000)
-    n = con.execute(
-        "SELECT COUNT(*) FROM ohlcv WHERE symbol=? AND timeframe=? AND open_time < ?",
-        (symbol, ATR_TF, end_ms),
-    ).fetchone()[0]
-    con.close()
+    with closing(sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)) as con:
+        n = con.execute(
+            "SELECT COUNT(*) FROM ohlcv WHERE symbol=? AND timeframe=? AND open_time < ?",
+            (symbol, ATR_TF, end_ms),
+        ).fetchone()[0]
     return n >= ATR_PERIOD
 
 
@@ -29,15 +29,15 @@ def load_population(papa_db: str, ohlcv_db: str) -> tuple[list[dict], list[dict]
 
     kept_positions: list of dicts with id, symbol, direction, entry_price, entry_ts
     (datetime), exit_price, exit_ts (datetime), qty, exit_reason, pnl_usd.
-    dropped_summary: [{"symbol":..., "n":...}] for symbols with zero OHLCV.
+    dropped_summary: [{"symbol":..., "n":...}] counting every dropped closed position,
+    whether dropped for being off KEEP_SYMBOLS or for having <ATR_PERIOD pre-entry 1h bars.
     """
-    con = sqlite3.connect(f"file:{papa_db}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    rows = con.execute(
-        "SELECT id, symbol, direction, entry_price, entry_ts, exit_price, exit_ts, "
-        "qty, size_usd, exit_reason, pnl_usd FROM positions WHERE status='closed'"
-    ).fetchall()
-    con.close()
+    with closing(sqlite3.connect(f"file:{papa_db}?mode=ro", uri=True)) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT id, symbol, direction, entry_price, entry_ts, exit_price, exit_ts, "
+            "qty, exit_reason, pnl_usd FROM positions WHERE status='closed'"
+        ).fetchall()
 
     kept, dropped_counts = [], {}
     for r in rows:
