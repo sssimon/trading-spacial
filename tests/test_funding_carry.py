@@ -294,85 +294,65 @@ def test_ingest_live_appends_all(tmp_path, monkeypatch):
         assert con.execute("SELECT COUNT(*) FROM funding").fetchone()[0] == 2
 
 
-def test_decay_statistic_matches_carry_for_symbol(tmp_path):
-    """The shadow statistic over a window MUST equal carry_for_symbol on that window —
-    identical method, span-annualized (NOT settlement-count annualized). Guards N1."""
+def test_symbol_rate_is_intensive(tmp_path):
+    """Pure mean(rate)*1095 — INVARIANT to window length at constant rate (the type-fix guard)."""
     import sqlite3
-    from tools.funding_carry import shadow, simulate
-    fdb = str(tmp_path / "f.db"); odb = str(tmp_path / "o.db")
-    # Build a tiny funding.db + ohlcv.db with a known, GAPPED settlement series.
+    from tools.funding_carry import shadow
+    fdb = str(tmp_path / "f.db")
     with sqlite3.connect(fdb) as con:
         con.execute("CREATE TABLE funding(symbol TEXT, funding_time_ms INTEGER, funding_rate REAL,"
                     " PRIMARY KEY(symbol, funding_time_ms))")
-        con.execute("CREATE TABLE perp_klines(symbol TEXT, open_time INTEGER, close REAL,"
-                    " PRIMARY KEY(symbol, open_time))")
-        H = 3_600_000
-        # 4 settlements but with a GAP (skip one 8h slot) so count != span.
-        times = [0, 8*H, 16*H, 40*H]
-        for t in times:
-            con.execute("INSERT INTO funding VALUES('BTCUSDT', ?, 0.0001)", (t,))
-            con.execute("INSERT INTO perp_klines VALUES('BTCUSDT', ?, 100.0)", (t,))
-    with sqlite3.connect(odb) as con:
-        con.execute("CREATE TABLE ohlcv(symbol TEXT, timeframe TEXT, open_time INTEGER,"
-                    " close REAL, volume REAL)")
-        for t in [0, 8*3_600_000, 16*3_600_000, 40*3_600_000]:
-            con.execute("INSERT INTO ohlcv VALUES('BTCUSDT','1h',?,100.0,1000.0)", (t,))
-    # Reference: carry_for_symbol directly over the same window.
-    funding = simulate.load_funding(fdb, "BTCUSDT", 0, 40*3_600_000)
-    ref = simulate.carry_for_symbol(
-        symbol="BTCUSDT", funding=funding,
-        spot_entry=100.0, spot_exit=100.0, perp_entry=100.0, perp_exit=100.0,
-        liq=float("nan"))
-    got = shadow.symbol_window_return(
-        "BTCUSDT", funding_db=fdb, ohlcv_db=odb, start_ms=0, end_ms=40*3_600_000)
-    assert abs(got - ref["net_return_annual"]) < 1e-12
+        H8 = 8*3_600_000
+        for i in range(6):   # 6 settlements, constant rate 0.0001
+            con.execute("INSERT INTO funding VALUES('BTCUSDT', ?, 0.0001)", (i*H8,))
+    r_short = shadow.symbol_rate("BTCUSDT", funding_db=fdb, start_ms=0, end_ms=2*H8)   # 3 settlements
+    r_long = shadow.symbol_rate("BTCUSDT", funding_db=fdb, start_ms=0, end_ms=5*H8)    # 6 settlements
+    # Constant rate -> same intensive value regardless of window length.
+    assert abs(r_short - r_long) < 1e-12
+    assert abs(r_short - 0.0001 * 1095) < 1e-9    # mean(rate) * INTERVALS_PER_YEAR
 
 
-def test_pooled_decay_uses_gate_a(tmp_path, monkeypatch):
+def test_pooled_rate_uses_gate_a(monkeypatch):
     from tools.funding_carry import shadow, evaluate
-    monkeypatch.setattr(shadow, "symbol_window_return",
-                        lambda s, **kw: {"BTCUSDT": 0.06, "ETHUSDT": 0.07}[s])
-    out = shadow.pooled_decay(["BTCUSDT", "ETHUSDT"], funding_db="x", ohlcv_db="y",
-                              start_ms=0, end_ms=1)
+    monkeypatch.setattr(shadow, "symbol_rate", lambda s, **kw: {"A": 0.06, "B": 0.07}[s])
+    out = shadow.pooled_rate(["A", "B"], funding_db="x", start_ms=0, end_ms=1)
     ref = evaluate.gate_a([0.06, 0.07])
-    assert out["ci_lo"] == ref["ci_lo"] and out["ci_hi"] == ref["ci_hi"]
-    assert out["mean"] == ref["mean"] and out["n"] == 2
+    assert out["ci_lo"] == ref["ci_lo"] and out["ci_hi"] == ref["ci_hi"] and out["mean"] == ref["mean"]
+    assert out["dropped"] == []
 
 
-def test_decay_state_three_states():
+def test_block_start_non_overlapping():
+    from tools.funding_carry.shadow import block_start
+    WK = 7*24*3_600_000
+    # Two timestamps in the same 1-week block -> same block_start.
+    assert block_start(5*WK + 1000, 1) == block_start(5*WK + 99999, 1)
+    # Crossing into the next week -> different block.
+    assert block_start(5*WK, 1) != block_start(6*WK, 1)
+
+
+def test_decay_state_anchors():
     from tools.funding_carry.shadow import decay_state
-    from tools.funding_carry.constants import DECAY_CI_LO, DECAY_KILL_N
-    # ALIVE: CI sits at/above the band.
-    s = decay_state(ci_lo=0.05, ci_hi=0.08, weeks_below=0)
-    assert s["decay_state"] == "ALIVE" and s["weeks_below"] == 0
-    # THIN: CI overlaps [0.0502, 0.0633] (ci_hi >= threshold but ci_lo below the headline).
-    s = decay_state(ci_lo=0.04, ci_hi=0.06, weeks_below=0)
-    assert s["decay_state"] == "THIN" and s["weeks_below"] == 0
-    # Below threshold once: counter increments, not yet REFUTED.
-    s = decay_state(ci_lo=0.01, ci_hi=DECAY_CI_LO - 0.001, weeks_below=0)
-    assert s["weeks_below"] == 1
-    assert s["decay_state"] == ("REFUTED" if DECAY_KILL_N <= 1 else "THIN")
-    # N consecutive below -> REFUTED.
-    s = decay_state(ci_lo=0.01, ci_hi=DECAY_CI_LO - 0.001, weeks_below=DECAY_KILL_N - 1)
-    assert s["weeks_below"] == DECAY_KILL_N and s["decay_state"] == "REFUTED"
-
-
-def test_decay_state_resets_counter_on_recovery():
-    from tools.funding_carry.shadow import decay_state
-    from tools.funding_carry.constants import DECAY_CI_LO
-    s = decay_state(ci_lo=0.06, ci_hi=0.08, weeks_below=3)   # recovered above threshold
-    assert s["weeks_below"] == 0 and s["decay_state"] == "ALIVE"
-
-
-def test_reconcile_settlement_one_step():
-    from tools.funding_carry.shadow import reconcile_settlement
-    # expected = naive (prev rate persists); realized = actual settled.
-    r = reconcile_settlement(prev_rate=0.0001, settled_rate=0.00008,
-                             mark=100.0, units=100.0)
-    # expected_net = prev_rate * mark * units ; realized_net = settled_rate * mark * units
-    assert abs(r["expected_net"] - 0.0001 * 100.0 * 100.0) < 1e-9
-    assert abs(r["realized_net"] - 0.00008 * 100.0 * 100.0) < 1e-9
-    assert abs(r["drift"] - (r["realized_net"] - r["expected_net"])) < 1e-12
+    from tools.funding_carry.constants import DECAY_KILL_N, R_FOSSIL_LO, T_FLOOR
+    # ALIVE: ci_lo at/above fossil band.
+    s = decay_state(ci_lo=R_FOSSIL_LO+0.001, ci_hi=R_FOSSIL_LO+0.02, r_mean=R_FOSSIL_LO+0.01,
+                    blocks_below=0, r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+    assert s["decay_state"] == "ALIVE" and s["blocks_below"] == 0
+    # THIN: below fossil band but ci_hi still above cost floor.
+    s = decay_state(ci_lo=T_FLOOR+0.001, ci_hi=R_FOSSIL_LO-0.001, r_mean=R_FOSSIL_LO-0.005,
+                    blocks_below=0, r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+    assert s["decay_state"] == "THIN" and s["blocks_below"] == 0
+    # Below floor once: counter increments, not yet REFUTED (N>1).
+    s = decay_state(ci_lo=-0.1, ci_hi=T_FLOOR-0.001, r_mean=-0.05,
+                    blocks_below=0, r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+    assert s["blocks_below"] == 1 and s["decay_state"] == ("REFUTED" if DECAY_KILL_N<=1 else "THIN")
+    # N consecutive below floor -> REFUTED.
+    s = decay_state(ci_lo=-0.1, ci_hi=T_FLOOR-0.001, r_mean=-0.05,
+                    blocks_below=DECAY_KILL_N-1, r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+    assert s["blocks_below"] == DECAY_KILL_N and s["decay_state"] == "REFUTED"
+    # Recovery above floor resets counter.
+    s = decay_state(ci_lo=R_FOSSIL_LO+0.001, ci_hi=R_FOSSIL_LO+0.02, r_mean=R_FOSSIL_LO+0.01,
+                    blocks_below=3, r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+    assert s["blocks_below"] == 0 and s["decay_state"] == "ALIVE"
 
 
 def test_window_complete_detects_gap():
@@ -388,65 +368,46 @@ def test_window_complete_detects_gap():
     assert window_complete([0], start_ms=0, end_ms=H8, max_gap_ms=H8) is False
 
 
-def test_run_once_appends_and_writes_state(tmp_path, monkeypatch):
+def test_run_once_counter_advances_only_on_new_block(tmp_path, monkeypatch):
     import json
     from tools.funding_carry import shadow
-    out_dir = tmp_path / "shadow"
-    # Stub the moving parts: ingest no-op, a fixed pooled CI (THIN band), a complete window.
-    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
-    monkeypatch.setattr(shadow, "pooled_decay",
-                        lambda *a, **k: {"mean": 0.057, "ci_lo": 0.055, "ci_hi": 0.060,
-                                         "loo_min_mean": 0.055, "pass_a": True, "n": 9,
-                                         "dropped": []})
+    from tools.funding_carry.constants import T_FLOOR
+    out_dir = tmp_path / "shadow"; WK = 7*24*3_600_000
+    monkeypatch.setattr(shadow, "_ingest_funding", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
     monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0, 1])
     monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: True)
-    monkeypatch.setattr(shadow, "_cal_hash", lambda: "deadbeef")
-    res1 = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
-    res2 = shadow.run_once(out_dir=str(out_dir), now_ms=10_100_000_000)
-    # .jsonl is append-only: second run adds, never truncates.
+    # Below-floor reading every run.
+    monkeypatch.setattr(shadow, "pooled_rate", lambda *a, **k: {
+        "mean": -0.05, "ci_lo": -0.1, "ci_hi": T_FLOOR-0.001, "n": 9, "dropped": [], "per_symbol": {}})
+    # Run twice in the SAME block -> counter must advance only once.
+    shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+1000, w_weeks=1)
+    shadow.run_once(out_dir=str(out_dir), now_ms=5*WK+2000, w_weeks=1)
+    st = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert st["blocks_below"] == 1     # same block, counted once
+    # Run in the NEXT block -> counter advances to 2.
+    shadow.run_once(out_dir=str(out_dir), now_ms=6*WK+1000, w_weeks=1)
+    st = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert st["blocks_below"] == 2
+    # jsonl is append-only: 3 lines.
     lines = (out_dir / "funding_carry_signals.jsonl").read_text().strip().splitlines()
-    assert len(lines) == 2
-    state = json.loads((out_dir / "funding_carry_state.json").read_text())
-    assert state["decay_state"] == "THIN"          # ci_hi 0.060 in [0.0502, 0.0633)
-    assert state["calibration_identity_hash"] == "deadbeef"
-    assert res2["decay_state"] in {"ALIVE", "THIN", "REFUTED"}
+    assert len(lines) == 3
 
 
-def test_run_once_incomplete_window_skips_kill(tmp_path, monkeypatch):
+def test_run_once_failsoft_error(tmp_path, monkeypatch):
     import json
     from tools.funding_carry import shadow
     out_dir = tmp_path / "shadow"
-    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
-    monkeypatch.setattr(shadow, "pooled_decay",
-                        lambda *a, **k: {"mean": 0.0, "ci_lo": 0.0, "ci_hi": 0.0,
-                                         "loo_min_mean": 0.0, "pass_a": False, "n": 0,
-                                         "dropped": []})
-    monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0])
-    monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: False)
-    monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
-    res = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
-    state = json.loads((out_dir / "funding_carry_state.json").read_text())
-    assert state["window_complete"] is False
-    assert state["decay_state"] == "INCOMPLETE"     # not evaluated; counter untouched
-    assert state["weeks_below"] == 0
-
-
-def test_run_once_failsoft_on_compute_error(tmp_path, monkeypatch):
-    import json
-    from tools.funding_carry import shadow
-    out_dir = tmp_path / "shadow"
-    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "_ingest_funding", lambda symbols, db, limit: None)
     monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
     monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0, 1])
     monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: True)
-    def boom(*a, **k):
-        raise RuntimeError("db gone")
-    monkeypatch.setattr(shadow, "pooled_decay", boom)
-    # Must NOT raise into the scheduler; must surface a visible ERROR state.
-    res = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
+    def boom(*a, **k): raise RuntimeError("db gone")
+    monkeypatch.setattr(shadow, "pooled_rate", boom)
+    res = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000, w_weeks=1)
     assert res["decay_state"] == "ERROR"
-    state = json.loads((out_dir / "funding_carry_state.json").read_text())
-    assert state["decay_state"] == "ERROR" and "db gone" in state["error"]
+    st = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert st["decay_state"] == "ERROR" and "db gone" in st["error"]
 
 
 def test_min_window_weeks_monotone():

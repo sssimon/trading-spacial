@@ -1,95 +1,88 @@
-"""Funding-carry shadow-deploy v0.1 (spec 2026-06-03).
+"""Funding-carry shadow-deploy v0.1 — pure-rate decay path (spec 2026-06-03 REV 5).
 
-Recomputes the FOSSIL'S OWN statistic (simulate.carry_for_symbol -> net_return_annual,
-span-annualized, entry-mark funding, $/notional) over a trailing W-week window, pools
-it equal-weight via evaluate.gate_a (identical bootstrap CI), and fires a pre-registered
-decay-kill when the live CI-hi falls below the backtest CI-lo (0.0502) for N consecutive
-non-overlapping windows. Paper-only: no positions, no orders, no holdout. The statistic
-reuses carry_for_symbol verbatim (audit N1) — no new annualization formula."""
+Monitors the ANNUALIZED mean funding rate (pure: no cost/mark/basis) over a trailing
+W-week window, pooled equal-weight via evaluate.gate_a, against two frozen fossil anchors:
+  - R_FOSSIL_LO / R_FOSSIL_HI : historical fossil band (THIN / ALIVE signal)
+  - T_FLOOR                   : cost floor (REFUTED kill after N consecutive blocks below)
+
+The decay-kill counter advances ONLY on non-overlapping W-week blocks (epoch-aligned grid).
+Paper-only: no positions, no orders, no holdout. Fail-soft: never raises into the scheduler."""
 from __future__ import annotations
 import json
 import logging
 import os
 from datetime import datetime, timezone
 from . import simulate, evaluate
-from .constants import DECAY_CI_LO, DECAY_KILL_N
 from .constants import (SHADOW_SYMBOLS, SHADOW_OUTPUT_DIR, SHADOW_VERSION,
-                        DECAY_WEEKS_W, FUNDING_DB, OHLCV_DB, FUNDING_FETCH_LIMIT)
+                        DECAY_WEEKS_W, DECAY_KILL_N, FUNDING_DB, FUNDING_FETCH_LIMIT,
+                        INTERVALS_PER_YEAR, R_FOSSIL_LO, R_FOSSIL_HI, T_FLOOR)
 
 log = logging.getLogger("funding_carry.shadow")
 
+_WEEK_MS = 7 * 24 * 3_600_000
+_MAX_GAP_MS = int(1.5 * 8 * 3_600_000)        # >1.5 funding intervals = a hole
 
-def symbol_window_return(symbol: str, *, funding_db: str, ohlcv_db: str,
-                         start_ms: int, end_ms: int) -> float:
-    """net_return_annual for `symbol` over [start_ms, end_ms], computed by the fossil's
-    carry_for_symbol (span-annualized). Raises ValueError on missing prices (drop upstream)."""
+
+# ---------------------------------------------------------------------------
+# Pure-rate statistics (REV 5)
+# ---------------------------------------------------------------------------
+
+def symbol_rate(symbol: str, *, funding_db: str, start_ms: int, end_ms: int) -> float:
+    """Annualized mean funding rate over the window (PURE: no cost/mark/basis).
+    mean(fundingRate) * INTERVALS_PER_YEAR. Raises ValueError if no settlements."""
     funding = simulate.load_funding(funding_db, symbol, start_ms, end_ms)
-    if len(funding) < 2:
-        raise ValueError(f"{symbol}: <2 settlements in window")
-    entry_ms, exit_ms = funding[0][0], funding[-1][0]
-    rec = simulate.carry_for_symbol(
-        symbol=symbol, funding=funding,
-        spot_entry=simulate.spot_price_at(ohlcv_db, symbol, entry_ms),
-        spot_exit=simulate.spot_price_at(ohlcv_db, symbol, exit_ms),
-        perp_entry=simulate.perp_price_at(funding_db, symbol, entry_ms),
-        perp_exit=simulate.perp_price_at(funding_db, symbol, exit_ms),
-        liq=simulate.spot_liquidity(ohlcv_db, symbol, entry_ms))
-    return rec["net_return_annual"]
+    if not funding:
+        raise ValueError(f"{symbol}: no settlements in window")
+    rates = [r for _, r in funding]
+    return (sum(rates) / len(rates)) * INTERVALS_PER_YEAR
 
 
-def pooled_decay(symbols: list[str], *, funding_db: str, ohlcv_db: str,
-                 start_ms: int, end_ms: int) -> dict:
-    """Equal-weight pooled CI of net_return_annual over the window — identical to gate_a.
-    Symbols with <2 settlements / missing prices are dropped loud (not poisoned)."""
-    annual, dropped = [], []
+def pooled_rate(symbols: list[str], *, funding_db: str, start_ms: int, end_ms: int) -> dict:
+    """Equal-weight pooled CI of per-symbol annualized mean rate, via gate_a."""
+    vals, dropped, per = [], [], {}
     for s in symbols:
         try:
-            annual.append(symbol_window_return(
-                s, funding_db=funding_db, ohlcv_db=ohlcv_db,
-                start_ms=start_ms, end_ms=end_ms))
+            v = symbol_rate(s, funding_db=funding_db, start_ms=start_ms, end_ms=end_ms)
+            vals.append(v)
+            per[s] = v
         except ValueError:
             dropped.append(s)
-    out = evaluate.gate_a(annual) if annual else {
+    out = evaluate.gate_a(vals) if vals else {
         "mean": 0.0, "ci_lo": 0.0, "ci_hi": 0.0, "loo_min_mean": 0.0, "pass_a": False, "n": 0}
     out["dropped"] = dropped
+    out["per_symbol"] = per
     return out
 
 
-_HEADLINE = 0.0633        # backtest gate_a mean — top of the thin band
+def block_start(now_ms: int, w_weeks: int) -> int:
+    """Epoch-aligned non-overlapping W-week block containing now_ms."""
+    block_ms = int(w_weeks) * _WEEK_MS
+    return (int(now_ms) // block_ms) * block_ms
 
 
-def decay_state(*, ci_lo: float, ci_hi: float, weeks_below: int) -> dict:
-    """State machine over the live CI vs the in-sample threshold (spec §6).
+def decay_state(*, ci_lo: float, ci_hi: float, r_mean: float, blocks_below: int,
+                r_fossil_lo: float, t_floor: float) -> dict:
+    """Classify the live pooled rate vs the two frozen fossil anchors (spec §6).
 
-    REFUTED   : ci_hi < DECAY_CI_LO for DECAY_KILL_N consecutive non-overlapping windows.
-    THIN      : CI overlaps [DECAY_CI_LO, headline] — compressing, not dead.
-    ALIVE     : CI sits at/above the band.
+    REFUTED: ci_hi < t_floor for DECAY_KILL_N consecutive blocks (rate no longer covers cost).
+    ALIVE  : ci_lo >= r_fossil_lo (rate holds in/above its historical band).
+    THIN   : between (compressed below band but ci still above cost floor).
 
-    `weeks_below` is the prior consecutive count; this call updates it. A window whose
-    ci_hi recovers to/above the threshold RESETS the counter (consecutive, not cumulative)."""
-    below = ci_hi < DECAY_CI_LO
-    new_count = (weeks_below + 1) if below else 0
+    `blocks_below` is the prior consecutive count; below-floor increments, else resets."""
+    below_floor = ci_hi < t_floor
+    new_count = (blocks_below + 1) if below_floor else 0
     if new_count >= DECAY_KILL_N:
         state = "REFUTED"
-    elif ci_hi >= _HEADLINE:
+    elif ci_lo >= r_fossil_lo:
         state = "ALIVE"
-    elif ci_hi >= DECAY_CI_LO:
-        state = "THIN"            # CI overlaps [DECAY_CI_LO, headline] — compressing, not dead
     else:
-        state = "THIN"            # below once but not yet N — still compressing, not dead
-    return {"decay_state": state, "weeks_below": new_count}
+        state = "THIN"
+    return {"decay_state": state, "blocks_below": new_count}
 
 
-def reconcile_settlement(*, prev_rate: float, settled_rate: float,
-                         mark: float, units: float) -> dict:
-    """Secondary operational sanity check (spec §5). Measures ONE-STEP surprise, NOT decay
-    (the naive random-walk baseline persists the prior rate, so it absorbs monotone decay —
-    decay is judged in §6 on the pooled CI, not here). Useful only for ingest/mark anomalies."""
-    expected_net = prev_rate * mark * units
-    realized_net = settled_rate * mark * units
-    return {"expected_net": expected_net, "realized_net": realized_net,
-            "drift": realized_net - expected_net}
-
+# ---------------------------------------------------------------------------
+# Window completeness (kept from prior version)
+# ---------------------------------------------------------------------------
 
 def window_complete(settlement_times_ms: list[int], *, start_ms: int, end_ms: int,
                     max_gap_ms: int) -> bool:
@@ -104,98 +97,139 @@ def window_complete(settlement_times_ms: list[int], *, start_ms: int, end_ms: in
     return all((b - a) <= max_gap_ms for a, b in zip(ts, ts[1:]))
 
 
-_WEEK_MS = 7 * 24 * 3_600_000
-_MAX_GAP_MS = int(1.5 * 8 * 3_600_000)        # >1.5 funding intervals = a hole
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-
-def _ingest(symbols, db, limit):
+def _ingest_funding(symbols: list[str], db: str, limit: int) -> None:
+    """Fetch and append recent funding settlements. No marks — pure-rate path (spec §4)."""
     from . import live_ingest
-    live_ingest.ingest_live(symbols, db_path=db, limit=limit)
+    for s in symbols:
+        rows = live_ingest.fetch_recent_funding(s, limit=limit)
+        if rows:
+            live_ingest.append_funding(db, s, rows)
 
 
-def _cal_hash():
+def _cal_hash() -> str:
     from backtest_costs import calibration_identity_hash, load_calibration
     return calibration_identity_hash(load_calibration())
 
 
-def _window_settlement_times(funding_db, symbols, start_ms, end_ms):
+def _window_settlement_times(funding_db: str, symbols: list[str],
+                             start_ms: int, end_ms: int) -> list[int]:
     """Union of settlement times across symbols in the window (for gap detection)."""
-    ts = set()
+    ts: set[int] = set()
     for s in symbols:
         ts.update(t for t, _ in simulate.load_funding(funding_db, s, start_ms, end_ms))
     return sorted(ts)
 
 
-def _read_prev_state(path):
+def _read_prev_state(path: str) -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-    return {"weeks_below": 0}
+    return {"blocks_below": 0}
 
+
+# ---------------------------------------------------------------------------
+# Main daily cycle
+# ---------------------------------------------------------------------------
 
 def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
-             funding_db: str = FUNDING_DB, ohlcv_db: str = OHLCV_DB,
-             symbols: tuple = SHADOW_SYMBOLS) -> dict:
-    """One daily shadow cycle: ingest live data, recompute the windowed pooled CI, update
-    the decay state, append a per-symbol line to the immutable .jsonl, write derived state.
-    Fail-soft: never raises into the scheduler. No positions, no orders, no holdout."""
+             funding_db: str = FUNDING_DB, symbols: tuple = SHADOW_SYMBOLS,
+             w_weeks: int = DECAY_WEEKS_W) -> dict:
+    """One daily shadow cycle: ingest live funding, recompute the windowed pooled rate,
+    update the block-aligned decay state, append to the immutable .jsonl, write derived
+    state. Fail-soft: never raises into the scheduler. No positions, no orders, no holdout."""
     os.makedirs(out_dir, exist_ok=True)
     jsonl = os.path.join(out_dir, "funding_carry_signals.jsonl")
     state_path = os.path.join(out_dir, "funding_carry_state.json")
-    ts_utc = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+    run_ts = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+    prev = _read_prev_state(state_path)
 
     try:
-        _ingest(list(symbols), funding_db, FUNDING_FETCH_LIMIT)
-    except Exception:                            # noqa: BLE001 — fail-soft; eval on what we have
-        pass
+        try:
+            _ingest_funding(list(symbols), funding_db, FUNDING_FETCH_LIMIT)
+        except Exception:
+            pass  # fail-soft ingest; eval on existing data
 
-    try:
-        start_ms, end_ms = now_ms - DECAY_WEEKS_W * _WEEK_MS, now_ms
         cal = _cal_hash()
+        block = block_start(now_ms, w_weeks)
+        win_start = now_ms - int(w_weeks) * _WEEK_MS
+        times = _window_settlement_times(funding_db, list(symbols), win_start, now_ms)
+        complete = window_complete(times, start_ms=win_start, end_ms=now_ms,
+                                   max_gap_ms=_MAX_GAP_MS)
+        pooled = pooled_rate(list(symbols), funding_db=funding_db,
+                             start_ms=win_start, end_ms=now_ms)
 
-        times = _window_settlement_times(funding_db, list(symbols), start_ms, end_ms)
-        complete = window_complete(times, start_ms=start_ms, end_ms=end_ms, max_gap_ms=_MAX_GAP_MS)
-        pooled = pooled_decay(list(symbols), funding_db=funding_db, ohlcv_db=ohlcv_db,
-                              start_ms=start_ms, end_ms=end_ms)
-        prev = _read_prev_state(state_path)
+        last_block = prev.get("last_counted_block")
+        blocks_below = int(prev.get("blocks_below", 0))
+        is_new_block = (last_block is None) or (block != last_block)
 
-        if complete:
+        if not complete:
+            # Incomplete window: do NOT advance the counter; classify as INCOMPLETE.
+            decay = "INCOMPLETE"
+            new_blocks_below = blocks_below
+            new_last_block = last_block
+        elif is_new_block:
+            # New non-overlapping block: evaluate and advance counter.
             ds = decay_state(ci_lo=pooled["ci_lo"], ci_hi=pooled["ci_hi"],
-                             weeks_below=int(prev.get("weeks_below", 0)))
+                             r_mean=pooled["mean"], blocks_below=blocks_below,
+                             r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+            decay = ds["decay_state"]
+            new_blocks_below = ds["blocks_below"]
+            new_last_block = block
         else:
-            ds = {"decay_state": "INCOMPLETE", "weeks_below": int(prev.get("weeks_below", 0))}
+            # Same block already counted: re-classify for display but DO NOT advance counter.
+            # Recompute the display state as if blocks_below is unchanged.
+            ds = decay_state(ci_lo=pooled["ci_lo"], ci_hi=pooled["ci_hi"],
+                             r_mean=pooled["mean"], blocks_below=max(0, blocks_below - 1),
+                             r_fossil_lo=R_FOSSIL_LO, t_floor=T_FLOOR)
+            # If already REFUTED (blocks_below >= N), preserve that verdict.
+            decay = "REFUTED" if blocks_below >= DECAY_KILL_N else ds["decay_state"]
+            new_blocks_below = blocks_below
+            new_last_block = last_block
 
-        line = {"settlement_ts_utc": ts_utc, "window": [start_ms, end_ms],
-                "pooled_mean": pooled["mean"], "ci_lo": pooled["ci_lo"], "ci_hi": pooled["ci_hi"],
-                "n": pooled["n"], "dropped": pooled["dropped"], "window_complete": complete,
-                "decay_state": ds["decay_state"], "weeks_below": ds["weeks_below"],
-                "calibration_identity_hash": cal, "shadow_version": SHADOW_VERSION}
+        line = {
+            "run_ts_utc": run_ts,
+            "block_start_ms": block,
+            "is_new_block": bool(is_new_block),
+            "R_pooled": pooled["mean"],
+            "R_ci_lo": pooled["ci_lo"],
+            "R_ci_hi": pooled["ci_hi"],
+            "n": pooled["n"],
+            "per_symbol_rate": pooled.get("per_symbol", {}),
+            "dropped": pooled["dropped"],
+            "R_fossil_lo": R_FOSSIL_LO,
+            "t_floor": T_FLOOR,
+            "window_complete": complete,
+            "decay_state": decay,
+            "blocks_below": new_blocks_below,
+            "calibration_identity_hash": cal,
+            "shadow_version": SHADOW_VERSION,
+        }
         with open(jsonl, "a", encoding="utf-8") as f:    # append-only ledger
             f.write(json.dumps(line) + "\n")
         with open(state_path, "w", encoding="utf-8") as f:
-            json.dump({**line, "decay_weeks_w": DECAY_WEEKS_W}, f, indent=2)
+            json.dump({**line, "last_counted_block": new_last_block,
+                       "decay_weeks_w": int(w_weeks)}, f, indent=2)
         return line
 
-    except Exception as e:                       # noqa: BLE001 — fail-soft; log and surface ERROR
+    except Exception as e:                               # noqa: BLE001 — fail-soft
         log.warning("run_once failed: %s", e, exc_info=True)
-        prev_weeks_below = 0
-        try:
-            prev_weeks_below = int(_read_prev_state(state_path).get("weeks_below", 0))
-        except Exception:                        # noqa: BLE001
-            pass
-        error_record = {
-            "settlement_ts_utc": ts_utc,
+        err = {
+            "run_ts_utc": run_ts,
             "decay_state": "ERROR",
             "error": str(e),
-            "weeks_below": prev_weeks_below,
+            "blocks_below": int(prev.get("blocks_below", 0)),
             "shadow_version": SHADOW_VERSION,
         }
         try:
             with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(error_record, f, indent=2)
-        except Exception:                        # noqa: BLE001
+                json.dump(err, f, indent=2)
+        except Exception:                                # noqa: BLE001
             pass
-        return error_record
+        return err
 
 
 if __name__ == "__main__":
