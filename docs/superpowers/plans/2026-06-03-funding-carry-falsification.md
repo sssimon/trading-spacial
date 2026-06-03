@@ -368,7 +368,7 @@ def recost_four_legs(*, symbol: str, units: float, spot_price: float,
             entry_notional_usd=notional, exit_notional_usd=notional,
             entry_liquidity_usd_per_min=liq, exit_liquidity_usd_per_min=liq,
             tier_params=tp, holding_hours=holding_hours, model="v3",
-            global_params=_CAL.global_)
+            enable_funding=False, global_params=_CAL.global_)   # funding modeled in funding_pnl
         return float(d["total_cost_usd"])
 
     return _rt(units * spot_price) + _rt(units * perp_price)
@@ -721,13 +721,16 @@ def main():
         if len(funding) < 2:
             dropped.append(s); continue
         entry_ms, exit_ms = funding[0][0], funding[-1][0]
-        rec = simulate.carry_for_symbol(
-            symbol=s, funding=funding,
-            spot_entry=simulate.spot_price_at(OHLCV_DB, s, entry_ms),
-            spot_exit=simulate.spot_price_at(OHLCV_DB, s, exit_ms),
-            perp_entry=simulate.perp_price_at(FUNDING_DB, s, entry_ms),
-            perp_exit=simulate.perp_price_at(FUNDING_DB, s, exit_ms),
-            liq=simulate.spot_liquidity(OHLCV_DB, s, entry_ms))
+        try:
+            rec = simulate.carry_for_symbol(
+                symbol=s, funding=funding,
+                spot_entry=simulate.spot_price_at(OHLCV_DB, s, entry_ms),
+                spot_exit=simulate.spot_price_at(OHLCV_DB, s, exit_ms),
+                perp_entry=simulate.perp_price_at(FUNDING_DB, s, entry_ms),
+                perp_exit=simulate.perp_price_at(FUNDING_DB, s, exit_ms),
+                liq=simulate.spot_liquidity(OHLCV_DB, s, entry_ms))
+        except ValueError:        # missing spot/perp price -> drop loud, don't poison the pool
+            dropped.append(s); continue
         records.append(rec)
 
     annual = [r["net_return_annual"] for r in records]

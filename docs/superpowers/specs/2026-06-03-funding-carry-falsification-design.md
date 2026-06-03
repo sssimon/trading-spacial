@@ -50,7 +50,9 @@ units u = N / spot_entry  (≈ N / perp_entry)
 funding_pnl = Σ_i ( fundingRate_i × markPrice_i × u )      # short recibe cuando rate>0
 basis_pnl   = − u × ( basis_exit − basis_entry )           # basis = mark − spot; convergencia favorable
 gross       = funding_pnl + basis_pnl
-costs_v3    = v3(entry spot) + v3(exit spot) + v3(entry perp) + v3(exit perp)   # 4 fills
+costs_v3    = v3(spot RT) + v3(perp RT)   # 4 fills, TRANSACTION-only (enable_funding=False:
+                                          # el funding ya está en funding_pnl con tasas reales;
+                                          # incluirlo en el cost lo doble-contaría)
 net         = gross − costs_v3
 net_return  = net / N      (anualizado por la longitud de la ventana del símbolo)
 ```
