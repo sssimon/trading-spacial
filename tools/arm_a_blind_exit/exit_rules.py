@@ -67,3 +67,40 @@ def simulate_chandelier(
     # never stopped within data/cap -> exit at last available bar within cap
     last = max((b for b in path if b["open_time"] <= cap_ms), key=lambda b: b["open_time"])
     return last["close"], last["open_time"], True
+
+
+def simulate_giveback(
+    path: list[dict], direction: str, entry_price: float,
+    *, frac: float = GIVEBACK_FRAC, fill: str = "pessimistic",
+) -> tuple[float, int, bool]:
+    """Confirmatory rule (DESCRIPTIVE only — spec §6). Exit when price retraces
+    `frac` of the running favorable move from entry. LONG: stop = peak - frac*(peak-entry)."""
+    cap_ms = _cap_ms(path)
+    long = direction == "LONG"
+    peak = entry_price
+    stop = None                              # undefined until a favorable move exists
+    for bar in path:
+        if bar["open_time"] > cap_ms:
+            break
+        hi, lo = bar["high"], bar["low"]
+        fav = hi if long else lo
+        adv = lo if long else hi
+
+        def _recompute(pk):
+            move = (pk - entry_price) if long else (entry_price - pk)
+            if move <= 0:
+                return None
+            return (pk - frac * move) if long else (pk + frac * move)
+
+        if fill == "optimistic":
+            peak = max(peak, fav) if long else min(peak, fav)
+            stop = _recompute(peak)
+            if stop is not None and (adv <= stop if long else adv >= stop):
+                return stop, bar["open_time"], False
+        else:
+            if stop is not None and (adv <= stop if long else adv >= stop):
+                return stop, bar["open_time"], False
+            peak = max(peak, fav) if long else min(peak, fav)
+            stop = _recompute(peak)
+    last = max((b for b in path if b["open_time"] <= cap_ms), key=lambda b: b["open_time"])
+    return last["close"], last["open_time"], True

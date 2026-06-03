@@ -86,3 +86,23 @@ def test_chandelier_hits_cap_when_never_stopped():
     assert cap is True
     assert px == pytest.approx(within[-1]["close"])
     assert ts == within[-1]["open_time"]
+
+
+def test_giveback_long_exits_after_retrace():
+    # bar0 high=entry (no favorable move yet, stop stays unarmed); bar1 sets peak 110
+    # with low 108 (above giveback 106.2 so it does not trigger same-bar); bar2 retraces.
+    path = [
+        _bar(0,   100, 100, 99,  100),   # high == entry -> no favorable move
+        _bar(300, 100, 110, 108, 109),   # peak 110, fav move = 10, giveback stop = 106.2
+        _bar(600, 109, 109, 105, 106),   # low 105 <= 106.2 -> exit at 106.2
+    ]
+    px, ts, cap = exit_rules.simulate_giveback(path, "LONG", entry_price=100.0, fill="pessimistic")
+    assert px == pytest.approx(106.2)
+    assert cap is False
+
+
+def test_giveback_never_favorable_rides_to_cap():
+    # price never exceeds entry -> no favorable move -> giveback stop never arms -> cap.
+    path = [_bar(i * 300_000, 100, 100, 99.8, 99.9) for i in range(5)]
+    px, ts, cap = exit_rules.simulate_giveback(path, "LONG", 100.0, fill="pessimistic")
+    assert cap is True

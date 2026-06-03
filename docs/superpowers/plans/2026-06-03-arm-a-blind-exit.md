@@ -426,11 +426,11 @@ git commit -m "feat(arm-a): chandelier simulator with pessimistic/optimistic fil
 Append to `tests/test_arm_a_blind_exit.py`:
 ```python
 def test_giveback_long_exits_after_retrace():
-    # entry 100, MFE peak 110 (favorable move +10). Giveback 38% -> exit when price
-    # falls to 110 - 0.38*10 = 106.2.
+    # bar0 high=entry (no favorable move yet, stop unarmed); bar1 sets peak 110 with
+    # low 108 (above giveback 106.2, no same-bar trigger); bar2 retraces to exit.
     path = [
-        _bar(0,   100, 101, 99,  100),
-        _bar(300, 100, 110, 100, 109),   # peak 110, fav move = 10
+        _bar(0,   100, 100, 99,  100),   # high == entry -> no favorable move
+        _bar(300, 100, 110, 108, 109),   # peak 110, fav move = 10, giveback stop = 106.2
         _bar(600, 109, 109, 105, 106),   # low 105 <= 106.2 -> exit at 106.2
     ]
     px, ts, cap = exit_rules.simulate_giveback(path, "LONG", entry_price=100.0, fill="pessimistic")
@@ -438,7 +438,8 @@ def test_giveback_long_exits_after_retrace():
     assert cap is False
 
 def test_giveback_never_favorable_rides_to_cap():
-    path = [_bar(i * 300_000, 100, 100.2, 99.9, 100) for i in range(5)]
+    # price never exceeds entry -> no favorable move -> giveback stop never arms -> cap.
+    path = [_bar(i * 300_000, 100, 100, 99.8, 99.9) for i in range(5)]
     px, ts, cap = exit_rules.simulate_giveback(path, "LONG", 100.0, fill="pessimistic")
     assert cap is True
 ```
