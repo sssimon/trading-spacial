@@ -191,3 +191,13 @@ def test_verdict_asymmetric_fills_is_indeterminate_not_pass():
     assert v["verdict"] == "INDETERMINATE"
     assert v["pessimistic_ci"]["excludes_zero"] is True
     assert v["optimistic_ci"]["excludes_zero"] is False
+
+
+def test_per_trade_record_shape():
+    rec = {
+        "id": 1, "symbol": "BTCUSDT", "direction": "LONG",
+        "actual_net_v3": 5.0, "blind_net_v3_pess": 4.0, "blind_net_v3_opt": 4.5,
+        "delta_pess": -1.0, "delta_opt": -0.5, "hit_cap": False,
+    }
+    from tools.arm_a_blind_exit import run
+    assert run.REQUIRED_PER_TRADE_KEYS <= set(rec.keys())
