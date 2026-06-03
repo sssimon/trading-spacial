@@ -99,3 +99,16 @@ def test_gate_a_pass_only_if_ci_excludes_zero():
     weak = [0.02, -0.05, 0.03, -0.04, 0.01, 0.02, -0.03, 0.04, -0.02]
     assert evaluate.gate_a(strong)["pass_a"] is True
     assert evaluate.gate_a(weak)["pass_a"] is False
+
+def test_gate_b_max_drawdown():
+    interval_pnls = [10.0, -6.0, 8.0]   # equity 0->10->4->12; max DD = 6
+    b1 = evaluate.gate_b1(interval_pnls)
+    assert b1["max_drawdown"] == pytest.approx(6.0)
+    assert b1["worst_interval"] == pytest.approx(-6.0)
+
+def test_gate_b_synthetic_shock_kills_thin_carry():
+    thin = evaluate.gate_b2(mean_net_return=0.03)   # bleed 5*3*0.005=0.075 -> 0.03-0.075<0
+    assert thin["pass_b2"] is False
+    fat = evaluate.gate_b2(mean_net_return=0.20)
+    assert fat["pass_b2"] is True
+    assert fat["shock_bleed"] == pytest.approx(0.075)
