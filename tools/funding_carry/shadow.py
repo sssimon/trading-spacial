@@ -7,8 +7,16 @@ decay-kill when the live CI-hi falls below the backtest CI-lo (0.0502) for N con
 non-overlapping windows. Paper-only: no positions, no orders, no holdout. The statistic
 reuses carry_for_symbol verbatim (audit N1) — no new annualization formula."""
 from __future__ import annotations
+import json
+import logging
+import os
+from datetime import datetime, timezone
 from . import simulate, evaluate
 from .constants import DECAY_CI_LO, DECAY_KILL_N
+from .constants import (SHADOW_SYMBOLS, SHADOW_OUTPUT_DIR, SHADOW_VERSION,
+                        DECAY_WEEKS_W, FUNDING_DB, OHLCV_DB, FUNDING_FETCH_LIMIT)
+
+log = logging.getLogger("funding_carry.shadow")
 
 
 def symbol_window_return(symbol: str, *, funding_db: str, ohlcv_db: str,
@@ -96,12 +104,6 @@ def window_complete(settlement_times_ms: list[int], *, start_ms: int, end_ms: in
     return all((b - a) <= max_gap_ms for a, b in zip(ts, ts[1:]))
 
 
-import json
-import os
-from datetime import datetime, timezone
-from .constants import (SHADOW_SYMBOLS, SHADOW_OUTPUT_DIR, SHADOW_VERSION,
-                        DECAY_WEEKS_W, FUNDING_DB, OHLCV_DB, FUNDING_FETCH_LIMIT)
-
 _WEEK_MS = 7 * 24 * 3_600_000
 _MAX_GAP_MS = int(1.5 * 8 * 3_600_000)        # >1.5 funding intervals = a hole
 
@@ -140,8 +142,6 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
     os.makedirs(out_dir, exist_ok=True)
     jsonl = os.path.join(out_dir, "funding_carry_signals.jsonl")
     state_path = os.path.join(out_dir, "funding_carry_state.json")
-    start_ms, end_ms = now_ms - DECAY_WEEKS_W * _WEEK_MS, now_ms
-    cal = _cal_hash()
     ts_utc = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
 
     try:
@@ -149,28 +149,53 @@ def run_once(*, out_dir: str = SHADOW_OUTPUT_DIR, now_ms: int,
     except Exception:                            # noqa: BLE001 — fail-soft; eval on what we have
         pass
 
-    times = _window_settlement_times(funding_db, list(symbols), start_ms, end_ms)
-    complete = window_complete(times, start_ms=start_ms, end_ms=end_ms, max_gap_ms=_MAX_GAP_MS)
-    pooled = pooled_decay(list(symbols), funding_db=funding_db, ohlcv_db=ohlcv_db,
-                          start_ms=start_ms, end_ms=end_ms)
-    prev = _read_prev_state(state_path)
+    try:
+        start_ms, end_ms = now_ms - DECAY_WEEKS_W * _WEEK_MS, now_ms
+        cal = _cal_hash()
 
-    if complete:
-        ds = decay_state(ci_lo=pooled["ci_lo"], ci_hi=pooled["ci_hi"],
-                         weeks_below=int(prev.get("weeks_below", 0)))
-    else:
-        ds = {"decay_state": "INCOMPLETE", "weeks_below": int(prev.get("weeks_below", 0))}
+        times = _window_settlement_times(funding_db, list(symbols), start_ms, end_ms)
+        complete = window_complete(times, start_ms=start_ms, end_ms=end_ms, max_gap_ms=_MAX_GAP_MS)
+        pooled = pooled_decay(list(symbols), funding_db=funding_db, ohlcv_db=ohlcv_db,
+                              start_ms=start_ms, end_ms=end_ms)
+        prev = _read_prev_state(state_path)
 
-    line = {"settlement_ts_utc": ts_utc, "window": [start_ms, end_ms],
-            "pooled_mean": pooled["mean"], "ci_lo": pooled["ci_lo"], "ci_hi": pooled["ci_hi"],
-            "n": pooled["n"], "dropped": pooled["dropped"], "window_complete": complete,
-            "decay_state": ds["decay_state"], "weeks_below": ds["weeks_below"],
-            "calibration_identity_hash": cal, "shadow_version": SHADOW_VERSION}
-    with open(jsonl, "a", encoding="utf-8") as f:    # append-only ledger
-        f.write(json.dumps(line) + "\n")
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump({**line, "decay_weeks_w": DECAY_WEEKS_W}, f, indent=2)
-    return line
+        if complete:
+            ds = decay_state(ci_lo=pooled["ci_lo"], ci_hi=pooled["ci_hi"],
+                             weeks_below=int(prev.get("weeks_below", 0)))
+        else:
+            ds = {"decay_state": "INCOMPLETE", "weeks_below": int(prev.get("weeks_below", 0))}
+
+        line = {"settlement_ts_utc": ts_utc, "window": [start_ms, end_ms],
+                "pooled_mean": pooled["mean"], "ci_lo": pooled["ci_lo"], "ci_hi": pooled["ci_hi"],
+                "n": pooled["n"], "dropped": pooled["dropped"], "window_complete": complete,
+                "decay_state": ds["decay_state"], "weeks_below": ds["weeks_below"],
+                "calibration_identity_hash": cal, "shadow_version": SHADOW_VERSION}
+        with open(jsonl, "a", encoding="utf-8") as f:    # append-only ledger
+            f.write(json.dumps(line) + "\n")
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({**line, "decay_weeks_w": DECAY_WEEKS_W}, f, indent=2)
+        return line
+
+    except Exception as e:                       # noqa: BLE001 — fail-soft; log and surface ERROR
+        log.warning("run_once failed: %s", e, exc_info=True)
+        prev_weeks_below = 0
+        try:
+            prev_weeks_below = int(_read_prev_state(state_path).get("weeks_below", 0))
+        except Exception:                        # noqa: BLE001
+            pass
+        error_record = {
+            "settlement_ts_utc": ts_utc,
+            "decay_state": "ERROR",
+            "error": str(e),
+            "weeks_below": prev_weeks_below,
+            "shadow_version": SHADOW_VERSION,
+        }
+        try:
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(error_record, f, indent=2)
+        except Exception:                        # noqa: BLE001
+            pass
+        return error_record
 
 
 if __name__ == "__main__":

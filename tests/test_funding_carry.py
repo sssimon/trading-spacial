@@ -428,3 +428,21 @@ def test_run_once_incomplete_window_skips_kill(tmp_path, monkeypatch):
     assert state["window_complete"] is False
     assert state["decay_state"] == "INCOMPLETE"     # not evaluated; counter untouched
     assert state["weeks_below"] == 0
+
+
+def test_run_once_failsoft_on_compute_error(tmp_path, monkeypatch):
+    import json
+    from tools.funding_carry import shadow
+    out_dir = tmp_path / "shadow"
+    monkeypatch.setattr(shadow, "_ingest", lambda symbols, db, limit: None)
+    monkeypatch.setattr(shadow, "_cal_hash", lambda: "x")
+    monkeypatch.setattr(shadow, "_window_settlement_times", lambda *a, **k: [0, 1])
+    monkeypatch.setattr(shadow, "window_complete", lambda *a, **k: True)
+    def boom(*a, **k):
+        raise RuntimeError("db gone")
+    monkeypatch.setattr(shadow, "pooled_decay", boom)
+    # Must NOT raise into the scheduler; must surface a visible ERROR state.
+    res = shadow.run_once(out_dir=str(out_dir), now_ms=10_000_000_000)
+    assert res["decay_state"] == "ERROR"
+    state = json.loads((out_dir / "funding_carry_state.json").read_text())
+    assert state["decay_state"] == "ERROR" and "db gone" in state["error"]
