@@ -1,5 +1,12 @@
 # Funding-Carry Shadow-Deploy v0.1 Implementation Plan
 
+> **SUPERSEDED (statistic only):** Tasks 5, 6, 9, 10 in this plan implemented a net-space
+> `net_return_annual` statistic that a live smoke run proved mis-typed (cost/window blew up to
+> −173%/yr at W=1). The decay statistic was redesigned to a PURE funding-rate vs fossil-anchors
+> approach — see spec REV 5 §3/§3b/§6 and the re-implementation commits (power v2 + shadow
+> rate rewrite). The INFRASTRUCTURE tasks (1–4 ingest, 8 gap, fail-soft/append-only shell of 9)
+> stand as written. Read the spec REV 5 as the source of truth for the statistic.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up a paper-only daily job that recomputes the funding-carry statistic over a trailing rolling window from live Binance FAPI data, logs it append-only, and fires a pre-registered decay-kill when the live CI falls below the backtest CI-lo (0.0502) — measuring whether the confirmed edge persists out-of-sample, with zero capital and zero holdout access.

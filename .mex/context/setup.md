@@ -71,14 +71,21 @@ python -m pytest tests/test_api.py -v       # API endpoints only
 
 ### Funding-carry shadow (paper-only, daily)
 
-`python -m tools.funding_carry.shadow` — recomputes the funding-carry decay statistic over
-the trailing W-week window from live FAPI data and appends to `data/shadow/`. Schedule 1x/day
-post-funding-settlement via watchdog/cron. SEPARATE process from `btc_scanner.py`; reads/writes
-only `data/funding.db` + `data/shadow/`. Paper-only: no positions, no orders, no holdout.
-A `decay_state=REFUTED` means the live carry CI fell below the backtest CI-lo (0.0502) for
-N consecutive windows — the edge is arbitraged; do NOT escalate to v0.2/#4. NOTE: false-REFUTED
-control comes from the live bootstrap CI (computed from live data), not the W-sizing heuristic;
-W=1 is intentionally conservative (wider per-window CI, N=4 consecutive windows = a high bar).
+`python -m tools.funding_carry.shadow` — recomputes the pooled GROSS funding rate (intensive,
+mean funding rate over a trailing window, annualized) from live Binance FAPI funding data and
+appends to `data/shadow/`. Schedule 1x/day post-funding-settlement via watchdog/cron. SEPARATE
+process from `btc_scanner.py`; reads/writes only `data/funding.db` + `data/shadow/`. Paper-only:
+no positions, no orders, no holdout, no marks/spot (funding rate only).
+
+Decay logic (REV 5, all anchors frozen in constants.py from the fossil):
+- REFUTED: the live gross-rate CI-hi falls below `T_FLOOR` (the rate that just covers v3 cost
+  amortized over H_REF_YEARS) for DECAY_KILL_N consecutive NON-OVERLAPPING blocks → the funding
+  rate no longer covers deployment cost = edge arbitraged. Do NOT escalate to v0.2/#4.
+- THIN: gross rate compressed below `R_FOSSIL_LO` (the fossil's historical band) but still above
+  the cost floor — early warning, not a kill.
+- ALIVE: rate holds in/above its historical band.
+The kill counter advances at most once per non-overlapping W-week block (daily runs within a
+block just log). False-REFUTED is controlled by the live bootstrap CI, not the W heuristic.
 
 ## Logs & Data
 
