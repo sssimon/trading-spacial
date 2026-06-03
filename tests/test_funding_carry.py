@@ -51,8 +51,17 @@ def test_carry_for_symbol_assembles_net():
         perp_entry=40_000.0, perp_exit=40_000.0, liq=5_000_000.0)
     assert set(rec) >= {"symbol", "funding_pnl", "basis_pnl", "cost_v3", "net",
                         "net_return", "n_funding", "window_hours"}
-    assert rec["funding_pnl"] > 0
+    # pinned: 90 events * 0.0001 * mark(40000) * units(10000/40000=0.25) = 90.0; flat basis = 0.
+    assert rec["funding_pnl"] == pytest.approx(90.0)
+    assert rec["basis_pnl"] == pytest.approx(0.0)
     assert rec["net"] == pytest.approx(rec["funding_pnl"] + rec["basis_pnl"] - rec["cost_v3"])
+
+def test_carry_for_symbol_raises_on_nan_price():
+    funding = [(0, 0.0001), (28_800_000, 0.0001)]
+    with pytest.raises(ValueError):
+        simulate.carry_for_symbol(
+            symbol="BTCUSDT", funding=funding, spot_entry=float("nan"),
+            spot_exit=40_000.0, perp_entry=40_000.0, perp_exit=40_000.0, liq=5e6)
 
 
 def _mk_funding_db(path):

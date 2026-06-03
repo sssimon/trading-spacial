@@ -4,6 +4,7 @@ Position: long spot N, short perp N (delta ~ 0). Carry = funding the short colle
 (when rate>0) + basis convergence, minus v3 cost on 4 fills. Directional price move
 cancels between legs by construction."""
 from __future__ import annotations
+import math
 import sqlite3
 from contextlib import closing
 from backtest_costs import load_calibration, tier_for_symbol, compute_trade_costs
@@ -29,10 +30,13 @@ def basis_pnl(*, spot_entry: float, perp_entry: float,
 
 def recost_four_legs(*, symbol: str, units: float, spot_price: float,
                      perp_price: float, liq: float, holding_hours: float) -> float:
-    """v3 cost (USD) of opening+closing BOTH legs = 2 round trips (4 fills).
+    """v3 TRANSACTION cost (USD) of opening+closing BOTH legs = 2 round trips (4 fills).
 
     Each leg is one round trip; compute_trade_costs returns a round-trip cost, so two
-    calls (spot leg, perp leg) cover all four fills."""
+    calls (spot leg, perp leg) cover all four fills. enable_funding=False on BOTH legs:
+    the carry's funding is modeled EXPLICITLY (with real rates) in funding_pnl, so the
+    cost model must contribute only spread+fee+slippage — not a generic funding charge
+    (which would double-count funding and wrongly apply it to the spot leg)."""
     tp = _CAL.tiers[tier_for_symbol(symbol)]
 
     def _rt(notional):
@@ -40,7 +44,7 @@ def recost_four_legs(*, symbol: str, units: float, spot_price: float,
             entry_notional_usd=notional, exit_notional_usd=notional,
             entry_liquidity_usd_per_min=liq, exit_liquidity_usd_per_min=liq,
             tier_params=tp, holding_hours=holding_hours, model="v3",
-            global_params=_CAL.global_)
+            enable_funding=False, global_params=_CAL.global_)
         return float(d["total_cost_usd"])
 
     return _rt(units * spot_price) + _rt(units * perp_price)
@@ -50,6 +54,11 @@ def carry_for_symbol(*, symbol: str, funding: list[tuple[int, float]],
                      spot_entry: float, spot_exit: float, perp_entry: float,
                      perp_exit: float, liq: float, notional: float = NOTIONAL) -> dict:
     """Full delta-neutral carry record for one symbol over its window."""
+    if not funding:
+        raise ValueError(f"{symbol}: empty funding series")
+    if any(math.isnan(p) for p in (spot_entry, spot_exit, perp_entry, perp_exit)):
+        raise ValueError(f"{symbol}: missing spot/perp price at entry/exit (NaN); "
+                         "drop the symbol upstream rather than poison the pool")
     units = notional / spot_entry
     mark = perp_entry                       # mark basis per unit for funding notional
     f_pnl = funding_pnl(funding, units=units, mark_price=mark)
