@@ -1,0 +1,62 @@
+{
+  "verdict": {
+    "pass_g1": true,
+    "pass_g2": true,
+    "verdict": "PASS"
+  },
+  "kill_vs_nokill": {
+    "mean_delta": -0.001832845561176998,
+    "ci_lo": -0.0047956860266127966,
+    "ci_hi": 0.0,
+    "kill_adds_value": false
+  },
+  "with_kill_pooled": 0.2706386205987667,
+  "no_kill_pooled": 0.27247146615994366,
+  "post_shock_pooled": 0.030638620598766677,
+  "k_sensitivity": {
+    "9": {
+      "pooled_net": 0.1738529854732167,
+      "mean_kills": 6.111111111111111
+    },
+    "18": {
+      "pooled_net": 0.26793773949979177,
+      "mean_kills": 0.6666666666666666
+    },
+    "24": {
+      "pooled_net": 0.2706386205987667,
+      "mean_kills": 0.2222222222222222
+    },
+    "36": {
+      "pooled_net": 0.2719560084466207,
+      "mean_kills": 0.1111111111111111
+    }
+  },
+  "manifest": {
+    "experiment": "funding-carry-tail-kill",
+    "spec_commit": "9605758",
+    "kill_k": 24,
+    "n_shocks": 2,
+    "shock_loss_frac": 0.12,
+    "cost_model": {
+      "active_model": "v3",
+      "calibration_identity_hash": "1b616f742ed2eec7c00e09a78d2dd796dad79ba3d771175a39cda512d38c0d4d"
+    },
+    "symbols_used": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOGEUSDT",
+      "UNIUSDT",
+      "XLMUSDT",
+      "RUNEUSDT",
+      "PENDLEUSDT"
+    ],
+    "generated_utc": "2026-06-03T12:03:31.852341+00:00"
+  },
+  "max_dd_pooled": {
+    "with_kill": 150.06380397765614,
+    "no_kill": 149.91886988673423,
+    "kill_lowers_dd": false
+  }
+}

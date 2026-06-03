@@ -130,3 +130,73 @@ def test_required_artifact_keys():
     rec = {"symbol": "BTCUSDT", "net_return_annual": 0.1, "net": 1000.0,
            "funding_pnl": 1200.0, "basis_pnl": 0.0, "cost_v3": 200.0}
     assert run.REQUIRED_SYMBOL_KEYS <= set(rec.keys())
+
+def test_perp_mark_series_lookup(tmp_path):
+    db = str(tmp_path / "f.db"); _mk_funding_db(db)   # perp close=100 at each hour
+    marks = simulate.perp_mark_series(db, "BTCUSDT", [0, 28_800_000, 57_600_000])
+    assert marks == [pytest.approx(100.0)] * 3
+
+def test_funding_pnl_per_interval_uses_each_mark():
+    funding = [(0, 0.0001), (1, -0.0002)]
+    marks = [100.0, 200.0]    # mark doubles on the 2nd settlement
+    pnl = simulate.funding_pnl_per_interval(funding, marks=marks, units=2.0)
+    assert pnl == pytest.approx(0.0001 * 100.0 * 2.0 + (-0.0002) * 200.0 * 2.0)
+
+from tools.funding_carry import kill_rule
+
+def test_simulate_no_kill_one_tramo():
+    funding = [(i, 0.0001) for i in range(10)]
+    marks = [100.0] * 10
+    r = kill_rule.simulate_no_kill(funding, marks=marks, units=2.0, rt_cost=5.0)
+    assert r["n_tramos"] == 1
+    assert r["churn_cost"] == pytest.approx(5.0)
+    assert r["net"] == pytest.approx(sum(0.0001 * 100.0 * 2.0 for _ in range(10)) - 5.0)
+    assert len(r["equity_curve"]) == 10
+
+def test_simulate_with_kill_exits_on_K_negatives():
+    funding = [(i, 0.0001) for i in range(3)] + [(i + 3, -0.0002) for i in range(3)] \
+              + [(i + 6, 0.0001) for i in range(2)]
+    marks = [100.0] * 8
+    r = kill_rule.simulate_with_kill(funding, marks=marks, units=2.0, rt_cost=5.0, k=3)
+    assert r["n_tramos"] == 2
+    assert r["n_kills"] == 1
+    assert r["churn_cost"] == pytest.approx(10.0)
+    assert len(r["equity_curve"]) == 8                 # one point per settlement, kills included
+    # 3 pos (+0.06) + 3 neg accrued through the kill (-0.12) + 1 post-reentry pos (+0.02) = -0.04
+    # gross; the re-entry tick (i=6) is NOT collected; net = gross - churn 10.0
+    assert r["net"] == pytest.approx(-0.04 - 10.0)
+
+def test_with_kill_no_negatives_equals_no_kill():
+    funding = [(i, 0.0001) for i in range(10)]
+    marks = [100.0] * 10
+    wk = kill_rule.simulate_with_kill(funding, marks=marks, units=2.0, rt_cost=5.0, k=3)
+    nk = kill_rule.simulate_no_kill(funding, marks=marks, units=2.0, rt_cost=5.0)
+    assert wk["net"] == pytest.approx(nk["net"])
+
+
+def test_kill_vs_nokill_bootstrap_deterministic():
+    wk = [0.06, 0.05, 0.07, 0.04, 0.08, 0.05, 0.06, 0.05, 0.07]
+    nk = [0.05, 0.05, 0.06, 0.04, 0.07, 0.05, 0.05, 0.05, 0.06]
+    a = evaluate.kill_vs_nokill(wk, nk)
+    b = evaluate.kill_vs_nokill(wk, nk)
+    assert a["ci_lo"] == b["ci_lo"]
+    assert a["mean_delta"] == pytest.approx(sum(w - n for w, n in zip(wk, nk)) / len(wk))
+
+def test_inject_shocks_subtracts_worst_points():
+    eq = [1.0, 2.0, 3.0, 4.0, 5.0]
+    final = evaluate.inject_shocks(eq, n_shocks=2, shock_loss=3.0)
+    assert final == pytest.approx(5.0 - 2 * 3.0)
+
+def test_gate_tail_requires_both():
+    g = evaluate.gate_tail(with_kill_net_pooled=0.10, post_shock_net_pooled=0.02)
+    assert g["pass_g1"] and g["pass_g2"] and g["verdict"] == "PASS"
+    g2 = evaluate.gate_tail(with_kill_net_pooled=0.10, post_shock_net_pooled=-0.01)
+    assert g2["verdict"] == "FAIL"
+    g3 = evaluate.gate_tail(with_kill_net_pooled=-0.01, post_shock_net_pooled=0.02)
+    assert g3["verdict"] == "FAIL"
+
+def test_run_kill_required_keys():
+    from tools.funding_carry import run_kill
+    rec = {"symbol": "BTCUSDT", "net_with_kill": 0.06, "net_no_kill": 0.05,
+           "n_kills": 1, "max_dd": 100.0, "churn_cost": 50.0}
+    assert run_kill.REQUIRED_KILL_KEYS <= set(rec.keys())
