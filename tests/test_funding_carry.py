@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import statistics
 import pytest
 from tools.funding_carry import ingest
 from tools.funding_carry import simulate
@@ -456,3 +457,110 @@ def test_min_window_weeks_monotone():
     w_tight = min_window_weeks(per_symbol_settlements_per_week=21, n_symbols=9,
                                sigma_annual=0.05, target_half_band=0.0030)
     assert w_loose >= 1 and w_tight >= w_loose
+
+
+# ---------------------------------------------------------------------------
+# Power v2: fossil_rate_band + cost_floor (REV 5 anchors)
+# ---------------------------------------------------------------------------
+
+def _mk_fossil_db(path, sym_rates):
+    """Build a tiny funding.db with known rates. sym_rates: {symbol: [rate, ...]}."""
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE funding(symbol TEXT, funding_time_ms INTEGER,"
+                " funding_rate REAL, PRIMARY KEY(symbol, funding_time_ms))")
+    for sym, rates in sym_rates.items():
+        for i, r in enumerate(rates):
+            con.execute("INSERT INTO funding VALUES(?,?,?)", (sym, i * 28_800_000, r))
+    con.commit(); con.close()
+
+
+def test_fossil_rate_band_uses_gate_a(tmp_path):
+    """fossil_rate_band must return gate_a's CI on the per-symbol mean rates (annualized ×1095).
+
+    Build a tiny funding.db with 2 symbols and known rates.  For each symbol compute
+    mean(rate)×1095 manually, run gate_a on those two values, and assert the function
+    returns an identical dict."""
+    from tools.funding_carry.power import fossil_rate_band
+    from tools.funding_carry.evaluate import gate_a
+    INTERVALS_PER_YEAR = 1095
+
+    # Symbol A: two rates [0.0001, 0.0003]  -> mean = 0.0002, annualized = 0.219
+    # Symbol B: four rates [0.0002, 0.0002, 0.0002, 0.0002] -> mean = 0.0002, annualized = 0.219
+    sym_rates = {
+        "ATOKEN": [0.0001, 0.0003],
+        "BTOKEN": [0.0002, 0.0002, 0.0002, 0.0002],
+    }
+    db = str(tmp_path / "fossil.db")
+    _mk_fossil_db(db, sym_rates)
+
+    start_ms = 0
+    # End beyond last settlement so all rows are included
+    end_ms = 10 * 28_800_000
+
+    result = fossil_rate_band(db, list(sym_rates.keys()), start_ms, end_ms)
+
+    # Manually compute expected annualized means
+    mean_a = (0.0001 + 0.0003) / 2 * INTERVALS_PER_YEAR
+    mean_b = 0.0002 * INTERVALS_PER_YEAR
+    ref = gate_a([mean_a, mean_b])
+
+    # CI values must match exactly (same bootstrap seed, same inputs)
+    assert result["ci_lo"] == pytest.approx(ref["ci_lo"])
+    assert result["ci_hi"] == pytest.approx(ref["ci_hi"])
+    assert result["mean"] == pytest.approx(ref["mean"])
+    assert result["n"] == 2
+    # Assert the annualization: mean must be ×1095 relative to raw per-settlement mean
+    raw_mean = (mean_a / INTERVALS_PER_YEAR + mean_b / INTERVALS_PER_YEAR) / 2
+    assert result["mean"] == pytest.approx(raw_mean * INTERVALS_PER_YEAR)
+
+
+def test_fossil_rate_band_drops_symbol_with_no_settlements(tmp_path):
+    """A symbol with 0 settlements in the window is dropped, not poisoning the pool."""
+    from tools.funding_carry.power import fossil_rate_band
+
+    sym_rates = {"GOOD": [0.0001, 0.0002]}
+    db = str(tmp_path / "fossil.db")
+    _mk_fossil_db(db, sym_rates)
+
+    # Include a symbol that is NOT in the DB at all
+    result = fossil_rate_band(db, ["GOOD", "GHOST"], start_ms=0, end_ms=10 * 28_800_000)
+    assert result["n"] == 1   # only GOOD survived
+
+
+def test_cost_floor_uses_median(tmp_path):
+    """cost_floor must use the MEDIAN, not the mean, across per-symbol costs.
+
+    With costs [30, 40, 50, 1254] / notional, the mean is dominated by the outlier;
+    the median is (40+50)/2 = 45.  Assert the result matches the median path."""
+    import json as _json
+    from tools.funding_carry.power import cost_floor
+
+    notional = 10_000.0
+    h_ref_years = 2.0
+    margin = 0.0
+    costs_v3 = [30.0, 40.0, 50.0, 1254.0]   # PENDLE-like outlier at end
+
+    records = [{"symbol": f"SYM{i}", "cost_v3": c} for i, c in enumerate(costs_v3)]
+    json_path = str(tmp_path / "per_symbol.json")
+    with open(json_path, "w") as fh:
+        _json.dump(records, fh)
+
+    result = cost_floor(json_path, notional=notional, h_ref_years=h_ref_years, margin=margin)
+
+    # Median of [30/10000, 40/10000, 50/10000, 1254/10000]
+    # = median([0.003, 0.004, 0.005, 0.1254]) = (0.004 + 0.005) / 2 = 0.0045
+    expected_median = statistics.median(c / notional for c in costs_v3)
+    expected = expected_median / h_ref_years + margin
+    assert result == pytest.approx(expected)
+
+    # Confirm the outlier does NOT dominate: mean would be >> median
+    mean_cost = sum(c / notional for c in costs_v3) / len(costs_v3)
+    assert mean_cost > expected * 5   # mean is >5× the median result
+
+    # Also verify h_ref_years scaling and margin additive
+    result_margin = cost_floor(json_path, notional=notional, h_ref_years=h_ref_years,
+                               margin=0.01)
+    assert result_margin == pytest.approx(expected + 0.01)
+
+    result_h4 = cost_floor(json_path, notional=notional, h_ref_years=4.0, margin=0.0)
+    assert result_h4 == pytest.approx(expected_median / 4.0)
