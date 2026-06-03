@@ -82,3 +82,20 @@ def test_load_funding_window(tmp_path):
 def test_perp_price_at(tmp_path):
     db = str(tmp_path / "f.db"); _mk_funding_db(db)
     assert simulate.perp_price_at(db, "BTCUSDT", 5 * 3_600_000) == pytest.approx(100.0)
+
+
+from tools.funding_carry import evaluate
+
+def test_gate_a_bootstrap_deterministic():
+    rets = [0.05, 0.08, -0.02, 0.06, 0.04, 0.09, 0.01, 0.07]
+    a = evaluate.gate_a(rets)
+    b = evaluate.gate_a(rets)
+    assert a["ci_lo"] == b["ci_lo"]                # seeded
+    assert a["ci_lo"] <= a["mean"] <= a["ci_hi"]
+    assert "pass_a" in a and "loo_min_mean" in a
+
+def test_gate_a_pass_only_if_ci_excludes_zero():
+    strong = [0.10] * 9
+    weak = [0.02, -0.05, 0.03, -0.04, 0.01, 0.02, -0.03, 0.04, -0.02]
+    assert evaluate.gate_a(strong)["pass_a"] is True
+    assert evaluate.gate_a(weak)["pass_a"] is False
