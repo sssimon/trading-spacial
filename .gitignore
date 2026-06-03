@@ -32,6 +32,10 @@ data/positions_summary.json
 data/ohlcv.db
 data/ohlcv.db-wal
 data/ohlcv.db-shm
+# Funding-rate carry DB — regenerable artifact (~15 MB), not source
+data/funding.db
+data/funding.db-wal
+data/funding.db-shm
 
 # ── Holdout dataset: large OHLCV slice exceeds GitHub's 100 MB per-file limit ──
 # Manifest captures sha256 + lock commit so the slice can be regenerated bit-for-bit
