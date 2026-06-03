@@ -43,26 +43,31 @@ def main():
     dropped = [s for s in CANDIDATE_SYMBOLS if s not in symbols]
 
     records = []
+    increments = []                  # pooled per-settlement funding stream for the B1 curve
     for s in symbols:
         funding = simulate.load_funding(FUNDING_DB, s, w0, w1)
         if len(funding) < 2:
             dropped.append(s); continue
         entry_ms, exit_ms = funding[0][0], funding[-1][0]
+        spot_e = simulate.spot_price_at(OHLCV_DB, s, entry_ms)
+        perp_e = simulate.perp_price_at(FUNDING_DB, s, entry_ms)
         try:
             rec = simulate.carry_for_symbol(
                 symbol=s, funding=funding,
-                spot_entry=simulate.spot_price_at(OHLCV_DB, s, entry_ms),
-                spot_exit=simulate.spot_price_at(OHLCV_DB, s, exit_ms),
-                perp_entry=simulate.perp_price_at(FUNDING_DB, s, entry_ms),
-                perp_exit=simulate.perp_price_at(FUNDING_DB, s, exit_ms),
+                spot_entry=spot_e, spot_exit=simulate.spot_price_at(OHLCV_DB, s, exit_ms),
+                perp_entry=perp_e, perp_exit=simulate.perp_price_at(FUNDING_DB, s, exit_ms),
                 liq=simulate.spot_liquidity(OHLCV_DB, s, entry_ms))
         except ValueError:        # missing spot/perp price -> drop loud, don't poison the pool
             dropped.append(s); continue
         records.append(rec)
+        increments.extend(simulate.funding_increments(
+            funding, units=NOTIONAL / spot_e, mark_price=perp_e))
 
     annual = [r["net_return_annual"] for r in records]
     a = evaluate.gate_a(annual)
-    b1 = evaluate.gate_b1([r["net"] for r in records])
+    # B1: pooled funding equity curve in TIME order (a real drawdown, not symbol-order)
+    increments.sort(key=lambda x: x[0])
+    b1 = evaluate.gate_b1([inc for _, inc in increments])
     b2 = evaluate.gate_b2(float(np.mean([r["net_return"] for r in records])) if records else 0.0)
     v = evaluate.verdict(a, b2)
 
@@ -84,10 +89,13 @@ def main():
         "# Funding-carry falsification: VERDICT", "",
         f"**Verdict: {v['verdict']}**  (Gate A: {v['pass_a']}, Gate B2: {v['pass_b2']})", "",
         f"- Symbols kept {len(symbols)}: {', '.join(symbols)}",
-        f"- Pooled annualized net return: mean {a['mean']:.4f}, CI95 [{a['ci_lo']:.4f}, {a['ci_hi']:.4f}]",
-        f"- LOO min mean: {a['loo_min_mean']:.4f}",
-        f"- Gate B1 max drawdown (pooled net): {b1['max_drawdown']:.2f}; worst symbol net {b1['worst_interval']:.2f}",
-        f"- Gate B2 synthetic shock bleed {b2['shock_bleed']:.4f}; post-shock mean return {b2['post_shock_return']:.4f}", "",
+        f"- Gate A (ANNUALIZED net return): mean {a['mean']:.4f}, CI95 [{a['ci_lo']:.4f}, {a['ci_hi']:.4f}], LOO min {a['loo_min_mean']:.4f}",
+        f"- Gate B1 max drawdown of pooled funding equity (TIME-ordered, $): {b1['max_drawdown']:.2f}; worst single settlement {b1['worst_interval']:.2f}",
+        f"- Gate B2 (TOTAL-window return vs one-time shock): bleed {b2['shock_bleed']:.4f}, post-shock {b2['post_shock_return']:.4f}", "",
+        "NOTE on scales: Gate A judges the ANNUALIZED carry-rate CI; Gate B2 judges the TOTAL",
+        "accumulated window carry against a single 5-day shock (7.5% of notional). Different",
+        "scales by design (spec §5/§6). Funding income uses the entry mark (conservative for",
+        "appreciating assets; per-interval mark is the fast-follow if the verdict is marginal).", "",
         "Scope: LIQUID universe only. A FAIL = liquid carry arbed/short-vol, NOT 'no carry anywhere'.",
         "PASS -> strategy-design fork (sizing/rebalance/long-tail). FAIL -> portfolio decision.",
     ]

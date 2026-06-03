@@ -90,13 +90,13 @@ def ingest_all(db_path: str = FUNDING_DB) -> dict:
             nf, nk = 0, 0
             for mo in months:
                 fu = _fetch_zip_csv(f"{BULK_BASE}/fundingRate/{sym}/{sym}-fundingRate-{mo}.zip")
-                if fu:
+                if fu and fu[0]:                 # header present (skip empty CSVs)
                     hdr, rows = fu
                     for t, rate in parse_funding_rows(hdr, rows):
                         con.execute("INSERT OR IGNORE INTO funding VALUES(?,?,?)", (sym, t, rate))
                         nf += 1
                 kl = _fetch_zip_csv(f"{BULK_BASE}/markPriceKlines/{sym}/1h/{sym}-1h-{mo}.zip")
-                if kl:
+                if kl and kl[1]:                 # rows present (skip empty CSVs)
                     _, rows = kl
                     for r in rows:
                         con.execute("INSERT OR IGNORE INTO perp_klines VALUES(?,?,?)",

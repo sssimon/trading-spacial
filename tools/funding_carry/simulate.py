@@ -8,7 +8,7 @@ import math
 import sqlite3
 from contextlib import closing
 from backtest_costs import load_calibration, tier_for_symbol, compute_trade_costs
-from .constants import OHLCV_DB, FUNDING_DB, NOTIONAL
+from .constants import NOTIONAL
 
 _CAL = load_calibration()
 assert _CAL.active_model == "v3", f"expected v3 calibration, got {_CAL.active_model}"
@@ -16,8 +16,21 @@ assert _CAL.active_model == "v3", f"expected v3 calibration, got {_CAL.active_mo
 
 def funding_pnl(funding: list[tuple[int, float]], *, units: float, mark_price: float) -> float:
     """Sum of funding the short leg collects. funding: [(time_ms, rate)]. Positive
-    rate -> short receives. mark_price is the perp notional basis per unit."""
+    rate -> short receives.
+
+    APPROXIMATION (pre-registered, spec §4): a constant `mark_price` (= perp entry) is
+    used for every settlement. Real funding settles at the per-interval mark; over a long
+    window with large price drift this understates income for appreciating assets (e.g.
+    BTC 40k->100k) — i.e. CONSERVATIVE (biases toward FAIL, so a PASS is robust). Using the
+    per-interval mark is the fast-follow if the verdict is marginal."""
     return sum(rate * mark_price * units for _, rate in funding)
+
+
+def funding_increments(funding: list[tuple[int, float]], *, units: float,
+                       mark_price: float) -> list[tuple[int, float]]:
+    """Per-settlement funding P&L stream [(time_ms, increment)] — feeds the pooled,
+    TIME-ORDERED in-sample equity curve for Gate B1 (a real drawdown, not symbol-order)."""
+    return [(t, rate * mark_price * units) for t, rate in funding]
 
 
 def basis_pnl(*, spot_entry: float, perp_entry: float,

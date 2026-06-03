@@ -2,7 +2,7 @@
 from __future__ import annotations
 import numpy as np
 from .constants import (BOOTSTRAP_N, BOOTSTRAP_SEED, SHOCK_FUNDING_PER_8H,
-                        SHOCK_DAYS, SHOCK_INTERVALS_PER_DAY, NOTIONAL)
+                        SHOCK_DAYS, SHOCK_INTERVALS_PER_DAY)
 
 
 def gate_a(annual_returns: list[float]) -> dict:

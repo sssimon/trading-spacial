@@ -56,6 +56,11 @@ def test_carry_for_symbol_assembles_net():
     assert rec["basis_pnl"] == pytest.approx(0.0)
     assert rec["net"] == pytest.approx(rec["funding_pnl"] + rec["basis_pnl"] - rec["cost_v3"])
 
+def test_funding_increments_stream():
+    funding = [(0, 0.0001), (28_800_000, 0.0001)]
+    incs = simulate.funding_increments(funding, units=2.0, mark_price=100.0)
+    assert incs == [(0, pytest.approx(0.02)), (28_800_000, pytest.approx(0.02))]
+
 def test_carry_for_symbol_raises_on_nan_price():
     funding = [(0, 0.0001), (28_800_000, 0.0001)]
     with pytest.raises(ValueError):
