@@ -608,3 +608,22 @@ def test_get_json_retry_honors_retry_after_on_429():
     out = live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=sleeps.append)
     assert out == {"ok": 1}
     assert sleeps == [7.0]      # Retry-After respected, not generic backoff
+
+
+def test_parse_depth_maps_binance_payload():
+    from tools.funding_carry import live_ingest
+    payload = {"lastUpdateId": 1, "bids": [["99.5", "2.0"], ["99.0", "5.0"]],
+               "asks": [["100.5", "1.0"], ["101.0", "4.0"]]}
+    book = live_ingest.parse_depth(payload)
+    assert book["bids"] == [(99.5, 2.0), (99.0, 5.0)]    # price-descending as Binance sends
+    assert book["asks"] == [(100.5, 1.0), (101.0, 4.0)]  # price-ascending as Binance sends
+
+def test_fetch_depth_propagates_fetch_failed(monkeypatch):
+    from tools.funding_carry import live_ingest
+    def boom(url, **kw):
+        raise live_ingest.FetchFailed("down")
+    monkeypatch.setattr(live_ingest, "_get_json_retry", boom)
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_perp_depth("BTCUSDT")
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_spot_depth("BTCUSDT")

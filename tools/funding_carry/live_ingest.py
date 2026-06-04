@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import closing
-from .constants import FAPI_FUNDING, FAPI_MARK_KLINES, FAPI_SPOT, FUNDING_DB
+from .constants import FAPI_FUNDING, FAPI_MARK_KLINES, FAPI_SPOT, FUNDING_DB, FAPI_PERP_DEPTH, SPOT_DEPTH, DEPTH_LIMIT_PERP, DEPTH_LIMIT_SPOT
 
 log = logging.getLogger("funding_carry.live_ingest")
 
@@ -149,3 +149,22 @@ def _get_json_retry(url: str, *, timeout: int = 30, retries: int = 3,
             if attempt < retries - 1:
                 _sleep(backoff_s * (attempt + 1))
     raise FetchFailed(f"{url}: {last!r}")
+
+
+def parse_depth(payload: dict) -> dict:
+    """Map a Binance depth payload to {'bids': [(price, qty)...], 'asks': [...]}.
+    Order preserved as sent (bids best-first descending, asks best-first ascending)."""
+    return {"bids": [(float(p), float(q)) for p, q in payload["bids"]],
+            "asks": [(float(p), float(q)) for p, q in payload["asks"]]}
+
+
+def fetch_perp_depth(symbol: str, *, limit: int = DEPTH_LIMIT_PERP) -> dict:
+    """USDT-M perp orderbook snapshot. Raises FetchFailed (v0.2 ABORT policy)."""
+    return parse_depth(_get_json_retry(
+        f"{FAPI_PERP_DEPTH}?symbol={symbol}&limit={int(limit)}"))
+
+
+def fetch_spot_depth(symbol: str, *, limit: int = DEPTH_LIMIT_SPOT) -> dict:
+    """Spot orderbook snapshot. Raises FetchFailed (v0.2 ABORT policy)."""
+    return parse_depth(_get_json_retry(
+        f"{SPOT_DEPTH}?symbol={symbol}&limit={int(limit)}"))
