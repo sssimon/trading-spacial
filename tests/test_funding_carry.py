@@ -692,3 +692,35 @@ def test_fetch_klines_1m_paginated_coverage_boundary(monkeypatch):
     with pytest.raises(live_ingest.FetchFailed):
         live_ingest.fetch_klines_1m_paginated(
             "BTCUSDT", base_url="http://fake", days=1, end_ms=end_ms)
+
+
+# ---------------------------------------------------------------------------
+# walk_book (execution_cost Unit 1, spec REV 2.1 §3.2)
+# ---------------------------------------------------------------------------
+
+def _book(bids, asks):
+    return {"bids": bids, "asks": asks}
+
+def test_walk_book_buy_multi_level_exact():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 50.0), (101.0, 200.0)])
+    r = ec.walk_book(book, 10_000.0, "buy")
+    assert r["mid"] == pytest.approx(99.0)
+    assert r["qty_target"] == pytest.approx(10_000.0 / 99.0)
+    # fill = 50@100 + 51.0101@101 = 10152.0202; mid*qty = 10000 exactly
+    assert r["slippage_cost"] == pytest.approx(152.0202, abs=1e-3)
+    assert r["vwap"] == pytest.approx(10_152.0202 / (10_000.0 / 99.0), abs=1e-3)
+
+def test_walk_book_sell_single_level_exact():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    r = ec.walk_book(book, 10_000.0, "sell")
+    # mid=99, qty=101.0101, sell fills at 98 -> slippage = (99-98)*101.0101
+    assert r["slippage_cost"] == pytest.approx(10_000.0 / 99.0, abs=1e-6)
+    assert r["slippage_cost"] >= 0.0
+
+def test_walk_book_insufficient_depth_raises():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 50.0)])   # 50 qty < ~101 needed
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(book, 10_000.0, "buy")
