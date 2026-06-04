@@ -179,3 +179,123 @@ def cost_v3_today(symbol: str, *, spot_mid: float, perp_mid: float, liq: float,
     return simulate.recost_four_legs(symbol=symbol, units=units, spot_price=spot_mid,
                                      perp_price=perp_mid, liq=liq,
                                      holding_hours=holding_hours)
+
+
+def _cal_hash() -> str:
+    from backtest_costs import calibration_identity_hash, load_calibration
+    return calibration_identity_hash(load_calibration())
+
+
+def _atomic_write(path: str, text: str) -> None:
+    """temp + os.replace — a crash mid-write never leaves a torn artifact (Halberg CF-1)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def _findings_md(res: dict) -> str:
+    lines = [
+        "# Funding-carry execution-realism v0.2 — U1 findings",
+        "",
+        f"- run_ts_utc: {res['run_ts_utc']}",
+        f"- settlement_ts_ms: {res.get('settlement_ts_ms')}",
+        f"- **VERDICT: {res['verdict']}**" + (f" — {res['reason']}" if res.get("reason") else ""),
+        f"- T_FLOOR_REAL: {res.get('t_floor_real')}",
+        f"- T_FLOOR (v3, frozen): {res.get('t_floor_v3')}",
+        f"- floor_ratio real/v3: {res.get('floor_ratio_vs_v3')}",
+        f"- live rate (v0.1 state): R_pooled={res.get('R_pooled')} "
+        f"CI=[{res.get('R_ci_lo')}, {res.get('R_ci_hi')}] decay_state={res.get('v01_decay_state')}",
+        f"- n_ok={res.get('n_ok')} insufficient={res.get('insufficient')}",
+        f"- calibration_identity_hash: {res.get('calibration_identity_hash')}",
+        f"- version: {res.get('version')}",
+        "",
+        "A PASS here is a same-epoch snapshot (rate vivo vs piso real). It is NOT by",
+        "itself a go for #4 — deployability has no joint estimator yet (spec §8).",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def run(*, now_ms: int, out_dir: str = EXEC_REALISM_OUTPUT_DIR,
+        state_path: str = os.path.join(SHADOW_OUTPUT_DIR, "funding_carry_state.json"),
+        ohlcv_db: str = OHLCV_DB, symbols: tuple = SHADOW_SYMBOLS) -> dict:
+    """One-shot U1 (spec §3). Order: enforce settlement window -> validate v0.1 state ->
+    hard-refuse on calibration drift -> fetch+walk all 9 books (FetchFailed -> ABORT;
+    InsufficientDepth -> flag) -> T_FLOOR_REAL -> verdict -> atomic artifact.
+    Returns the result dict (also written to out_dir). Never touches data/shadow/."""
+    from . import live_ingest
+    run_ts = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+    res: dict = {"run_ts_utc": run_ts, "version": EXEC_REALISM_VERSION,
+                 "t_floor_v3": T_FLOOR}
+    os.makedirs(out_dir, exist_ok=True)
+    snap_dir = os.path.join(out_dir, "depth_snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+    try:
+        settlement = settlement_check(now_ms)
+        res["settlement_ts_ms"] = settlement
+        state = read_v01_state(state_path, now_ms=now_ms)
+        res.update({"R_pooled": state["R_pooled"], "R_ci_lo": state["R_ci_lo"],
+                    "R_ci_hi": state["R_ci_hi"], "v01_decay_state": state["decay_state"],
+                    "v01_run_ts_utc": state["run_ts_utc"]})
+        cal = _cal_hash()
+        res["calibration_identity_hash"] = cal
+        if cal != state["calibration_identity_hash"]:
+            raise AbortRun(f"calibration drift: live={cal[:12]} "
+                           f"!= v0.1 state={state['calibration_identity_hash'][:12]}")
+
+        per_symbol: dict = {}
+        insufficient: list = []
+        try:
+            for s in symbols:
+                perp_book = live_ingest.fetch_perp_depth(s)
+                spot_book = live_ingest.fetch_spot_depth(s)
+                _atomic_write(os.path.join(snap_dir, f"{s}.json"), json.dumps(
+                    {"fetched_now_ms": now_ms, "perp": perp_book, "spot": spot_book}))
+                try:
+                    rt = roundtrip_real_cost(perp_book, spot_book)
+                except InsufficientDepth as e:
+                    insufficient.append(s)
+                    per_symbol[s] = {"status": "INSUFFICIENT_DEPTH", "detail": str(e)}
+                    continue
+                spot_mid = rt["legs"]["spot_buy"]["mid"]
+                perp_mid = rt["legs"]["perp_buy"]["mid"]
+                liq = _liq_ro(ohlcv_db, s, now_ms)
+                v3 = cost_v3_today(s, spot_mid=spot_mid, perp_mid=perp_mid, liq=liq)
+                per_symbol[s] = {
+                    "status": "OK", "cost_real": rt["cost_real"],
+                    "slippage_total": rt["slippage_total"], "fees_total": rt["fees_total"],
+                    "cost_v3_hoy": v3, "ratio": rt["cost_real"] / v3 if v3 else None,
+                    "violation_v3_upper_bound": bool(v3) and rt["cost_real"] > v3,
+                    "spot_mid": spot_mid, "perp_mid": perp_mid, "liq": liq,
+                }
+        except live_ingest.FetchFailed as e:
+            raise AbortRun(f"FETCH_FAILED: {e}") from e
+
+        res["insufficient"] = insufficient
+        res["n_ok"] = len(symbols) - len(insufficient)
+        if len(insufficient) > MAX_INSUFFICIENT_SYMBOLS:
+            res["verdict"] = "INVALID"
+            res["reason"] = (f"k={len(insufficient)} INSUFFICIENT_DEPTH "
+                             f"> MAX_INSUFFICIENT_SYMBOLS={MAX_INSUFFICIENT_SYMBOLS}")
+            res["t_floor_real"] = None
+            res["floor_ratio_vs_v3"] = None
+        else:
+            costs = [per_symbol[s]["cost_real"] for s in symbols
+                     if per_symbol[s]["status"] == "OK"]
+            tfr = t_floor_real(costs)
+            res["t_floor_real"] = tfr
+            res["floor_ratio_vs_v3"] = tfr / T_FLOOR
+            res["verdict"] = verdict(tfr, state)
+        _atomic_write(os.path.join(out_dir, "per_symbol.json"),
+                      json.dumps(per_symbol, indent=2))
+    except AbortRun as e:
+        res["verdict"] = "ABORT"
+        res["reason"] = str(e)
+    _atomic_write(os.path.join(out_dir, "findings.md"), _findings_md(res))
+    _atomic_write(os.path.join(out_dir, "u1_result.json"), json.dumps(res, indent=2))
+    return res
+
+
+if __name__ == "__main__":
+    import time
+    print(json.dumps(run(now_ms=int(time.time() * 1000)), indent=2))

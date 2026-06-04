@@ -904,3 +904,105 @@ def test_cost_v3_today_uses_recost_four_legs(monkeypatch):
     assert seen["spot_price"] == 40_000.0 and seen["perp_price"] == 40_100.0
     assert seen["liq"] == 5e6
     assert seen["symbol"] == "BTCUSDT"
+
+
+# ---------------------------------------------------------------------------
+# U1 run()  (Task 10, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+_NOW = 1_780_531_200_000 + 5 * 60_000     # settlement (00:00Z 2026-06-04) + 5min, inside window
+
+
+def _exec_env(tmp_path, monkeypatch, *, state_over=None, books=None):
+    """Wire a full fake environment for execution_cost.run()."""
+    from tools.funding_carry import execution_cost as ec
+    from tools.funding_carry import live_ingest
+    state_path = _v01_state(tmp_path, run_ts_utc="2026-06-03T16:05:00+00:00",
+                            **(state_over or {}))
+    out_dir = str(tmp_path / "artifact")
+    good_spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    good_perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    books = books if books is not None else {}
+    monkeypatch.setattr(live_ingest, "fetch_spot_depth",
+                        lambda s, **kw: books.get(("spot", s), good_spot))
+    monkeypatch.setattr(live_ingest, "fetch_perp_depth",
+                        lambda s, **kw: books.get(("perp", s), good_perp))
+    monkeypatch.setattr(ec, "_cal_hash", lambda: "CALHASH")
+    monkeypatch.setattr(ec, "_liq_ro", lambda db, s, ts, **kw: 5_000_000.0)
+    return ec, state_path, out_dir
+
+
+def test_run_happy_path_writes_verdict_and_artifact(tmp_path, monkeypatch):
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db="unused.db")
+    assert res["verdict"] in ("PASS", "THIN", "FAIL")     # computed, not ABORT/INVALID
+    assert res["t_floor_real"] > 0.0
+    assert res["floor_ratio_vs_v3"] == pytest.approx(res["t_floor_real"] / res["t_floor_v3"])
+    assert res["n_ok"] == 9 and res["insufficient"] == []
+    assert os.path.exists(os.path.join(out_dir, "per_symbol.json"))
+    assert os.path.exists(os.path.join(out_dir, "findings.md"))
+    assert os.path.isdir(os.path.join(out_dir, "depth_snapshots"))
+    with open(os.path.join(out_dir, "per_symbol.json"), encoding="utf-8") as fh:
+        per = json.load(fh)
+    assert set(per) == set(ec.SHADOW_SYMBOLS)
+    for rec in per.values():
+        assert rec["status"] == "OK"
+        assert "cost_real" in rec and "cost_v3_hoy" in rec and "ratio" in rec
+
+
+def test_run_aborts_off_window(tmp_path, monkeypatch):
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch)
+    res = ec.run(now_ms=1_780_531_200_000 + 60 * 60_000,   # settlement + 1h
+                 out_dir=out_dir, state_path=state_path, ohlcv_db="unused.db")
+    assert res["verdict"] == "ABORT" and "off-window" in res["reason"]
+
+
+def test_run_aborts_on_calibration_drift(tmp_path, monkeypatch):
+    ec, state_path, out_dir = _exec_env(
+        tmp_path, monkeypatch, state_over={"calibration_identity_hash": "OTHER"})
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db="unused.db")
+    assert res["verdict"] == "ABORT" and "calibration" in res["reason"]
+
+
+def test_run_aborts_on_fetch_failed_never_shrinks_pool(tmp_path, monkeypatch):
+    from tools.funding_carry import live_ingest
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch)
+    def boom(s, **kw):
+        raise live_ingest.FetchFailed("rate limited")
+    monkeypatch.setattr(live_ingest, "fetch_perp_depth", boom)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db="unused.db")
+    assert res["verdict"] == "ABORT" and "FETCH_FAILED" in res["reason"]
+
+
+def test_run_invalid_above_max_insufficient(tmp_path, monkeypatch):
+    from tools.funding_carry.constants import SHADOW_SYMBOLS
+    thin = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 0.001)])   # cannot fill buy
+    books = {("spot", s): thin for s in SHADOW_SYMBOLS[:3]}      # k=3 > MAX=2
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch, books=books)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db="unused.db")
+    assert res["verdict"] == "INVALID"
+    assert sorted(res["insufficient"]) == sorted(SHADOW_SYMBOLS[:3])
+
+
+def test_run_flags_but_proceeds_at_max_insufficient(tmp_path, monkeypatch):
+    from tools.funding_carry.constants import SHADOW_SYMBOLS
+    thin = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 0.001)])
+    books = {("spot", s): thin for s in SHADOW_SYMBOLS[:2]}      # k=2 == MAX -> proceed
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch, books=books)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db="unused.db")
+    assert res["verdict"] in ("PASS", "THIN", "FAIL")
+    assert len(res["insufficient"]) == 2 and res["n_ok"] == 7
+
+
+def test_run_never_writes_data_shadow(tmp_path, monkeypatch):
+    # NN spec §7: data/shadow/ is v0.1's namespace. run() must not create/modify it.
+    ec, state_path, out_dir = _exec_env(tmp_path, monkeypatch)
+    shadow_dir = tmp_path / "data" / "shadow"
+    monkeypatch.chdir(tmp_path)
+    ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path, ohlcv_db="unused.db")
+    assert not shadow_dir.exists()
