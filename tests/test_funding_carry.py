@@ -848,3 +848,14 @@ def test_verdict_semantics_isomorphic_to_rev5():
     assert ec.verdict(0.002, st) == "PASS"      # ci_lo >= floor
     assert ec.verdict(0.030, st) == "THIN"      # ci_lo < floor <= ci_hi
     assert ec.verdict(0.080, st) == "FAIL"      # ci_hi < floor
+
+def test_read_v01_state_aborts_on_naive_timestamp(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, run_ts_utc="2026-06-04T08:05:00")   # no offset
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_settlement_check_boundary_exactly_window_min_allowed():
+    from tools.funding_carry import execution_cost as ec
+    s = 1_780_531_200_000
+    assert ec.settlement_check(s + 15 * 60_000) == s    # ==15.0min allowed (> excludes)

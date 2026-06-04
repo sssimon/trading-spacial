@@ -130,7 +130,10 @@ def read_v01_state(path: str, *, now_ms: int,
     if missing:
         raise AbortRun(f"v0.1 state missing keys {missing} "
                        f"(decay_state={st.get('decay_state')!r})")
-    run_ms = int(datetime.fromisoformat(st["run_ts_utc"]).timestamp() * 1000)
+    dt = datetime.fromisoformat(st["run_ts_utc"])
+    if dt.tzinfo is None:
+        raise AbortRun("v0.1 state run_ts_utc is tz-naive — ambiguous on non-UTC machines")
+    run_ms = int(dt.timestamp() * 1000)
     age_h = (now_ms - run_ms) / 3_600_000.0
     if age_h > max_age_hours:
         raise AbortRun(f"v0.1 state stale: {age_h:.1f}h > {max_age_hours}h")
