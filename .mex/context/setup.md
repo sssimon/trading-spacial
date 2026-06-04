@@ -58,10 +58,22 @@ docker compose up --build  # Frontend at :3000, backend at :8000
 ## Tests
 
 ```bash
-python -m pytest tests/ -v
+# FAST local gate (default for dev loops): parallel + skip network-marked tests.
+# ~49s for ~3100 tests on a 24-core box. Same selection CI's Backend job runs.
+python -m pytest tests/ -m "not network" -n auto -q
+
+python -m pytest tests/ -v                  # FULL serial suite — runs the network-marked
+                                            # full backtests over data/ohlcv.db (705 MB,
+                                            # local-only): HOURS. Run deliberately, not by default.
 python -m pytest tests/test_scanner.py -v   # Scanner logic only
 python -m pytest tests/test_api.py -v       # API endpoints only
 ```
+
+`-n auto` needs `pytest-xdist` (in `requirements-dev.txt`). The slow set is the
+`network`-marked modules (`test_backtest_with_costs`, `test_backtest_smoke_*`,
+`test_backtest_refactor_parity`, `test_auto_tune_max_date::...`) — they fetch live
+data on cache miss and replay multi-year backtests; CI never runs them (marker +
+missing ohlcv.db).
 
 ## Windows Automation
 

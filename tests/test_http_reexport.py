@@ -22,13 +22,18 @@ def test_rate_limit_enforces_min_interval():
 
 
 def test_load_proxy_from_env(monkeypatch):
-    """HTTPS_PROXY env var takes precedence."""
+    """HTTPS_PROXY env var takes precedence.
+
+    Order matters: delenv BEFORE setenv. On Windows os.environ is
+    case-insensitive, so delenv("https_proxy") after setenv("HTTPS_PROXY", ...)
+    deletes the variable just set — the test passed on Linux CI but failed
+    locally on Windows."""
     from infra import http
 
-    monkeypatch.setenv("HTTPS_PROXY", "socks5://test:1080")
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("https_proxy", raising=False)
     monkeypatch.delenv("http_proxy", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "socks5://test:1080")
 
     proxy = http._load_proxy()
     assert proxy == {"http": "socks5://test:1080", "https": "socks5://test:1080"}
