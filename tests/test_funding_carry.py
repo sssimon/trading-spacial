@@ -1021,3 +1021,33 @@ def test_run_aborts_on_missing_ohlcv_db(tmp_path, monkeypatch):
     res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
                  ohlcv_db=str(tmp_path / "missing.db"))
     assert res["verdict"] == "ABORT" and "ohlcv_db missing" in res["reason"]
+
+
+# ---------------------------------------------------------------------------
+# leg_lag — Unit 2 (spec REV 2.1 §4): basis_sigma_1m + scale_to_window
+# ---------------------------------------------------------------------------
+
+def test_basis_sigma_1m_deterministic():
+    from tools.funding_carry import leg_lag
+    # spot constant 100; perp alternates 100.0 / 100.1 -> basis 0, 0.001, 0, 0.001
+    # deltas = +0.001, -0.001, +0.001 -> stdev = sqrt( sum((d-mean)^2)/(n-1) )
+    spot = [(i * 60_000, 100.0) for i in range(4)]
+    perp = [(0, 100.0), (60_000, 100.1), (120_000, 100.0), (180_000, 100.1)]
+    s = leg_lag.basis_sigma_1m(spot, perp)
+    assert s == pytest.approx(statistics.stdev([0.001, -0.001, 0.001]))
+
+def test_basis_sigma_1m_aligns_on_common_timestamps():
+    from tools.funding_carry import leg_lag
+    spot = [(0, 100.0), (60_000, 100.0), (120_000, 100.0)]
+    perp = [(0, 100.0), (120_000, 100.2)]          # missing the middle bar
+    s = leg_lag.basis_sigma_1m(spot, perp)
+    # only ts {0, 120000} align -> basis [0, 0.002] -> one delta -> stdev of 1 value
+    # is undefined: function must return 0.0 for < 2 deltas, not crash.
+    assert s == 0.0
+
+def test_scale_to_window_sqrt_t():
+    import math
+    from tools.funding_carry import leg_lag
+    assert leg_lag.scale_to_window(0.004, 60) == pytest.approx(0.004)
+    assert leg_lag.scale_to_window(0.004, 15) == pytest.approx(0.002)
+    assert leg_lag.scale_to_window(0.004, 300) == pytest.approx(0.004 * math.sqrt(5))
