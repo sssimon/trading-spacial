@@ -627,3 +627,39 @@ def test_fetch_depth_propagates_fetch_failed(monkeypatch):
         live_ingest.fetch_perp_depth("BTCUSDT")
     with pytest.raises(live_ingest.FetchFailed):
         live_ingest.fetch_spot_depth("BTCUSDT")
+
+
+def _fake_kline_pages(start_ms, n_bars, page_limit):
+    """Build a fake paginated klines server: returns a callable like _get_json_retry."""
+    all_rows = [[start_ms + i * 60_000, "0", "0", "0", str(100.0 + i), "0"]
+                for i in range(n_bars)]
+    def fake(url, **kw):
+        import urllib.parse as up
+        q = dict(up.parse_qsl(up.urlsplit(url).query))
+        s, e, lim = int(q["startTime"]), int(q["endTime"]), int(q["limit"])
+        page = [r for r in all_rows if s <= r[0] < e][:lim]
+        return page
+    return fake
+
+def test_fetch_klines_1m_paginated_walks_pages(monkeypatch):
+    from tools.funding_carry import live_ingest
+    start = 0
+    n = 3000                                   # > 2 pages at limit 1500
+    end_ms = n * 60_000
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(start, n, 1500))
+    out = live_ingest.fetch_klines_1m_paginated(
+        "BTCUSDT", base_url="http://fake", days=end_ms / 86_400_000, end_ms=end_ms)
+    assert len(out) == 3000
+    assert out[0] == (0, 100.0) and out[-1] == ((n - 1) * 60_000, 100.0 + n - 1)
+    assert out == sorted(out)                  # ascending, no duplicates
+
+def test_fetch_klines_1m_paginated_hard_fails_on_short_series(monkeypatch):
+    from tools.funding_carry import live_ingest
+    # Server only has ~25h of data but caller asks for 30 days -> MUST raise,
+    # never silently return a short series labeled 30d (Halberg BP-1).
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(0, 1500, 1500))
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=30, end_ms=30 * 86_400_000)

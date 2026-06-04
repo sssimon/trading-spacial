@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import closing
-from .constants import FAPI_FUNDING, FAPI_MARK_KLINES, FAPI_SPOT, FUNDING_DB, FAPI_PERP_DEPTH, SPOT_DEPTH, DEPTH_LIMIT_PERP, DEPTH_LIMIT_SPOT
+from .constants import FAPI_FUNDING, FAPI_MARK_KLINES, FAPI_SPOT, FUNDING_DB, FAPI_PERP_DEPTH, SPOT_DEPTH, DEPTH_LIMIT_PERP, DEPTH_LIMIT_SPOT, KLINE_PAGE_LIMIT, KLINE_MIN_COVERAGE
 
 log = logging.getLogger("funding_carry.live_ingest")
 
@@ -168,3 +168,30 @@ def fetch_spot_depth(symbol: str, *, limit: int = DEPTH_LIMIT_SPOT) -> dict:
     """Spot orderbook snapshot. Raises FetchFailed (v0.2 ABORT policy)."""
     return parse_depth(_get_json_retry(
         f"{SPOT_DEPTH}?symbol={symbol}&limit={int(limit)}"))
+
+
+def fetch_klines_1m_paginated(symbol: str, *, base_url: str, days: float, end_ms: int,
+                              page_limit: int = KLINE_PAGE_LIMIT,
+                              min_coverage: float = KLINE_MIN_COVERAGE
+                              ) -> list[tuple[int, float]]:
+    """1m closes over `days` ending at end_ms, paginated (Binance caps at 1500/request).
+    Returns [(open_time_ms, close)] ascending. Raises FetchFailed if total bars
+    < min_coverage x expected — NEVER silently truncates (spec §4, Halberg BP-1).
+    <=2% missing bars (maintenance, thin perps) is tolerated as benign gaps."""
+    start_ms = int(end_ms - days * 86_400_000)
+    out: list[tuple[int, float]] = []
+    cursor = start_ms
+    while cursor < end_ms:
+        url = (f"{base_url}?symbol={symbol}&interval=1m"
+               f"&startTime={cursor}&endTime={int(end_ms)}&limit={int(page_limit)}")
+        page = _get_json_retry(url)
+        if not page:
+            break
+        rows = sorted((int(k[0]), float(k[4])) for k in page)
+        out.extend(rows)
+        cursor = rows[-1][0] + 60_000
+    expected = days * 1440
+    if len(out) < min_coverage * expected:
+        raise FetchFailed(
+            f"{symbol}: short 1m series {len(out)} < {min_coverage}x{expected:.0f} expected")
+    return out
