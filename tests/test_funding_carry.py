@@ -742,6 +742,9 @@ def test_roundtrip_real_cost_four_legs_all_in():
     assert r["fees_total"] == pytest.approx(30.0)          # 2x10bps + 2x5bps on 10k
     assert r["cost_real"] == pytest.approx(slip_expected + 30.0, abs=1e-6)
     assert set(r["legs"]) == {"spot_buy", "perp_sell", "spot_sell", "perp_buy"}
+    # Anchor which physical book fills which named leg (argument-swap guard).
+    assert r["legs"]["spot_buy"]["mid"] == pytest.approx(99.0)
+    assert r["legs"]["perp_sell"]["mid"] == pytest.approx(200.0)
 
 def test_roundtrip_real_cost_propagates_insufficient_depth():
     from tools.funding_carry import execution_cost as ec
