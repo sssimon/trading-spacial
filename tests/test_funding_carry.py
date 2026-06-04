@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import statistics
@@ -776,3 +777,74 @@ def test_t_floor_real_keystone_reproduces_frozen_t_floor():
     assert tfr == pytest.approx(cost_floor(path, notional=NOTIONAL,
                                            h_ref_years=H_REF_YEARS, margin=MARGIN))
     assert tfr == pytest.approx(T_FLOOR)        # 0.0038575872804181457
+
+
+# ---------------------------------------------------------------------------
+# settlement_check / read_v01_state / verdict  (Task 8, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+_SETTLE = 8 * 3_600_000
+
+def _v01_state(tmp_path, **over):
+    """Fabricate a valid v0.1 state.json; override fields via kwargs (None deletes)."""
+    base = {
+        "run_ts_utc": "2026-06-04T08:05:00+00:00",
+        "decay_state": "THIN",
+        "R_pooled": 0.036, "R_ci_lo": 0.0094, "R_ci_hi": 0.0606,
+        "calibration_identity_hash": "CALHASH",
+    }
+    base.update(over)
+    for k, v in list(base.items()):
+        if v is None:
+            del base[k]
+    p = tmp_path / "funding_carry_state.json"
+    p.write_text(json.dumps(base), encoding="utf-8")
+    return str(p)
+
+def test_settlement_check_inside_window_returns_settlement():
+    from tools.funding_carry import execution_cost as ec
+    now = 1_780_531_200_000 + 10 * 60_000          # settlement + 10min
+    assert ec.settlement_check(now) == 1_780_531_200_000
+
+def test_settlement_check_off_window_aborts():
+    from tools.funding_carry import execution_cost as ec
+    now = 1_780_531_200_000 + 20 * 60_000          # settlement + 20min > 15
+    with pytest.raises(ec.AbortRun):
+        ec.settlement_check(now)
+
+def test_read_v01_state_happy_path(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path)
+    # now_ms is ~6.6h after the state's run_ts (2026-06-04T08:05:00+00:00 = 1780560300000ms)
+    now_ms = 1_780_584_060_000                      # state_ms + 6.6h, well within 26h
+    st = ec.read_v01_state(path, now_ms=now_ms)
+    assert st["R_ci_lo"] == 0.0094
+
+def test_read_v01_state_aborts_on_stale(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, run_ts_utc="2026-06-01T08:05:00+00:00")
+    # now_ms 78.6h after the stale state -> exceeds 26h bound
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)   # ~78.6h after stale state
+
+def test_read_v01_state_aborts_on_bad_decay_state(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    for bad in ("ERROR", "INCOMPLETE", "REFUTED"):
+        path = _v01_state(tmp_path, decay_state=bad)
+        with pytest.raises(ec.AbortRun):
+            ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_read_v01_state_aborts_clean_on_missing_keys(tmp_path):
+    # v0.1's ERROR branch omits R_ci_lo/R_ci_hi/calibration_identity_hash:
+    # the guard must hard-refuse cleanly, NOT crash with KeyError (Adrian REV2-F8).
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, R_ci_lo=None)
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_verdict_semantics_isomorphic_to_rev5():
+    from tools.funding_carry import execution_cost as ec
+    st = {"R_ci_lo": 0.0094, "R_ci_hi": 0.0606}
+    assert ec.verdict(0.002, st) == "PASS"      # ci_lo >= floor
+    assert ec.verdict(0.030, st) == "THIN"      # ci_lo < floor <= ci_hi
+    assert ec.verdict(0.080, st) == "FAIL"      # ci_hi < floor

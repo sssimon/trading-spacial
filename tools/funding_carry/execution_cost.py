@@ -97,3 +97,53 @@ def t_floor_real(costs_usd: list[float], *, notional: float = NOTIONAL,
     fossil's cost_v3 values must reproduce the frozen T_FLOOR exactly."""
     per_sym = [c / notional for c in costs_usd]
     return statistics.median(per_sym) / h_ref_years + margin
+
+
+def settlement_check(now_ms: int, *, window_min: int = SETTLEMENT_WINDOW_MIN) -> int:
+    """Return the funding settlement (ms, 8h-grid: 00/08/16 UTC) this run is adjacent
+    to. Hard-refuse if now is more than window_min minutes after the last settlement —
+    instrument-time co-location is ENFORCED, not trusted (spec §3 / Adrian REV2-F7)."""
+    last = (int(now_ms) // _SETTLEMENT_MS) * _SETTLEMENT_MS
+    delta_min = (now_ms - last) / 60_000.0
+    if delta_min > window_min:
+        raise AbortRun(f"off-window: {delta_min:.1f}min after settlement "
+                       f"> SETTLEMENT_WINDOW_MIN={window_min}")
+    return last
+
+
+_REQUIRED_STATE_KEYS = ("run_ts_utc", "decay_state", "R_pooled", "R_ci_lo",
+                        "R_ci_hi", "calibration_identity_hash")
+
+
+def read_v01_state(path: str, *, now_ms: int,
+                   max_age_hours: float = STATE_MAX_AGE_HOURS) -> dict:
+    """Validated read of v0.1's state.json — the verdict's LEFT operand (spec §3
+    preconditions / Adrian REV2-F4/F8). ABORT (clean, never KeyError) on:
+    missing file; missing keys (v0.1's ERROR branch omits them); staleness
+    > max_age_hours; decay_state not in {ALIVE, THIN} (ERROR/INCOMPLETE = no
+    operand today; REFUTED = v0.1 already killed the edge, v0.2 is moot)."""
+    if not os.path.exists(path):
+        raise AbortRun(f"v0.1 state missing: {path}")
+    with open(path, encoding="utf-8") as fh:
+        st = json.load(fh)
+    missing = [k for k in _REQUIRED_STATE_KEYS if k not in st]
+    if missing:
+        raise AbortRun(f"v0.1 state missing keys {missing} "
+                       f"(decay_state={st.get('decay_state')!r})")
+    run_ms = int(datetime.fromisoformat(st["run_ts_utc"]).timestamp() * 1000)
+    age_h = (now_ms - run_ms) / 3_600_000.0
+    if age_h > max_age_hours:
+        raise AbortRun(f"v0.1 state stale: {age_h:.1f}h > {max_age_hours}h")
+    if st["decay_state"] not in ("ALIVE", "THIN"):
+        raise AbortRun(f"v0.1 decay_state={st['decay_state']!r} — no valid left operand")
+    return st
+
+
+def verdict(t_floor_real_val: float, state: dict) -> str:
+    """PASS/THIN/FAIL — same semantics as v0.1 REV 5 but against the REAL floor.
+    A snapshot: does NOT touch v0.1's kill counter (spec §8)."""
+    if state["R_ci_lo"] >= t_floor_real_val:
+        return "PASS"
+    if state["R_ci_hi"] < t_floor_real_val:
+        return "FAIL"
+    return "THIN"
