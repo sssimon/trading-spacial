@@ -62,3 +62,28 @@ FUNDING_FETCH_LIMIT = 1000     # FAPI fundingRate page size; covers multi-day ga
 
 SHADOW_OUTPUT_DIR = "data/shadow"
 SHADOW_VERSION = "v0.1"
+
+# --- Execution-realism v0.2 (spec 2026-06-03 REV 2.1) — FROZEN 2026-06-04 ---
+# Naming note (Halberg RC-1): legacy FAPI_SPOT above actually points at the SPOT
+# ticker (mislabel). New constants use truthful prefixes: SPOT_* = api.binance.com,
+# FAPI_* = fapi.binance.com. Renaming the legacy one = separate cleanup PR, not here.
+FAPI_PERP_DEPTH = "https://fapi.binance.com/fapi/v1/depth"
+SPOT_DEPTH = "https://api.binance.com/api/v3/depth"
+SPOT_KLINES_1M = "https://api.binance.com/api/v3/klines"
+DEPTH_LIMIT_PERP = 1000
+DEPTH_LIMIT_SPOT = 5000
+# Taker fees frozen NUMERICALLY (Binance public VIP0, 2026-06). NOT read from the
+# v3 calibration: v3's fee is multiplied by stress_mult and does not co-locate
+# with a walked-book cost (spec §5 / Adrian F6).
+PERP_TAKER_FEE = 0.0005        # 5 bps per fill, USDT-M futures
+SPOT_TAKER_FEE = 0.001         # 10 bps per fill, spot
+LEG_LAG_DAYS = 30
+LEG_LAG_T_SWEEP = (1, 10, 60, 300)   # seconds; DESCRIPTIVE sweep — no verdict, no T_REF
+SETTLEMENT_WINDOW_MIN = 15     # run must start <= this many minutes AFTER a settlement
+MAX_INSUFFICIENT_SYMBOLS = 2   # k > this -> verdict INVALID (k=3 invalidates, k=2 not)
+STATE_MAX_AGE_HOURS = 26       # v0.1 state staleness bound (daily cadence + margin)
+HOLDING_HOURS_DIAG = int(H_REF_YEARS * 8760)   # 17520h; cost_v3_hoy diagnostic holding
+KLINE_PAGE_LIMIT = 1500        # Binance klines per-request cap (pagination required)
+KLINE_MIN_COVERAGE = 0.98      # hard-fail below this fraction of expected 1m bars
+EXEC_REALISM_OUTPUT_DIR = "data/retune/2026-06-04-funding-carry-exec-realism"
+EXEC_REALISM_VERSION = "v0.2"

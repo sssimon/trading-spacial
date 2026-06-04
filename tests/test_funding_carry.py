@@ -549,3 +549,25 @@ def test_cost_floor_uses_median(tmp_path):
 
     result_h4 = cost_floor(json_path, notional=notional, h_ref_years=4.0, margin=0.0)
     assert result_h4 == pytest.approx(expected_median / 4.0)
+
+
+# ---------------------------------------------------------------------------
+# Execution-realism v0.2 (spec 2026-06-03 REV 2.1)
+# ---------------------------------------------------------------------------
+
+def test_v02_constants_frozen():
+    from tools.funding_carry import constants as C
+    # Endpoints named truthfully (SPOT_* is spot, FAPI_* is futures) — Halberg RC-1.
+    assert C.FAPI_PERP_DEPTH.startswith("https://fapi.binance.com/")
+    assert C.SPOT_DEPTH.startswith("https://api.binance.com/")
+    assert C.SPOT_KLINES_1M.startswith("https://api.binance.com/")
+    # Frozen numerics (pre-registered; changing any = new experiment).
+    assert C.DEPTH_LIMIT_PERP == 1000 and C.DEPTH_LIMIT_SPOT == 5000
+    assert C.PERP_TAKER_FEE == 0.0005 and C.SPOT_TAKER_FEE == 0.001
+    assert C.LEG_LAG_DAYS == 30 and C.LEG_LAG_T_SWEEP == (1, 10, 60, 300)
+    assert C.SETTLEMENT_WINDOW_MIN == 15
+    assert C.MAX_INSUFFICIENT_SYMBOLS == 2
+    assert C.STATE_MAX_AGE_HOURS == 26
+    assert C.HOLDING_HOURS_DIAG == 17520          # H_REF_YEARS * 8760
+    assert C.KLINE_PAGE_LIMIT == 1500 and C.KLINE_MIN_COVERAGE == 0.98
+    assert C.EXEC_REALISM_VERSION == "v0.2"
