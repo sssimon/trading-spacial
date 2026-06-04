@@ -64,6 +64,45 @@ def _load_index_rows() -> list[dict[str, str]]:
     return rows
 
 
+def _validate_verdict(data: dict) -> list[str]:
+    """Valida forma y vocabulario de un verdict.json del programa (spec §3-§4).
+
+    Devuelve lista de errores (vacía = válido).
+    """
+    errors: list[str] = []
+    verdict = data.get("verdict")
+    if not isinstance(verdict, str) or not verdict:
+        errors.append("'verdict' ausente o no-string")
+        verdict = ""
+    coord = data.get("coordenada")
+    if not isinstance(coord, dict):
+        errors.append("'coordenada' ausente o no-dict")
+        return errors
+    verbo = coord.get("verbo")
+    if verbo not in VERBOS:
+        errors.append(f"coordenada.verbo inválido: {verbo!r}")
+    if not isinstance(coord.get("edicion"), int) or coord["edicion"] < 1:
+        errors.append(f"coordenada.edicion inválida: {coord.get('edicion')!r}")
+    if not isinstance(coord.get("celda"), str) or not coord.get("celda"):
+        errors.append("coordenada.celda ausente")
+    n_f = coord.get("n_f_corridas_a_la_fecha")
+    if not isinstance(n_f, int) or n_f < 0:
+        errors.append(f"coordenada.n_f_corridas_a_la_fecha inválida: {n_f!r}")
+    # Vocabulario por verbo (spec §3): F→PASS|FAIL, R→INVIABLE-RETAIL|REQUIERE-INFRA-*,
+    # C→EXCLUIDA, D→DEGRADADA. Cruzar vocabularios es el registro plano que miente.
+    if verbo == "F" and verdict not in {"PASS", "FAIL"}:
+        errors.append(f"vocabulario F es PASS|FAIL, no {verdict!r}")
+    elif verbo == "R" and not (
+        verdict == "INVIABLE-RETAIL" or verdict.startswith("REQUIERE-INFRA")
+    ):
+        errors.append(f"vocabulario R es INVIABLE-RETAIL|REQUIERE-INFRA-*, no {verdict!r}")
+    elif verbo == "C" and verdict != "EXCLUIDA":
+        errors.append(f"vocabulario C es EXCLUIDA, no {verdict!r}")
+    elif verbo == "D" and verdict != "DEGRADADA":
+        errors.append(f"vocabulario D es DEGRADADA, no {verdict!r}")
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # 1-2. INDEX: existencia, forma, celdas cerradas
 # ---------------------------------------------------------------------------
@@ -103,3 +142,77 @@ def test_celdas_cerradas_coordenada_y_artefacto():
         assert artefacto.exists(), (
             f"celda {row['celda']}: artefacto apuntado no existe: {row['artefacto']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 3. verdict.json: esquema y vocabulario por verbo (spec §3-§4)
+# ---------------------------------------------------------------------------
+
+_VERDICT_OK_F = {
+    "verdict": "PASS",
+    "coordenada": {
+        "edicion": 1,
+        "celda": "stat-arb",
+        "verbo": "F",
+        "n_f_corridas_a_la_fecha": 3,
+    },
+}
+
+
+def test_validador_acepta_verdict_f_valido():
+    assert _validate_verdict(_VERDICT_OK_F) == []
+
+
+def test_validador_acepta_dictamen_r():
+    data = {
+        "verdict": "REQUIERE-INFRA-opciones",
+        "coordenada": {
+            "edicion": 1,
+            "celda": "vrp-opciones",
+            "verbo": "R",
+            "n_f_corridas_a_la_fecha": 2,
+        },
+    }
+    assert _validate_verdict(data) == []
+
+
+def test_validador_rechaza_verbo_invalido():
+    data = {
+        "verdict": "PASS",
+        "coordenada": {
+            "edicion": 1,
+            "celda": "x",
+            "verbo": "Z",
+            "n_f_corridas_a_la_fecha": 1,
+        },
+    }
+    assert any("verbo" in e for e in _validate_verdict(data))
+
+
+def test_validador_rechaza_coordenada_ausente():
+    assert any("coordenada" in e for e in _validate_verdict({"verdict": "PASS"}))
+
+
+def test_validador_rechaza_vocabulario_cruzado():
+    # Un verbo C no puede emitir "PASS" — su vocabulario es EXCLUIDA (spec §3)
+    data = {
+        "verdict": "PASS",
+        "coordenada": {
+            "edicion": 1,
+            "celda": "mev-latencia",
+            "verbo": "C",
+            "n_f_corridas_a_la_fecha": 2,
+        },
+    }
+    assert any("vocabulario" in e for e in _validate_verdict(data))
+
+
+def test_verdicts_reales_en_artefactos():
+    """Integración: todo verdict.json bajo data/retune/programa-celdas/ valida."""
+    if not ARTEFACTS_DIR.is_dir():
+        pytest.skip("aún no hay artefactos de celda nuevos — check vacuo")
+    paths = sorted(ARTEFACTS_DIR.glob("*/verdict.json"))
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        errors = _validate_verdict(data)
+        assert not errors, f"{path.relative_to(REPO_ROOT)}: {errors}"
