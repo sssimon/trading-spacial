@@ -65,3 +65,24 @@ def walk_book(book: dict, notional_usd: float, side: str) -> dict:
     vwap = fill_cost / qty_target
     return {"mid": mid, "qty_target": qty_target, "vwap": vwap,
             "slippage_cost": abs(vwap - mid) * qty_target}
+
+
+def roundtrip_real_cost(perp_book: dict, spot_book: dict, *, notional: float = NOTIONAL,
+                        spot_fee: float = SPOT_TAKER_FEE,
+                        perp_fee: float = PERP_TAKER_FEE) -> dict:
+    """All-in 4-leg roundtrip cost on the SAME snapshot (approximation §6.1):
+    open = spot-buy + perp-sell; close = spot-sell + perp-buy.
+    Per leg: slippage + taker_fee * notional.
+    Leg/denominator convention pinned to the fossil (spec §3.3 / Adrian REV2-F5):
+    recost_four_legs = 4 fills with per-leg notional; cost_floor divides the 4-leg
+    total by NOTIONAL=10000 per-leg, NOT 2x. This function returns the 4-leg USD total."""
+    legs = {
+        "spot_buy":  walk_book(spot_book, notional, "buy"),
+        "perp_sell": walk_book(perp_book, notional, "sell"),
+        "spot_sell": walk_book(spot_book, notional, "sell"),
+        "perp_buy":  walk_book(perp_book, notional, "buy"),
+    }
+    slip = sum(leg["slippage_cost"] for leg in legs.values())
+    fees = 2 * notional * spot_fee + 2 * notional * perp_fee
+    return {"cost_real": slip + fees, "slippage_total": slip,
+            "fees_total": fees, "legs": legs}

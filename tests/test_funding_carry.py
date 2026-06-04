@@ -731,3 +731,21 @@ def test_walk_book_empty_side_raises_insufficient_depth():
         ec.walk_book(_book(bids=[], asks=[(100.0, 50.0)]), 10_000.0, "buy")
     with pytest.raises(ec.InsufficientDepth):
         ec.walk_book(_book(bids=[(98.0, 5.0)], asks=[]), 10_000.0, "sell")
+
+def test_roundtrip_real_cost_four_legs_all_in():
+    from tools.funding_carry import execution_cost as ec
+    spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    r = ec.roundtrip_real_cost(perp, spot)
+    slip_expected = 2 * (10_000.0 / 99.0) + 2 * 50.0      # 2 spot legs + 2 perp legs
+    assert r["slippage_total"] == pytest.approx(slip_expected, abs=1e-6)
+    assert r["fees_total"] == pytest.approx(30.0)          # 2x10bps + 2x5bps on 10k
+    assert r["cost_real"] == pytest.approx(slip_expected + 30.0, abs=1e-6)
+    assert set(r["legs"]) == {"spot_buy", "perp_sell", "spot_sell", "perp_buy"}
+
+def test_roundtrip_real_cost_propagates_insufficient_depth():
+    from tools.funding_carry import execution_cost as ec
+    spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1.0)])   # too thin to buy
+    perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    with pytest.raises(ec.InsufficientDepth):
+        ec.roundtrip_real_cost(perp, spot)
