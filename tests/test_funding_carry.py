@@ -663,3 +663,32 @@ def test_fetch_klines_1m_paginated_hard_fails_on_short_series(monkeypatch):
     with pytest.raises(live_ingest.FetchFailed):
         live_ingest.fetch_klines_1m_paginated(
             "BTCUSDT", base_url="http://fake", days=30, end_ms=30 * 86_400_000)
+
+
+def test_fetch_klines_1m_paginated_aborts_on_non_advancing_page(monkeypatch):
+    """A server that always returns the same stale page (ignoring startTime) must raise
+    FetchFailed, not hang.  Without the new_cursor <= cursor guard the loop would spin
+    forever because cursor = rows[-1][0] + 60_000 always evaluates to the same value
+    (0 + 60_000 = 60_000) which is always > start_ms=0, so the while-condition stays
+    True and the loop never exits."""
+    from tools.funding_carry import live_ingest
+    stale = [[0, "0", "0", "0", "100.0", "0"]]
+    monkeypatch.setattr(live_ingest, "_get_json_retry", lambda url, **kw: stale)
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=1, end_ms=86_400_000)
+
+
+def test_fetch_klines_1m_paginated_coverage_boundary(monkeypatch):
+    """Boundary test for the 0.98 coverage threshold (days=1, expected=1440, floor=1411.2).
+    A server with exactly 1400 bars (< floor) must raise; a server with 1440 (full)
+    must pass — the existing walks_pages test already covers the full-coverage path, so
+    we only assert the raise direction here."""
+    from tools.funding_carry import live_ingest
+    end_ms = 86_400_000  # 1 day in ms
+    # 1400 bars < 0.98 * 1440 = 1411.2 -> must raise
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(0, 1400, 1500))
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=1, end_ms=end_ms)

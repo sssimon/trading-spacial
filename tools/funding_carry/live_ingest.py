@@ -189,8 +189,14 @@ def fetch_klines_1m_paginated(symbol: str, *, base_url: str, days: float, end_ms
             break
         rows = sorted((int(k[0]), float(k[4])) for k in page)
         out.extend(rows)
-        cursor = rows[-1][0] + 60_000
+        new_cursor = rows[-1][0] + 60_000
+        if new_cursor <= cursor:
+            raise FetchFailed(
+                f"{symbol}: server returned non-advancing page at cursor={cursor}")
+        cursor = new_cursor
     expected = days * 1440
+    if len({t for t, _ in out}) != len(out):
+        raise FetchFailed(f"{symbol}: duplicate bars across pages")
     if len(out) < min_coverage * expected:
         raise FetchFailed(
             f"{symbol}: short 1m series {len(out)} < {min_coverage}x{expected:.0f} expected")
