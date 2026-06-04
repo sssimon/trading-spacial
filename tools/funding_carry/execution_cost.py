@@ -45,6 +45,8 @@ def walk_book(book: dict, notional_usd: float, side: str) -> dict:
     mid = (best_bid + best_ask) / 2 of THIS book; qty_target = notional_usd / mid;
     slippage_cost = |VWAP_fill - mid| * qty_target  (>= 0 both sides by construction).
     Raises InsufficientDepth if the levels cannot fill qty_target (spec §3.2)."""
+    if not book["bids"] or not book["asks"]:
+        raise InsufficientDepth(f"empty book side ({side})")
     best_bid, best_ask = book["bids"][0][0], book["asks"][0][0]
     mid = (best_bid + best_ask) / 2.0
     qty_target = notional_usd / mid

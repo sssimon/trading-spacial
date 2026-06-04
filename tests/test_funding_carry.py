@@ -724,3 +724,10 @@ def test_walk_book_insufficient_depth_raises():
     book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 50.0)])   # 50 qty < ~101 needed
     with pytest.raises(ec.InsufficientDepth):
         ec.walk_book(book, 10_000.0, "buy")
+
+def test_walk_book_empty_side_raises_insufficient_depth():
+    from tools.funding_carry import execution_cost as ec
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(_book(bids=[], asks=[(100.0, 50.0)]), 10_000.0, "buy")
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(_book(bids=[(98.0, 5.0)], asks=[]), 10_000.0, "sell")
