@@ -1,4 +1,4 @@
-"""Candado sintáctico del programa de investigación de edge (Edición 1).
+r"""Candado sintáctico del programa de investigación de edge (Edición 1).
 
 Constitución: docs/superpowers/specs/2026-06-04-programa-edge-marco-design.md (§6).
 Runbook: .mex/patterns/estudiar-una-celda.md. Estado vivo: .mex/programa/INDEX.md.
@@ -26,6 +26,11 @@ prosa ("la celda de carry rindió más que las cerradas") pasa este test. Esa
 regla vive como gotcha en ``.mex/patterns/estudiar-una-celda.md`` y su
 backstop es la revisión de PR. Este test solo atrapa el lapsus estructural:
 columnas mal tipadas, coordenadas malformadas, artefactos colgantes.
+
+El parser de filas (``_load_index_rows``) hace ``split("|")`` ciego a pipes
+escapados: una celda con ``\|`` se reporta como "fila malformada" aunque sea
+markdown válido. No usar ``\|`` en las celdas del INDEX; si algún día hace
+falta, hay que enseñarle al parser, no al INDEX.
 """
 from __future__ import annotations
 
@@ -216,3 +221,30 @@ def test_verdicts_reales_en_artefactos():
         data = json.loads(path.read_text(encoding="utf-8"))
         errors = _validate_verdict(data)
         assert not errors, f"{path.relative_to(REPO_ROOT)}: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# 4. Proxy declarado: tipado de la columna Veredicto (ver docstring del módulo)
+# ---------------------------------------------------------------------------
+
+def test_detector_cardinal_funciona():
+    """Autotest del regex — el proxy debe atrapar lo que dice atrapar."""
+    assert CARDINAL_RE.search("PASS (6.33%/año net-v3)")
+    assert CARDINAL_RE.search("carry de $1254 en tier chico")
+    assert CARDINAL_RE.search("retorno 27 % total")
+    assert not CARDINAL_RE.search("EXCLUIDA")
+    assert not CARDINAL_RE.search("REQUIERE-INFRA-opciones")
+    assert not CARDINAL_RE.search("DOUBLE-FAIL")
+
+
+def test_filas_rcd_sin_valores_cardinales():
+    """Una celda R/C/D no tiene retorno; un cardinal en su Veredicto es un
+    error de tipo (spec §3) — o un lapsus que este proxy atrapa."""
+    for row in _load_index_rows():
+        if row["verbo"] not in {"R", "C", "D"}:
+            continue
+        assert not CARDINAL_RE.search(row["veredicto"]), (
+            f"celda {row['celda']} (verbo {row['verbo']}): valor cardinal en "
+            f"Veredicto: {row['veredicto']!r}. Los verbos R/C/D no tienen "
+            "retorno — ver Regla del atlas (spec §3)."
+        )
