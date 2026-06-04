@@ -28,8 +28,11 @@ python btc_api.py          # REST API at http://localhost:8000
 python btc_scanner.py      # Standalone scanner (runs once, used by API)
 python watchdog.py         # Process supervisor (Windows only)
 
-# Tests
-python -m pytest tests/ -v
+# Tests — DEFAULT to the fast parallel gate (same selection as CI's Backend job;
+# ~49s on this machine). The bare `pytest tests/` runs network-marked multi-year
+# backtests over the local 705 MB ohlcv.db: HOURS. Only run those deliberately.
+python -m pytest tests/ -m "not network" -n auto -q
+python -m pytest tests/ -v                  # FULL suite incl. slow network-marked backtests
 python -m pytest tests/test_scanner.py -v
 python -m pytest tests/test_api.py -v
 
