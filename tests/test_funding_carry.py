@@ -1051,3 +1051,27 @@ def test_scale_to_window_sqrt_t():
     assert leg_lag.scale_to_window(0.004, 60) == pytest.approx(0.004)
     assert leg_lag.scale_to_window(0.004, 15) == pytest.approx(0.002)
     assert leg_lag.scale_to_window(0.004, 300) == pytest.approx(0.004 * math.sqrt(5))
+
+
+def test_leg_lag_run_emits_table_no_verdict(tmp_path, monkeypatch):
+    from tools.funding_carry import leg_lag, live_ingest
+    # 1m series with constant tiny basis wiggle, full coverage.
+    n = int(0.99 * 30 * 1440)
+    spot = [(i * 60_000, 100.0) for i in range(n)]
+    perp = [(i * 60_000, 100.0 + 0.05 * (i % 2)) for i in range(n)]
+    def fake_fetch(symbol, *, base_url, days, end_ms, **kw):
+        return spot if "fapi.binance.com" not in base_url else perp
+    monkeypatch.setattr(live_ingest, "fetch_klines_1m_paginated", fake_fetch)
+    out_dir = str(tmp_path / "artifact")
+    res = leg_lag.run(now_ms=n * 60_000, out_dir=out_dir)
+    assert set(res["per_symbol"]) == set(leg_lag.SHADOW_SYMBOLS)
+    row = res["per_symbol"]["BTCUSDT"]
+    assert row["sigma_1m"] > 0.0
+    assert set(row["per_event_usd"]) == {1, 10, 60, 300}      # the full sweep
+    for t in (1, 10, 60, 300):
+        assert row["hold_continuo_usd"][t] == pytest.approx(
+            row["per_event_usd"][t] * (2 ** 0.5))             # sqrt(2) aggregate labeled apart
+    # NO verdict anywhere — descriptive by design (spec §4).
+    assert "verdict" not in res
+    assert os.path.exists(os.path.join(out_dir, "leg_lag.json"))
+    assert os.path.exists(os.path.join(out_dir, "leg_lag.md"))
