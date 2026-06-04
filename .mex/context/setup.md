@@ -87,6 +87,22 @@ Decay logic (REV 5, all anchors frozen in constants.py from the fossil):
 The kill counter advances at most once per non-overlapping W-week block (daily runs within a
 block just log). False-REFUTED is controlled by the live bootstrap CI, not the W heuristic.
 
+### Execution-realism v0.2 (one-shot, settlement-adjacent)
+
+Both are MANUAL one-shots (no scheduler). U1 MUST be launched within 15 minutes
+AFTER a funding settlement (00:00/08:00/16:00 UTC) — it hard-refuses otherwise:
+
+```bash
+python -m tools.funding_carry.execution_cost   # U1: T_FLOOR_REAL vs live rate
+python -m tools.funding_carry.leg_lag          # U2: descriptive sigma table (no window)
+```
+
+Preconditions for U1: v0.1's `data/shadow/funding_carry_state.json` fresh (<26h),
+`decay_state` in {ALIVE, THIN}, calibration hash matching. Output:
+`data/retune/2026-06-04-funding-carry-exec-realism/`. ABORT/INVALID verdicts are
+recorded in the artifact, not raised. A v0.2 PASS is a same-epoch snapshot —
+NOT by itself a go for #4 (spec §8: deployability has no joint estimator yet).
+
 ## Logs & Data
 
 - `logs/signals_log.txt` — human-readable signal entries/exits
