@@ -13,18 +13,18 @@ weather); InsufficientDepth -> per-symbol flag, INVALID above MAX_INSUFFICIENT_S
 Never writes data/shadow/ (v0.1's namespace); never reads funding.db; ohlcv.db only
 via _liq_ro (read-only + busy_timeout). No positions, no orders, no holdout."""
 from __future__ import annotations
-import json  # noqa: F401
-import os  # noqa: F401
-import sqlite3  # noqa: F401
-import statistics  # noqa: F401
-from contextlib import closing  # noqa: F401
-from datetime import datetime, timezone  # noqa: F401
-from . import simulate  # noqa: F401
+import json
+import os
+import sqlite3
+import statistics
+from contextlib import closing
+from datetime import datetime, timezone
+from . import simulate
 from .constants import (NOTIONAL, H_REF_YEARS, MARGIN, T_FLOOR, SHADOW_SYMBOLS,
                         SHADOW_OUTPUT_DIR, OHLCV_DB, PERP_TAKER_FEE, SPOT_TAKER_FEE,
                         SETTLEMENT_WINDOW_MIN, MAX_INSUFFICIENT_SYMBOLS,
                         STATE_MAX_AGE_HOURS, HOLDING_HOURS_DIAG,
-                        EXEC_REALISM_OUTPUT_DIR, EXEC_REALISM_VERSION)  # noqa: F401
+                        EXEC_REALISM_OUTPUT_DIR, EXEC_REALISM_VERSION)
 
 _SETTLEMENT_MS = 8 * 3_600_000          # funding settles 00:00/08:00/16:00 UTC
 
@@ -242,6 +242,8 @@ def run(*, now_ms: int, out_dir: str = EXEC_REALISM_OUTPUT_DIR,
         if cal != state["calibration_identity_hash"]:
             raise AbortRun(f"calibration drift: live={cal[:12]} "
                            f"!= v0.1 state={state['calibration_identity_hash'][:12]}")
+        if not os.path.exists(ohlcv_db):
+            raise AbortRun(f"ohlcv_db missing: {ohlcv_db}")
 
         per_symbol: dict = {}
         insufficient: list = []
