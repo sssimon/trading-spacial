@@ -1,0 +1,110 @@
+{
+  "BTCUSDT": {
+    "status": "OK",
+    "cost_real": 30.73105051225117,
+    "slippage_total": 0.7310505122511687,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 31.75067920150868,
+    "ratio": 0.9678863975543218,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 63840.005000000005,
+    "perp_mid": 63806.25,
+    "liq": 678206.863261524
+  },
+  "ETHUSDT": {
+    "status": "OK",
+    "cost_real": 30.439077633315765,
+    "slippage_total": 0.43907763331576677,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 35.25199945498807,
+    "ratio": 0.8634709549505768,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 1781.5149999999999,
+    "perp_mid": 1780.5749999999998,
+    "liq": 262255.04260065686
+  },
+  "ADAUSDT": {
+    "status": "OK",
+    "cost_real": 40.240656073163564,
+    "slippage_total": 10.240656073163567,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 106.1484124524182,
+    "ratio": 0.3790980490754087,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 0.19535,
+    "perp_mid": 0.19525,
+    "liq": 12688.104404420741
+  },
+  "AVAXUSDT": {
+    "status": "OK",
+    "cost_real": 35.65891159188986,
+    "slippage_total": 5.658911591889864,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 107.73845932592042,
+    "ratio": 0.33097662445699005,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 7.8395,
+    "perp_mid": 7.8345,
+    "liq": 12128.900050523935
+  },
+  "DOGEUSDT": {
+    "status": "OK",
+    "cost_real": 34.004564239907154,
+    "slippage_total": 4.004564239907151,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 67.99016817010471,
+    "ratio": 0.5001394342021788,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 0.089115,
+    "perp_mid": 0.089055,
+    "liq": 60964.82511505354
+  },
+  "UNIUSDT": {
+    "status": "OK",
+    "cost_real": 42.905623415978766,
+    "slippage_total": 12.90562341597877,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 114.73038213146063,
+    "ratio": 0.37396914939947246,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 2.6875,
+    "perp_mid": 2.6855,
+    "liq": 10068.45164698125
+  },
+  "XLMUSDT": {
+    "status": "OK",
+    "cost_real": 46.980557405754645,
+    "slippage_total": 16.980557405754645,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 90.06188180606787,
+    "ratio": 0.5216475212778572,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 0.21075,
+    "perp_mid": 0.210565,
+    "liq": 21343.81088539051
+  },
+  "RUNEUSDT": {
+    "status": "OK",
+    "cost_real": 114.02760316823046,
+    "slippage_total": 84.02760316823046,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 386.46805633949907,
+    "ratio": 0.2950505256456722,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 0.3665,
+    "perp_mid": 0.36545,
+    "liq": 1493.9736811100001
+  },
+  "PENDLEUSDT": {
+    "status": "OK",
+    "cost_real": 79.00395449139751,
+    "slippage_total": 49.00395449139751,
+    "fees_total": 30.0,
+    "cost_v3_hoy": 323.45682134613037,
+    "ratio": 0.24424884336217342,
+    "violation_v3_upper_bound": false,
+    "spot_mid": 1.3285,
+    "perp_mid": 1.32775,
+    "liq": 2302.9126030377315
+  }
+}

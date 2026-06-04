@@ -1,0 +1,17 @@
+{
+  "run_ts_utc": "2026-06-04T08:04:38.722000+00:00",
+  "version": "v0.2",
+  "t_floor_v3": 0.0038575872804181457,
+  "settlement_ts_ms": 1780560000000,
+  "R_pooled": 0.035980193650793656,
+  "R_ci_lo": 0.009381564583333335,
+  "R_ci_hi": 0.06057524212301587,
+  "v01_decay_state": "THIN",
+  "v01_run_ts_utc": "2026-06-04T05:29:02.018000+00:00",
+  "calibration_identity_hash": "1b616f742ed2eec7c00e09a78d2dd796dad79ba3d771175a39cda512d38c0d4d",
+  "insufficient": [],
+  "n_ok": 9,
+  "t_floor_real": 0.002012032803658178,
+  "floor_ratio_vs_v3": 0.5215780376173582,
+  "verdict": "PASS"
+}

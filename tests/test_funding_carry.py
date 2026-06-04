@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import statistics
@@ -549,3 +550,539 @@ def test_cost_floor_uses_median(tmp_path):
 
     result_h4 = cost_floor(json_path, notional=notional, h_ref_years=4.0, margin=0.0)
     assert result_h4 == pytest.approx(expected_median / 4.0)
+
+
+# ---------------------------------------------------------------------------
+# Execution-realism v0.2 (spec 2026-06-03 REV 2.1)
+# ---------------------------------------------------------------------------
+
+def test_v02_constants_frozen():
+    from tools.funding_carry import constants as C
+    # Endpoints named truthfully (SPOT_* is spot, FAPI_* is futures) — Halberg RC-1.
+    assert C.FAPI_PERP_DEPTH.startswith("https://fapi.binance.com/")
+    assert C.SPOT_DEPTH.startswith("https://api.binance.com/")
+    assert C.SPOT_KLINES_1M.startswith("https://api.binance.com/")
+    # Frozen numerics (pre-registered; changing any = new experiment).
+    assert C.DEPTH_LIMIT_PERP == 1000 and C.DEPTH_LIMIT_SPOT == 5000
+    assert C.PERP_TAKER_FEE == 0.0005 and C.SPOT_TAKER_FEE == 0.001
+    assert C.LEG_LAG_DAYS == 30 and C.LEG_LAG_T_SWEEP == (1, 10, 60, 300)
+    assert C.SETTLEMENT_WINDOW_MIN == 15
+    assert C.MAX_INSUFFICIENT_SYMBOLS == 2
+    assert C.STATE_MAX_AGE_HOURS == 26
+    assert C.HOLDING_HOURS_DIAG == 17520          # H_REF_YEARS * 8760
+    assert C.KLINE_PAGE_LIMIT == 1500 and C.KLINE_MIN_COVERAGE == 0.98
+    assert C.EXEC_REALISM_VERSION == "v0.2"
+
+
+def test_get_json_retry_succeeds_after_transient_error():
+    from tools.funding_carry import live_ingest
+    calls = {"n": 0}
+    def fake_open(url, timeout):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionResetError("transient")
+        return [{"ok": True}]
+    out = live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=lambda s: None)
+    assert out == [{"ok": True}] and calls["n"] == 3
+
+def test_get_json_retry_raises_fetch_failed_after_exhaustion():
+    from tools.funding_carry import live_ingest
+    def fake_open(url, timeout):
+        raise ConnectionResetError("down")
+    sleeps = []
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=sleeps.append)
+    assert len(sleeps) == 2   # 3 attempts → 2 inter-attempt sleeps; no sleep after final failure
+
+def test_get_json_retry_honors_retry_after_on_429():
+    import urllib.error
+    from email.message import Message
+    from tools.funding_carry import live_ingest
+    sleeps = []
+    calls = {"n": 0}
+    hdrs = Message(); hdrs["Retry-After"] = "7"
+    def fake_open(url, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError("http://x", 429, "rate", hdrs, None)
+        return {"ok": 1}
+    out = live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=sleeps.append)
+    assert out == {"ok": 1}
+    assert sleeps == [7.0]      # Retry-After respected, not generic backoff
+
+
+def test_parse_depth_maps_binance_payload():
+    from tools.funding_carry import live_ingest
+    payload = {"lastUpdateId": 1, "bids": [["99.5", "2.0"], ["99.0", "5.0"]],
+               "asks": [["100.5", "1.0"], ["101.0", "4.0"]]}
+    book = live_ingest.parse_depth(payload)
+    assert book["bids"] == [(99.5, 2.0), (99.0, 5.0)]    # price-descending as Binance sends
+    assert book["asks"] == [(100.5, 1.0), (101.0, 4.0)]  # price-ascending as Binance sends
+
+def test_fetch_depth_propagates_fetch_failed(monkeypatch):
+    from tools.funding_carry import live_ingest
+    def boom(url, **kw):
+        raise live_ingest.FetchFailed("down")
+    monkeypatch.setattr(live_ingest, "_get_json_retry", boom)
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_perp_depth("BTCUSDT")
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_spot_depth("BTCUSDT")
+
+
+def _fake_kline_pages(start_ms, n_bars, page_limit):
+    """Build a fake paginated klines server: returns a callable like _get_json_retry."""
+    all_rows = [[start_ms + i * 60_000, "0", "0", "0", str(100.0 + i), "0"]
+                for i in range(n_bars)]
+    def fake(url, **kw):
+        import urllib.parse as up
+        q = dict(up.parse_qsl(up.urlsplit(url).query))
+        s, e, lim = int(q["startTime"]), int(q["endTime"]), int(q["limit"])
+        page = [r for r in all_rows if s <= r[0] < e][:lim]
+        return page
+    return fake
+
+def test_fetch_klines_1m_paginated_walks_pages(monkeypatch):
+    from tools.funding_carry import live_ingest
+    start = 0
+    n = 3000                                   # > 2 pages at limit 1500
+    end_ms = n * 60_000
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(start, n, 1500))
+    out = live_ingest.fetch_klines_1m_paginated(
+        "BTCUSDT", base_url="http://fake", days=end_ms / 86_400_000, end_ms=end_ms)
+    assert len(out) == 3000
+    assert out[0] == (0, 100.0) and out[-1] == ((n - 1) * 60_000, 100.0 + n - 1)
+    assert out == sorted(out)                  # ascending, no duplicates
+
+def test_fetch_klines_1m_paginated_hard_fails_on_short_series(monkeypatch):
+    from tools.funding_carry import live_ingest
+    # Server only has ~25h of data but caller asks for 30 days -> MUST raise,
+    # never silently return a short series labeled 30d (Halberg BP-1).
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(0, 1500, 1500))
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=30, end_ms=30 * 86_400_000)
+
+
+def test_fetch_klines_1m_paginated_aborts_on_non_advancing_page(monkeypatch):
+    """A server that always returns the same stale page (ignoring startTime) must raise
+    FetchFailed, not hang.  Without the new_cursor <= cursor guard the loop would spin
+    forever because cursor = rows[-1][0] + 60_000 always evaluates to the same value
+    (0 + 60_000 = 60_000) which is always > start_ms=0, so the while-condition stays
+    True and the loop never exits."""
+    from tools.funding_carry import live_ingest
+    stale = [[0, "0", "0", "0", "100.0", "0"]]
+    monkeypatch.setattr(live_ingest, "_get_json_retry", lambda url, **kw: stale)
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=1, end_ms=86_400_000)
+
+
+def test_fetch_klines_1m_paginated_coverage_boundary(monkeypatch):
+    """Boundary test for the 0.98 coverage threshold (days=1, expected=1440, floor=1411.2).
+    A server with exactly 1400 bars (< floor) must raise; a server with 1440 (full)
+    must pass — the existing walks_pages test already covers the full-coverage path, so
+    we only assert the raise direction here."""
+    from tools.funding_carry import live_ingest
+    end_ms = 86_400_000  # 1 day in ms
+    # 1400 bars < 0.98 * 1440 = 1411.2 -> must raise
+    monkeypatch.setattr(live_ingest, "_get_json_retry",
+                        _fake_kline_pages(0, 1400, 1500))
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest.fetch_klines_1m_paginated(
+            "BTCUSDT", base_url="http://fake", days=1, end_ms=end_ms)
+
+
+# ---------------------------------------------------------------------------
+# walk_book (execution_cost Unit 1, spec REV 2.1 §3.2)
+# ---------------------------------------------------------------------------
+
+def _book(bids, asks):
+    return {"bids": bids, "asks": asks}
+
+def test_walk_book_buy_multi_level_exact():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 50.0), (101.0, 200.0)])
+    r = ec.walk_book(book, 10_000.0, "buy")
+    assert r["mid"] == pytest.approx(99.0)
+    assert r["qty_target"] == pytest.approx(10_000.0 / 99.0)
+    # fill = 50@100 + 51.0101@101 = 10152.0202; mid*qty = 10000 exactly
+    assert r["slippage_cost"] == pytest.approx(152.0202, abs=1e-3)
+    assert r["vwap"] == pytest.approx(10_152.0202 / (10_000.0 / 99.0), abs=1e-3)
+
+def test_walk_book_sell_single_level_exact():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    r = ec.walk_book(book, 10_000.0, "sell")
+    # mid=99, qty=101.0101, sell fills at 98 -> slippage = (99-98)*101.0101
+    assert r["slippage_cost"] == pytest.approx(10_000.0 / 99.0, abs=1e-6)
+    assert r["slippage_cost"] >= 0.0
+
+def test_walk_book_insufficient_depth_raises():
+    from tools.funding_carry import execution_cost as ec
+    book = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 50.0)])   # 50 qty < ~101 needed
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(book, 10_000.0, "buy")
+
+def test_walk_book_empty_side_raises_insufficient_depth():
+    from tools.funding_carry import execution_cost as ec
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(_book(bids=[], asks=[(100.0, 50.0)]), 10_000.0, "buy")
+    with pytest.raises(ec.InsufficientDepth):
+        ec.walk_book(_book(bids=[(98.0, 5.0)], asks=[]), 10_000.0, "sell")
+
+def test_roundtrip_real_cost_four_legs_all_in():
+    from tools.funding_carry import execution_cost as ec
+    spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    r = ec.roundtrip_real_cost(perp, spot)
+    slip_expected = 2 * (10_000.0 / 99.0) + 2 * 50.0      # 2 spot legs + 2 perp legs
+    assert r["slippage_total"] == pytest.approx(slip_expected, abs=1e-6)
+    assert r["fees_total"] == pytest.approx(30.0)          # 2x10bps + 2x5bps on 10k
+    assert r["cost_real"] == pytest.approx(slip_expected + 30.0, abs=1e-6)
+    assert set(r["legs"]) == {"spot_buy", "perp_sell", "spot_sell", "perp_buy"}
+    # Anchor which physical book fills which named leg (argument-swap guard).
+    assert r["legs"]["spot_buy"]["mid"] == pytest.approx(99.0)
+    assert r["legs"]["perp_sell"]["mid"] == pytest.approx(200.0)
+
+def test_roundtrip_real_cost_propagates_insufficient_depth():
+    from tools.funding_carry import execution_cost as ec
+    spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1.0)])   # too thin to buy
+    perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    with pytest.raises(ec.InsufficientDepth):
+        ec.roundtrip_real_cost(perp, spot)
+
+def test_t_floor_real_median_construction():
+    from tools.funding_carry import execution_cost as ec
+    # median([10, 20, 30])/10000/2.0 + 0.0 = 20/20000 = 0.001
+    assert ec.t_floor_real([10.0, 20.0, 30.0]) == pytest.approx(0.001)
+
+def test_t_floor_real_keystone_reproduces_frozen_t_floor():
+    """KEYSTONE (spec §3.4 / Adrian REV2-F5): cost_real := fossil cost_v3 values
+    => t_floor_real == power.cost_floor == frozen T_FLOOR. Fixed numeric expectation."""
+    import json as _json
+    from tools.funding_carry import execution_cost as ec
+    from tools.funding_carry.power import cost_floor
+    from tools.funding_carry.constants import (OUTPUT_DIR, T_FLOOR, NOTIONAL,
+                                               H_REF_YEARS, MARGIN)
+    path = os.path.join(OUTPUT_DIR, "per_symbol.json")
+    if not os.path.exists(path):
+        pytest.skip("fossil per_symbol.json not present in this checkout")
+    with open(path, encoding="utf-8") as fh:
+        records = _json.load(fh)
+    costs = [rec["cost_v3"] for rec in records]
+    tfr = ec.t_floor_real(costs)
+    assert tfr == pytest.approx(cost_floor(path, notional=NOTIONAL,
+                                           h_ref_years=H_REF_YEARS, margin=MARGIN))
+    assert tfr == pytest.approx(T_FLOOR)        # 0.0038575872804181457
+
+
+# ---------------------------------------------------------------------------
+# settlement_check / read_v01_state / verdict  (Task 8, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+_SETTLE = 8 * 3_600_000
+
+def _v01_state(tmp_path, **over):
+    """Fabricate a valid v0.1 state.json; override fields via kwargs (None deletes)."""
+    base = {
+        "run_ts_utc": "2026-06-04T08:05:00+00:00",
+        "decay_state": "THIN",
+        "R_pooled": 0.036, "R_ci_lo": 0.0094, "R_ci_hi": 0.0606,
+        "calibration_identity_hash": "CALHASH",
+    }
+    base.update(over)
+    for k, v in list(base.items()):
+        if v is None:
+            del base[k]
+    p = tmp_path / "funding_carry_state.json"
+    p.write_text(json.dumps(base), encoding="utf-8")
+    return str(p)
+
+def test_settlement_check_inside_window_returns_settlement():
+    from tools.funding_carry import execution_cost as ec
+    now = 1_780_531_200_000 + 10 * 60_000          # settlement + 10min
+    assert ec.settlement_check(now) == 1_780_531_200_000
+
+def test_settlement_check_off_window_aborts():
+    from tools.funding_carry import execution_cost as ec
+    now = 1_780_531_200_000 + 20 * 60_000          # settlement + 20min > 15
+    with pytest.raises(ec.AbortRun):
+        ec.settlement_check(now)
+
+def test_read_v01_state_happy_path(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path)
+    # now_ms is ~6.6h after the state's run_ts (2026-06-04T08:05:00+00:00 = 1780560300000ms)
+    now_ms = 1_780_584_060_000                      # state_ms + 6.6h, well within 26h
+    st = ec.read_v01_state(path, now_ms=now_ms)
+    assert st["R_ci_lo"] == 0.0094
+
+def test_read_v01_state_aborts_on_stale(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, run_ts_utc="2026-06-01T08:05:00+00:00")
+    # now_ms 78.6h after the stale state -> exceeds 26h bound
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)   # ~78.6h after stale state
+
+def test_read_v01_state_aborts_on_bad_decay_state(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    for bad in ("ERROR", "INCOMPLETE", "REFUTED"):
+        path = _v01_state(tmp_path, decay_state=bad)
+        with pytest.raises(ec.AbortRun):
+            ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_read_v01_state_aborts_clean_on_missing_keys(tmp_path):
+    # v0.1's ERROR branch omits R_ci_lo/R_ci_hi/calibration_identity_hash:
+    # the guard must hard-refuse cleanly, NOT crash with KeyError (Adrian REV2-F8).
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, R_ci_lo=None)
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_verdict_semantics_isomorphic_to_rev5():
+    from tools.funding_carry import execution_cost as ec
+    st = {"R_ci_lo": 0.0094, "R_ci_hi": 0.0606}
+    assert ec.verdict(0.002, st) == "PASS"      # ci_lo >= floor
+    assert ec.verdict(0.030, st) == "THIN"      # ci_lo < floor <= ci_hi
+    assert ec.verdict(0.080, st) == "FAIL"      # ci_hi < floor
+
+def test_read_v01_state_aborts_on_naive_timestamp(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    path = _v01_state(tmp_path, run_ts_utc="2026-06-04T08:05:00")   # no offset
+    with pytest.raises(ec.AbortRun):
+        ec.read_v01_state(path, now_ms=1_780_584_060_000)
+
+def test_settlement_check_boundary_exactly_window_min_allowed():
+    from tools.funding_carry import execution_cost as ec
+    s = 1_780_531_200_000
+    assert ec.settlement_check(s + 15 * 60_000) == s    # ==15.0min allowed (> excludes)
+
+
+# ---------------------------------------------------------------------------
+# _liq_ro + cost_v3_today  (Task 9, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+def _mk_ohlcv_db(path, n_bars=720):
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE ohlcv(symbol TEXT, timeframe TEXT, open_time INTEGER,"
+                " close REAL, volume REAL)")
+    for i in range(n_bars):
+        con.execute("INSERT INTO ohlcv VALUES('BTCUSDT','1h',?,100.0,60.0)",
+                    (i * 3_600_000,))
+    con.commit(); con.close()
+
+def test_liq_ro_matches_spot_liquidity_query(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    db = tmp_path / "ohlcv.db"
+    _mk_ohlcv_db(db)
+    liq = ec._liq_ro(str(db), "BTCUSDT", 720 * 3_600_000)
+    # 720 bars of close=100, vol=60 -> sum(100*60/60)/720 = 100.0
+    assert liq == pytest.approx(100.0)
+    # And identical to v0.1's spot_liquidity on the same data (same query semantics).
+    assert liq == pytest.approx(simulate.spot_liquidity(str(db), "BTCUSDT", 720 * 3_600_000))
+
+def test_liq_ro_nan_under_120_bars(tmp_path):
+    import math
+    from tools.funding_carry import execution_cost as ec
+    db = tmp_path / "thin.db"
+    _mk_ohlcv_db(db, n_bars=10)
+    assert math.isnan(ec._liq_ro(str(db), "BTCUSDT", 720 * 3_600_000))
+
+def test_cost_v3_today_uses_recost_four_legs(monkeypatch):
+    from tools.funding_carry import execution_cost as ec
+    seen = {}
+    def fake_recost(**kw):
+        seen.update(kw); return 42.0
+    monkeypatch.setattr(ec.simulate, "recost_four_legs", fake_recost)
+    out = ec.cost_v3_today("BTCUSDT", spot_mid=40_000.0, perp_mid=40_100.0, liq=5e6)
+    assert out == 42.0
+    assert seen["units"] == pytest.approx(10_000.0 / 40_000.0)   # NOTIONAL / spot_mid
+    assert seen["holding_hours"] == 17520                         # HOLDING_HOURS_DIAG frozen
+    assert seen["spot_price"] == 40_000.0 and seen["perp_price"] == 40_100.0
+    assert seen["liq"] == 5e6
+    assert seen["symbol"] == "BTCUSDT"
+
+
+# ---------------------------------------------------------------------------
+# U1 run()  (Task 10, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+_NOW = 1_780_531_200_000 + 5 * 60_000     # settlement (00:00Z 2026-06-04) + 5min, inside window
+
+
+def _exec_env(tmp_path, monkeypatch, *, state_over=None, books=None):
+    """Wire a full fake environment for execution_cost.run().
+
+    Returns (ec, state_path, out_dir, ohlcv_db) where ohlcv_db is a real
+    (empty) file so the ohlcv_db precondition passes; _liq_ro is still
+    monkeypatched so no actual query is executed."""
+    from tools.funding_carry import execution_cost as ec
+    from tools.funding_carry import live_ingest
+    state_path = _v01_state(tmp_path, run_ts_utc="2026-06-03T16:05:00+00:00",
+                            **(state_over or {}))
+    out_dir = str(tmp_path / "artifact")
+    # Create a real (empty) ohlcv.db so the precondition os.path.exists() passes.
+    ohlcv_db = str(tmp_path / "ohlcv.db")
+    open(ohlcv_db, "w").close()
+    good_spot = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 1000.0)])
+    good_perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
+    books = books if books is not None else {}
+    monkeypatch.setattr(live_ingest, "fetch_spot_depth",
+                        lambda s, **kw: books.get(("spot", s), good_spot))
+    monkeypatch.setattr(live_ingest, "fetch_perp_depth",
+                        lambda s, **kw: books.get(("perp", s), good_perp))
+    monkeypatch.setattr(ec, "_cal_hash", lambda: "CALHASH")
+    monkeypatch.setattr(ec, "_liq_ro", lambda db, s, ts, **kw: 5_000_000.0)
+    return ec, state_path, out_dir, ohlcv_db
+
+
+def test_run_happy_path_writes_verdict_and_artifact(tmp_path, monkeypatch):
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=ohlcv_db)
+    assert res["verdict"] in ("PASS", "THIN", "FAIL")     # computed, not ABORT/INVALID
+    assert res["t_floor_real"] > 0.0
+    assert res["floor_ratio_vs_v3"] == pytest.approx(res["t_floor_real"] / res["t_floor_v3"])
+    assert res["n_ok"] == 9 and res["insufficient"] == []
+    assert os.path.exists(os.path.join(out_dir, "per_symbol.json"))
+    assert os.path.exists(os.path.join(out_dir, "findings.md"))
+    assert os.path.isdir(os.path.join(out_dir, "depth_snapshots"))
+    with open(os.path.join(out_dir, "per_symbol.json"), encoding="utf-8") as fh:
+        per = json.load(fh)
+    assert set(per) == set(ec.SHADOW_SYMBOLS)
+    for rec in per.values():
+        assert rec["status"] == "OK"
+        assert "cost_real" in rec and "cost_v3_hoy" in rec and "ratio" in rec
+
+
+def test_run_aborts_off_window(tmp_path, monkeypatch):
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch)
+    res = ec.run(now_ms=1_780_531_200_000 + 60 * 60_000,   # settlement + 1h
+                 out_dir=out_dir, state_path=state_path, ohlcv_db=ohlcv_db)
+    assert res["verdict"] == "ABORT" and "off-window" in res["reason"]
+
+
+def test_run_aborts_on_calibration_drift(tmp_path, monkeypatch):
+    ec, state_path, out_dir, ohlcv_db = _exec_env(
+        tmp_path, monkeypatch, state_over={"calibration_identity_hash": "OTHER"})
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=ohlcv_db)
+    assert res["verdict"] == "ABORT" and "calibration" in res["reason"]
+
+
+def test_run_aborts_on_fetch_failed_never_shrinks_pool(tmp_path, monkeypatch):
+    from tools.funding_carry import live_ingest
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch)
+    def boom(s, **kw):
+        raise live_ingest.FetchFailed("rate limited")
+    monkeypatch.setattr(live_ingest, "fetch_perp_depth", boom)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=ohlcv_db)
+    assert res["verdict"] == "ABORT" and "FETCH_FAILED" in res["reason"]
+
+
+def test_run_invalid_above_max_insufficient(tmp_path, monkeypatch):
+    from tools.funding_carry.constants import SHADOW_SYMBOLS
+    thin = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 0.001)])   # cannot fill buy
+    books = {("spot", s): thin for s in SHADOW_SYMBOLS[:3]}      # k=3 > MAX=2
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch, books=books)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=ohlcv_db)
+    assert res["verdict"] == "INVALID"
+    assert sorted(res["insufficient"]) == sorted(SHADOW_SYMBOLS[:3])
+
+
+def test_run_flags_but_proceeds_at_max_insufficient(tmp_path, monkeypatch):
+    from tools.funding_carry.constants import SHADOW_SYMBOLS
+    thin = _book(bids=[(98.0, 1000.0)], asks=[(100.0, 0.001)])
+    books = {("spot", s): thin for s in SHADOW_SYMBOLS[:2]}      # k=2 == MAX -> proceed
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch, books=books)
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=ohlcv_db)
+    assert res["verdict"] in ("PASS", "THIN", "FAIL")
+    assert len(res["insufficient"]) == 2 and res["n_ok"] == 7
+
+
+def test_run_never_writes_data_shadow(tmp_path, monkeypatch):
+    # NN spec §7: data/shadow/ is v0.1's namespace. run() must not create/modify it.
+    ec, state_path, out_dir, ohlcv_db = _exec_env(tmp_path, monkeypatch)
+    shadow_dir = tmp_path / "data" / "shadow"
+    monkeypatch.chdir(tmp_path)
+    ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path, ohlcv_db=ohlcv_db)
+    assert not shadow_dir.exists()
+
+
+def test_run_aborts_on_missing_ohlcv_db(tmp_path, monkeypatch):
+    ec, state_path, out_dir, _real_db = _exec_env(tmp_path, monkeypatch)
+    # un-monkeypatch _liq_ro so the precondition is what protects us
+    res = ec.run(now_ms=_NOW, out_dir=out_dir, state_path=state_path,
+                 ohlcv_db=str(tmp_path / "missing.db"))
+    assert res["verdict"] == "ABORT" and "ohlcv_db missing" in res["reason"]
+
+
+# ---------------------------------------------------------------------------
+# leg_lag — Unit 2 (spec REV 2.1 §4): basis_sigma_1m + scale_to_window
+# ---------------------------------------------------------------------------
+
+def test_basis_sigma_1m_deterministic():
+    from tools.funding_carry import leg_lag
+    # spot constant 100; perp alternates 100.0 / 100.1 -> basis 0, 0.001, 0, 0.001
+    # deltas = +0.001, -0.001, +0.001 -> stdev = sqrt( sum((d-mean)^2)/(n-1) )
+    spot = [(i * 60_000, 100.0) for i in range(4)]
+    perp = [(0, 100.0), (60_000, 100.1), (120_000, 100.0), (180_000, 100.1)]
+    s = leg_lag.basis_sigma_1m(spot, perp)
+    assert s == pytest.approx(statistics.stdev([0.001, -0.001, 0.001]))
+
+def test_basis_sigma_1m_aligns_on_common_timestamps():
+    from tools.funding_carry import leg_lag
+    spot = [(0, 100.0), (60_000, 100.0), (120_000, 100.0)]
+    perp = [(0, 100.0), (120_000, 100.2)]          # missing the middle bar
+    s = leg_lag.basis_sigma_1m(spot, perp)
+    # only ts {0, 120000} align -> basis [0, 0.002] -> one delta -> stdev of 1 value
+    # is undefined: function must return 0.0 for < 2 deltas, not crash.
+    assert s == 0.0
+
+def test_scale_to_window_sqrt_t():
+    import math
+    from tools.funding_carry import leg_lag
+    assert leg_lag.scale_to_window(0.004, 60) == pytest.approx(0.004)
+    assert leg_lag.scale_to_window(0.004, 15) == pytest.approx(0.002)
+    assert leg_lag.scale_to_window(0.004, 300) == pytest.approx(0.004 * math.sqrt(5))
+
+
+def test_leg_lag_run_emits_table_no_verdict(tmp_path, monkeypatch):
+    from tools.funding_carry import leg_lag, live_ingest
+    # 1m series with constant tiny basis wiggle, full coverage.
+    n = int(0.99 * 30 * 1440)
+    spot = [(i * 60_000, 100.0) for i in range(n)]
+    perp = [(i * 60_000, 100.0 + 0.05 * (i % 2)) for i in range(n)]
+    def fake_fetch(symbol, *, base_url, days, end_ms, **kw):
+        return spot if "fapi.binance.com" not in base_url else perp
+    monkeypatch.setattr(live_ingest, "fetch_klines_1m_paginated", fake_fetch)
+    out_dir = str(tmp_path / "artifact")
+    res = leg_lag.run(now_ms=n * 60_000, out_dir=out_dir)
+    assert set(res["per_symbol"]) == set(leg_lag.SHADOW_SYMBOLS)
+    row = res["per_symbol"]["BTCUSDT"]
+    assert row["sigma_1m"] > 0.0
+    assert set(row["per_event_usd"]) == {1, 10, 60, 300}      # the full sweep
+    for t in (1, 10, 60, 300):
+        assert row["hold_continuo_usd"][t] == pytest.approx(
+            row["per_event_usd"][t] * (2 ** 0.5))             # sqrt(2) aggregate labeled apart
+    # NO verdict anywhere — descriptive by design (spec §4).
+    assert "verdict" not in res
+    assert os.path.exists(os.path.join(out_dir, "leg_lag.json"))
+    assert os.path.exists(os.path.join(out_dir, "leg_lag.md"))
+
+
+def test_leg_lag_run_propagates_short_series_fetch_failed(tmp_path, monkeypatch):
+    from tools.funding_carry import leg_lag, live_ingest
+    def boom(symbol, *, base_url, days, end_ms, **kw):
+        raise live_ingest.FetchFailed("short series")
+    monkeypatch.setattr(live_ingest, "fetch_klines_1m_paginated", boom)
+    out_dir = str(tmp_path / "artifact")
+    with pytest.raises(live_ingest.FetchFailed):
+        leg_lag.run(now_ms=86_400_000, out_dir=out_dir)
+    assert not os.path.exists(os.path.join(out_dir, "leg_lag.json"))
