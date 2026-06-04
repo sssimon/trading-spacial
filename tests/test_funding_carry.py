@@ -752,3 +752,27 @@ def test_roundtrip_real_cost_propagates_insufficient_depth():
     perp = _book(bids=[(199.0, 1000.0)], asks=[(201.0, 1000.0)])
     with pytest.raises(ec.InsufficientDepth):
         ec.roundtrip_real_cost(perp, spot)
+
+def test_t_floor_real_median_construction():
+    from tools.funding_carry import execution_cost as ec
+    # median([10, 20, 30])/10000/2.0 + 0.0 = 20/20000 = 0.001
+    assert ec.t_floor_real([10.0, 20.0, 30.0]) == pytest.approx(0.001)
+
+def test_t_floor_real_keystone_reproduces_frozen_t_floor():
+    """KEYSTONE (spec §3.4 / Adrian REV2-F5): cost_real := fossil cost_v3 values
+    => t_floor_real == power.cost_floor == frozen T_FLOOR. Fixed numeric expectation."""
+    import json as _json
+    from tools.funding_carry import execution_cost as ec
+    from tools.funding_carry.power import cost_floor
+    from tools.funding_carry.constants import (OUTPUT_DIR, T_FLOOR, NOTIONAL,
+                                               H_REF_YEARS, MARGIN)
+    path = os.path.join(OUTPUT_DIR, "per_symbol.json")
+    if not os.path.exists(path):
+        pytest.skip("fossil per_symbol.json not present in this checkout")
+    with open(path, encoding="utf-8") as fh:
+        records = _json.load(fh)
+    costs = [rec["cost_v3"] for rec in records]
+    tfr = ec.t_floor_real(costs)
+    assert tfr == pytest.approx(cost_floor(path, notional=NOTIONAL,
+                                           h_ref_years=H_REF_YEARS, margin=MARGIN))
+    assert tfr == pytest.approx(T_FLOOR)        # 0.0038575872804181457

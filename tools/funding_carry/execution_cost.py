@@ -86,3 +86,14 @@ def roundtrip_real_cost(perp_book: dict, spot_book: dict, *, notional: float = N
     fees = 2 * notional * spot_fee + 2 * notional * perp_fee
     return {"cost_real": slip + fees, "slippage_total": slip,
             "fees_total": fees, "legs": legs}
+
+
+def t_floor_real(costs_usd: list[float], *, notional: float = NOTIONAL,
+                 h_ref_years: float = H_REF_YEARS, margin: float = MARGIN) -> float:
+    """Annualized REAL cost floor: median(cost/notional)/h_ref_years + margin.
+    Construction IDENTICAL to power.cost_floor (median — PENDLE's cost is ~40x
+    others; per-leg NOTIONAL denominator; H_REF amortization) with the live
+    walked-book cost in place of the fossil's cost_v3. Keystone: feeding the
+    fossil's cost_v3 values must reproduce the frozen T_FLOOR exactly."""
+    per_sym = [c / notional for c in costs_usd]
+    return statistics.median(per_sym) / h_ref_years + margin
