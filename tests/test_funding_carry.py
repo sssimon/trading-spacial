@@ -859,3 +859,46 @@ def test_settlement_check_boundary_exactly_window_min_allowed():
     from tools.funding_carry import execution_cost as ec
     s = 1_780_531_200_000
     assert ec.settlement_check(s + 15 * 60_000) == s    # ==15.0min allowed (> excludes)
+
+
+# ---------------------------------------------------------------------------
+# _liq_ro + cost_v3_today  (Task 9, spec REV 2.1 §3)
+# ---------------------------------------------------------------------------
+
+def _mk_ohlcv_db(path, n_bars=720):
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE ohlcv(symbol TEXT, timeframe TEXT, open_time INTEGER,"
+                " close REAL, volume REAL)")
+    for i in range(n_bars):
+        con.execute("INSERT INTO ohlcv VALUES('BTCUSDT','1h',?,100.0,60.0)",
+                    (i * 3_600_000,))
+    con.commit(); con.close()
+
+def test_liq_ro_matches_spot_liquidity_query(tmp_path):
+    from tools.funding_carry import execution_cost as ec
+    db = tmp_path / "ohlcv.db"
+    _mk_ohlcv_db(db)
+    liq = ec._liq_ro(str(db), "BTCUSDT", 720 * 3_600_000)
+    # 720 bars of close=100, vol=60 -> sum(100*60/60)/720 = 100.0
+    assert liq == pytest.approx(100.0)
+    # And identical to v0.1's spot_liquidity on the same data (same query semantics).
+    assert liq == pytest.approx(simulate.spot_liquidity(str(db), "BTCUSDT", 720 * 3_600_000))
+
+def test_liq_ro_nan_under_120_bars(tmp_path):
+    import math
+    from tools.funding_carry import execution_cost as ec
+    db = tmp_path / "thin.db"
+    _mk_ohlcv_db(db, n_bars=10)
+    assert math.isnan(ec._liq_ro(str(db), "BTCUSDT", 720 * 3_600_000))
+
+def test_cost_v3_today_uses_recost_four_legs(monkeypatch):
+    from tools.funding_carry import execution_cost as ec
+    seen = {}
+    def fake_recost(**kw):
+        seen.update(kw); return 42.0
+    monkeypatch.setattr(ec.simulate, "recost_four_legs", fake_recost)
+    out = ec.cost_v3_today("BTCUSDT", spot_mid=40_000.0, perp_mid=40_100.0, liq=5e6)
+    assert out == 42.0
+    assert seen["units"] == pytest.approx(10_000.0 / 40_000.0)   # NOTIONAL / spot_mid
+    assert seen["holding_hours"] == 17520                         # HOLDING_HOURS_DIAG frozen
+    assert seen["spot_price"] == 40_000.0 and seen["perp_price"] == 40_100.0

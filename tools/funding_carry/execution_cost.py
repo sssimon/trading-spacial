@@ -150,3 +150,32 @@ def verdict(t_floor_real_val: float, state: dict) -> str:
     if state["R_ci_hi"] < t_floor_real_val:
         return "FAIL"
     return "THIN"
+
+
+def _liq_ro(ohlcv_db: str, symbol: str, ts_ms: int, *,
+            busy_timeout_ms: int = 5000) -> float:
+    """spot_liquidity's exact query with an explicit busy_timeout on an own read-only
+    connection — v0.2 must not modify v0.1 functions and must not hit SQLITE_BUSY
+    against scanner writes (spec §3 / Adrian REV2-F10). Same semantics: 30-day
+    rolling USD/min proxy from spot 1h bars; NaN under 120 bars."""
+    with closing(sqlite3.connect(f"file:{ohlcv_db}?mode=ro", uri=True)) as con:
+        con.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
+        rows = con.execute(
+            "SELECT close, volume FROM ohlcv WHERE symbol=? AND timeframe='1h' "
+            "AND open_time<=? ORDER BY open_time DESC LIMIT 720",
+            (symbol, ts_ms)).fetchall()
+    if len(rows) < 120:
+        return float("nan")
+    return sum(c * v / 60.0 for c, v in rows) / len(rows)
+
+
+def cost_v3_today(symbol: str, *, spot_mid: float, perp_mid: float, liq: float,
+                  holding_hours: float = HOLDING_HOURS_DIAG) -> float:
+    """Same-epoch v3 cost via the SAME function that produced the fossil's cost_v3
+    (recost_four_legs — one invocation, not a hand reconstruction of
+    compute_trade_costs; Adrian REV2-F9), with live mids/liq and the frozen
+    diagnostic holding. Same 4-leg basis as roundtrip_real_cost by construction."""
+    units = NOTIONAL / spot_mid
+    return simulate.recost_four_legs(symbol=symbol, units=units, spot_price=spot_mid,
+                                     perp_price=perp_mid, liq=liq,
+                                     holding_hours=holding_hours)
