@@ -11,6 +11,7 @@ basis (§6.4). Fail-LOUD: a short klines series raises FetchFailed (never sigma
 over 25h labeled 30d)."""
 from __future__ import annotations
 import json
+import logging
 import math
 import os
 import statistics
@@ -18,6 +19,8 @@ from datetime import datetime, timezone
 from .constants import (SHADOW_SYMBOLS, NOTIONAL, LEG_LAG_DAYS, LEG_LAG_T_SWEEP,
                         SPOT_KLINES_1M, FAPI_MARK_KLINES,
                         EXEC_REALISM_OUTPUT_DIR, EXEC_REALISM_VERSION)
+
+log = logging.getLogger("funding_carry.leg_lag")
 
 
 def basis_sigma_1m(spot_closes: list[tuple[int, float]],
@@ -76,12 +79,13 @@ def run(*, now_ms: int, out_dir: str = EXEC_REALISM_OUTPUT_DIR,
     from . import live_ingest
     run_ts = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
     per: dict = {}
-    for s in symbols:
+    for i, s in enumerate(symbols):
         spot = live_ingest.fetch_klines_1m_paginated(
             s, base_url=SPOT_KLINES_1M, days=days, end_ms=now_ms)
         perp = live_ingest.fetch_klines_1m_paginated(
             s, base_url=FAPI_MARK_KLINES, days=days, end_ms=now_ms)
         s1 = basis_sigma_1m(spot, perp)
+        log.info("leg_lag %s: sigma_1m=%.3e (%d/%d)", s, s1, i + 1, len(symbols))
         per_event = {t: scale_to_window(s1, t) * NOTIONAL for t in LEG_LAG_T_SWEEP}
         per[s] = {"sigma_1m": s1,
                   "per_event_usd": per_event,
@@ -97,4 +101,5 @@ def run(*, now_ms: int, out_dir: str = EXEC_REALISM_OUTPUT_DIR,
 
 if __name__ == "__main__":
     import time
+    logging.basicConfig(level=logging.INFO)
     print(json.dumps(run(now_ms=int(time.time() * 1000)), indent=2))

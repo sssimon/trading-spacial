@@ -1075,3 +1075,14 @@ def test_leg_lag_run_emits_table_no_verdict(tmp_path, monkeypatch):
     assert "verdict" not in res
     assert os.path.exists(os.path.join(out_dir, "leg_lag.json"))
     assert os.path.exists(os.path.join(out_dir, "leg_lag.md"))
+
+
+def test_leg_lag_run_propagates_short_series_fetch_failed(tmp_path, monkeypatch):
+    from tools.funding_carry import leg_lag, live_ingest
+    def boom(symbol, *, base_url, days, end_ms, **kw):
+        raise live_ingest.FetchFailed("short series")
+    monkeypatch.setattr(live_ingest, "fetch_klines_1m_paginated", boom)
+    out_dir = str(tmp_path / "artifact")
+    with pytest.raises(live_ingest.FetchFailed):
+        leg_lag.run(now_ms=86_400_000, out_dir=out_dir)
+    assert not os.path.exists(os.path.join(out_dir, "leg_lag.json"))
