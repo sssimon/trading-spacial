@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
+import urllib.error
 import urllib.request
 from contextlib import closing
 from .constants import FAPI_FUNDING, FAPI_MARK_KLINES, FAPI_SPOT, FUNDING_DB
@@ -97,3 +99,40 @@ def ingest_live(symbols: list[str], *, db_path: str = FUNDING_DB,
         nk = append_perp_klines(db_path, s, klines) if klines else 0
         summary[s] = {"funding": nf, "klines": nk}
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Execution-realism v0.2 fetchers (spec 2026-06-03 REV 2.1 §5).
+# v0.2 policy is fail-LOUD: FetchFailed propagates and the caller ABORTs the whole
+# run — the verdict sample must NEVER be a function of network weather (Halberg).
+# v0.1 functions above keep their bare _get_json + fail-soft contract, untouched.
+# ---------------------------------------------------------------------------
+
+class FetchFailed(Exception):
+    """Network/HTTP failure after bounded retries. v0.2 callers ABORT, never shrink the pool."""
+
+
+def _default_open(url: str, timeout: int):
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        used = resp.headers.get("X-MBX-USED-WEIGHT-1M")
+        if used:
+            log.info("binance used-weight-1m=%s (%s)", used, url.split("?")[0])
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _get_json_retry(url: str, *, timeout: int = 30, retries: int = 3,
+                    backoff_s: float = 2.0, _open=_default_open, _sleep=time.sleep):
+    """GET+parse with bounded retry. Honors Retry-After on HTTP 429/418 (rate-limit),
+    generic linear backoff otherwise. Raises FetchFailed after exhausting retries."""
+    last: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return _open(url, timeout)
+        except urllib.error.HTTPError as e:
+            last = e
+            ra = e.headers.get("Retry-After") if e.code in (429, 418) and e.headers else None
+            _sleep(float(ra) if ra else backoff_s * (attempt + 1))
+        except Exception as e:                   # noqa: BLE001 — converted to FetchFailed below
+            last = e
+            _sleep(backoff_s * (attempt + 1))
+    raise FetchFailed(f"{url}: {last!r}")

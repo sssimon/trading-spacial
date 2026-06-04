@@ -571,3 +571,38 @@ def test_v02_constants_frozen():
     assert C.HOLDING_HOURS_DIAG == 17520          # H_REF_YEARS * 8760
     assert C.KLINE_PAGE_LIMIT == 1500 and C.KLINE_MIN_COVERAGE == 0.98
     assert C.EXEC_REALISM_VERSION == "v0.2"
+
+
+def test_get_json_retry_succeeds_after_transient_error():
+    from tools.funding_carry import live_ingest
+    calls = {"n": 0}
+    def fake_open(url, timeout):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionResetError("transient")
+        return [{"ok": True}]
+    out = live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=lambda s: None)
+    assert out == [{"ok": True}] and calls["n"] == 3
+
+def test_get_json_retry_raises_fetch_failed_after_exhaustion():
+    from tools.funding_carry import live_ingest
+    def fake_open(url, timeout):
+        raise ConnectionResetError("down")
+    with pytest.raises(live_ingest.FetchFailed):
+        live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=lambda s: None)
+
+def test_get_json_retry_honors_retry_after_on_429():
+    import urllib.error
+    from email.message import Message
+    from tools.funding_carry import live_ingest
+    sleeps = []
+    calls = {"n": 0}
+    hdrs = Message(); hdrs["Retry-After"] = "7"
+    def fake_open(url, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError("http://x", 429, "rate", hdrs, None)
+        return {"ok": 1}
+    out = live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=sleeps.append)
+    assert out == {"ok": 1}
+    assert sleeps == [7.0]      # Retry-After respected, not generic backoff
