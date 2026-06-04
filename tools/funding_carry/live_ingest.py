@@ -123,16 +123,29 @@ def _default_open(url: str, timeout: int):
 def _get_json_retry(url: str, *, timeout: int = 30, retries: int = 3,
                     backoff_s: float = 2.0, _open=_default_open, _sleep=time.sleep):
     """GET+parse with bounded retry. Honors Retry-After on HTTP 429/418 (rate-limit),
-    generic linear backoff otherwise. Raises FetchFailed after exhausting retries."""
+    generic linear backoff otherwise. Raises FetchFailed after exhausting retries.
+
+    ``retries=N`` means N TOTAL attempts (not N retries after the first).
+    ``retries=0`` fails immediately with FetchFailed — no attempt is made.
+    """
     last: Exception | None = None
     for attempt in range(retries):
         try:
             return _open(url, timeout)
         except urllib.error.HTTPError as e:
             last = e
-            ra = e.headers.get("Retry-After") if e.code in (429, 418) and e.headers else None
-            _sleep(float(ra) if ra else backoff_s * (attempt + 1))
+            if attempt < retries - 1:
+                ra = e.headers.get("Retry-After") if e.code in (429, 418) and e.headers else None
+                if ra is not None:
+                    try:
+                        delay = float(ra)
+                    except ValueError:
+                        delay = backoff_s * (attempt + 1)
+                else:
+                    delay = backoff_s * (attempt + 1)
+                _sleep(delay)
         except Exception as e:                   # noqa: BLE001 — converted to FetchFailed below
             last = e
-            _sleep(backoff_s * (attempt + 1))
+            if attempt < retries - 1:
+                _sleep(backoff_s * (attempt + 1))
     raise FetchFailed(f"{url}: {last!r}")

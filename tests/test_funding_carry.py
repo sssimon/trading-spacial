@@ -588,8 +588,10 @@ def test_get_json_retry_raises_fetch_failed_after_exhaustion():
     from tools.funding_carry import live_ingest
     def fake_open(url, timeout):
         raise ConnectionResetError("down")
+    sleeps = []
     with pytest.raises(live_ingest.FetchFailed):
-        live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=lambda s: None)
+        live_ingest._get_json_retry("http://x", _open=fake_open, _sleep=sleeps.append)
+    assert len(sleeps) == 2   # 3 attempts → 2 inter-attempt sleeps; no sleep after final failure
 
 def test_get_json_retry_honors_retry_after_on_429():
     import urllib.error
