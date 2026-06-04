@@ -902,3 +902,5 @@ def test_cost_v3_today_uses_recost_four_legs(monkeypatch):
     assert seen["units"] == pytest.approx(10_000.0 / 40_000.0)   # NOTIONAL / spot_mid
     assert seen["holding_hours"] == 17520                         # HOLDING_HOURS_DIAG frozen
     assert seen["spot_price"] == 40_000.0 and seen["perp_price"] == 40_100.0
+    assert seen["liq"] == 5e6
+    assert seen["symbol"] == "BTCUSDT"
