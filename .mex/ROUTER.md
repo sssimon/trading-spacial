@@ -14,7 +14,7 @@ edges:
     condition: when starting services, debugging boot-up, or installing dependencies
   - target: patterns/INDEX.md
     condition: at the start of every task — check the pattern index for a matching pattern file
-last_updated: 2026-05-26
+last_updated: 2026-06-04
 ---
 
 # Session Bootstrap
@@ -60,6 +60,7 @@ Load the relevant file based on the current task. At the start of every task, ch
 | Starting services, install issues, watchdog setup | `context/setup.md` |
 | Considering admin-merge / CI bypass / failing tests on a PR | `context/ci-discipline.md` |
 | Writing a PR body — choosing the right verb for `<Verb> #N` references | `context/verb-taxonomy.md` |
+| Estudiar una celda de edge (programa Edición 1), preparar dossier de deploy | `patterns/estudiar-una-celda.md` + `programa/INDEX.md` |
 
 ## Behavioural Contract
 

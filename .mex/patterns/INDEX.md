@@ -1,7 +1,7 @@
 ---
 name: patterns-index
 description: Index of pattern files. Each pattern is a task-shaped runbook with steps + gotchas + verification. ROUTER.md tells you to check this file at the start of any task.
-last_updated: 2026-05-26
+last_updated: 2026-06-04
 ---
 
 # Pattern Index
@@ -15,6 +15,7 @@ last_updated: 2026-05-26
 | Fire a falsification read of the locked holdout (A.4-3, #322) | [firing-the-holdout.md](firing-the-holdout.md) |
 | Compute live portfolio drawdown / equity (kill-switch, shadow, dashboard) | [computing-portfolio-dd.md](computing-portfolio-dd.md) |
 | Touch the backtest cost model / calibration (v3 two-body bound) | [cost-model-v3.md](cost-model-v3.md) |
+| Abrir, correr o cerrar una celda del programa de edge (Edición 1) | [estudiar-una-celda.md](estudiar-una-celda.md) |
 
 ## How to grow this index
 
