@@ -144,7 +144,7 @@ def main() -> int:
     print("listando perps de Vision...")
     perps = list_perp_symbols()
     target = sorted(panel & perps)
-    print(f"panel ∩ perps: {len(target)} símbolos")
+    print(f"panel x perps: {len(target)} simbolos")  # ASCII: consola Windows cp1252
 
     init_futures_tables(PROGRAM_DB)
     months = _months_in_window()
