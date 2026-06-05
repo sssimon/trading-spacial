@@ -1,7 +1,7 @@
 ---
 name: programa-index
 description: Estado vivo de la Edición 1 del programa de investigación de edge. Tabla de celdas (verbo/estado/veredicto/coordenada/artefacto), candidatas a Edición 2, preguntas abiertas. Constitución: docs/superpowers/specs/2026-06-04-programa-edge-marco-design.md. Runbook: ../patterns/estudiar-una-celda.md.
-last_updated: 2026-06-04
+last_updated: 2026-06-05
 ---
 
 # Programa de investigación de edge — Edición 1
@@ -20,10 +20,10 @@ comparación en prosa la atrapa la revisión.
 | 2 | carry-funding | F | CERRADA | PASS (6.33%/año net-v3, CI95[5.02,7.45]) | E1/F/n_F=2 | data/retune/2026-06-03-funding-carry-falsification/ |
 | 3 | cross-sectional-factor | F | BLOQUEADA-POR-DATA | — | — | — |
 | 4 | stat-arb | F | ABIERTA | — | — | — |
-| 5 | market-making | R | ABIERTA | — | — | — |
-| 6 | mev-latencia | C | ABIERTA | — | — | — |
-| 7 | vrp-opciones | R | ABIERTA | — | — | — |
-| 8 | on-chain-flow | D | ABIERTA | — | — | — |
+| 5 | market-making | R | CERRADA | INVIABLE-RETAIL | E1/R/n_F=2 | data/retune/programa-celdas/celda5-market-making/ |
+| 6 | mev-latencia | C | CERRADA | EXCLUIDA | E1/C/n_F=2 | data/retune/programa-celdas/celda6-mev-latencia/ |
+| 7 | vrp-opciones | R | CERRADA | INVIABLE-RETAIL | E1/R/n_F=2 | data/retune/programa-celdas/celda7-vrp-opciones/ |
+| 8 | on-chain-flow | D | CERRADA | DEGRADADA | E1/D/n_F=2 | data/retune/programa-celdas/celda8-on-chain-flow/ |
 | 9 | event-unlocks | F | ABIERTA | — | — | — |
 
 Notas de coordenada retroactiva (los fósiles de `data/retune/2026-06-03-*` no

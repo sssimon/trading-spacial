@@ -1,0 +1,15 @@
+{
+  "verdict": "INVIABLE-RETAIL",
+  "coordenada": {
+    "edicion": 1,
+    "celda": "market-making",
+    "verbo": "R",
+    "n_f_corridas_a_la_fecha": 2
+  },
+  "fecha": "2026-06-05",
+  "pre_registro": "criterios.md commiteado pre-survey (faa81dd, 2026-06-05)",
+  "criterio_gatillado": "D2-fee-tiers (fuente primaria Binance); D1 NO gatillo limpio (latencia cruda comprable <100 USD/mes), D3 soporte direccional sin el cardinal de regimen normal",
+  "por_que_no_requiere_infra": "el bloqueo dominante es un piso de VOLUMEN mensual (VIP9 / programas MM), no una pieza comprable con dinero a escala 5 cifras",
+  "condicion_reapertura": "ver findings.md — cambio estructural del fee schedule (maker rebate en tier base) o venue liquido accesible con rebate retail",
+  "n_fuentes": 11
+}

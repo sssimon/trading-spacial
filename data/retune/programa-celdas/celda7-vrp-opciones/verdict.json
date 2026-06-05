@@ -1,0 +1,15 @@
+{
+  "verdict": "INVIABLE-RETAIL",
+  "coordenada": {
+    "edicion": 1,
+    "celda": "vrp-opciones",
+    "verbo": "R",
+    "n_f_corridas_a_la_fecha": 2
+  },
+  "fecha": "2026-06-05",
+  "pre_registro": "criterios.md commiteado pre-survey (faa81dd, 2026-06-05)",
+  "criterios_gatillados": "D1-clausula-margen (minimo portfolio-margin de Deribit excede 5 cifras bajas) + D2-riesgo-no-acotable (standard margin sin neteo + cola gamma documentada); D1-jurisdiccion NO gatilla (acceso abierto)",
+  "capas_adicionales_documentadas": "X1 data strike-level de pago (DVOL gratis no basta para falsificador $-denominado), X2 motor de opciones inversas inexistente en repo (pricing no-BS-estandar, orden semanas-persona), X3 friccion de ejecucion OTM material (cost-model v3 no aplica)",
+  "condicion_reapertura": "ver findings.md — conjuncion: capital 6 cifras (o venue liquido con neteo retail) Y data X1 adquirida Y motor X2 construido",
+  "n_fuentes": 16
+}
