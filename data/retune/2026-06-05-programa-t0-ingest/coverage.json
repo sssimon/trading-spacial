@@ -1,0 +1,963 @@
+{
+  "db": "data/program_ohlcv.db",
+  "symbols": {
+    "1INCHUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AAVEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ADAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AIONUSDT": {
+      "gap_months": [],
+      "months_fetched": 26,
+      "rows": 18884
+    },
+    "AKROUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 34885
+    },
+    "ALGOUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ALPHAUSDT": {
+      "gap_months": [],
+      "months_fetched": 55,
+      "rows": 39469
+    },
+    "ANKRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ANTUSDT": {
+      "gap_months": [],
+      "months_fetched": 38,
+      "rows": 27469
+    },
+    "ARDRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ARPAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ASRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ATMUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ATOMUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AUDIOUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AVAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AVAXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "AXSUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BALUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 37573
+    },
+    "BANDUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BATUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BCHUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BEAMUSDT": {
+      "gap_months": [],
+      "months_fetched": 25,
+      "rows": 18116
+    },
+    "BELUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BLZUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 34885
+    },
+    "BNBUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BNTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BTCSTUSDT": {
+      "gap_months": [],
+      "months_fetched": 23,
+      "rows": 16304
+    },
+    "BTCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "BTSUSDT": {
+      "gap_months": [],
+      "months_fetched": 36,
+      "rows": 25669
+    },
+    "BTTUSDT": {
+      "gap_months": [],
+      "months_fetched": 13,
+      "rows": 9135
+    },
+    "BZRXUSDT": {
+      "gap_months": [],
+      "months_fetched": 12,
+      "rows": 8463
+    },
+    "CELOUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47330
+    },
+    "CELRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CHRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CHZUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CKBUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 46822
+    },
+    "COCOSUSDT": {
+      "gap_months": [],
+      "months_fetched": 29,
+      "rows": 20970
+    },
+    "COMPUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "COSUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "COTIUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CRVUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CTKUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CTSIUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "CTXCUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 37573
+    },
+    "CVCUSDT": {
+      "gap_months": [
+        "2023-01",
+        "2023-02",
+        "2023-03",
+        "2023-04"
+      ],
+      "months_fetched": 61,
+      "rows": 43734
+    },
+    "DASHUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DATAUSDT": {
+      "gap_months": [],
+      "months_fetched": 62,
+      "rows": 44845
+    },
+    "DCRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DENTUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46621
+    },
+    "DGBUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DIAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DNTUSDT": {
+      "gap_months": [],
+      "months_fetched": 22,
+      "rows": 15860
+    },
+    "DOCKUSDT": {
+      "gap_months": [],
+      "months_fetched": 43,
+      "rows": 31141
+    },
+    "DOGEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DOTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "DREPUSDT": {
+      "gap_months": [],
+      "months_fetched": 40,
+      "rows": 28405
+    },
+    "DUSKUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "EGLDUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ENJUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "EOSUSDT": {
+      "gap_months": [],
+      "months_fetched": 53,
+      "rows": 38533
+    },
+    "ETCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ETHUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "FETUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "FILUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "FIOUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46501
+    },
+    "FIROUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 36899
+    },
+    "FLMUSDT": {
+      "gap_months": [],
+      "months_fetched": 59,
+      "rows": 42613
+    },
+    "FTMUSDT": {
+      "gap_months": [],
+      "months_fetched": 49,
+      "rows": 35341
+    },
+    "FTTUSDT": {
+      "gap_months": [
+        "2022-12",
+        "2023-01",
+        "2023-02",
+        "2023-03",
+        "2023-04",
+        "2023-05",
+        "2023-06",
+        "2023-07",
+        "2023-08"
+      ],
+      "months_fetched": 56,
+      "rows": 39968
+    },
+    "FUNUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46501
+    },
+    "GRTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "GTOUSDT": {
+      "gap_months": [],
+      "months_fetched": 23,
+      "rows": 16694
+    },
+    "GXSUSDT": {
+      "gap_months": [],
+      "months_fetched": 16,
+      "rows": 11487
+    },
+    "HARDUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 37573
+    },
+    "HBARUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "HIVEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "HNTUSDT": {
+      "gap_months": [],
+      "months_fetched": 22,
+      "rows": 15614
+    },
+    "HOTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ICXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "INJUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "IOSTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "IOTAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "IOTXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "IRISUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 34525
+    },
+    "JSTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "JUVUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 49666
+    },
+    "KAVAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "KEYUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 33848
+    },
+    "KMDUSDT": {
+      "gap_months": [],
+      "months_fetched": 55,
+      "rows": 39469
+    },
+    "KNCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "KSMUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "LINKUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "LRCUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 45973
+    },
+    "LSKUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "LTCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "LTOUSDT": {
+      "gap_months": [],
+      "months_fetched": 55,
+      "rows": 39469
+    },
+    "LUNAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 46997
+    },
+    "MANAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "MATICUSDT": {
+      "gap_months": [],
+      "months_fetched": 45,
+      "rows": 32341
+    },
+    "MBLUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "MDTUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46501
+    },
+    "MFTUSDT": {
+      "gap_months": [],
+      "months_fetched": 25,
+      "rows": 17558
+    },
+    "MITHUSDT": {
+      "gap_months": [],
+      "months_fetched": 24,
+      "rows": 17276
+    },
+    "MKRUSDT": {
+      "gap_months": [],
+      "months_fetched": 57,
+      "rows": 41221
+    },
+    "MTLUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "NANOUSDT": {
+      "gap_months": [],
+      "months_fetched": 13,
+      "rows": 9303
+    },
+    "NBSUSDT": {
+      "gap_months": [],
+      "months_fetched": 22,
+      "rows": 15860
+    },
+    "NEARUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "NEOUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "NKNUSDT": {
+      "gap_months": [],
+      "months_fetched": 62,
+      "rows": 44845
+    },
+    "NMRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "NPXSUSDT": {
+      "gap_months": [],
+      "months_fetched": 4,
+      "rows": 2259
+    },
+    "NULSUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 37573
+    },
+    "OCEANUSDT": {
+      "gap_months": [],
+      "months_fetched": 43,
+      "rows": 30637
+    },
+    "OGNUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "OGUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "OMGUSDT": {
+      "gap_months": [],
+      "months_fetched": 42,
+      "rows": 30301
+    },
+    "ONEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ONGUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ONTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ORNUSDT": {
+      "gap_months": [],
+      "months_fetched": 46,
+      "rows": 33181
+    },
+    "OXTUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46501
+    },
+    "PAXGUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "PERLUSDT": {
+      "gap_months": [],
+      "months_fetched": 36,
+      "rows": 25669
+    },
+    "PNTUSDT": {
+      "gap_months": [],
+      "months_fetched": 40,
+      "rows": 28501
+    },
+    "PSGUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "QTUMUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "REEFUSDT": {
+      "gap_months": [],
+      "months_fetched": 44,
+      "rows": 31981
+    },
+    "RENUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 34525
+    },
+    "REPUSDT": {
+      "gap_months": [],
+      "months_fetched": 24,
+      "rows": 17276
+    },
+    "RIFUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47277
+    },
+    "RLCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ROSEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "RSRUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "RUNEUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "RVNUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SANDUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SCUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SKLUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SNXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SOLUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SRMUSDT": {
+      "gap_months": [],
+      "months_fetched": 23,
+      "rows": 16694
+    },
+    "STMXUSDT": {
+      "gap_months": [],
+      "months_fetched": 50,
+      "rows": 36349
+    },
+    "STORJUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "STPTUSDT": {
+      "gap_months": [],
+      "months_fetched": 53,
+      "rows": 38365
+    },
+    "STRAXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47237
+    },
+    "STXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SUNUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47338
+    },
+    "SUSHIUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "SXPUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 45973
+    },
+    "TCTUSDT": {
+      "gap_months": [],
+      "months_fetched": 22,
+      "rows": 15860
+    },
+    "TFUELUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "THETAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "TOMOUSDT": {
+      "gap_months": [],
+      "months_fetched": 35,
+      "rows": 25261
+    },
+    "TRBUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "TROYUSDT": {
+      "gap_months": [],
+      "months_fetched": 52,
+      "rows": 37573
+    },
+    "TRUUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46182
+    },
+    "TRXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "TWTUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 46802
+    },
+    "UMAUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "UNFIUSDT": {
+      "gap_months": [],
+      "months_fetched": 47,
+      "rows": 33709
+    },
+    "UNIUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "UTKUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46296
+    },
+    "VETUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "VITEUSDT": {
+      "gap_months": [],
+      "months_fetched": 50,
+      "rows": 36349
+    },
+    "VTHOUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "WANUSDT": {
+      "gap_months": [],
+      "months_fetched": 64,
+      "rows": 46501
+    },
+    "WAVESUSDT": {
+      "gap_months": [],
+      "months_fetched": 42,
+      "rows": 30301
+    },
+    "WINGUSDT": {
+      "gap_months": [],
+      "months_fetched": 53,
+      "rows": 37957
+    },
+    "WINUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "WNXMUSDT": {
+      "gap_months": [],
+      "months_fetched": 42,
+      "rows": 30301
+    },
+    "WRXUSDT": {
+      "gap_months": [],
+      "months_fetched": 48,
+      "rows": 34885
+    },
+    "WTCUSDT": {
+      "gap_months": [],
+      "months_fetched": 36,
+      "rows": 25669
+    },
+    "XEMUSDT": {
+      "gap_months": [],
+      "months_fetched": 42,
+      "rows": 30301
+    },
+    "XLMUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "XMRUSDT": {
+      "gap_months": [],
+      "months_fetched": 38,
+      "rows": 27469
+    },
+    "XRPUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "XTZUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "XVSUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "XZCUSDT": {
+      "gap_months": [],
+      "months_fetched": 1,
+      "rows": 578
+    },
+    "YFIIUSDT": {
+      "gap_months": [],
+      "months_fetched": 32,
+      "rows": 23101
+    },
+    "YFIUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ZECUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ZENUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ZILUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    },
+    "ZRXUSDT": {
+      "gap_months": [],
+      "months_fetched": 65,
+      "rows": 47434
+    }
+  },
+  "totals": {
+    "rows": 7622597,
+    "symbols": 187
+  },
+  "window": [
+    "2021-01",
+    "2026-05"
+  ]
+}
