@@ -1,0 +1,16 @@
+{
+  "verdict": "DEGRADADA",
+  "coordenada": {
+    "edicion": 1,
+    "celda": "on-chain-flow",
+    "verbo": "D",
+    "n_f_corridas_a_la_fecha": 2
+  },
+  "fecha": "2026-06-05",
+  "pre_registro": "criterios.md commiteado pre-survey (faa81dd, 2026-06-05)",
+  "lineas_sostenidas": ["E1-arbitraje-de-la-senal (fechada 2018-2021)", "E3-migracion-del-alpha (labeling propietario de entidades)", "E2-degradacion-medida (corroborativa, 2 estudios academicos 2026)"],
+  "fechado_muerte": "ventana 2018-2021, punto medio defendible 2020-2021 (saturacion retail del ciclo alcista)",
+  "clausula_escape": "candidato hallado (Chi-Chu-Hao arXiv:2411.06327, flujos USDT 1-6h) — NO califica: forecasting in-sample sin modelado de costos retail; reportado como hipotesis de reapertura",
+  "condicion_reapertura": "ver findings.md — hipotesis especifica (replicar Chi et al. neto de costos retail) + fuente de data concreta",
+  "n_fuentes": 10
+}

@@ -1,0 +1,15 @@
+{
+  "verdict": "EXCLUIDA",
+  "coordenada": {
+    "edicion": 1,
+    "celda": "mev-latencia",
+    "verbo": "C",
+    "n_f_corridas_a_la_fecha": 2
+  },
+  "fecha": "2026-06-05",
+  "pre_registro": "criterios.md commiteado pre-survey (faa81dd, 2026-06-05)",
+  "p_sostenidas": ["P1-orderflow-privado", "P2-subasta-latencia-prioridad", "P3-concentracion-builders-searchers"],
+  "clausula_escape": "buscada y no hallada: ninguna via retail con expectativa positiva documentada y vigente 2024-2026",
+  "condicion_reapertura": "ver findings.md — negacion verificable de P1 (acceso a orderflow democratizado de facto) o de P3 (desconcentracion del mercado de builders/searchers)",
+  "n_fuentes": 6
+}
