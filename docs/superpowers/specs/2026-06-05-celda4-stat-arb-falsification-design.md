@@ -96,6 +96,7 @@ serían inconmensurables con el mismo nombre.
 - **Estructura:** idéntica a v3 (floor spread+fee por fill + tail de basis
   diario sqrt con Y=1.5) — se reusan los parámetros POR TIER de
   `costs_calibration.json` sin modificarlos.
+- **Proxy de liquidez (parámetro de v3w, completado en implementación pre-corrida):** el tail de v3 exige `liquidity_usd_per_min`; v3w lo define como `dollar_volume_mediano_diario_de_formación / 1440` — la misma cantidad pura-de-formación que asigna el tier. Cierres forzosos usan tier small con la liquidez real del símbolo moribundo (volumen bajo → tail grande → conservador).
 - **Asignación de tier (lo nuevo, regla declarada — Null Vale: los cortes no
   pueden ser cardinales inventados):** por mediana del dollar-volume diario
   del símbolo en la VENTANA DE FORMACIÓN (la misma cantidad de elegibilidad

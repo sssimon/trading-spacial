@@ -145,28 +145,50 @@ def test_tier_for_volume_fronteras():
 def test_v3w_fill_cost_monotono_por_tier():
     cal = load_calibration()
     notional = constants.NOTIONAL_PER_LEG
-    large = v3w_fill_cost(notional, "large", cal)
-    mid = v3w_fill_cost(notional, "mid", cal)
-    small = v3w_fill_cost(notional, "small", cal)
+    mdv = 5_000_000.0
+    large = v3w_fill_cost(notional, "large", cal, median_daily_dollar_vol=mdv)
+    mid = v3w_fill_cost(notional, "mid", cal, median_daily_dollar_vol=mdv)
+    small = v3w_fill_cost(notional, "small", cal, median_daily_dollar_vol=mdv)
     assert small > mid > large > 0.0
 
 
 def test_v3w_fill_cost_forced_close_fuerza_small():
     cal = load_calibration()
     notional = constants.NOTIONAL_PER_LEG
-    small = v3w_fill_cost(notional, "small", cal)
-    forced_from_large = v3w_fill_cost(notional, "large", cal, forced_close=True)
+    mdv = 5_000_000.0
+    small = v3w_fill_cost(notional, "small", cal, median_daily_dollar_vol=mdv)
+    forced_from_large = v3w_fill_cost(
+        notional, "large", cal, median_daily_dollar_vol=mdv, forced_close=True)
     assert forced_from_large == small
 
 
-def test_v3w_fill_cost_reusa_floor_leg_de_v3():
-    """El costo v3w de un fill == floor leg de v3 (stress_mult*(spread+fee))*$."""
+def test_v3w_fill_cost_reusa_leg_completo_de_v3():
+    """El costo v3w de un fill == leg COMPLETO de v3 (floor + tail), reusando
+    directamente _v3_leg_cost — NO solo el floor."""
+    from backtest_costs import _v3_leg_cost
     cal = load_calibration()
     notional = 10_000.0
+    mdv = 5_000_000.0
+    liq = mdv / 1440.0
     for v3w_tier, v3_key in (("large", "major"), ("mid", "mid"), ("small", "small")):
         tp = cal.tiers[v3_key]
-        expected = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side) * notional / 10_000.0
-        assert v3w_fill_cost(notional, v3w_tier, cal) == pytest.approx(expected)
+        leg_bps, _, _ = _v3_leg_cost(notional, liq, tp, cal.global_)
+        expected = leg_bps * notional / 10_000.0
+        got = v3w_fill_cost(notional, v3w_tier, cal, median_daily_dollar_vol=mdv)
+        assert got == pytest.approx(expected)
+        # El tail está presente: el leg completo > floor leg puro.
+        floor_only = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
+        assert leg_bps > floor_only
+
+
+def test_v3w_fill_cost_tail_responde_a_liquidez():
+    """Menor liquidez (median_daily_dollar_vol) → estrictamente MÁS costo de fill
+    al mismo notional/tier: el tail Almgren-Chriss responde a la liquidez."""
+    cal = load_calibration()
+    notional = constants.NOTIONAL_PER_LEG
+    high_liq = v3w_fill_cost(notional, "mid", cal, median_daily_dollar_vol=50_000_000.0)
+    low_liq = v3w_fill_cost(notional, "mid", cal, median_daily_dollar_vol=2_000_000.0)
+    assert low_liq > high_liq
 
 
 # ---------------------------------------------------------------------------

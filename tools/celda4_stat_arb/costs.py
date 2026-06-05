@@ -16,17 +16,21 @@ comparación cardinal con el PASS de carry (net-of-v3 en su dominio) queda
 Reuso de v3 (verificable, sin inventar fórmula):
   - `backtest_costs.load_calibration()` → `Calibration` con `tiers[t]`
     (`TierParams` por tier) y `global_` (`GlobalParams`).
-  - El costo de UN fill v3w es el "floor leg" de v3, idéntico a la primera línea
-    de `backtest_costs._v3_leg_cost` (backtest_costs.py:446):
-        floor_leg_bps = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
-    Es el cuerpo size-INDEPENDIENTE de v3 (spread+fee por fill, stress-escalado),
-    la cota dominante en el régimen de operación ($10k notional). El "tail"
-    Almgren-Chriss de `_v3_leg_cost` depende de `liquidity_usd_per_min` por fill;
-    la firma de `v3w_fill_cost` no transporta liquidez (el costo de la celda es
-    por-fill sobre tier, no por-orderbook), y v3 documenta el tail como inerte
-    (floor-dominado) al notional de operación (costs_calibration.json
-    sensitivity_note). NO se inventa fórmula: se reusa exactamente el floor leg.
-  - dollar_cost = floor_leg_bps * notional_usd / 10_000  (bps → $, igual que v3:
+  - El costo de UN fill v3w es el leg COMPLETO de v3: floor (spread+fee
+    stress-escalado) MÁS el tail Almgren-Chriss. Se reusa DIRECTAMENTE
+    `backtest_costs._v3_leg_cost(order_usd, liquidity_usd_per_min, tp, g)`
+    (backtest_costs.py:438) — no se re-implementa su cuerpo. Su primer elemento
+    de retorno (`leg_bps`) es el costo total del fill en bps; si la liquidez es
+    inutilizable, _v3_leg_cost aplica internamente el fallback-floor de v3.
+    NO se descarta el tail: descartarlo SUBESTIMA el costo y sesga el falsador
+    hacia PASS (la dirección incorrecta).
+  - Proxy de liquidez (parte DECLARADA de la definición de v3w): el tail exige
+    `liquidity_usd_per_min`; v3w lo define como
+        liquidity_usd_per_min = median_daily_dollar_vol / 1440.0
+    — la misma cantidad pura-de-formación (mediana del dollar-volume diario) que
+    asigna el tier, convertida a su tasa natural por-minuto (1440 min/día). Así
+    el tail responde a la liquidez del símbolo, coherente con cómo v3 lo computa.
+  - dollar_cost = leg_bps * notional_usd / 10_000  (bps → $, igual que v3:
     total_cost_usd = total_cost_bps * notional / 10_000, backtest_costs.py:547).
 
 NOTA de tier: v3w nombra los tiers "large"/"mid"/"small" (spec); v3 nombra el
@@ -40,7 +44,7 @@ import statistics
 from contextlib import closing
 from datetime import datetime, timezone
 
-from backtest_costs import _TIER_BY_SYMBOL, tier_for_symbol
+from backtest_costs import _TIER_BY_SYMBOL, _v3_leg_cost, tier_for_symbol
 
 from .constants import V3W_REFERENCE_WINDOW
 
@@ -176,18 +180,34 @@ def tier_for_volume(median_dollar_vol: float, cutoffs: dict) -> str:
 
 
 def v3w_fill_cost(notional_usd: float, tier: str, calibration, *,
+                  median_daily_dollar_vol: float,
                   forced_close: bool = False) -> float:
     """Costo en $ de UN fill taker de `notional_usd` en el tier dado (spec §3-bis/§4 F6).
 
-    Reusa el "floor leg" de v3 (backtest_costs._v3_leg_cost:446), el cuerpo
-    size-independiente spread+fee stress-escalado, con los `TierParams` por tier
-    de la calibración cargada (sin modificarlos):
+    Reusa DIRECTAMENTE el leg COMPLETO de v3 (`backtest_costs._v3_leg_cost`,
+    backtest_costs.py:438) — floor (spread+fee stress-escalado) MÁS tail
+    Almgren-Chriss — con los `TierParams` por tier de la calibración cargada
+    (sin modificarlos) y su bloque `global_` (`GlobalParams`). NO se re-implementa
+    el cuerpo de _v3_leg_cost: se invoca y se toma su `leg_bps` (primer elemento),
+    que ya incluye el tail (o el fallback-floor de v3 si la liquidez es inutilizable):
 
-        floor_leg_bps = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
-        dollar_cost   = floor_leg_bps * notional_usd / 10_000
+        leg_bps, _, _ = _v3_leg_cost(notional_usd, liquidity_usd_per_min, tp, g)
+        dollar_cost    = leg_bps * notional_usd / 10_000
+
+    Descartar el tail subestimaría el costo y sesgaría el falsador hacia PASS
+    (la dirección incorrecta); por eso el leg COMPLETO es la moneda de v3w.
+
+    Proxy de liquidez (parámetro DECLARADO de v3w):
+        liquidity_usd_per_min = median_daily_dollar_vol / 1440.0
+    `median_daily_dollar_vol` es la misma cantidad pura-de-formación (mediana del
+    dollar-volume diario) que asigna el tier; 1440 = minutos por día. Es la tasa
+    natural por-minuto de esa cantidad, así el tail responde a la liquidez real
+    del símbolo.
 
     `forced_close=True` fuerza el tier "small" (el peor) sin importar `tier`
-    (spec §4 F6: cierres forzosos por delisting se cargan al tier small de v3w).
+    (spec §4 F6: cierres forzosos por delisting se cargan al tier small de v3w),
+    usando el `median_daily_dollar_vol` REAL del símbolo moribundo (volumen bajo
+    → tail grande → conservador, que es lo correcto para un cierre forzoso).
 
     `tier` es nombre v3w ("large"/"mid"/"small"); se traduce a la clave de
     calibración v3 ("major"/"mid"/"small") vía _V3W_TO_V3_TIER.
@@ -200,5 +220,7 @@ def v3w_fill_cost(notional_usd: float, tier: str, calibration, *,
         )
     v3_tier_key = _V3W_TO_V3_TIER[effective]
     tp = calibration.tiers[v3_tier_key]
-    floor_leg_bps = tp.stress_mult * (tp.half_spread_bps + tp.fee_bps_per_side)
-    return floor_leg_bps * notional_usd / 10_000.0
+    g = calibration.global_
+    liquidity_usd_per_min = median_daily_dollar_vol / 1440.0
+    leg_bps, _slip, _fb = _v3_leg_cost(notional_usd, liquidity_usd_per_min, tp, g)
+    return leg_bps * notional_usd / 10_000.0
