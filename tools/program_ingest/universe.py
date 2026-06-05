@@ -49,7 +49,9 @@ def parse_listing_page(xml_text: str) -> tuple[list[str], list[str], str | None]
 
 
 def _fetch_listing(prefix: str, marker: str | None = None, *, retries: int = 4) -> str:
-    url = f"{VISION_LISTING}{prefix}"
+    # quote(): the listing contains at least one directory with non-ASCII
+    # characters in its name; an unencoded prefix breaks http.client (ascii).
+    url = f"{VISION_LISTING}{urllib.parse.quote(prefix)}"
     if marker:
         url += f"&marker={urllib.parse.quote(marker)}"
     for attempt in range(retries):

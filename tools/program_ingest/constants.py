@@ -12,7 +12,9 @@ TIMEFRAME = "1h"
 
 # Binance Vision: listing S3 (XML) + bulk zips. El listing RETIENE símbolos
 # delistados — esa es la defensa anti-survivorship de la regla del universo.
-VISION_LISTING = "https://data.binance.vision/?delimiter=/&prefix="
+# El listing vive en el endpoint S3 directo (la raíz de data.binance.vision
+# sirve el HTML del sitio, no XML).
+VISION_LISTING = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?delimiter=/&prefix="
 SPOT_KLINES_PREFIX = "data/spot/monthly/klines/"
 VISION_DOWNLOAD = "https://data.binance.vision/"
 
