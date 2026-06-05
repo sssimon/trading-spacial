@@ -18,7 +18,7 @@ comparación en prosa la atrapa la revisión.
 |---|-------|-------|--------|-----------|------------|-----------|
 | 1 | direccional-un-activo | F | CERRADA | DOUBLE-FAIL | E1/F/n_F=1 | data/retune/2026-06-03-arm-a-blind-exit/ |
 | 2 | carry-funding | F | CERRADA | PASS (6.33%/año net-v3, CI95[5.02,7.45]) | E1/F/n_F=2 | data/retune/2026-06-03-funding-carry-falsification/ |
-| 3 | cross-sectional-factor | F | BLOQUEADA-POR-DATA | — | — | — |
+| 3 | cross-sectional-factor | F | ABIERTA | — | — | — |
 | 4 | stat-arb | F | ABIERTA | — | — | — |
 | 5 | market-making | R | CERRADA | INVIABLE-RETAIL | E1/R/n_F=2 | data/retune/programa-celdas/celda5-market-making/ |
 | 6 | mev-latencia | C | CERRADA | EXCLUIDA | E1/C/n_F=2 | data/retune/programa-celdas/celda6-mev-latencia/ |
@@ -36,6 +36,13 @@ spec §4.
 
 Los hijos del PASS de carry (shadow v0.1/v0.2, kill-rule, sizing) son
 proyectos hijos FUERA de la unidad de estudio — no reabren la celda 2.
+
+**Data del programa (T0, 2026-06-05):** panel de 187 símbolos spot 1h
+(2021-01→2026-05, regla pre-registrada anti-survivorship con 73 delistados
+retenidos) en `data/program_ohlcv.db` (regenerable:
+`python -m tools.program_ingest.run`). Universo y cobertura:
+`data/retune/2026-06-05-programa-t0-ingest/`. Esto desbloqueó la celda 3.
+La selección fina de símbolos para cada estudio F es de ESE estudio.
 
 ## Candidatas a Edición 2
 
