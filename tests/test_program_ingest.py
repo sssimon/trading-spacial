@@ -236,3 +236,51 @@ def test_backfill_ingest_log_reconstructs_months(tmp_path):
 def test_window_constants_match_spec():
     assert WINDOW_START == "2021-01"
     assert WINDOW_END == "2026-05"
+
+
+# ---------------------------------------------------------------------------
+# Futures (T0-bis, celda 4): funding parsing bi-era + resume con kind
+# ---------------------------------------------------------------------------
+
+from tools.program_ingest import futures as fut  # noqa: E402
+
+
+def test_parse_funding_rows_modern_era():
+    hdr = ["fundingTime", "fundingRate", "markPrice"]
+    rows = [["1609459200000", "0.0001", "29000"]]
+    assert fut.parse_funding_rows(hdr, rows) == [(1609459200000, 0.0001)]
+
+
+def test_parse_funding_rows_legacy_era():
+    hdr = ["calc_time", "funding_interval_hours", "last_funding_rate"]
+    rows = [["1609459200000", "8", "-0.0002"]]
+    assert fut.parse_funding_rows(hdr, rows) == [(1609459200000, -0.0002)]
+
+
+def test_parse_funding_rows_rejects_unknown_header():
+    import pytest
+    with pytest.raises(ValueError):
+        fut.parse_funding_rows(["foo", "bar"], [["1", "2"]])
+
+
+def test_download_perp_symbol_klines_funding_and_resume(tmp_path, monkeypatch):
+    db = str(tmp_path / "program.db")
+    fut.init_futures_tables(db)
+
+    def fake_fetch(url, **kw):
+        if "fundingRate" in url:
+            return (["fundingTime", "fundingRate"], [["1609459200000", "0.0001"]])
+        return ([], [["1609459200000", "29000", "29100", "28900", "29050",
+                      "12.5", "0", "0", "0", "0", "0", "0"]])
+
+    monkeypatch.setattr(fut, "_fetch_zip_csv", fake_fetch)
+    counts = fut.download_perp_symbol("BTCUSDT", ["2021-01"], db)
+    assert counts["klines"] == 1 and counts["funding"] == 1
+    # resume: red prohibida en el segundo paso
+    monkeypatch.setattr(fut, "_fetch_zip_csv",
+                        lambda url, **kw: (_ for _ in ()).throw(AssertionError(url)))
+    counts2 = fut.download_perp_symbol("BTCUSDT", ["2021-01"], db)
+    assert counts2["klines"] == 0 and counts2["funding"] == 0  # nada nuevo
+    with closing(sqlite3.connect(db)) as con:
+        assert con.execute("SELECT COUNT(*) FROM perp_klines").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM perp_funding").fetchone()[0] == 1
