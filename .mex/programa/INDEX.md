@@ -58,6 +58,15 @@ Abrir la Edición 2 es un acto explícito con su propia junta. Ninguna por ahora
   insuficiente (lo evalúa el primer estudio F nuevo: stat-arb), el cambio al
   contrato del `selection_fingerprint` se especifica como estudio de impacto
   propio.
+- **La moneda de costos de las celdas anchas (Voronov V1, 2026-06-05):** el
+  mandato constitucional "net-of-v3" solo es cobrable en el dominio curado de
+  10 símbolos (`tier_for_symbol` se niega fuera). La celda 4 definió **v3w**
+  (extensión declarada, tier por dollar-volume, spec celda 4 §3-bis) y su
+  verdict es net-of-v3w — incomparable con el PASS de carry sin re-pricing
+  explícito. Las celdas 3 y 9 heredan el mismo problema. PENDIENTE: decidir si
+  v3w se promueve a moneda estándar de celdas anchas o si cada celda declara
+  la suya; la regla de activación de deflación cross-celda (marco §4)
+  presupone conmensurabilidad que hoy NO existe entre carry y las anchas.
 
 ## Cierre de la Edición
 

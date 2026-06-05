@@ -17,7 +17,9 @@ Mecánica congelada del spec §4:
     formación; delisting forced-close → small).
 
 HARD BOUNDARY (spec §3 NV-A): ninguna consulta toca open_time ni funding_time_ms
->= STUDY_END. `assert_within_study_bounds` lo enforcea; lo usan pairs/simulate.
+>= STUDY_END. `assert_within_study_bounds` lo enforcea en simulate (el único que
+abre ventanas de trading); pairs no lo llama: sus ventanas de formación preceden
+estructuralmente a trading_end <= STUDY_END vía trading_windows().
 """
 from __future__ import annotations
 
@@ -51,9 +53,11 @@ _STUDY_END_MS = _to_ms(STUDY_END)
 def assert_within_study_bounds(ts_ms: int) -> None:
     """Hard boundary del estudio (spec §3 NV-A): jamás se mira timestamp >= STUDY_END.
 
-    Falla (AssertionError) si `ts_ms >= STUDY_END` epoch ms. Lo usan los módulos
-    que abren ventanas para garantizar que ninguna consulta cruce la frontera del
-    holdout en TIEMPO (aunque el db contenga data posterior).
+    Falla (AssertionError) si `ts_ms >= STUDY_END` epoch ms. Lo usa simulate (el
+    único módulo que abre ventanas de trading) para garantizar que ninguna
+    consulta cruce la frontera del holdout en TIEMPO (aunque el db contenga data
+    posterior). pairs no lo llama: sus formaciones preceden estructuralmente a
+    trading_end <= STUDY_END vía trading_windows().
     """
     assert ts_ms < _STUDY_END_MS, (
         f"study boundary violated: timestamp {ts_ms} >= STUDY_END "
