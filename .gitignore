@@ -38,6 +38,10 @@ data/funding.db-wal
 data/funding.db-shm
 # Funding-carry shadow monitor runtime output (paper-only signals + state)
 data/shadow/
+# Programa E1 T0 — universo amplio spot 1h, regenerable desde Binance Vision bulk
+data/program_ohlcv.db
+data/program_ohlcv.db-wal
+data/program_ohlcv.db-shm
 
 # ── Holdout dataset: large OHLCV slice exceeds GitHub's 100 MB per-file limit ──
 # Manifest captures sha256 + lock commit so the slice can be regenerated bit-for-bit
