@@ -811,3 +811,469 @@ def test_simulate_price_pnl_long_spread(tmp_path):
     assert pos["gross"] == pytest.approx(expected_gross)
     assert pos["net"] == pytest.approx(pos["gross"] + pos["funding"] - pos["costs"])
     assert pos["pair"] == "XXXUSDT/YYYUSDT"
+
+
+# ===========================================================================
+# GRUPO 3 — power.py + evaluate.py (gates, orden forzado) + run.py + candado
+# ===========================================================================
+
+import json
+import os
+
+from tools.celda4_stat_arb import evaluate as eval_mod
+from tools.celda4_stat_arb import power as power_mod
+from tools.celda4_stat_arb import run as run_mod
+from tools.celda4_stat_arb.evaluate import evaluate
+from tools.celda4_stat_arb.power import compute_power
+
+_HOLD_HOURS = 24
+_HOLD_MS = _HOLD_HOURS * _HOUR_MS
+
+
+def _pos(pair, window_start_ms, net, *, costs=2.0, hold_ms=_HOLD_MS):
+    """Posición sintética mínima para power/evaluate (sólo los campos que leen)."""
+    return {
+        "pair": pair,
+        "window_start_ms": window_start_ms,
+        "entry_time_ms": window_start_ms,
+        "exit_time_ms": window_start_ms + hold_ms,
+        "exit_reason": "exit_z",
+        "side": "long_spread",
+        "gross": net + costs,
+        "funding": 0.0,
+        "costs": costs,
+        "net": net,
+    }
+
+
+def _window_start(year, month=1, offset_days=0):
+    return _to_ms(f"{year}-{month:02d}-01") + offset_days * _DAY_MS
+
+
+def _positive_population(*, per_window=2, n_windows_pre=20, n_windows_post=20,
+                         net=50.0, costs=2.0):
+    """Población sintética 'sana': muchos windows, cada uno con net>0, repartidos
+    a ambos lados de GATE_B_START y sobre >=2 años por lado, con >=2 símbolos por
+    posición. Diseñada para PASAR todos los kills y todos los gates."""
+    positions = []
+    # PRE Gate-B (2021-2022): 2 años, n_windows_pre windows.
+    for i in range(n_windows_pre):
+        year = 2021 + (i % 2)
+        ws = _window_start(year, offset_days=(i // 2) * 30 + (i % 2) * 5)
+        for j in range(per_window):
+            pair = f"S{j}AUSDT/S{j}BUSDT"
+            positions.append(_pos(pair, ws, net, costs=costs))
+    # POST Gate-B (2023-2024): 2 años, n_windows_post windows.
+    for i in range(n_windows_post):
+        year = 2023 + (i % 2)
+        # asegurar inicio >= GATE_B_START (2023-03-01)
+        ws = _to_ms(f"{year}-03-01") + (i // 2) * 30 * _DAY_MS + (i % 2) * 5 * _DAY_MS
+        for j in range(per_window):
+            pair = f"S{j}AUSDT/S{j}BUSDT"
+            positions.append(_pos(pair, ws, net, costs=costs))
+    return positions
+
+
+# ---------------------------------------------------------------------------
+# power.py — escribe power.json ANTES de devolver; gate auto-referente a costos
+# ---------------------------------------------------------------------------
+
+def test_power_writes_power_json_before_returning(tmp_path):
+    positions = _positive_population()
+    out = compute_power(positions, str(tmp_path))
+    assert os.path.exists(tmp_path / "power.json")
+    saved = json.loads((tmp_path / "power.json").read_text(encoding="utf-8"))
+    assert saved == out
+    assert "power_ok" in out and "t_floor_v3w_annual" in out and "mde_annualized" in out
+
+
+def test_power_ok_true_when_mde_under_threshold(tmp_path):
+    # Costos tiny → t_floor pequeño; pero net grande y consistente → MDE pequeño
+    # relativo. Usamos costos moderados y muchos windows para MDE estrecho.
+    positions = _positive_population(n_windows_pre=40, n_windows_post=40, net=50.0, costs=20.0)
+    out = compute_power(positions, str(tmp_path))
+    assert out["power_ok"] is True
+
+
+def test_power_ok_false_when_mde_dwarfs_floor(tmp_path):
+    # Costos minúsculos (floor ~0) + muy pocos windows con net ruidoso → MDE
+    # enorme frente al floor → power_ok False.
+    rng = np.random.default_rng(1)
+    positions = []
+    for i in range(31):
+        ws = _window_start(2021 + i % 4) + i * _DAY_MS
+        net = float(rng.normal(0, 1000))
+        positions.append(_pos(f"S{i}AUSDT/S{i}BUSDT", ws, net, costs=1e-6))
+    out = compute_power(positions, str(tmp_path))
+    assert out["power_ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# evaluate.py — ORDEN FORZADO (power.json ausente → RuntimeError)
+# ---------------------------------------------------------------------------
+
+def test_evaluate_without_power_json_raises(tmp_path):
+    """Orden forzado F10: evaluate se niega si power.json no existe."""
+    positions = _positive_population()
+    # NO escribimos power.json. Los kills deben pasar para LLEGAR al gate de poder.
+    with pytest.raises(RuntimeError, match="orden violado"):
+        evaluate(positions, str(tmp_path))
+
+
+def test_evaluate_power_gate_fail_yields_n_insuficiente(tmp_path):
+    """Si power_ok es False → N-INSUFICIENTE (no PASS/FAIL)."""
+    positions = _positive_population()
+    # power.json con power_ok False, escrito a mano (kills ya pasan).
+    (tmp_path / "power.json").write_text(json.dumps({"power_ok": False}), encoding="utf-8")
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "N-INSUFICIENTE"
+    assert result["reason"] == "power gate"
+
+
+# ---------------------------------------------------------------------------
+# evaluate.py — kill criteria (cada uno con fixtures sintéticos)
+# ---------------------------------------------------------------------------
+
+def test_kill_n_insuficiente_total(tmp_path):
+    positions = [_pos("AUSDT/BUSDT", _window_start(2021) + i * _DAY_MS, 10.0)
+                 for i in range(constants.MIN_POSITIONS - 1)]
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "N-INSUFICIENTE"
+    assert "MIN_POSITIONS" in result["reason"]
+
+
+def test_kill_concentracion_artefacto(tmp_path):
+    """Una sola (pair, window) aporta >50% de la suma de contribuciones positivas
+    y el pooled total > 0 → ARTEFACTO. Resto pequeño y repartido para pasar LOO/Gate-B N."""
+    positions = []
+    # 40 posiciones pequeñas positivas (repartidas pre/post Gate-B y >=2 símbolos).
+    for i in range(40):
+        year = 2021 + (i % 4)
+        if i % 2 == 0:
+            ws = _to_ms(f"{year}-03-01") + (i // 4) * 20 * _DAY_MS
+        else:
+            ws = _window_start(year) + (i // 4) * 20 * _DAY_MS
+        positions.append(_pos(f"S{i % 5}AUSDT/S{i % 5}BUSDT", ws, 1.0))
+    # Un monstruo: una (pair, window) con net gigantesco → domina las contribuciones +.
+    positions.append(_pos("BIGAUSDT/BIGBUSDT", _to_ms("2023-06-01"), 10_000.0))
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "ARTEFACTO"
+
+
+def test_concentracion_inerte_si_pooled_no_positivo(tmp_path):
+    """Si el pooled net total <= 0, la concentración es INERTE (no ARTEFACTO).
+    Población sana en N (sobrevive todos los kills) pero net negativo → cae en los
+    gates con power_ok forzado → FAIL (gate A), NO ARTEFACTO."""
+    # Base sana de N (misma forma que la población positiva) pero con net negativo.
+    positions = _positive_population(n_windows_pre=30, n_windows_post=30, net=-100.0)
+    # Un solo (pair, window) positivo grande; el total sigue << 0 → concentración inerte.
+    positions.append(_pos("BIGAUSDT/BIGBUSDT", _to_ms("2023-06-01"), 50.0))
+    _force_power_ok(tmp_path)
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] in ("PASS", "FAIL")   # NO ARTEFACTO
+    assert result["verdict"] == "FAIL"              # net negativo → gate A falla
+
+
+def test_kill_loo_drop_symbol_insuficiente(tmp_path):
+    """Un símbolo presente en tantas posiciones que dropearlo deja < MIN_POSITIONS."""
+    positions = []
+    # 35 posiciones, 32 contienen DOMUSDT → drop DOMUSDT deja 3 < 30.
+    for i in range(32):
+        ws = _window_start(2021 + i % 4) + i * _DAY_MS
+        positions.append(_pos(f"DOMUSDT/S{i}USDT", ws, 10.0))
+    for i in range(3):
+        ws = _window_start(2022) + i * _DAY_MS
+        positions.append(_pos(f"P{i}AUSDT/P{i}BUSDT", ws, 10.0))
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "N-INSUFICIENTE"
+    assert "LOO" in result["reason"]
+
+
+def test_kill_loo_drop_year_insuficiente(tmp_path):
+    """Casi todas las posiciones en un año → drop de ese año deja < MIN_POSITIONS."""
+    positions = []
+    for i in range(33):
+        ws = _window_start(2022) + i * _DAY_MS     # casi todo en 2022
+        positions.append(_pos(f"S{i}AUSDT/S{i}BUSDT", ws, 10.0))
+    for i in range(2):
+        ws = _window_start(2023, month=6) + i * _DAY_MS
+        positions.append(_pos(f"Q{i}AUSDT/Q{i}BUSDT", ws, 10.0))
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "N-INSUFICIENTE"
+    assert "LOO drop-año" in result["reason"]
+
+
+def test_kill_gate_b_subset_insuficiente(tmp_path):
+    """Subset Gate-B (>=2023-03) < MIN_POSITIONS, construido para SOBREVIVIR los
+    kills previos (N total y LOO por símbolo/año) — así el kill que dispara es el
+    de Gate-B, no uno anterior. PRE Gate-B repartido en 2021 y 2022 (30 c/u → drop
+    de cualquier año deja 35 >= 30); sólo 5 post Gate-B (en 2024)."""
+    positions = []
+    sym = 0
+    for year in (2021, 2022):
+        for k in range(30):
+            ws = _window_start(year) + k * _DAY_MS    # PRE 2023-03
+            positions.append(_pos(f"S{sym}AUSDT/S{sym}BUSDT", ws, 10.0))
+            sym += 1
+    for k in range(5):                                # post Gate-B (2024) — sólo 5
+        ws = _to_ms("2024-06-01") + k * _DAY_MS
+        positions.append(_pos(f"P{k}AUSDT/P{k}BUSDT", ws, 10.0))
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "N-INSUFICIENTE"
+    assert "Gate-B" in result["reason"]
+
+
+# ---------------------------------------------------------------------------
+# evaluate.py — Gate A ∧ Gate B ∧ LOO (PASS / FAIL)
+# ---------------------------------------------------------------------------
+
+def _force_power_ok(tmp_path):
+    """Escribe un power.json con power_ok True para AISLAR la lógica de gates de la
+    del gate de poder (que tiene su propio test). El gate de poder es
+    auto-referente a costos; estas poblaciones sintéticas tienen costos irreales
+    relativos al net, así que el poder no es lo que estos tests examinan."""
+    (tmp_path / "power.json").write_text(json.dumps({"power_ok": True}), encoding="utf-8")
+
+
+def test_evaluate_full_pass(tmp_path):
+    """Población sana: Gate A, Gate B y LOO todos con ci_lo>0 → PASS."""
+    positions = _positive_population(n_windows_pre=30, n_windows_post=30, net=50.0)
+    _force_power_ok(tmp_path)
+    result = evaluate(positions, str(tmp_path))
+    assert result["verdict"] == "PASS"
+    assert result["gate_a"]["pass"] is True
+    assert result["gate_b"]["pass"] is True
+    assert result["loo"]["pass"] is True
+
+
+def test_evaluate_edge_muerto_fail(tmp_path):
+    """V4: 2021-2022 fuertemente positivos, 2023+ negativos → Gate A True (el
+    promedio histórico existió) pero Gate B False (murió) → verdict FAIL."""
+    positions = []
+    # PRE Gate-B: muy positivo (2021, 2022).
+    for i in range(40):
+        year = 2021 + (i % 2)
+        ws = _window_start(year) + (i // 2) * 20 * _DAY_MS
+        positions.append(_pos(f"S{i % 4}AUSDT/S{i % 4}BUSDT", ws, 500.0))
+    # POST Gate-B: claramente negativo (2023, 2024).
+    for i in range(40):
+        year = 2023 + (i % 2)
+        ws = _to_ms(f"{year}-03-01") + (i // 2) * 20 * _DAY_MS
+        positions.append(_pos(f"S{i % 4}AUSDT/S{i % 4}BUSDT", ws, -50.0))
+    _force_power_ok(tmp_path)
+    result = evaluate(positions, str(tmp_path))
+    assert result["gate_a"]["pass"] is True      # promedio histórico > 0
+    assert result["gate_b"]["pass"] is False     # segunda mitad murió
+    assert result["verdict"] == "FAIL"
+
+
+def test_evaluate_loo_fragility_fail(tmp_path):
+    """Gate A y Gate B pasan, pero un símbolo carga todo el edge: dropearlo hace
+    el resto plano/negativo → LOO falla → FAIL por fragilidad (lección PENDLE)."""
+    positions = []
+    # Base plana (net ~0) repartida pre/post y en >=2 años por lado, sobre símbolos
+    # que NO incluyen al héroe → LOO-por-héroe deja esta base plana.
+    for i in range(60):
+        year = 2021 + (i % 4)
+        if i % 2 == 0:
+            ws = _to_ms(f"{year}-03-01") + (i // 4) * 15 * _DAY_MS
+        else:
+            ws = _window_start(year) + (i // 4) * 15 * _DAY_MS
+        net = 0.5 if i % 2 == 0 else -0.5     # casi plano
+        positions.append(_pos(f"S{i % 5}AUSDT/S{i % 5}BUSDT", ws, net))
+    # HÉROE: un símbolo que aporta un net enorme en CADA window existente.
+    seen_windows = sorted({p["window_start_ms"] for p in positions})
+    for ws in seen_windows:
+        positions.append(_pos("HEROUSDT/SIDEKICKUSDT", ws, 1000.0))
+    _force_power_ok(tmp_path)
+    result = evaluate(positions, str(tmp_path))
+    assert result["gate_a"]["pass"] is True
+    assert result["gate_b"]["pass"] is True
+    assert result["loo"]["pass"] is False        # drop HEROUSDT → base plana, ci_lo<=0
+    assert result["verdict"] == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# verdict.json valida contra el candado del programa (_validate_verdict)
+# ---------------------------------------------------------------------------
+
+def test_verdict_doc_valida_contra_programa(tmp_path, monkeypatch):
+    """El verdict.json que escribe run.py (verbo F, PASS|FAIL) valida contra
+    tests/test_programa_celdas.py::_validate_verdict. Forzamos un verdict PASS de
+    evaluate para ejercitar la rama que ESCRIBE verdict.json."""
+    from tests.test_programa_celdas import _validate_verdict
+    _patch_cutoffs(monkeypatch)
+    monkeypatch.setattr(run_mod, "claim_trial", lambda **k: 1)
+    monkeypatch.setattr(run_mod, "finalize_trial", lambda *a, **k: None)
+    monkeypatch.setattr(
+        run_mod.evaluate_mod, "evaluate",
+        lambda positions, output_dir: {
+            "verdict": "PASS",
+            "gate_a": {"point": 1.0, "ci_lo": 0.5, "ci_hi": 1.5, "n_windows": 30, "pass": True},
+            "gate_b": {"point": 1.0, "ci_lo": 0.5, "ci_hi": 1.5, "n_windows": 15,
+                       "pass": True, "start": constants.GATE_B_START},
+            "loo": {"pass": True, "by_symbol": {}, "by_year": {}},
+            "descriptive_per_position_ci": {"point": 1.0, "ci_lo": 0.5, "ci_hi": 1.5,
+                                            "n_positions": 60, "label": "descriptive_biased_narrow"},
+            "per_year_net": {"2021": 1.0},
+            "n_positions": 60,
+        })
+    doc = run_mod.main(
+        argv=[], db_path=_pass_db(tmp_path), output_dir=str(tmp_path),
+        run_date="2026-06-05")
+    assert _validate_verdict(doc) == []
+    assert doc["coordenada"]["verbo"] == "F"
+    assert doc["verdict"] == "PASS"
+    # El verdict.json escrito en disco también valida.
+    written = json.loads((tmp_path / "verdict.json").read_text(encoding="utf-8"))
+    assert _validate_verdict(written) == []
+
+
+# ---------------------------------------------------------------------------
+# run.py — fixture db mínima + --dry-run + registro de trial + killed.json
+# ---------------------------------------------------------------------------
+
+def _pass_db(tmp_path):
+    """db sintética mínima que produce una corrida real (no dry-run) con >= un
+    par cointegrado en varios windows. Diseñada para que el pipeline complete sin
+    error (el verdict en sí no importa para los tests de orquestación)."""
+    # Cubrimos la primera ventana de trading con dos símbolos cointegrados.
+    p = tmp_path / "mini.db"
+    fstart = _to_ms(constants.STUDY_START)
+    # 180d de formación + algo de trading; barras horarias para los dos símbolos.
+    n_form = constants.FORMATION_DAYS * 24
+    n_trade = 24 * 35
+    n = n_form + n_trade
+    px, py = _cointegrated_prices(seed=11, n=n, alpha=0.5, beta=1.0)
+    vol = 5_000_000.0 / 24.0 / 100.0
+    _klines_db(p, {
+        "AAAUSDT": _bars_from_prices(fstart, px, vol),
+        "BBBUSDT": _bars_from_prices(fstart, py, vol),
+    })
+    return str(p)
+
+
+def _patch_cutoffs(monkeypatch):
+    """La mini-db de orquestación no contiene los 10 curados de v3, así que
+    derive_tier_cutoffs (testeado aparte en Grupo 1) se parchea con cortes fijos —
+    estos tests examinan la ORQUESTACIÓN de run.py, no la derivación de cortes."""
+    monkeypatch.setattr(
+        run_mod, "derive_tier_cutoffs",
+        lambda db_path: {"cutoff_large": 1.0e8, "cutoff_mid": 1.0e7, "derivation": {}})
+
+
+def test_run_dry_run_stops_after_fingerprint(tmp_path):
+    db = _pass_db(tmp_path)
+    out = run_mod.main(argv=["--dry-run"], db_path=db, output_dir=str(tmp_path))
+    assert out["dry_run"] is True
+    assert os.path.exists(tmp_path / "fingerprint.json")
+    fp = out["fingerprint"]
+    assert "AAAUSDT" in fp["panel_perps_members"]
+    assert "BBBUSDT" in fp["panel_perps_members"]
+    assert fp["n_members"] == 2
+    # dry-run NO produce verdict ni positions.
+    assert not os.path.exists(tmp_path / "verdict.json")
+    assert not os.path.exists(tmp_path / "positions.json")
+
+
+def test_run_missing_ingest_raises(tmp_path):
+    """db sin barras < STUDY_END → error claro (no skip silencioso)."""
+    p = tmp_path / "empty.db"
+    _klines_db(p, {})   # tablas vacías
+    with pytest.raises(RuntimeError, match="ingest ausente"):
+        run_mod.main(argv=[], db_path=str(p), output_dir=str(tmp_path), run_date="2026-06-05")
+
+
+def test_run_requires_run_date(tmp_path, monkeypatch):
+    """Sin run_date ni STUDY_RUN_DATE → error (la fecha no se inventa)."""
+    monkeypatch.delenv("STUDY_RUN_DATE", raising=False)
+    _patch_cutoffs(monkeypatch)
+    db = _pass_db(tmp_path)
+    # Evita escribir en el ledger real si la corrida llegara tan lejos.
+    monkeypatch.setattr(run_mod, "claim_trial", lambda **k: 1)
+    monkeypatch.setattr(run_mod, "finalize_trial", lambda *a, **k: None)
+    # Fuerza llegar a la verificación de fecha (verdict PASS, no kill).
+    monkeypatch.setattr(
+        run_mod.evaluate_mod, "evaluate",
+        lambda positions, output_dir: {
+            "verdict": "PASS",
+            "gate_a": {"pass": True}, "gate_b": {"pass": True},
+            "loo": {"pass": True}, "descriptive_per_position_ci": {},
+            "per_year_net": {}, "n_positions": 0})
+    with pytest.raises(RuntimeError, match="fecha de corrida ausente"):
+        run_mod.main(argv=[], db_path=db, output_dir=str(tmp_path), run_date=None)
+
+
+def test_run_registers_trial_with_primary_source(tmp_path, monkeypatch):
+    """run.py registra la primaria con source=SOURCE_PRIMARY, study_type
+    confirmatory, claim-then-finalize. Se monkeypatchea el ledger (tmp, offline)."""
+    calls = {}
+
+    def fake_claim(**kw):
+        calls["claim"] = kw
+        return 777
+
+    def fake_finalize(trial_id, **kw):
+        calls["finalize"] = {"trial_id": trial_id, **kw}
+
+    monkeypatch.setattr(run_mod, "claim_trial", fake_claim)
+    monkeypatch.setattr(run_mod, "finalize_trial", fake_finalize)
+    _patch_cutoffs(monkeypatch)
+    # Fuerza un verdict PASS para ejercitar la rama de registro.
+    monkeypatch.setattr(
+        run_mod.evaluate_mod, "evaluate",
+        lambda positions, output_dir: {
+            "verdict": "PASS",
+            "gate_a": {"pass": True}, "gate_b": {"pass": True},
+            "loo": {"pass": True}, "descriptive_per_position_ci": {},
+            "per_year_net": {}, "n_positions": 0})
+
+    db = _pass_db(tmp_path)
+    doc = run_mod.main(argv=[], db_path=db, output_dir=str(tmp_path), run_date="2026-06-05")
+
+    assert doc["verdict"] == "PASS"
+    assert calls["claim"]["source"] == constants.SOURCE_PRIMARY
+    assert calls["claim"]["study_type"] == "confirmatory"
+    assert calls["finalize"]["trial_id"] == 777
+    assert calls["finalize"]["status"] == "ok"
+    assert os.path.exists(tmp_path / "verdict.json")
+    assert os.path.exists(tmp_path / "power.json")
+    assert os.path.exists(tmp_path / "positions.json")
+    assert os.path.exists(tmp_path / "pairs_formed.json")
+
+
+def test_run_kill_writes_killed_not_verdict(tmp_path, monkeypatch):
+    """Si el estudio muere por kill, run.py escribe killed.json (no verdict.json)
+    y NO registra el trial — la celda permanece ABIERTA."""
+    # Forzamos un kill: evaluate devuelve N-INSUFICIENTE (parcheamos evaluate).
+    _patch_cutoffs(monkeypatch)
+    monkeypatch.setattr(
+        run_mod.evaluate_mod, "evaluate",
+        lambda positions, output_dir: {"verdict": "N-INSUFICIENTE", "reason": "test kill"})
+    registered = {"called": False}
+    monkeypatch.setattr(run_mod, "claim_trial",
+                        lambda **k: registered.__setitem__("called", True) or 1)
+    monkeypatch.setattr(run_mod, "finalize_trial", lambda *a, **k: None)
+
+    db = _pass_db(tmp_path)
+    out = run_mod.main(argv=[], db_path=db, output_dir=str(tmp_path), run_date="2026-06-05")
+    assert out["outcome"] == "N-INSUFICIENTE"
+    assert os.path.exists(tmp_path / "killed.json")
+    assert not os.path.exists(tmp_path / "verdict.json")
+    assert registered["called"] is False     # kill NO registra trial
+
+
+def test_run_fingerprint_respects_study_end(tmp_path):
+    """El fingerprint no cuenta barras >= STUDY_END (frontera del holdout NV-A)."""
+    p = tmp_path / "bound.db"
+    pre = _to_ms("2024-01-01")
+    post = _to_ms(constants.STUDY_END) + 24 * _HOUR_MS   # más allá de la frontera
+    _klines_db(p, {
+        "AAAUSDT": [(pre + h * _HOUR_MS, 100.0, 1.0) for h in range(48)]
+        + [(post + h * _HOUR_MS, 100.0, 1.0) for h in range(48)],
+    })
+    with _ro(str(p)) as con:
+        fp = run_mod.input_fingerprint(con, _to_ms(constants.STUDY_END))
+    kl = fp["perp_klines_by_symbol"]["AAAUSDT"]
+    assert kl["rows"] == 48                            # sólo las pre-frontera
+    assert kl["max_open_time"] < _to_ms(constants.STUDY_END)
