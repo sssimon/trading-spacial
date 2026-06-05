@@ -1,5 +1,8 @@
 pandas>=2.0
 numpy>=1.24
+# Engle-Granger / ADF cointegration test — imported ONLY by tools/celda4_stat_arb/
+# (stat-arb falsification study), not the live system. Added 2026-06-05.
+statsmodels>=0.14
 requests>=2.28
 fastapi>=0.100
 uvicorn>=0.23

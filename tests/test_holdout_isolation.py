@@ -108,6 +108,12 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # console/report label "Cutoff (holdout-safe): <ts>" documenting that the run
     # stays below the cutoff. No data/holdout/ access.
     "tools/ks_stress_replay/run.py",
+    # Celda 4 stat-arb candado (spec 2026-06-05). The literal 'data/holdout' and
+    # 'open_holdout' appear ONLY as the FORBIDDEN needles of
+    # test_paquete_no_referencia_holdout, which asserts the celda4_stat_arb package
+    # contains NEITHER token — i.e. this test ENFORCES holdout isolation (same
+    # rationale as this scanner's own whitelisting). No data/holdout/ access.
+    "tests/test_celda4_stat_arb.py",
 }
 
 # Directories that don't contain trading code; scanning them would be noise
