@@ -92,14 +92,47 @@ def init_db(db_path: str = PROGRAM_DB) -> None:
             "close REAL NOT NULL, volume REAL NOT NULL,"
             "PRIMARY KEY(symbol, open_time)) WITHOUT ROWID"
         )
+        # Resume ledger: every processed (symbol, month) lands here — also the
+        # 404 gaps (rows=0) — so a killed run continues where it stopped.
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS ingest_log("
+            "symbol TEXT NOT NULL, month TEXT NOT NULL, rows INTEGER NOT NULL,"
+            "PRIMARY KEY(symbol, month)) WITHOUT ROWID"
+        )
         con.commit()
 
 
+def backfill_ingest_log(db_path: str = PROGRAM_DB) -> int:
+    """Reconstruct ingest_log from spot_klines for runs that predate the ledger.
+
+    Only months with rows>0 are reconstructible (gaps get re-checked — cheap).
+    Returns the number of (symbol, month) entries inserted.
+    """
+    with closing(sqlite3.connect(db_path)) as con:
+        cur = con.execute(
+            "INSERT OR IGNORE INTO ingest_log "
+            "SELECT symbol, strftime('%Y-%m', open_time/1000, 'unixepoch'), COUNT(*) "
+            "FROM spot_klines GROUP BY 1, 2"
+        )
+        con.commit()
+        return cur.rowcount
+
+
 def download_symbol(symbol: str, months: list[str], db_path: str = PROGRAM_DB) -> dict:
-    """Download the given months for one symbol. Returns {month: rows_ingested}."""
+    """Download the given months for one symbol. Returns {month: rows_ingested}.
+
+    Months already in ingest_log are skipped (resume); their logged row count
+    is reported as-is.
+    """
     per_month: dict[str, int] = {}
     with closing(sqlite3.connect(db_path)) as con:
+        done = dict(con.execute(
+            "SELECT month, rows FROM ingest_log WHERE symbol = ?", (symbol,)
+        ).fetchall())
         for mo in months:
+            if mo in done:
+                per_month[mo] = done[mo]
+                continue
             url = (f"{VISION_DOWNLOAD}{SPOT_KLINES_PREFIX}{symbol}/{TIMEFRAME}/"
                    f"{symbol}-{TIMEFRAME}-{mo}.zip")
             res = _fetch_zip_csv(url)
@@ -111,6 +144,8 @@ def download_symbol(symbol: str, months: list[str], db_path: str = PROGRAM_DB) -
                         (symbol, *row),
                     )
                     n += 1
+            con.execute("INSERT OR REPLACE INTO ingest_log VALUES(?,?,?)",
+                        (symbol, mo, n))
             per_month[mo] = n
         con.commit()  # per-symbol commit: a mid-run failure keeps prior work
     return per_month

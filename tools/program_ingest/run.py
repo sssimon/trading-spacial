@@ -9,7 +9,7 @@ import sys
 import time
 
 from .constants import OUTPUT_DIR, PROGRAM_DB, WINDOW_END, WINDOW_START
-from .download import download_symbol, init_db
+from .download import backfill_ingest_log, download_symbol, init_db
 from .universe import enumerate_universe
 
 
@@ -34,6 +34,9 @@ def main(argv: list[str]) -> int:
         return 0
 
     init_db(PROGRAM_DB)
+    backfilled = backfill_ingest_log(PROGRAM_DB)   # resume across pre-ledger runs
+    if backfilled:
+        print(f"ingest_log backfilled: {backfilled} (symbol, month) entries")
     panel = universe["panel"]
     coverage: dict[str, dict] = {}
     t0 = time.time()

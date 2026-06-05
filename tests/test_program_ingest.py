@@ -207,12 +207,30 @@ def test_download_symbol_inserts_and_reports_gaps(tmp_path, monkeypatch):
     monkeypatch.setattr(dl, "_fetch_zip_csv", fake_fetch)
     per_month = dl.download_symbol("BTCUSDT", ["2021-01", "2021-02"], db)
     assert per_month == {"2021-01": 1, "2021-02": 0}
-    # idempotent: second run inserts nothing new
-    per_month2 = dl.download_symbol("BTCUSDT", ["2021-01"], db)
-    assert per_month2 == {"2021-01": 1}        # parsed 1, INSERT OR IGNORE'd
+    # resume: second run touches no network (fetch would raise on any call)
+    monkeypatch.setattr(dl, "_fetch_zip_csv",
+                        lambda url, **kw: (_ for _ in ()).throw(AssertionError(url)))
+    per_month2 = dl.download_symbol("BTCUSDT", ["2021-01", "2021-02"], db)
+    assert per_month2 == {"2021-01": 1, "2021-02": 0}   # served from ingest_log
     with closing(sqlite3.connect(db)) as con:
         n = con.execute("SELECT COUNT(*) FROM spot_klines").fetchone()[0]
     assert n == 1
+
+
+def test_backfill_ingest_log_reconstructs_months(tmp_path):
+    db = str(tmp_path / "program.db")
+    dl.init_db(db)
+    with closing(sqlite3.connect(db)) as con:
+        # two bars in 2021-01, one in 2021-02 (UTC month boundaries)
+        con.execute("INSERT INTO spot_klines VALUES('BTCUSDT',1609459200000,1,1,1,1,1)")
+        con.execute("INSERT INTO spot_klines VALUES('BTCUSDT',1609462800000,1,1,1,1,1)")
+        con.execute("INSERT INTO spot_klines VALUES('BTCUSDT',1612137600000,1,1,1,1,1)")
+        con.commit()
+    assert dl.backfill_ingest_log(db) == 2
+    with closing(sqlite3.connect(db)) as con:
+        rows = dict(con.execute(
+            "SELECT month, rows FROM ingest_log WHERE symbol='BTCUSDT'").fetchall())
+    assert rows == {"2021-01": 2, "2021-02": 1}
 
 
 def test_window_constants_match_spec():
