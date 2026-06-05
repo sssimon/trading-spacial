@@ -1,8 +1,8 @@
 # Celda 4 — stat-arb: falsificación pre-registrada (pares cointegrados en perps)
 
-**Fecha:** 2026-06-05 · **REV 3** (REV 2 = roast Adrian, 6 BLOCKERS + 5 HIGH;
-REV 3 = crítica ontológica Voronov, 4 hallazgos; ver §10) · **Verbo:** F ·
-**Coordenada al verdict:** E1/F/n_F=3
+**Fecha:** 2026-06-05 · **REV 4** (REV 2 = roast Adrian; REV 3 = ontología
+Voronov; REV 4 = audit Null Vale, 2 decisiones de Samuel; ver §10) ·
+**Verbo:** F · **Coordenada al verdict:** E1/F/n_F=3
 **Survey previo:** ejecutado 2026-06-05 ANTES de este spec (anti-post-hoc,
 requisito Richter) — hallazgos resumidos en §1. Este spec se commitea ANTES de
 escribir el falsificador y MUCHO antes de correrlo. Los parámetros de §4 son
@@ -28,10 +28,19 @@ nuevo.
 - **Decay:** entrada institucional 2021-2023 (Jump sep-2021, Jane Street,
   Tower) → muestras pre-2021 sobreestiman. Nuestra ventana ES el mundo
   post-institucionalización.
+- **Declaración de solapamiento (Null Vale):** Tadi 2023 mide DENTRO de
+  nuestra ventana (2021-2023 ⊂ 2021-2025), y los "parámetros canónicos" son
+  supervivientes de búsquedas previas de otros autores sobre ventanas
+  solapadas. El pre-registro protege contra NUESTRA selección post-data, no
+  contra la de la literatura. Mitigación estructural: el gate de poder NO
+  ancla en efectos publicados (§5) y el verdict no compara contra los
+  retornos de la literatura — las anclas de la lit. fijan FORMA (ventanas,
+  tests, umbrales de señal), y la forma canónica es precisamente lo que la
+  hipótesis somete a falsificación.
 
 ## §2 · Hipótesis falsificable
 
-**H:** En Binance USDT-M perps (1h, 2021-01→2026-05), una estrategia de pares
+**H:** En Binance USDT-M perps (1h, **2021-01→2025-04**), una estrategia de pares
 cointegrados con parámetros canónicos de literatura, ejecutada taker y cargada
 con cost-model **v3w** (§3-bis) + funding neto, produce P&L pooled
 $-denominado > 0 (bootstrap CI95 lo > 0) en walk-forward **Y sigue vivo en la
@@ -49,6 +58,15 @@ post-institucionalización.
   `perp_funding` (settlements), sub-universo panel∩perps (point-in-time: el
   listing de Vision retiene delistados; el conteo REALIZADO se registra en el
   manifest, no se estima en prosa).
+- **Ventana del ESTUDIO (Null Vale A, decisión Samuel 2026-06-05):**
+  **2021-01-01 → 2025-04-30** — el estudio termina donde empieza la era del
+  holdout. El candado de `data/holdout/` protege el directorio; esta cláusula
+  protege el MUNDO: evaluar pares sobre el régimen post-2025-04 vía perps
+  fotografiaría el mismo proceso de precios que la bala única (#322)
+  disparará sobre spot. Ningún módulo del estudio lee barras, funding ni
+  volumen con timestamp ≥ 2025-04-30, aunque el db los contenga. (El ingest
+  llega a 2026-05: la data existe, el estudio no la mira — la frontera es del
+  estudio, no del db.)
 - **Fingerprint del input (F14):** el manifest del verdict congela: membresía
   exacta del panel∩perps, row-counts por símbolo en `perp_klines` y
   `perp_funding`, y min/max `open_time` por símbolo. La corrida es auditable
@@ -78,11 +96,18 @@ serían inconmensurables con el mismo nombre.
 - **Estructura:** idéntica a v3 (floor spread+fee por fill + tail de basis
   diario sqrt con Y=1.5) — se reusan los parámetros POR TIER de
   `costs_calibration.json` sin modificarlos.
-- **Asignación de tier (lo nuevo, regla declarada):** por mediana del
-  dollar-volume diario del símbolo en la VENTANA DE FORMACIÓN (la misma
-  cantidad de elegibilidad de §4, función pura de formación): ≥$100M → tier
-  large; ≥$10M → mid; <$10M → small. (El piso de elegibilidad de $1M ya
-  excluye lo no-tierable.)
+- **Asignación de tier (lo nuevo, regla declarada — Null Vale: los cortes no
+  pueden ser cardinales inventados):** por mediana del dollar-volume diario
+  del símbolo en la VENTANA DE FORMACIÓN (la misma cantidad de elegibilidad
+  de §4, función pura de formación). **Los cortes se DERIVAN, no se
+  inventan:** pre-implementación, se mide el dollar-volume mediano de los 10
+  símbolos curados de v3 (sobre una ventana de referencia declarada en
+  constants.py) y los cortes son los puntos medios geométricos entre los
+  grupos de tier adyacentes, de modo que los 10 curados mapean a su tier v3
+  original bajo la regla de volumen. La derivación se congela en constants.py
+  y el cálculo queda en el artefacto (testeable: el candado del estudio
+  verifica el mapeo de los 10). El piso de elegibilidad de $1M excluye lo
+  no-tierable.
 - **El tipo carga su dominio en el nombre:** el verdict de esta celda es
   **net-of-v3w**, no net-of-v3. La comparación cardinal con el PASS de carry
   queda **prohibida a nivel de tipo** salvo re-pricing explícito a moneda
@@ -129,29 +154,38 @@ LOO. Ningún paso lee el resultado de un paso posterior.**
      A resuelve.)
   3. LOO inviable (F9): algún subset LOO (por símbolo o por año) queda con
      < 30 posiciones.
-- **Gate de poder (F10/V2, ANTES de mirar el signo de nada):** `power.py`
-  computa el efecto mínimo detectable (MDE ≈ semi-ancho esperado del CI95
-  sobre el estimador pooled, desde N de posiciones y σ empírica de P&L por
-  window) y lo congela en el artefacto. **Si MDE > 10%/año sobre el notional
-  desplegado, el estudio muere como N-INSUFICIENTE sin verdict.** El umbral
-  está anclado en LITERATURA, no en otra celda (Voronov V2: usar el 6.33% de
-  carry era un cardinal cross-mundo dentro del gate — atlas violado): 10%/año
-  es el orden del efecto neto que reporta Tadi & Kortchemski 2023 (~10.6%),
-  el setup publicado más cercano a este mundo (Binance, horario, 2021-2023,
-  costos modelados). La mecánica fuerza el orden (power.py corre y escribe
-  ANTES de evaluate.py).
+- **Gate de poder (F10/V2/NV-B, ANTES de mirar el signo de nada):**
+  `power.py` computa y congela en el artefacto: (a) el efecto mínimo
+  detectable (MDE ≈ semi-ancho esperado del CI95 sobre el estimador pooled,
+  desde N de posiciones y σ empírica de P&L por window), y (b)
+  **T_FLOOR_v3w** = mediana sobre posiciones del costo round-trip v3w /
+  (2×NOTIONAL_PER_LEG), anualizada por la mediana del holding observado.
+  **Regla pre-registrada: si MDE > 3 × T_FLOOR_v3w, el estudio muere como
+  N-INSUFICIENTE sin verdict.** El ancla es auto-referente a COSTOS (misma
+  familia que el T_FLOOR de carry): "el estudio debe poder ver un edge que
+  importe — cómodamente encima de sus propios costos". NO ancla en efectos
+  publicados (Null Vale B: el 10%/año de Tadi fue medido DENTRO de nuestra
+  ventana — in-sample lavado por cita; y el 6.33% de carry era cardinal
+  cross-mundo — Voronov V2). Ambos insumos son outputs de la corrida, pero
+  la REGLA y el MULTIPLICADOR están congelados aquí y la mecánica fuerza el
+  orden (power.py corre y escribe ANTES de evaluate.py).
 - **Gate A (¿hubo edge?):** P&L pooled neto, **bootstrap por TRADING-WINDOW**
   (F8): se resamplean con reemplazo los windows (cada uno con la suma de P&L
   de sus posiciones), `BOOTSTRAP_N=10_000`, `SEED=20260605`. **CI95 lo > 0.**
   El bootstrap per-posición se reporta como descriptivo (sesgado a estrecho
   bajo clustering temporal — declarado).
 - **Gate B — vigencia (¿sigue vivo?, Voronov V4):** mismo bootstrap por
-  window restringido a los windows cuyo inicio ≥ **2023-09-01** (la segunda
-  mitad de la ventana, ~33 windows). **CI95 lo > 0.** Sin esto, el pooled
-  integra sobre la no-estacionariedad que la propia literatura del §1 declara
-  como EL fenómeno: un edge que vivió en 2021-22 y murió en 2025 pasaría Gate
-  A y LOO-por-año. Si el subset de Gate B queda con < 30 posiciones → kill
-  criterio 3 (N-INSUFICIENTE, sin verdict).
+  window restringido a los windows cuyo inicio ≥ **2023-03-01** — derivado
+  por REGLA, no elegido: el punto medio del calendario del estudio
+  (2021-01→2025-04 = 52 meses; mitad = 26 meses → 2023-03). Se declara la
+  indistinguibilidad de Null Vale: todo corte fue elegido por una mente que
+  vivió estas eras; la mitigación es que el corte sea función mecánica de la
+  ventana (que se fijó por la frontera del holdout, no por eras de cripto).
+  **CI95 lo > 0.** Sin esto, el pooled integra sobre la no-estacionariedad
+  que la propia literatura del §1 declara como EL fenómeno: un edge que vivió
+  en 2021-22 y murió después pasaría Gate A y LOO-por-año. Si el subset de
+  Gate B queda con < 30 posiciones → kill criterio 3 (N-INSUFICIENTE, sin
+  verdict).
 - **PASS ⟺ Gate A ∧ Gate B ∧ LOO.** Gate A sin Gate B = **FAIL por edge
   muerto** (cierra la celda: el promedio histórico existió, el mundo presente
   no lo paga). El findings reporta la curva por-año como descriptivo.
@@ -174,9 +208,11 @@ LOO. Ningún paso lee el resultado de un paso posterior.**
 
 ## §6 · Poder declarado
 
-Mecanizado como gate en §5 (orden forzado, umbral 6.33%/año pre-registrado).
-El findings reporta además la zona ciega residual: "un edge menor que MDE no
-era visible con este N", cualquiera sea el verdict.
+Mecanizado como gate en §5 (orden forzado; regla MDE ≤ 3×T_FLOOR_v3w — Null
+Vale atrapó que esta sección conservaba el 6.33% que la REV 3 había eliminado
+de §5: dos pre-registros fingiendo ser uno; §5 es la única fuente de verdad
+del umbral). El findings reporta además la zona ciega residual: "un edge
+menor que MDE no era visible con este N", cualquiera sea el verdict.
 
 ## §7 · Sweep descriptivo (NO gatea, SÍ se registra)
 
@@ -211,7 +247,13 @@ defensa contra el humano distraído, no contra el atacante motivado.
    entrada/salida, P&L bruto, costos v3, funding neto), `pairs_formed.json`,
    `power.json` (escrito ANTES que el verdict).
 5. `findings.md` — veredicto línea 1, gates con números, poder declarado,
-   qué-significa-PASS/FAIL, scope, limitación de calibración v3 (F6).
+   qué-significa-PASS/FAIL, scope, limitación de calibración v3 (F6), curva
+   por-año descriptiva (V4), y **el audit de namespacing que la constitución
+   asignó a este estudio** (marco §4: "si el primer estudio nuevo (stat-arb)
+   demuestra que el namespacing no basta..." — Null Vale atrapó que el
+   trigger no tenía detector): el findings DEBE responder explícitamente si
+   `source = celda4-stat-arb/*` bastó para aislar la deflación-N intra-celda
+   o si el contrato del fingerprint necesita el estudio de impacto.
 
 ## §9 · Negative space
 
@@ -253,5 +295,19 @@ defensa contra el humano distraído, no contra el atacante motivado.
   convención, no mecanismo → declarada honesta con su contrato de enforcement
   (§7). **V4** el pooled bootstrap asume intercambiabilidad de windows y
   borra el decay (el fenómeno del §1) → **Gate B de vigencia** (segunda mitad
-  de la ventana, ≥2023-09, CI95 lo > 0) requerido para PASS; Gate A sin Gate
+  de la ventana, CI95 lo > 0) requerido para PASS; Gate A sin Gate
   B = FAIL por edge muerto (§2, §5).
+- **REV 4 (2026-06-05):** audit de Null Vale + 2 decisiones de Samuel:
+  **NV-bug** §6 conservaba el umbral 6.33% que REV 3 eliminó de §5 (dos
+  pre-registros fingiendo ser uno) → §5 única fuente de verdad. **NV-tiers**
+  los cortes de v3w eran el único cardinal sin ancla → derivados por
+  consistencia con el dominio-hogar (los 10 curados mapean a su tier v3 bajo
+  la regla de volumen; candado verifica). **NV-A (decisión: cortar):** la
+  ventana del estudio termina en **2025-04-30** — pre-holdout en TIEMPO, el
+  estudio no fotografía vía perps el régimen que la bala única disparará
+  sobre spot; Gate B pasa a ≥2023-03-01 (punto medio derivado por regla).
+  **NV-B (decisión: cost floor):** umbral de poder = **3×T_FLOOR_v3w**
+  (auto-referente a costos; el 10% de Tadi era in-sample lavado por cita).
+  **NV-lit** declaración de solapamiento literatura↔ventana en §1.
+  **NV-namespacing** el audit que la constitución asignó a este estudio
+  entra como deliverable del findings (§8).
