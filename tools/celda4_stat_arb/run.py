@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None, *, db_path: str = DB_PATH,
         if args.dry_run:
             with open(os.path.join(output_dir, "fingerprint.json"), "w", encoding="utf-8") as f:
                 json.dump(fingerprint, f, indent=2)
-            print(f"[dry-run] fingerprint: {fingerprint['n_members']} símbolos panel∩perps")
+            print(f"[dry-run] fingerprint: {fingerprint['n_members']} simbolos panel x perps")  # ASCII: cp1252
             return {"dry_run": True, "fingerprint": fingerprint}
 
         cutoffs_full = derive_tier_cutoffs(db_path)
