@@ -1,7 +1,8 @@
 # Celda 4 — stat-arb: falsificación pre-registrada (pares cointegrados en perps)
 
-**Fecha:** 2026-06-05 · **REV 2** (post-roast Adrian: 6 BLOCKERS + 5 HIGH
-resueltos; ver §10) · **Verbo:** F · **Coordenada al verdict:** E1/F/n_F=3
+**Fecha:** 2026-06-05 · **REV 3** (REV 2 = roast Adrian, 6 BLOCKERS + 5 HIGH;
+REV 3 = crítica ontológica Voronov, 4 hallazgos; ver §10) · **Verbo:** F ·
+**Coordenada al verdict:** E1/F/n_F=3
 **Survey previo:** ejecutado 2026-06-05 ANTES de este spec (anti-post-hoc,
 requisito Richter) — hallazgos resumidos en §1. Este spec se commitea ANTES de
 escribir el falsificador y MUCHO antes de correrlo. Los parámetros de §4 son
@@ -32,8 +33,10 @@ nuevo.
 
 **H:** En Binance USDT-M perps (1h, 2021-01→2026-05), una estrategia de pares
 cointegrados con parámetros canónicos de literatura, ejecutada taker y cargada
-con cost-model v3 + funding neto, produce P&L pooled $-denominado > 0
-(bootstrap CI95 lo > 0) en walk-forward.
+con cost-model **v3w** (§3-bis) + funding neto, produce P&L pooled
+$-denominado > 0 (bootstrap CI95 lo > 0) en walk-forward **Y sigue vivo en la
+segunda mitad de la ventana** (Gate B, §5 — la hipótesis nombra un proceso, no
+un promedio; el verdict debe responder ambas preguntas: ¿hubo edge? ¿sigue?).
 
 El pagador estructural hipotético: flujo de ruido que desalinea
 transitoriamente pares co-movidos. La incertidumbre que caduca: si la
@@ -62,6 +65,34 @@ post-institucionalización.
   O(1e-7 × notional) por settlement: segundo orden, declarado, no afecta el
   signo de ningún gate.
 
+### §3-bis · v3w: la moneda de costos de ESTA celda (Voronov V1)
+
+v3 está **cerrado sobre 10 símbolos curados** (`tier_for_symbol` lanza
+`UnknownSymbolError` fuera de dominio — el código se niega, no aproxima).
+Aplicar "v3" al universo ancho sería una extrapolación renombrada como
+calibración, y los PASSes de carry (net-of-v3 en su dominio) y de esta celda
+serían inconmensurables con el mismo nombre.
+
+**v3w** se define como extensión DECLARADA con procedencia propia:
+
+- **Estructura:** idéntica a v3 (floor spread+fee por fill + tail de basis
+  diario sqrt con Y=1.5) — se reusan los parámetros POR TIER de
+  `costs_calibration.json` sin modificarlos.
+- **Asignación de tier (lo nuevo, regla declarada):** por mediana del
+  dollar-volume diario del símbolo en la VENTANA DE FORMACIÓN (la misma
+  cantidad de elegibilidad de §4, función pura de formación): ≥$100M → tier
+  large; ≥$10M → mid; <$10M → small. (El piso de elegibilidad de $1M ya
+  excluye lo no-tierable.)
+- **El tipo carga su dominio en el nombre:** el verdict de esta celda es
+  **net-of-v3w**, no net-of-v3. La comparación cardinal con el PASS de carry
+  queda **prohibida a nivel de tipo** salvo re-pricing explícito a moneda
+  común (operación que, si algún día se hace para la regla de activación del
+  marco §4, es un acto declarado con su propio artefacto).
+- **Implicación para el marco (registrada como pregunta abierta del INDEX,
+  no se legisla aquí):** toda celda F de universo ancho (3, 9) tiene el mismo
+  problema de moneda; el mandato "net-of-v3" de la constitución es cobrable
+  solo en el dominio curado.
+
 ## §4 · Parámetros IRREVOCABLES de la config primaria
 
 | Parámetro | Valor | Ancla |
@@ -80,7 +111,7 @@ post-institucionalización.
 | Salida | cruce de z=0 | canónico |
 | Stop | \|z\| ≥ 3.0 → cierre; cierre forzoso al fin del trading window (sin re-apertura en el window siguiente salvo señal nueva de su propia formación); delisting de una pierna → cierre forzoso en la última barra disponible (F3) | Park 2026 |
 | Ejecución | taker en el close de la barra siguiente a la señal (lag 1 barra) | anti look-ahead |
-| Costos (F6) | cost-model v3 por pierna por fill (4 fills/round-trip); fills de cierre forzoso por delisting se cargan al PEOR tier de v3 (conservador); la extrapolación de la calibración v3 a este universo se declara como limitación en findings | |
+| Costos (F6, V1) | **v3w** (§3-bis) por pierna por fill (4 fills/round-trip); fills de cierre forzoso por delisting se cargan al tier small de v3w (el peor) independiente del tier de formación; la reutilización de los parámetros por-tier de v3 fuera de su universo de calibración se declara como limitación en findings | |
 | Funding (F13) | NETO del par, acumulado en todo settlement con `entry_fill_time < funding_time ≤ exit_fill_time`, al close de la hora del settlement (§3 aproximación) | decisión Samuel 2026-06-05 |
 | Posiciones | dollar-neutral, $10k por pierna | |
 
@@ -98,33 +129,48 @@ LOO. Ningún paso lee el resultado de un paso posterior.**
      A resuelve.)
   3. LOO inviable (F9): algún subset LOO (por símbolo o por año) queda con
      < 30 posiciones.
-- **Gate de poder (F10, ANTES de mirar el signo de nada):** `power.py`
+- **Gate de poder (F10/V2, ANTES de mirar el signo de nada):** `power.py`
   computa el efecto mínimo detectable (MDE ≈ semi-ancho esperado del CI95
   sobre el estimador pooled, desde N de posiciones y σ empírica de P&L por
-  window) y lo congela en el artefacto. **Si MDE > 6.33%/año sobre el
-  notional desplegado (la referencia ya medida de la celda 2), el estudio
-  muere como N-INSUFICIENTE sin verdict.** La regla de decisión está
-  pre-registrada aquí; la mecánica fuerza el orden (power.py corre y escribe
-  ANTES de evaluate.py). Esto reemplaza el poder post-hoc: lo que queda
-  congelado pre-verdict es la REGLA y el UMBRAL, y la corrida no puede
-  esquivarla.
-- **Gate A (el verdict):** P&L pooled neto, **bootstrap por TRADING-WINDOW**
+  window) y lo congela en el artefacto. **Si MDE > 10%/año sobre el notional
+  desplegado, el estudio muere como N-INSUFICIENTE sin verdict.** El umbral
+  está anclado en LITERATURA, no en otra celda (Voronov V2: usar el 6.33% de
+  carry era un cardinal cross-mundo dentro del gate — atlas violado): 10%/año
+  es el orden del efecto neto que reporta Tadi & Kortchemski 2023 (~10.6%),
+  el setup publicado más cercano a este mundo (Binance, horario, 2021-2023,
+  costos modelados). La mecánica fuerza el orden (power.py corre y escribe
+  ANTES de evaluate.py).
+- **Gate A (¿hubo edge?):** P&L pooled neto, **bootstrap por TRADING-WINDOW**
   (F8): se resamplean con reemplazo los windows (cada uno con la suma de P&L
-  de sus posiciones), `BOOTSTRAP_N=10_000`, `SEED=20260605`. **PASS ⟺ CI95
-  lo > 0.** El bootstrap per-posición se reporta como descriptivo (sesgado a
-  estrecho bajo clustering temporal — declarado).
-- **Robustez LOO:** PASS requiere además CI95 lo > 0 (mismo bootstrap por
-  window) al excluir (a) cualquier símbolo individual, (b) cualquier año
-  calendario. Gate A pasa + LOO falla → **FAIL por fragilidad** (lección
+  de sus posiciones), `BOOTSTRAP_N=10_000`, `SEED=20260605`. **CI95 lo > 0.**
+  El bootstrap per-posición se reporta como descriptivo (sesgado a estrecho
+  bajo clustering temporal — declarado).
+- **Gate B — vigencia (¿sigue vivo?, Voronov V4):** mismo bootstrap por
+  window restringido a los windows cuyo inicio ≥ **2023-09-01** (la segunda
+  mitad de la ventana, ~33 windows). **CI95 lo > 0.** Sin esto, el pooled
+  integra sobre la no-estacionariedad que la propia literatura del §1 declara
+  como EL fenómeno: un edge que vivió en 2021-22 y murió en 2025 pasaría Gate
+  A y LOO-por-año. Si el subset de Gate B queda con < 30 posiciones → kill
+  criterio 3 (N-INSUFICIENTE, sin verdict).
+- **PASS ⟺ Gate A ∧ Gate B ∧ LOO.** Gate A sin Gate B = **FAIL por edge
+  muerto** (cierra la celda: el promedio histórico existió, el mundo presente
+  no lo paga). El findings reporta la curva por-año como descriptivo.
+- **Robustez LOO:** CI95 lo > 0 (mismo bootstrap por window, sobre el
+  pooled) al excluir (a) cualquier símbolo individual, (b) cualquier año
+  calendario. Gate A+B pasan + LOO falla → **FAIL por fragilidad** (lección
   Brazo A/PENDLE).
 - **Qué significa FAIL:** con el gate de poder superado, FAIL cierra la celda
   — "no hay edge de pares cointegrados extraíble con diseño canónico en este
-  mundo". Reapertura solo con hipótesis distinta tipada (p.ej. intradía 5min
-  costos maker — estudio nuevo).
-- **Qué significa PASS:** la celda cierra PASS con coordenada E1/F/n_F=3. NO
-  autoriza deploy (dossier del marco §5 + decisión explícita). Si compite con
-  el PASS de carry por promoción → deflación cross-celda con N = celdas F
-  corridas (regla de activación, marco §4).
+  mundo, O lo hubo y murió" (el findings distingue cuál vía Gate A/B).
+  Reapertura solo con hipótesis distinta tipada (p.ej. intradía 5min costos
+  maker — estudio nuevo).
+- **Qué significa PASS:** la celda cierra PASS con coordenada E1/F/n_F=3.
+  Gate A afirma el promedio histórico; Gate B es lo único que afirma
+  vigencia. NO autoriza deploy (dossier del marco §5 + decisión explícita).
+  El PASS está denominado **net-of-v3w** (§3-bis): NO es comparable
+  cardinalmente con el PASS de carry sin re-pricing explícito a moneda común
+  — si algún día compite por promoción, ese re-pricing es un acto declarado
+  previo a la deflación de la regla de activación (marco §4).
 
 ## §6 · Poder declarado
 
@@ -143,13 +189,22 @@ momento del verdict; el sweep posterior crece su propio N y no re-interpreta
 el verdict.** Si la primaria falla y una variante pasa, el verdict es FAIL y
 la variante es candidata declarada a estudio nuevo (arrastrando este N).
 
+**Honestidad sobre la frontera (Voronov V3):** la separación
+primaria/sweep vive en el campo `source` y en la disciplina del operador —
+es una CONVENCIÓN, no una restricción mecánica (el mismo `evaluate.py`
+computa ambas). El enforcement real: el orden está pre-registrado aquí, el
+sweep no se implementa hasta después del verdict de la primaria (§9), y el
+backstop es la revisión de PR — mismo contrato que el candado del programa:
+defensa contra el humano distraído, no contra el atacante motivado.
+
 ## §8 · Unidad de estudio (Cassian, 5 piezas)
 
 1. Este spec (pre-registrado, commiteado antes del código).
 2. `tools/celda4_stat_arb/` — clonando la forma de `tools/funding_carry/`:
-   `constants.py` (parámetros §4 congelados) / `pairs.py` (formación EG) /
-   `simulate.py` (señal+ejecución+costos) / `power.py` / `evaluate.py`
-   (gates+bootstrap) / `run.py`. Determinista, seed fijo.
+   `constants.py` (parámetros §4 congelados) / `costs.py` (**v3w**, §3-bis) /
+   `pairs.py` (formación EG) / `simulate.py` (señal+ejecución+costos) /
+   `power.py` / `evaluate.py` (gates+bootstrap) / `run.py`. Determinista,
+   seed fijo.
 3. `data/retune/programa-celdas/celda4-stat-arb/verdict.json` (+ coordenada +
    fingerprint del input §3).
 4. Datos del verdict: `positions.json` (por posición: par, window,
@@ -187,3 +242,16 @@ la variante es candidata declarada a estudio nuevo (arrastrando este N).
   sobre neto positivo (§5); F12 deflación de la primaria congelada (§7); F13
   boundary de funding `(entry, exit]` (§4); F14 fingerprint del input en el
   manifest (§3); F15 conteos realizados, no prosa (§3).
+- **REV 3 (2026-06-05):** crítica ontológica de Voronov aplicada: **V1** v3
+  está cerrado sobre 10 símbolos (`UnknownSymbolError` fuera de dominio) →
+  la celda define **v3w** con asignación de tier por dollar-volume declarado
+  y el verdict se denomina net-of-v3w, incomparable con carry sin re-pricing
+  (§3-bis, §5); implicación constitucional registrada como pregunta abierta
+  del INDEX. **V2** el umbral del gate de poder era el cardinal de carry
+  (cross-mundo, atlas violado) → reemplazado por ancla de literatura: 10%/año
+  (Tadi 2023, setup más cercano) (§5). **V3** la frontera primaria/sweep es
+  convención, no mecanismo → declarada honesta con su contrato de enforcement
+  (§7). **V4** el pooled bootstrap asume intercambiabilidad de windows y
+  borra el decay (el fenómeno del §1) → **Gate B de vigencia** (segunda mitad
+  de la ventana, ≥2023-09, CI95 lo > 0) requerido para PASS; Gate A sin Gate
+  B = FAIL por edge muerto (§2, §5).
