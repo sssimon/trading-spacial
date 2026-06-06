@@ -137,3 +137,6 @@ SIGNAL_*.txt
 # Private live production trade data (real positions/P&L) â€” diagnostic inputs
 data/retune/2026-06-01-cost-model-diagnosis/live_trades.json
 data/retune/2026-06-01-cost-model-diagnosis/per_trade.json
+
+# Realizacion per-tenant — data familiar sensible, el tool se versiona, la data no
+data/realizacion/
