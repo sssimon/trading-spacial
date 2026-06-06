@@ -144,11 +144,15 @@ def test_metrics_returns_documented_shape(admin_client):
 def test_metrics_aggregates_today_correctly(admin_client):
     """Seed: 2 assistant turns (cost $0.05 + $0.10), 1 error, 1 refused.
     Metrics reflect each."""
-    _seed_turn(tenant_id=1, cost_usd=0.05, role="assistant", hours_ago=1)
-    _seed_turn(tenant_id=1, cost_usd=0.10, role="assistant", hours_ago=2)
-    _seed_turn(tenant_id=1, cost_usd=0.0,  role="error", hours_ago=3,
+    # minutos, no horas (#571): con hours_ago=1..4 el test mentía en las
+    # primeras ~4h UTC del día — los turns más viejos caían en AYER y
+    # today.turn_count daba 2 en vez de 4. Con minutos el test es válido a
+    # cualquier hora salvo los primeros ~4 min del día UTC.
+    _seed_turn(tenant_id=1, cost_usd=0.05, role="assistant", hours_ago=1 / 60)
+    _seed_turn(tenant_id=1, cost_usd=0.10, role="assistant", hours_ago=2 / 60)
+    _seed_turn(tenant_id=1, cost_usd=0.0,  role="error", hours_ago=3 / 60,
                 content_summary="upstream")
-    _seed_turn(tenant_id=2, cost_usd=0.0,  role="error", hours_ago=4,
+    _seed_turn(tenant_id=2, cost_usd=0.0,  role="error", hours_ago=4 / 60,
                 refused=True, content_summary="too_many_tool_hops")
 
     resp = admin_client.get("/agent/metrics")
