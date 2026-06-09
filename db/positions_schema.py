@@ -142,6 +142,12 @@ CANONICAL_POSITIONS_COLUMNS: tuple[ColumnSpec, ...] = (
     ColumnSpec("atr_entry", "REAL"),
     ColumnSpec("be_mult", "REAL"),
     ColumnSpec("tenant_id", "INTEGER"),
+    # control_domain: provenance/control axis. INTERNAL (system-born, system
+    # may actuate) vs EXTERNAL (opened outside, observed-only). Added by
+    # _migrate_control_domain after all table recreations. NOT NULL DEFAULT
+    # 'INTERNAL' so every pre-existing row is INTERNAL (behavior preserved).
+    # Spec: 2026-06-09-posiciones-externas-control-domain-spec.md.
+    ColumnSpec("control_domain", "TEXT", nullable=False, default="'INTERNAL'"),
 )
 
 

@@ -48,11 +48,14 @@ def _load_closed_trades(conn, *, tenant_id: int) -> list[dict[str, Any]]:
     `db.capital.db_list_active_tenant_ids()` and call this loader once per
     tenant. Aggregating across tenants implicitly is not allowed.
     """
+    # control_domain='INTERNAL': los baselines de riesgo del kill-switch se
+    # computan solo de trades del sistema. Un cierre EXTERNAL (posición de papá
+    # cerrada en Binance) no es un trade del sistema — CD-1 (spec §4).
     rows = conn.execute(
         """SELECT symbol, exit_ts, pnl_usd
            FROM positions
            WHERE status = 'closed' AND exit_ts IS NOT NULL
-             AND tenant_id = ?
+             AND tenant_id = ? AND control_domain = 'INTERNAL'
            ORDER BY exit_ts""",
         (tenant_id,),
     ).fetchall()
@@ -67,10 +70,13 @@ def _load_open_positions(conn, *, tenant_id: int) -> list[dict[str, Any]]:
 
     See `_load_closed_trades` for the multi-tenant policy rationale.
     """
+    # control_domain='INTERNAL': el MTM / P(ruina) del kill-switch no debe
+    # ver una posición EXTERNAL que el sistema no controla — CD-1 (spec §4).
     rows = conn.execute(
         """SELECT symbol, entry_price, qty, direction
            FROM positions
-           WHERE status = 'open' AND tenant_id = ?""",
+           WHERE status = 'open' AND tenant_id = ?
+             AND control_domain = 'INTERNAL'""",
         (tenant_id,),
     ).fetchall()
     # NOTE: qty is intentionally NOT coerced to 0.0 here. Legacy unmeasurable
