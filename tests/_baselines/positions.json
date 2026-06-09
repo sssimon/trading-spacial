@@ -5,6 +5,7 @@
         {
           "atr_entry": null,
           "be_mult": null,
+          "control_domain": "INTERNAL",
           "direction": "LONG",
           "entry_price": 50000.0,
           "entry_ts": "2026-01-15T10:05:00Z",
@@ -42,6 +43,7 @@
         {
           "atr_entry": null,
           "be_mult": null,
+          "control_domain": "INTERNAL",
           "direction": "LONG",
           "entry_price": 50000.0,
           "entry_ts": "2026-01-15T10:05:00Z",
@@ -72,6 +74,7 @@
       "position": {
         "atr_entry": null,
         "be_mult": null,
+        "control_domain": "INTERNAL",
         "direction": "LONG",
         "entry_price": 3000.0,
         "entry_ts": "2026-04-27T17:05:48.172642+00:00",
@@ -106,6 +109,7 @@
       "position": {
         "atr_entry": null,
         "be_mult": null,
+        "control_domain": "INTERNAL",
         "direction": "LONG",
         "entry_price": 50000.0,
         "entry_ts": "2026-01-15T10:05:00Z",

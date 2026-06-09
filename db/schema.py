@@ -426,6 +426,15 @@ def init_db() -> None:
         _migrate_unique_open_scan(con_d)
         _migrate_idempotency_keys(con_d)
 
+    # control_domain axis (posiciones EXTERNAL — spec
+    # 2026-06-09-posiciones-externas-control-domain). Runs AFTER all table
+    # recreations so the column is never dropped by a later recreate. Fresh DB:
+    # the recreations build positions without it → this ALTER adds it. Prod
+    # (already migrated): the recreations skip (idempotent) → this ALTER adds
+    # it. PRAGMA-guarded for idempotency.
+    with transaction() as con_cd:
+        _migrate_control_domain(con_cd)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -812,6 +821,37 @@ def backfill_tenant(
         )
         affected[table] = cursor.rowcount
     return affected
+
+
+def _migrate_control_domain(con: sqlite3.Connection) -> None:
+    """Add `control_domain` to positions (INTERNAL default / EXTERNAL).
+
+    Distingue posiciones nacidas DEL sistema (INTERNAL — el sistema tiene
+    camino de control: PositionClosure, check_position_stops) de las abiertas
+    POR FUERA (EXTERNAL — observadas, nunca actuadas). `positions` confundía
+    dos ejes que coincidían por accidente: provenance (de dónde vino) y control
+    (quién actúa); esta columna los separa.
+
+    Idempotente: PRAGMA-guarded ADD COLUMN (NO try/except — un ALTER fallido en
+    la BEGIN IMMEDIATE marcaría la tx como abortable). NOT NULL DEFAULT
+    'INTERNAL' rellena toda fila existente, así que el comportamiento de las
+    filas previas se preserva (todas son INTERNAL).
+
+    Spec: docs/superpowers/specs/es/2026-06-09-posiciones-externas-control-domain-spec.md (REV 2 §2).
+    """
+    cols = {
+        row[1]
+        for row in con.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    if "control_domain" not in cols:
+        con.execute(
+            "ALTER TABLE positions ADD COLUMN control_domain TEXT NOT NULL "
+            "DEFAULT 'INTERNAL'"
+        )
+        log.info(
+            "DB migration: added control_domain column to positions "
+            "(default INTERNAL)"
+        )
 
 
 def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
