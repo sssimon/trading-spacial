@@ -68,6 +68,19 @@ function currentPriceFor(p: Position, symbols: SymbolStatus[]): number {
   return p.entry_price * (1 + (p.pnl_pct ?? 0) / 100);
 }
 
+// P&L NO REALIZADO en vivo de una posición abierta, marcado a `currentPrice`.
+// `pnl_usd`/`pnl_pct` están NULL hasta el cierre (solo se setean al cerrar),
+// así que una abierta mostraría $0.00 — lo computamos contra el precio actual.
+function livePnlFor(p: Position, currentPrice: number): { usd: number; pct: number } {
+  const qty = p.qty ?? 0;
+  const isLong = p.direction === 'LONG';
+  const diff = isLong ? (currentPrice - p.entry_price) : (p.entry_price - currentPrice);
+  return {
+    usd: diff * qty,
+    pct: p.entry_price > 0 ? (diff / p.entry_price) * 100 : 0,
+  };
+}
+
 // ── Main ─────────────────────────────────────────────────────
 
 const PositionsView: React.FC<PositionsViewProps> = ({
@@ -75,11 +88,11 @@ const PositionsView: React.FC<PositionsViewProps> = ({
   onOpenSymbol, onAbrirPosicion, onAskAgent, onEditSlTp, onClosePosition,
   mobile = false,
 }) => {
-  const winningPos = positions.filter((p) => (p.pnl_pct ?? 0) > 0).length;
-  const losingPos  = positions.filter((p) => (p.pnl_pct ?? 0) < 0).length;
+  const winningPos = positions.filter((p) => livePnlFor(p, currentPriceFor(p, symbols)).usd > 0).length;
+  const losingPos  = positions.filter((p) => livePnlFor(p, currentPriceFor(p, symbols)).usd < 0).length;
 
   const metrics = useMemo(() => {
-    const pnlOpen   = positions.reduce((a, p) => a + (p.pnl_usd ?? 0), 0);
+    const pnlOpen   = positions.reduce((a, p) => a + livePnlFor(p, currentPriceFor(p, symbols)).usd, 0);
     const pnlClosed = closedRecent7d.reduce((a, p) => a + (p.pnl_usd ?? 0), 0);
     const wins      = closedRecent7d.filter((p) => (p.pnl_usd ?? 0) > 0).length;
     const losses    = closedRecent7d.length - wins;
@@ -245,8 +258,9 @@ const PositionCard: React.FC<PositionCardProps> = ({
   position: p, currentPrice, onView, onAskAgent, onEditSlTp, onClosePosition,
 }) => {
   const isLong  = p.direction === 'LONG';
-  const pnlPct  = p.pnl_pct ?? 0;
-  const pnlAbs  = p.pnl_usd ?? 0;
+  // P&L no realizado en vivo (abierta): contra el precio actual, no el
+  // pnl_usd/pnl_pct guardado (NULL hasta el cierre).
+  const { usd: pnlAbs, pct: pnlPct } = livePnlFor(p, currentPrice);
   const tone: 'bull' | 'bear' = pnlAbs >= 0 ? 'bull' : 'bear';
   const insight = useMemo(() => getPositionInsight(p, currentPrice), [p, currentPrice]);
 
