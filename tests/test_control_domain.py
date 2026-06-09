@@ -83,3 +83,44 @@ def test_migration_idempotent_second_init(tmp_path):
     finally:
         con.close()
     assert len(cd_cols) == 1, "control_domain no debe duplicarse en el segundo init_db"
+
+
+def test_external_survives_reinit_recreations(tmp_path):
+    """Una posición EXTERNAL sobrevive a un segundo init_db.
+
+    Regresión del incidente 2026-06-09: las 4 migraciones recrean la tabla
+    positions en cada boot (cascada de CHECKs) y borraban control_domain →
+    re-default a INTERNAL → la exención dejaba de proteger las bolsas de papá
+    y el scanner las auto-cerraba. control_domain DEBE viajar dentro de las
+    recreaciones (CREATE + TARGET_COLS), no re-añadirse por ALTER después.
+    """
+    con = _fresh_db(tmp_path)
+    con.execute(
+        "INSERT INTO positions (symbol,direction,status,entry_price,entry_ts,"
+        "qty,tenant_id,control_domain) VALUES "
+        "('BTCUSDT','LONG','open',64390,'2026-06-04T00:56:00+00:00',0.01967,2,'EXTERNAL')"
+    )
+    con.commit()
+    con.close()
+
+    import btc_api
+    from db.schema import init_db
+    db_path = tmp_path / "control_domain.db"
+    orig = btc_api.DB_FILE
+    btc_api.DB_FILE = str(db_path)
+    try:
+        init_db()  # simula un deploy restart → corre las recreaciones de tabla
+    finally:
+        btc_api.DB_FILE = orig
+
+    con = sqlite3.connect(str(db_path))
+    try:
+        cd = con.execute(
+            "SELECT control_domain FROM positions WHERE symbol='BTCUSDT'"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert cd == "EXTERNAL", (
+        "las recreaciones de init_db resetearon EXTERNAL a INTERNAL (el wipe que "
+        "auto-cerró las bolsas de papá)"
+    )

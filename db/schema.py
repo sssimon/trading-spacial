@@ -1078,6 +1078,7 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
             atr_entry   REAL,
             be_mult     REAL,
             tenant_id   INTEGER,
+            control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             CHECK (qty IS NOT NULL OR status = 'legacy_unmeasurable')
         )
         """
@@ -1089,9 +1090,15 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
+        "control_domain",
     ]
     select_expressions = [
-        col if col in existing_cols else "NULL"
+        # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
+        # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
+        # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
+        # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        col if col in existing_cols
+        else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1197,6 +1204,7 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
             atr_entry   REAL,
             be_mult     REAL,
             tenant_id   INTEGER,
+            control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable')
         )
         """
@@ -1206,9 +1214,15 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
+        "control_domain",
     ]
     select_expressions = [
-        col if col in existing_cols else "NULL"
+        # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
+        # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
+        # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
+        # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        col if col in existing_cols
+        else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1309,6 +1323,7 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
             atr_entry   REAL,
             be_mult     REAL,
             tenant_id   INTEGER,
+            control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant'))
         )
@@ -1319,9 +1334,15 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
+        "control_domain",
     ]
     select_expressions = [
-        col if col in existing_cols else "NULL"
+        # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
+        # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
+        # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
+        # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        col if col in existing_cols
+        else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1444,6 +1465,7 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
             atr_entry   REAL,
             be_mult     REAL,
             tenant_id   INTEGER,
+            control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant')),
             CHECK (direction IN ('LONG', 'SHORT') OR status = 'legacy_unmeasurable')
@@ -1455,9 +1477,15 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
+        "control_domain",
     ]
     select_expressions = [
-        col if col in existing_cols else "NULL"
+        # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
+        # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
+        # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
+        # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        col if col in existing_cols
+        else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
     ]
     insert_sql = (
