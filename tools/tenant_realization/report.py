@@ -25,13 +25,17 @@ import time
 
 PROD_DB = "/var/www/trading/signals.db"
 OUTPUT_DIR = "data/realizacion"
-MANUAL_REASONS = {"MANUAL"}
+# Cierre discrecional del operador = conducta atribuible. MANUAL_AGENT (el
+# operador confirma un cierre propuesto por el copiloto) es humano-en-el-loop,
+# así que cuenta como conducta — NO como señal. (Corrige el bug que clasificaba
+# MANUAL_AGENT del lado resultado; ver spec eje-conducta REV 2 §6/§7.)
+MANUAL_REASONS = {"MANUAL", "MANUAL_AGENT"}
 
 _QUERY = (
     "SELECT json_group_array(json_object("
     "'symbol', symbol, 'direction', direction, 'size_usd', size_usd,"
     "'pnl_usd', pnl_usd, 'pnl_pct', pnl_pct, 'exit_reason', exit_reason,"
-    "'entry_ts', entry_ts, 'exit_ts', exit_ts)) "
+    "'entry_ts', entry_ts, 'exit_ts', exit_ts, 'scan_id', scan_id)) "
     "FROM positions WHERE tenant_id={tenant} AND status='closed' "
     "AND pnl_usd IS NOT NULL"
 )
