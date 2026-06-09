@@ -435,6 +435,11 @@ def init_db() -> None:
     with transaction() as con_cd:
         _migrate_control_domain(con_cd)
 
+    # cash_balance_usd en capital: el saldo NO-posición del operador (cash /
+    # futuros) para el equity en vivo display-only (v0.1.5). Idempotente.
+    with transaction() as con_cash:
+        _migrate_cash_balance(con_cash)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -852,6 +857,28 @@ def _migrate_control_domain(con: sqlite3.Connection) -> None:
             "DB migration: added control_domain column to positions "
             "(default INTERNAL)"
         )
+
+
+def _migrate_cash_balance(con: sqlite3.Connection) -> None:
+    """Add `cash_balance_usd` to capital (saldo no-posición del operador).
+
+    Es el cash/futuros del operador que NO vive en una posición trackeada. Lo
+    usa el equity en vivo display-only (`api.equity.compute_real_equity`):
+    equity_real = cash_balance_usd + Σ(holds EXTERNAL × precio_actual). NO
+    alimenta `capital.balance` ni el `portfolio_dd` del kill-switch.
+
+    Idempotente: PRAGMA-guarded ADD COLUMN. NOT NULL DEFAULT 0 → toda fila
+    existente arranca en 0 (sin efecto hasta que un operador lo fije).
+    """
+    cols = {
+        row[1]
+        for row in con.execute("PRAGMA table_info(capital)").fetchall()
+    }
+    if "cash_balance_usd" not in cols:
+        con.execute(
+            "ALTER TABLE capital ADD COLUMN cash_balance_usd REAL NOT NULL DEFAULT 0"
+        )
+        log.info("DB migration: added cash_balance_usd column to capital (default 0)")
 
 
 def _migrate_qty_not_null(con: sqlite3.Connection) -> None:

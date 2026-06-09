@@ -35,6 +35,39 @@ def db_get_capital(
     return dict(row) if row else None
 
 
+def db_set_cash_balance(
+    con: sqlite3.Connection,
+    tenant_id: int,
+    cash_balance_usd: float,
+) -> dict:
+    """Fija el saldo no-posición (cash/futuros) del tenant para el equity en vivo.
+
+    Si el tenant ya tiene fila de capital, UPDATE solo `cash_balance_usd` (no
+    toca balance/peak/dd). Si no existe, crea una fila mínima (balance=peak=0)
+    con el cash. NO alimenta el kill-switch — es solo para `compute_real_equity`.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    existing = con.execute(
+        "SELECT id FROM capital WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
+    if existing is None:
+        con.execute(
+            "INSERT INTO capital (tenant_id, balance, peak_balance, "
+            "cash_balance_usd, updated_at) VALUES (?, 0, 0, ?, ?)",
+            (tenant_id, float(cash_balance_usd), now),
+        )
+    else:
+        con.execute(
+            "UPDATE capital SET cash_balance_usd = ?, updated_at = ? "
+            "WHERE tenant_id = ?",
+            (float(cash_balance_usd), now, tenant_id),
+        )
+    row = con.execute(
+        "SELECT * FROM capital WHERE tenant_id = ?", (tenant_id,),
+    ).fetchone()
+    return dict(row)
+
+
 def db_list_active_tenant_ids(
     con: sqlite3.Connection,
 ) -> list[int]:
