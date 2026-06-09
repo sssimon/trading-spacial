@@ -1,7 +1,7 @@
 ---
 name: programa-index
 description: Estado vivo de la Edición 1 del programa de investigación de edge. Tabla de celdas (verbo/estado/veredicto/coordenada/artefacto), candidatas a Edición 2, preguntas abiertas. Constitución: docs/superpowers/specs/2026-06-04-programa-edge-marco-design.md. Runbook: ../patterns/estudiar-una-celda.md.
-last_updated: 2026-06-05
+last_updated: 2026-06-09
 ---
 
 # Programa de investigación de edge — Edición 1
@@ -47,7 +47,13 @@ La selección fina de símbolos para cada estudio F es de ESE estudio.
 ## Candidatas a Edición 2
 
 (Celdas nuevas descubiertas se anotan aquí — NO se estudian en la Edición 1.
-Abrir la Edición 2 es un acto explícito con su propia junta. Ninguna por ahora.)
+Abrir la Edición 2 es un acto explícito con su propia junta.)
+
+| Candidata | Origen | Sondeo pre-celda | ¿Abrir? |
+|---|---|---|---|
+| sentiment (Fear&Greed) | junta tipado 2026-06-09 (C1) | **FAIL** — contrarian gross-flat/negativa net-of-v3 post-2021 (CI95 pooled [−39.1,−5.1] excluye cero negativo). `data/retune/2026-06-09-fng-probe/` | **NO** (reapertura solo con hipótesis de-tendenciada por régimen, pre-registrada) |
+| order-flow / microestructura | junta tipado 2026-06-09 (C2) | MUERTO-AL-LLEGAR — sin order book histórico (1 snapshot); inalcanzable retail; vecino de celdas 5 (MM) y 6 (MEV) cerradas | NO (requiere ingest forward L2/tick de meses) |
+| fundamentales discrecionales | junta tipado 2026-06-09 (C3) | MUERTO-AL-LLEGAR — verbo discrecional (resucita q3_pass:false); parte medible = celda 8 (DEGRADADA) | NO (solo la cláusula de reapertura de celda 8: Chi/Chu/Hao USDT-flows net-v3) |
 
 ## Preguntas abiertas de la Edición 1
 

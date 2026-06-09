@@ -1,0 +1,108 @@
+{
+  "hold_days": 5,
+  "fear_max": 25,
+  "greed_min": 75,
+  "notional": 1000.0,
+  "n_boot": 10000,
+  "seed": 42,
+  "symbols": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "BTCUSDT",
+    "DOGEUSDT",
+    "ETHUSDT",
+    "JUPUSDT",
+    "PENDLEUSDT",
+    "RUNEUSDT",
+    "UNIUSDT",
+    "XLMUSDT"
+  ],
+  "cost_bps_by_tier": {
+    "major": [
+      13.0,
+      15.0,
+      28.0
+    ],
+    "mid": [
+      18.0,
+      30.0,
+      48.0
+    ],
+    "small": [
+      30.0,
+      75.0,
+      105.0
+    ]
+  },
+  "by_period": {
+    "PRE": {
+      "n_trades": 769,
+      "n_episodes": 7,
+      "mean_pnl": -31.6846,
+      "ci95": [
+        -74.6811,
+        71.5711
+      ],
+      "mean_gross_pct": -2.7074,
+      "verdict": "UNDERPOWERED"
+    },
+    "POST": {
+      "n_trades": 5840,
+      "n_episodes": 127,
+      "mean_pnl": -21.9001,
+      "ci95": [
+        -39.1363,
+        -5.1061
+      ],
+      "mean_gross_pct": -1.6358,
+      "verdict": "FAIL"
+    }
+  },
+  "by_period_leg": {
+    "PRE_fear_long": {
+      "n_trades": 130,
+      "n_episodes": 1,
+      "mean_pnl": 70.7082,
+      "ci95": [
+        70.7082,
+        70.7082
+      ],
+      "mean_gross_pct": 7.4708,
+      "verdict": "UNDERPOWERED"
+    },
+    "PRE_greed_short": {
+      "n_trades": 639,
+      "n_episodes": 6,
+      "mean_pnl": -52.5157,
+      "ci95": [
+        -80.7046,
+        72.3127
+      ],
+      "mean_gross_pct": -4.778,
+      "verdict": "UNDERPOWERED"
+    },
+    "POST_fear_long": {
+      "n_trades": 3899,
+      "n_episodes": 78,
+      "mean_pnl": -9.1151,
+      "ci95": [
+        -18.8265,
+        2.8002
+      ],
+      "mean_gross_pct": -0.3643,
+      "verdict": "FAIL"
+    },
+    "POST_greed_short": {
+      "n_trades": 1941,
+      "n_episodes": 49,
+      "mean_pnl": -47.5821,
+      "ci95": [
+        -80.6619,
+        -0.934
+      ],
+      "mean_gross_pct": -4.19,
+      "verdict": "FAIL"
+    }
+  },
+  "sondeo_verdict": "FAIL"
+}
