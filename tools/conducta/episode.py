@@ -266,10 +266,9 @@ def main() -> int:
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
     b = report["presupuesto_perdida"]
-    print(
-        f"\ntenant {args.tenant}: costo-piso (al menos) ${report['costo_piso_total_usd']}"
-        f"{f' [{report['n_simbolos_sin_tier']} trades sin tier]' if report['n_simbolos_sin_tier'] else ''}"
-    )
+    sin_tier = report["n_simbolos_sin_tier"]
+    sufijo = f" [{sin_tier} trades sin tier]" if sin_tier else ""
+    print(f"\ntenant {args.tenant}: costo-piso (al menos) ${report['costo_piso_total_usd']}{sufijo}")
     print(f"presupuesto {b['semana_iso']}: perdiste ${b['perdida_realizada_usd']} → {b['estado']}"
           + (f" (queda ${b['restante_usd']})" if b["restante_usd"] is not None else ""))
     for nombre in ("revenge_trade", "oversizing_tras_ganar", "aguantar_perdedores"):
