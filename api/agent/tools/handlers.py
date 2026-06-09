@@ -92,7 +92,11 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
     from api.config import load_config
 
     with snapshot_connection() as con:
-        open_positions = db_get_positions(con, status="open", tenant_id=tenant_id)
+        # control_domain='INTERNAL': el copiloto solo gobierna posiciones del
+        # sistema; no presenta EXTERNAL como actuable (no puede cerrarlas) — CD-1.
+        open_positions = db_get_positions(
+            con, status="open", tenant_id=tenant_id, control_domain="INTERNAL"
+        )
     open_count = len(open_positions)
     total_notional = sum(float(p.get("size_usd") or 0) for p in open_positions)
 
@@ -119,10 +123,17 @@ def get_portfolio_overview(*, tenant_id: int) -> dict:
 
 
 def get_positions(*, tenant_id: int) -> dict:
-    """Currently open positions, summarized."""
+    """Currently open positions, summarized.
+
+    control_domain='INTERNAL': EXTERNAL positions (opened outside the system)
+    are not shown as the copilot's governable positions — it cannot close them
+    (CD-1). They surface in the operator's own view (v0.1.5), not here.
+    """
     from db.positions import db_get_positions
     with snapshot_connection() as con:
-        rows = db_get_positions(con, status="open", tenant_id=tenant_id)
+        rows = db_get_positions(
+            con, status="open", tenant_id=tenant_id, control_domain="INTERNAL"
+        )
     return {"positions": [_position_to_summary(p) for p in rows]}
 
 

@@ -153,8 +153,14 @@ def check_position_stops(
     pos_list_to_close: list[tuple[int, float, str]] = []
 
     with transaction() as con:
+        # control_domain='INTERNAL': el auto-cierre (SL/TP/TIME) es un ACTUADOR
+        # del sistema. Una posición EXTERNAL (abierta por fuera, p.ej. en Binance)
+        # se observa pero NUNCA se actúa — CD-1. Sin este filtro el scanner
+        # cerraría el ledger de una posición que sigue viva en el broker
+        # (spec 2026-06-09-posiciones-externas §4.1).
         rows = con.execute(
-            "SELECT * FROM positions WHERE symbol=? AND status='open'",
+            "SELECT * FROM positions "
+            "WHERE symbol=? AND status='open' AND control_domain='INTERNAL'",
             (symbol.upper(),),
         ).fetchall()
         pos_list = [dict(r) for r in rows]
@@ -427,11 +433,20 @@ def delete_position(
     # serialize against any concurrent operator edit of the same row.
     with transaction() as con:
         row = con.execute(
-            "SELECT id FROM positions WHERE id=? AND tenant_id=?",
+            "SELECT control_domain FROM positions WHERE id=? AND tenant_id=?",
             (pos_id, tenant_id),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail=f"Posicion #{pos_id} no encontrada")
+        if row[0] == "EXTERNAL":
+            # CD-5: una EXTERNAL corrió y tiene P&L; cancelarla (outcome nulo)
+            # corrompería su EpisodioDeConducción. El sistema no la lleva a
+            # cancelled ni a closed; solo el operador la cierra vía
+            # PositionClosure(USER) tras cerrar en Binance (spec §4, HIGH #7).
+            raise HTTPException(
+                status_code=409,
+                detail=f"Posicion #{pos_id} es EXTERNAL; no se puede cancelar desde el sistema (ciérrala en Binance)",
+            )
         con.execute("UPDATE positions SET status='cancelled' WHERE id=?", (pos_id,))
     update_positions_json()
     return {"ok": True, "message": f"Posicion #{pos_id} cancelada"}

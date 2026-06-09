@@ -106,10 +106,14 @@ def db_last_exit_ts(
 
     Task 8 (#446): `con` is now mandatory positional first arg.
     """
+    # control_domain='INTERNAL': el cooldown gobierna las ENTRADAS del sistema.
+    # Cerrar una posición EXTERNAL (papá cierra su bag en Binance) no debe
+    # pausar las señales INTERNAL del símbolo — CD-1 (spec §4, HIGH #11).
     if tenant_id is None:
         row = con.execute(
             "SELECT exit_ts FROM positions "
             "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
+            "AND control_domain='INTERNAL' "
             "ORDER BY exit_ts DESC LIMIT 1",
             (symbol.upper(),),
         ).fetchone()
@@ -117,7 +121,7 @@ def db_last_exit_ts(
         row = con.execute(
             "SELECT exit_ts FROM positions "
             "WHERE symbol=? AND status='closed' AND exit_ts IS NOT NULL "
-            "AND tenant_id=? "
+            "AND tenant_id=? AND control_domain='INTERNAL' "
             "ORDER BY exit_ts DESC LIMIT 1",
             (symbol.upper(), tenant_id),
         ).fetchone()
@@ -137,11 +141,18 @@ def db_get_positions(
     status: Optional[str] = None,
     tenant_id: Optional[int] = None,
     since: Optional[str] = None,
+    control_domain: Optional[str] = None,
 ) -> list:
-    """List positions, optionally filtered by status, tenant_id, and since.
+    """List positions, optionally filtered by status, tenant_id, since, and
+    control_domain.
 
     Per B.5: when tenant_id is None (default), returns all rows (legacy).
     When tenant_id is int, filters strict to that tenant.
+
+    `control_domain`: opt-in filter ('INTERNAL' / 'EXTERNAL'). Default None =
+    no filter, so the general listing (the /positions API and the v0.1.5 view)
+    sees EXTERNAL rows. System-risk/actuator callers (the agent context) pass
+    'INTERNAL' to exclude positions the system cannot govern — CD-1.
 
     `since`: ISO 8601 string. When provided, filters to rows with
     `exit_ts >= since` for status='closed' (the typical use — windowed
@@ -159,6 +170,9 @@ def db_get_positions(
     if tenant_id is not None:
         clauses.append("tenant_id=?")
         params.append(tenant_id)
+    if control_domain is not None:
+        clauses.append("control_domain=?")
+        params.append(control_domain)
     if since is not None:
         # Use exit_ts when filtering closed trades (the historial case);
         # otherwise entry_ts. Both columns are ISO 8601 strings so a
