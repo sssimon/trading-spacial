@@ -31,6 +31,19 @@ def test_descomposicion_q2_manual_vs_senal():
     assert q2["fraccion_manual_del_pnl"] == 0.8
 
 
+def test_manual_agent_cuenta_como_conducta():
+    # MANUAL_AGENT (operador confirma cierre propuesto por copiloto) es conducta,
+    # no señal (fix spec eje-conducta REV 2).
+    r = compute_report([
+        _pos(80.0, 8.0, reason="MANUAL"),
+        _pos(20.0, 2.0, reason="MANUAL_AGENT"),
+        _pos(10.0, 1.0, reason="SL_HIT"),
+    ])
+    q2 = r["descomposicion_q2"]
+    assert q2["manual"]["n"] == 2 and q2["manual"]["pnl_usd"] == 100.0
+    assert q2["señal"]["n"] == 1 and q2["señal"]["pnl_usd"] == 10.0
+
+
 def test_ci_incluye_cero_es_ruido():
     # media positiva pero n chico y sigma grande -> no significativo
     r = compute_report([_pos(5, 2.0), _pos(-4, -1.5), _pos(3, 1.0)])
