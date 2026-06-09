@@ -1224,11 +1224,30 @@ def get_dashboard_state(
             portfolio_tier = {"tier": "NORMAL", "dd": 0.0, "concurrent_failures": 0}
             n_failures = 0
 
+        # Real equity (display-only): cash + EXTERNAL holds marked to live price.
+        # Separate from current_equity/portfolio_dd — the operator's externally
+        # held bags must NOT drive his signal kill-switch (CD-1). None for
+        # normal signal-only tenants (no external holds nor cash set).
+        real_equity_usd = None
+        try:
+            from api.equity import compute_real_equity
+            from strategy.kill_switch_v2_shadow import _snapshot_prices
+            _re = compute_real_equity(
+                conn, tenant_id=tenant_id, price_lookup=_snapshot_prices(),
+            )
+            if _re["holds"] or _re["cash_balance_usd"]:
+                real_equity_usd = _re["real_equity_usd"]
+        except Exception:
+            log.warning(
+                "get_dashboard_state real_equity computation failed", exc_info=True,
+            )
+
         portfolio_out = {
             "tier": portfolio_tier["tier"],
             "dd_pct": float(portfolio_dd),
             "peak_equity": peak_equity,
             "current_equity": current_equity,
+            "real_equity_usd": real_equity_usd,
             "concurrent_failures": int(n_failures),
             "recent_transitions": recent_portfolio_transitions(conn, limit=5),
         }

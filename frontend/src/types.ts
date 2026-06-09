@@ -403,6 +403,10 @@ export interface DashboardPortfolioState {
   dd_pct: number;
   peak_equity: number;
   current_equity: number;
+  // Equity en vivo display-only: cash + holds EXTERNAL marcados a precio actual.
+  // null para tenants sin holds externos ni cash (señal-only). Separado de
+  // current_equity/dd_pct: NO alimenta el kill-switch (CD-1).
+  real_equity_usd?: number | null;
   concurrent_failures: number;
   recent_transitions: DashboardPortfolioTransition[];
 }

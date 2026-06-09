@@ -359,10 +359,13 @@ const App: React.FC = () => {
   // - pnlToday: sum of realized PnL over today's closed positions (UTC)
   // - drawdown: capital.max_drawdown_pct
   const portfolio: PortfolioSummary = useMemo(() => ({
-    equity:   capital?.balance ?? 0,
+    // Equity en vivo: si el backend expone real_equity_usd (tenants con holds
+    // EXTERNAL reales = cash + holds × precio actual), el hero lo muestra y se
+    // mueve con el precio; cae a capital.balance (nocional) para señal-only.
+    equity:   dashboard?.portfolio?.real_equity_usd ?? capital?.balance ?? 0,
     pnlToday,
     drawdown: capital?.max_drawdown_pct ?? 0,
-  }), [capital, pnlToday]);
+  }), [capital, pnlToday, dashboard]);
 
   // Highest-score symbol with señal=true — used as the empty-state
   // suggestion in PositionsView.
