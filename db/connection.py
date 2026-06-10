@@ -69,13 +69,18 @@ class _DictRow(tuple):
         return self._mapping.keys()
 
 
-def _open_configured_connection() -> sqlite3.Connection:
+def _open_configured_connection(busy_timeout_ms: int = 15000) -> sqlite3.Connection:
     """Open a configured sqlite3.Connection.
 
     PRIVATE. Use db.transaction.transaction() for all data access.
 
     isolation_level=None disables Python's implicit transaction management
     so transaction() can drive BEGIN/COMMIT/ROLLBACK explicitly.
+
+    `busy_timeout_ms` defaults to 15000 (see comment below). Interactive
+    endpoints that retry on contention (e.g. auth writes, prod incident
+    2026-06-10) pass a shorter per-attempt timeout so total latency stays
+    bounded across retries instead of blocking 15s on a single attempt.
     """
     db_file = _resolve_db_file()
     con = sqlite3.connect(db_file, isolation_level=None)
@@ -88,7 +93,7 @@ def _open_configured_connection() -> sqlite3.Connection:
     # use snapshot_connection() (WAL-concurrent, no writer lock) — this longer
     # timeout is the safety net for the writes + any remaining BEGIN IMMEDIATE
     # readers. Do NOT lower below 15000 without addressing the write-burst load.
-    con.execute("PRAGMA busy_timeout = 15000")
+    con.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
     return con
 
 
