@@ -434,11 +434,18 @@ def init_db() -> None:
     # it. PRAGMA-guarded for idempotency.
     with transaction() as con_cd:
         _migrate_control_domain(con_cd)
+        _migrate_positions_market(con_cd)
+        _install_binance_external_guards(con_cd)
 
     # cash_balance_usd en capital: el saldo NO-posición del operador (cash /
     # futuros) para el equity en vivo display-only (v0.1.5). Idempotente.
     with transaction() as con_cash:
         _migrate_cash_balance(con_cash)
+
+    # binance_credentials: API key read-only spot por-tenant, cifrada at-rest
+    # (spec 2026-06-10-conexion-binance-solo-lectura §2.2). Idempotente.
+    with transaction() as con_bc:
+        _migrate_binance_credentials(con_bc)
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -859,6 +866,58 @@ def _migrate_control_domain(con: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_positions_market(con: sqlite3.Connection) -> None:
+    """Add `market` (SPOT/FUTURES) a positions. NULL para INTERNAL/manuales.
+
+    Identidad de posición EXTERNAL = (tenant_id, symbol, market, direction). Se
+    setea SOLO en filas nacidas del sync de Binance. Idempotente: PRAGMA-guarded
+    ADD COLUMN (sin default → NULL para filas existentes).
+
+    Spec: 2026-06-10-conexion-binance-solo-lectura §4.3b.
+    """
+    cols = {row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()}
+    if "market" not in cols:
+        con.execute("ALTER TABLE positions ADD COLUMN market TEXT")
+        log.info("DB migration: added market column to positions")
+
+
+def _install_binance_external_guards(con: sqlite3.Connection) -> None:
+    """Garantía de tipo ESTRUCTURAL + índice de idempotencia para EXTERNAL synced.
+
+    SQLite no permite ALTER ADD CONSTRAINT CHECK sin recrear la tabla; un TRIGGER
+    da el mismo invariante (BNC-4): una fila con `market` seteado DEBE ser
+    EXTERNAL. Cierra la landmine del REALIZED-falso (una fila viva de Binance que
+    entre como INTERNAL la auto-cerraría check_position_stops). Idempotente.
+
+    Spec: 2026-06-10-conexion-binance-solo-lectura §4.3 (realizado como trigger).
+    """
+    con.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_market_implies_external_ins
+        BEFORE INSERT ON positions
+        WHEN NEW.market IS NOT NULL AND (NEW.control_domain IS NULL OR NEW.control_domain != 'EXTERNAL')
+        BEGIN
+            SELECT RAISE(ABORT, 'market set requires control_domain=EXTERNAL (BNC-4)');
+        END
+        """
+    )
+    con.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_market_implies_external_upd
+        BEFORE UPDATE ON positions
+        WHEN NEW.market IS NOT NULL AND (NEW.control_domain IS NULL OR NEW.control_domain != 'EXTERNAL')
+        BEGIN
+            SELECT RAISE(ABORT, 'market set requires control_domain=EXTERNAL (BNC-4)');
+        END
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_external_identity "
+        "ON positions(tenant_id, symbol, market, direction) "
+        "WHERE control_domain='EXTERNAL'"
+    )
+
+
 def _migrate_cash_balance(con: sqlite3.Connection) -> None:
     """Add `cash_balance_usd` to capital (saldo no-posición del operador).
 
@@ -879,6 +938,37 @@ def _migrate_cash_balance(con: sqlite3.Connection) -> None:
             "ALTER TABLE capital ADD COLUMN cash_balance_usd REAL NOT NULL DEFAULT 0"
         )
         log.info("DB migration: added cash_balance_usd column to capital (default 0)")
+
+
+def _migrate_binance_credentials(con: sqlite3.Connection) -> None:
+    """Crea la tabla binance_credentials (una fila por tenant; secret cifrada).
+
+    NO en config.secrets.json (global + texto plano) ni en positions (credencial
+    = acceso, no posición). Molde de capital/user_preferences: UNIQUE INDEX por
+    tenant_id. Idempotente (CREATE TABLE/INDEX IF NOT EXISTS).
+
+    Spec: docs/superpowers/specs/es/2026-06-10-conexion-binance-solo-lectura-spec.md §2.2.
+    """
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS binance_credentials (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id       INTEGER NOT NULL,
+            api_key_public  TEXT NOT NULL,
+            secret_enc      BLOB NOT NULL,
+            key_version     INTEGER NOT NULL DEFAULT 1,
+            scope_detected  TEXT,
+            ip_whitelisted  INTEGER NOT NULL DEFAULT 0,
+            status          TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_binance_cred_tenant "
+        "ON binance_credentials(tenant_id)"
+    )
 
 
 def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
@@ -1079,6 +1169,7 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
             be_mult     REAL,
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
+            market      TEXT,
             CHECK (qty IS NOT NULL OR status = 'legacy_unmeasurable')
         )
         """
@@ -1090,13 +1181,17 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain",
+        "control_domain", "market",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
         # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
         # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
         # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        # market: nullable sin default — el fallback genérico (copia si existe,
+        # NULL si la columna precede al ALTER) ya es correcto; sin él, `market`
+        # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
+        # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
         else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
@@ -1205,6 +1300,7 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
             be_mult     REAL,
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
+            market      TEXT,
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable')
         )
         """
@@ -1214,13 +1310,17 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain",
+        "control_domain", "market",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
         # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
         # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
         # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        # market: nullable sin default — el fallback genérico (copia si existe,
+        # NULL si la columna precede al ALTER) ya es correcto; sin él, `market`
+        # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
+        # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
         else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
@@ -1324,6 +1424,7 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
             be_mult     REAL,
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
+            market      TEXT,
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant'))
         )
@@ -1334,13 +1435,17 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain",
+        "control_domain", "market",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
         # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
         # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
         # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        # market: nullable sin default — el fallback genérico (copia si existe,
+        # NULL si la columna precede al ALTER) ya es correcto; sin él, `market`
+        # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
+        # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
         else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS
@@ -1466,6 +1571,7 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
             be_mult     REAL,
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
+            market      TEXT,
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant')),
             CHECK (direction IN ('LONG', 'SHORT') OR status = 'legacy_unmeasurable')
@@ -1477,13 +1583,17 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain",
+        "control_domain", "market",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
         # tiene (DB fresca, primera recreación), cae a 'INTERNAL', no a NULL
         # (que violaría el NOT NULL). Si lo tiene, COPIA el valor (preserva
         # EXTERNAL a través de la cascada de recreaciones — incidente 2026-06-09).
+        # market: nullable sin default — el fallback genérico (copia si existe,
+        # NULL si la columna precede al ALTER) ya es correcto; sin él, `market`
+        # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
+        # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
         else ("'INTERNAL'" if col == "control_domain" else "NULL")
         for col in TARGET_COLS

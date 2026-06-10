@@ -35,6 +35,7 @@ def compute_real_equity(
     rows = con.execute(
         "SELECT symbol, qty FROM positions "
         "WHERE tenant_id = ? AND status = 'open' AND control_domain = 'EXTERNAL' "
+        "AND qty IS NOT NULL AND qty > 0 "
         "ORDER BY symbol",
         (tenant_id,),
     ).fetchall()

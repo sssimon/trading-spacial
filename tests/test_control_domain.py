@@ -124,3 +124,46 @@ def test_external_survives_reinit_recreations(tmp_path):
         "las recreaciones de init_db resetearon EXTERNAL a INTERNAL (el wipe que "
         "auto-cerró las bolsas de papá)"
     )
+
+
+def test_market_survives_reinit_recreations(tmp_path):
+    """`market` (SPOT/FUTURES) sobrevive a un segundo init_db.
+
+    Regresión del incidente 2026-06-10 (mismo class que control_domain #578):
+    las 4 migraciones recrean la tabla positions en cada boot. Si `market` no
+    viaja DENTRO de las recreaciones (CREATE + TARGET_COLS), cada deploy/restart
+    lo reseteaba a NULL → la fila sincronizada de Binance dejaba de estar cubierta
+    por el trigger/índice BNC-4 → podía mis-clasificarse o auto-cerrarse. `market`
+    es nullable sin default: el fallback genérico del select-expression
+    (copia si existe, NULL si no) ya hace lo correcto.
+    """
+    con = _fresh_db(tmp_path)
+    con.execute(
+        "INSERT INTO positions (symbol,direction,status,entry_price,entry_ts,"
+        "qty,tenant_id,control_domain,market) VALUES "
+        "('BTCUSDT','LONG','open',64390,'2026-06-04T00:56:00+00:00',0.01967,2,'EXTERNAL','SPOT')"
+    )
+    con.commit()
+    con.close()
+
+    import btc_api
+    from db.schema import init_db
+    db_path = tmp_path / "control_domain.db"
+    orig = btc_api.DB_FILE
+    btc_api.DB_FILE = str(db_path)
+    try:
+        init_db()  # simula un deploy restart → corre las recreaciones de tabla
+    finally:
+        btc_api.DB_FILE = orig
+
+    con = sqlite3.connect(str(db_path))
+    try:
+        market = con.execute(
+            "SELECT market FROM positions WHERE symbol='BTCUSDT'"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert market == "SPOT", (
+        "las recreaciones de init_db borraron market a NULL (reabre la landmine "
+        "BNC-4: la fila de Binance pierde cobertura del trigger/índice EXTERNAL)"
+    )

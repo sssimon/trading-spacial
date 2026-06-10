@@ -148,6 +148,12 @@ CANONICAL_POSITIONS_COLUMNS: tuple[ColumnSpec, ...] = (
     # 'INTERNAL' so every pre-existing row is INTERNAL (behavior preserved).
     # Spec: 2026-06-09-posiciones-externas-control-domain-spec.md.
     ColumnSpec("control_domain", "TEXT", nullable=False, default="'INTERNAL'"),
+    # market: SPOT/FUTURES para filas EXTERNAL nacidas del sync de Binance; NULL
+    # para INTERNAL/manuales. Parte de la identidad de idempotencia
+    # (tenant_id, symbol, market, direction) y, vía el trigger
+    # trg_market_implies_external_*, garantiza estructuralmente que una fila con
+    # market seteado es EXTERNAL. Spec: 2026-06-10-conexion-binance-solo-lectura.
+    ColumnSpec("market", "TEXT"),
 )
 
 
@@ -216,6 +222,12 @@ CANONICAL_POSITIONS_INDEXES: tuple[IndexSpec, ...] = (
         columns=("tenant_id", "scan_id"),
         unique=True,
         partial_where_fragment="status='open'andscan_idisnotnull",
+    ),
+    IndexSpec(
+        name="idx_positions_external_identity",
+        columns=("tenant_id", "symbol", "market", "direction"),
+        unique=True,
+        partial_where_fragment="control_domain='external'",
     ),
 )
 

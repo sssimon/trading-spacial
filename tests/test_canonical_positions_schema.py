@@ -264,9 +264,9 @@ def test_no_unexpected_table_columns_or_constraints(tmp_path):
         "canonical CHECK list should currently have 3 entries "
         "(qty + tenant_id + direction)"
     )
-    assert len(CANONICAL_POSITIONS_INDEXES) == 2, (
-        "canonical index list should currently have 2 entries "
-        "(tenant index + partial unique index)"
+    assert len(CANONICAL_POSITIONS_INDEXES) == 3, (
+        "canonical index list should have 3 entries "
+        "(tenant index + open-scan partial unique + external-identity partial unique)"
     )
     # normalize_sql smoke test
     assert normalize_sql("CHECK ( qty > 0 )") == "check(qty>0)"
