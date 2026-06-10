@@ -294,8 +294,9 @@ def _update_last_login(user_id: int) -> None:
 def _persist_refresh_token(user: User, *, user_agent, ip) -> str:
     """Critical login write. Retries on transient 'database is locked' so a
     background scanner write-burst does not 500 the login. Bounded worst-case
-    wait (~9.5s); the common case succeeds on the first attempt with no delay.
-    A non-lock error is not retried — it surfaces immediately."""
+    wait ~9.5s (4×2s busy_timeout + 0.25/0.5/0.75s backoffs), blocking one
+    threadpool worker; the common case succeeds on the first attempt with no
+    delay. A non-lock error is not retried — it surfaces immediately."""
     last_exc: Optional[sqlite3.OperationalError] = None
     for attempt in range(_AUTH_WRITE_RETRIES):
         try:
@@ -309,7 +310,8 @@ def _persist_refresh_token(user: User, *, user_agent, ip) -> str:
                 "refresh-token write contended (attempt %d/%d): %s",
                 attempt + 1, _AUTH_WRITE_RETRIES, exc,
             )
-            time.sleep(_AUTH_WRITE_BACKOFF_SEC * (attempt + 1))
+            if attempt < _AUTH_WRITE_RETRIES - 1:  # no backoff after the last try
+                time.sleep(_AUTH_WRITE_BACKOFF_SEC * (attempt + 1))
     assert last_exc is not None  # loop ran ≥1 time
     raise last_exc
 
