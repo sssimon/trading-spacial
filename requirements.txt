@@ -25,3 +25,6 @@ python-multipart>=0.0.9
 # streaming via client.messages.stream(). Bump deliberately post-Phase 5
 # with a live-model re-run (pre-reg §12.7 Buffers internos).
 anthropic>=0.40,<1.0
+# Cifrado-at-rest de secretos de broker por-tenant (Fernet AES-128-CBC + HMAC).
+# Añadido 2026-06-10 para binance_credentials (spec conexion-binance-solo-lectura).
+cryptography>=42.0
