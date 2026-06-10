@@ -122,3 +122,111 @@ def test_rate_banned_maps_to_typed_error():
     with patch("data.providers.binance_account._signed_get", return_value=FakeResp()):
         with pytest.raises(BinanceRateBanned):
             client.get_spot_balances()
+
+
+# ─── v0.2: myTrades + exchangeInfo + ticker (Task 3) ──────────────────────────
+
+
+def test_raise_for_error_code_handles_list_body():
+    """Un myTrades exitoso devuelve una LISTA (no un dict con 'code').
+    _raise_for_error_code NO debe crashear con .get sobre una lista."""
+    from data.providers.binance_account import _raise_for_error_code
+
+    class ListResp:
+        status_code = 200
+        def json(self):
+            return [{"id": 1, "price": "100"}]
+    _raise_for_error_code(ListResp())  # no debe lanzar
+
+
+def test_get_my_trades_paginates_by_from_id():
+    from data.providers import binance_account as ba
+    from data.providers.binance_account import BinanceAccountClient
+
+    class Resp:
+        status_code = 200
+        def __init__(self, fills): self._f = fills
+        def json(self): return self._f
+
+    page1 = [{"id": 1, "price": "1"}, {"id": 2, "price": "2"}]  # == limit(2) → sigue
+    page2 = [{"id": 3, "price": "3"}]                            # < limit → para
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch.object(ba, "_MYTRADES_PAGE_LIMIT", 2), \
+         patch("data.providers.binance_account._signed_get",
+               side_effect=[Resp(page1), Resp(page2)]) as m:
+        fills = client.get_my_trades("BTCUSDT")
+    assert [f["id"] for f in fills] == [1, 2, 3]
+    # la 2da página pide fromId = max(id de page1) + 1 = 3
+    assert m.call_args_list[1].args[3]["fromId"] == 3
+    assert m.call_args_list[1].args[3]["symbol"] == "BTCUSDT"
+
+
+def test_get_my_trades_single_page():
+    from data.providers import binance_account as ba
+    from data.providers.binance_account import BinanceAccountClient
+
+    class Resp:
+        status_code = 200
+        def json(self): return [{"id": 1}, {"id": 2}]  # < limit 1000 → una sola llamada
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._signed_get", return_value=Resp()) as m:
+        fills = client.get_my_trades("ETHUSDT")
+    assert len(fills) == 2
+    assert m.call_count == 1
+
+
+def test_get_my_trades_rate_ban_propagates():
+    """Un ban mid-paginación PROPAGA (el caller marca ingest_incompleto, no
+    persiste ACB truncado — spec F8)."""
+    from data.providers.binance_account import BinanceAccountClient, BinanceRateBanned
+
+    class Resp:
+        status_code = 429
+        def json(self): return {"code": -1003, "msg": "weight"}
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._signed_get", return_value=Resp()):
+        with pytest.raises(BinanceRateBanned):
+            client.get_my_trades("BTCUSDT")
+
+
+def test_get_exchange_filters_parses_notional_and_lot():
+    from data.providers.binance_account import BinanceAccountClient
+
+    class Resp:
+        status_code = 200
+        def json(self):
+            return {"symbols": [{
+                "symbol": "BTCUSDT",
+                "filters": [
+                    {"filterType": "LOT_SIZE", "minQty": "0.00001000", "stepSize": "0.00001000"},
+                    {"filterType": "NOTIONAL", "minNotional": "10.00000000"},
+                ],
+            }]}
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._http_get", return_value=Resp()):
+        out = client.get_exchange_filters(["BTCUSDT"])
+    assert out["BTCUSDT"]["min_notional"] == 10.0
+    assert out["BTCUSDT"]["min_qty"] == 0.00001
+
+
+def test_get_ticker_prices_parses():
+    from data.providers.binance_account import BinanceAccountClient
+
+    class Resp:
+        status_code = 200
+        def json(self):
+            return [{"symbol": "BTCUSDT", "price": "64000.5"},
+                    {"symbol": "ETHUSDT", "price": "3000.0"}]
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._http_get", return_value=Resp()):
+        prices = client.get_ticker_prices(["BTCUSDT", "ETHUSDT"])
+    assert prices == {"BTCUSDT": 64000.5, "ETHUSDT": 3000.0}
+
+
+def test_public_methods_empty_symbols_no_call():
+    from data.providers.binance_account import BinanceAccountClient
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._http_get") as m:
+        assert client.get_exchange_filters([]) == {}
+        assert client.get_ticker_prices([]) == {}
+    m.assert_not_called()
