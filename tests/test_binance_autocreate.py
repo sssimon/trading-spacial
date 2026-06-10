@@ -207,37 +207,73 @@ def test_dry_run_reports_would_create_without_writing(tmp_path):
     assert n == 0                        # pero NADA escrito
 
 
-def test_sync_tenant_autocreate_wires_report(tmp_path, monkeypatch):
-    """sync_tenant(autocreate=True) corre el descubrimiento y mete el reporte."""
+def _db_with_active_cred(tmp_path, monkeypatch):
+    """DB de archivo con schema + credencial ACTIVE, con btc_api.DB_FILE fijo (para
+    que sync_tenant — que abre sus propias conexiones — apunte aquí)."""
     from cryptography.fernet import Fernet
-    from unittest.mock import MagicMock, patch
     monkeypatch.setenv("TRADING_BINANCE_MASTER_KEY", Fernet.generate_key().decode())
-    con = _fresh_db(tmp_path)
+    monkeypatch.setenv("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", "1")
+    p = tmp_path / "synctenant.db"
+    import btc_api
+    monkeypatch.setattr(btc_api, "DB_FILE", str(p), raising=False)
+    from db.schema import init_db
+    init_db()
+    con = sqlite3.connect(str(p))
+    con.row_factory = sqlite3.Row
+    from db.binance_credentials import db_upsert_binance_credential
+    db_upsert_binance_credential(con, tenant_id=2, api_key_public="PUB", secret_plaintext="s",
+                                 scope_detected="READ_ONLY_SPOT", ip_whitelisted=True)
+    con.commit()
+    con.close()
+    return str(p)
+
+
+def _fake_client():
+    from unittest.mock import MagicMock
+    fc = FakeClient(
+        trades={"BNBUSDT": [_fill(id=1, time=1000, is_buyer=True, qty=2, quote_qty=1000)]},
+        filters={"BNBUSDT": {"min_notional": 10.0}},
+        prices={"BNBUSDT": 600.0},
+    )
+    fake = MagicMock()
+    fake.get_spot_balances.return_value = {"BNB": 2.0}
+    fake.get_my_trades.side_effect = fc.get_my_trades
+    fake.get_exchange_filters.side_effect = fc.get_exchange_filters
+    fake.get_ticker_prices.side_effect = fc.get_ticker_prices
+    return fake
+
+
+def _count(db_path, symbol):
+    con = sqlite3.connect(db_path)
     try:
-        from db.binance_credentials import db_upsert_binance_credential
-        db_upsert_binance_credential(con, tenant_id=2, api_key_public="PUB",
-                                     secret_plaintext="s", scope_detected="READ_ONLY_SPOT",
-                                     ip_whitelisted=True)
-        con.commit()
-        fc = FakeClient(
-            trades={"BNBUSDT": [_fill(id=1, time=1000, is_buyer=True, qty=2, quote_qty=1000)]},
-            filters={"BNBUSDT": {"min_notional": 10.0}},
-            prices={"BNBUSDT": 600.0},
-        )
-        fake = MagicMock()
-        fake.get_spot_balances.return_value = {"BNB": 2.0}
-        fake.get_my_trades.side_effect = fc.get_my_trades
-        fake.get_exchange_filters.side_effect = fc.get_exchange_filters
-        fake.get_ticker_prices.side_effect = fc.get_ticker_prices
-        from tools import sync_binance_spot as sbs
-        with patch.object(sbs, "BinanceAccountClient", return_value=fake), \
-             patch.object(sbs, "get_server_time_offset_ms", return_value=0):
-            report = sbs.sync_tenant(con, 2, autocreate=True)
-        con.commit()
-        created = report["autocreate"]["created"]
+        return con.execute("SELECT COUNT(*) FROM positions WHERE symbol=?", (symbol,)).fetchone()[0]
     finally:
         con.close()
-    assert "BNBUSDT" in created
+
+
+def test_sync_tenant_autocreate_wires_report_and_writes(tmp_path, monkeypatch):
+    """sync_tenant(autocreate=True): corre el descubrimiento (I/O fase 1) y aplica
+    los INSERTs (fase 2 tx corta). El reporte trae created y la fila se persiste."""
+    from unittest.mock import patch
+    db_path = _db_with_active_cred(tmp_path, monkeypatch)
+    from tools import sync_binance_spot as sbs
+    with patch.object(sbs, "BinanceAccountClient", return_value=_fake_client()), \
+         patch.object(sbs, "get_server_time_offset_ms", return_value=0):
+        report = sbs.sync_tenant(2, autocreate=True)
+    assert "BNBUSDT" in report["autocreate"]["created"]
+    assert _count(db_path, "BNBUSDT") == 1   # persistido (no dry-run)
+
+
+def test_sync_tenant_dry_run_reports_without_writing(tmp_path, monkeypatch):
+    """sync_tenant(dry_run=True): reporta would-create pero NADA se persiste (rollback)."""
+    from unittest.mock import patch
+    db_path = _db_with_active_cred(tmp_path, monkeypatch)
+    from tools import sync_binance_spot as sbs
+    with patch.object(sbs, "BinanceAccountClient", return_value=_fake_client()), \
+         patch.object(sbs, "get_server_time_offset_ms", return_value=0):
+        report = sbs.sync_tenant(2, autocreate=True, dry_run=True)
+    assert "BNBUSDT" in report["autocreate"]["created"]  # would-create
+    assert _count(db_path, "BNBUSDT") == 0               # rollback: NADA escrito
 
 
 def test_idempotent_second_run_no_duplicate(tmp_path):

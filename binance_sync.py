@@ -113,38 +113,28 @@ def _create_auto_derived(
     return dict(zip(cols, cur2.fetchone()))
 
 
-def autocreate_spot_holdings(
-    con: sqlite3.Connection, *, tenant_id: int, client, balances: dict[str, float],
-    dry_run: bool = False,
-) -> dict:
-    """Descubre holds spot reales y auto-crea filas AUTO_DERIVED (observabilidad).
+def plan_spot_autocreate(*, client, balances: dict[str, float], existing_symbols: set) -> dict:
+    """FASE I/O (sin DB, SIN writer-lock): descubre holds, baja myTrades, reconstruye
+    ACB, valida minNotional. Devuelve {plan, abstained}, donde plan =
+    [{symbol, qty, avg_entry, entry_ts}].
+
+    TODO el I/O de red vive AQUÍ, FUERA de cualquier transacción — Halberg
+    (revisión holística): sostener el writer-lock (BEGIN IMMEDIATE) durante las
+    llamadas a Binance reproduce el incidente de contención del login. El plan se
+    aplica después en una tx CORTA (apply_spot_autocreate).
 
     Para cada asset con balance>0 (excluye quotes y Earn LD*) SIN fila EXTERNAL:
-    busca el par con trades entre las 4 quotes, reconstruye el ACB, valida
-    minNotional (no dust), y crea la fila con el BALANCE como qty (NO qty_viva —
-    transfers a Earn reducen el balance spot sin ser ventas, Adrian #3) y el ACB
-    como entry de referencia. Abstención: no_reconstruible (sin trades, F9), flat
-    (vendido), dust (<minNotional), ingest_incompleto (ban → no persiste ACB
-    truncado, F8). NO pisa filas OPERATOR del papá (F4). El caller posee la tx.
-
-    Spec: 2026-06-10-binance-v02-autocreacion-observabilidad-spec.md §4, §5.
+    usa el BALANCE como qty (NO qty_viva — transfers a Earn, Adrian #3) y el ACB
+    como entry. Abstención: no_reconstruible (F9), flat, dust (<minNotional),
+    ingest_incompleto (ban → F8). NO planifica símbolos ya-existentes (F4).
+    Spec §4, §5.
     """
-    existing = {
-        r["symbol"] for r in con.execute(
-            "SELECT symbol FROM positions WHERE tenant_id=? AND control_domain='EXTERNAL' "
-            "AND status='open'",
-            (tenant_id,),
-        ).fetchall()
-    }
-    created: list[str] = []
+    plan: list[dict] = []
     abstained: dict[str, str] = {}
-
     for asset, amount in balances.items():
         if amount <= 0 or asset in _QUOTES or asset.startswith("LD"):
             continue  # quote / Earn (LD*) / sin balance → no candidato (Earn diferido)
-        fills = None
-        pair = None
-        quote = None
+        fills = pair = quote = None
         try:
             for q in _QUOTES:
                 cand = asset + q
@@ -158,7 +148,7 @@ def autocreate_spot_holdings(
         if not fills:
             abstained[asset] = "no_reconstruible"     # F9: sin trades en ninguna quote
             continue
-        if pair in existing:
+        if pair in existing_symbols:
             abstained[pair] = "ya_existe"             # F4: no pisa OPERATOR/existente
             continue
         acb = reconstruct_acb(fills, base_asset=asset, quote_asset=quote)
@@ -171,16 +161,47 @@ def autocreate_spot_holdings(
         if price is not None and min_notional is not None and amount * price < min_notional:
             abstained[pair] = "dust"
             continue
-        if dry_run:
-            created.append(pair)   # would-create: reporta sin INSERT
-            continue
-        row = _create_auto_derived(
-            con, tenant_id=tenant_id, symbol=pair, qty=amount,
-            avg_entry=acb["avg_entry"], entry_ts=_ms_to_iso(acb["entry_ts_ms"]),
-        )
-        if row is None:
-            abstained[pair] = "ya_existe"
-        else:
-            created.append(pair)
+        plan.append({
+            "symbol": pair, "qty": amount, "avg_entry": acb["avg_entry"],
+            "entry_ts": _ms_to_iso(acb["entry_ts_ms"]),
+        })
+    return {"plan": plan, "abstained": abstained}
 
-    return {"created": created, "abstained": abstained}
+
+def apply_spot_autocreate(con: sqlite3.Connection, *, tenant_id: int, plan: list[dict]) -> list[str]:
+    """FASE WRITE (tx CORTA del caller, sin I/O): aplica el plan = solo INSERTs.
+    Re-chequea idempotencia (F4: no pisa OPERATOR). Devuelve los símbolos creados."""
+    created: list[str] = []
+    for item in plan:
+        row = _create_auto_derived(
+            con, tenant_id=tenant_id, symbol=item["symbol"], qty=item["qty"],
+            avg_entry=item["avg_entry"], entry_ts=item["entry_ts"],
+        )
+        if row is not None:
+            created.append(item["symbol"])
+    return created
+
+
+def autocreate_spot_holdings(
+    con: sqlite3.Connection, *, tenant_id: int, client, balances: dict[str, float],
+    dry_run: bool = False,
+) -> dict:
+    """Conveniencia: plan (I/O) + apply (writes) en una pasada sobre `con`.
+
+    Apto para uso/test donde la contención del writer-lock NO es preocupación (DB
+    en memoria o ventana sin tráfico). En PROD, el orquestador (sync_tenant) usa
+    `plan_spot_autocreate` FUERA de la tx + `apply_spot_autocreate` DENTRO de una tx
+    corta, para no sostener el lock durante la red (Halberg). El caller posee la tx.
+    """
+    existing = {
+        r["symbol"] for r in con.execute(
+            "SELECT symbol FROM positions WHERE tenant_id=? AND control_domain='EXTERNAL' "
+            "AND status='open'",
+            (tenant_id,),
+        ).fetchall()
+    }
+    result = plan_spot_autocreate(client=client, balances=balances, existing_symbols=existing)
+    if dry_run:
+        return {"created": [it["symbol"] for it in result["plan"]], "abstained": result["abstained"]}
+    created = apply_spot_autocreate(con, tenant_id=tenant_id, plan=result["plan"])
+    return {"created": created, "abstained": result["abstained"]}
