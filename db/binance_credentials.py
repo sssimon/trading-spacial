@@ -69,7 +69,11 @@ def db_get_decrypted_secret(con: sqlite3.Connection, tenant_id: int) -> Optional
 
 def db_set_credential_status(con: sqlite3.Connection, tenant_id: int, status: str) -> None:
     """Fija el estado fail-closed (ACTIVE/AUTH_FAILED/REVOKED/RATE_BANNED/CLOCK_SKEW)."""
-    assert status in VALID_STATUSES, f"status inválido: {status}"
+    # RuntimeError/ValueError, NO assert: `python -O` borra los asserts y
+    # desactivaría silenciosamente este guard de estado (misma convención que
+    # api/agent/models.py).
+    if status not in VALID_STATUSES:
+        raise ValueError(f"status Binance inválido: {status!r}")
     now = datetime.now(timezone.utc).isoformat()
     con.execute(
         "UPDATE binance_credentials SET status=?, updated_at=? WHERE tenant_id=?",

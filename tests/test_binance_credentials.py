@@ -48,3 +48,16 @@ def test_metadata_view_never_exposes_secret(con):
     assert "secret" not in str(meta).lower()
     assert meta["api_key_last4"] == "3456"
     assert "secret_enc" not in meta
+
+
+def test_set_status_rejects_invalid_status(con):
+    # Guard must raise (not assert — `python -O` would strip an assert and
+    # silently let a bad fail-closed state through). Review finding, Task 2.
+    from db.binance_credentials import db_upsert_binance_credential, db_set_credential_status
+    db_upsert_binance_credential(con, tenant_id=2, api_key_public="P", secret_plaintext="s")
+    with pytest.raises(ValueError):
+        db_set_credential_status(con, tenant_id=2, status="BOGUS")
+    db_set_credential_status(con, tenant_id=2, status="REVOKED")  # valid → no raise
+    assert con.execute(
+        "SELECT status FROM binance_credentials WHERE tenant_id=2"
+    ).fetchone()[0] == "REVOKED"
