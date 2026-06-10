@@ -434,6 +434,8 @@ def init_db() -> None:
     # it. PRAGMA-guarded for idempotency.
     with transaction() as con_cd:
         _migrate_control_domain(con_cd)
+        _migrate_positions_market(con_cd)
+        _install_binance_external_guards(con_cd)
 
     # cash_balance_usd en capital: el saldo NO-posición del operador (cash /
     # futuros) para el equity en vivo display-only (v0.1.5). Idempotente.
@@ -862,6 +864,58 @@ def _migrate_control_domain(con: sqlite3.Connection) -> None:
             "DB migration: added control_domain column to positions "
             "(default INTERNAL)"
         )
+
+
+def _migrate_positions_market(con: sqlite3.Connection) -> None:
+    """Add `market` (SPOT/FUTURES) a positions. NULL para INTERNAL/manuales.
+
+    Identidad de posición EXTERNAL = (tenant_id, symbol, market, direction). Se
+    setea SOLO en filas nacidas del sync de Binance. Idempotente: PRAGMA-guarded
+    ADD COLUMN (sin default → NULL para filas existentes).
+
+    Spec: 2026-06-10-conexion-binance-solo-lectura §4.3b.
+    """
+    cols = {row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()}
+    if "market" not in cols:
+        con.execute("ALTER TABLE positions ADD COLUMN market TEXT")
+        log.info("DB migration: added market column to positions")
+
+
+def _install_binance_external_guards(con: sqlite3.Connection) -> None:
+    """Garantía de tipo ESTRUCTURAL + índice de idempotencia para EXTERNAL synced.
+
+    SQLite no permite ALTER ADD CONSTRAINT CHECK sin recrear la tabla; un TRIGGER
+    da el mismo invariante (BNC-4): una fila con `market` seteado DEBE ser
+    EXTERNAL. Cierra la landmine del REALIZED-falso (una fila viva de Binance que
+    entre como INTERNAL la auto-cerraría check_position_stops). Idempotente.
+
+    Spec: 2026-06-10-conexion-binance-solo-lectura §4.3 (realizado como trigger).
+    """
+    con.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_market_implies_external_ins
+        BEFORE INSERT ON positions
+        WHEN NEW.market IS NOT NULL AND NEW.control_domain != 'EXTERNAL'
+        BEGIN
+            SELECT RAISE(ABORT, 'market set requires control_domain=EXTERNAL (BNC-4)');
+        END
+        """
+    )
+    con.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_market_implies_external_upd
+        BEFORE UPDATE ON positions
+        WHEN NEW.market IS NOT NULL AND NEW.control_domain != 'EXTERNAL'
+        BEGIN
+            SELECT RAISE(ABORT, 'market set requires control_domain=EXTERNAL (BNC-4)');
+        END
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_external_identity "
+        "ON positions(tenant_id, symbol, market, direction) "
+        "WHERE control_domain='EXTERNAL'"
+    )
 
 
 def _migrate_cash_balance(con: sqlite3.Connection) -> None:
