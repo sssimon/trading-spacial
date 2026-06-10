@@ -17,7 +17,7 @@ import sqlite3
 from binance_sync import reconcile_spot
 from data.providers.binance_account import (
     BinanceAccountClient, BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
-    get_server_time_offset_ms,
+    BinanceTransportError, get_server_time_offset_ms,
 )
 from db.binance_credentials import (
     db_get_binance_credential_raw, db_get_decrypted_secret, db_set_credential_status,
@@ -34,11 +34,11 @@ def sync_tenant(con: sqlite3.Connection, tenant_id: int) -> dict:
         return {"status": cred["status"], "skipped": True}
 
     secret = db_get_decrypted_secret(con, tenant_id)
-    client = BinanceAccountClient(
-        api_key=cred["api_key_public"], secret=secret,
-        server_time_offset_ms=get_server_time_offset_ms(),
-    )
     try:
+        client = BinanceAccountClient(
+            api_key=cred["api_key_public"], secret=secret,
+            server_time_offset_ms=get_server_time_offset_ms(),
+        )
         balances = client.get_spot_balances()
     except BinanceAuthError:
         db_set_credential_status(con, tenant_id, "AUTH_FAILED")
@@ -49,6 +49,12 @@ def sync_tenant(con: sqlite3.Connection, tenant_id: int) -> dict:
     except BinanceRateBanned:
         db_set_credential_status(con, tenant_id, "RATE_BANNED")
         return {"status": "RATE_BANNED"}
+    except BinanceTransportError:
+        # Blip de red transitorio: NO cambia el estado de la credencial (sigue
+        # ACTIVE), se reintenta el próximo ciclo. Fail-soft, no fail-closed —
+        # un transporte caído no es un problema de la credencial. El mensaje ya
+        # viene scrubbeado (sin la firma) desde el cliente.
+        return {"status": "TRANSPORT_ERROR", "transient": True}
 
     report = reconcile_spot(con, tenant_id=tenant_id, balances=balances)
     report["status"] = "ACTIVE"

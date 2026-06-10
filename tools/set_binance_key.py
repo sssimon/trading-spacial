@@ -34,7 +34,10 @@ def onboard_credential(con, *, tenant_id, api_key, secret, client, ip_whiteliste
 
 def main() -> int:
     from db.transaction import transaction
-    from data.providers.binance_account import BinanceAccountClient, get_server_time_offset_ms
+    from data.providers.binance_account import (
+        BinanceAccountClient, BinanceAuthError, BinanceClockSkew,
+        BinanceRateBanned, BinanceTransportError, get_server_time_offset_ms,
+    )
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", type=int, required=True)
@@ -44,15 +47,22 @@ def main() -> int:
                     help="confirma que la IP del VPS está whitelisted en Binance")
     args = ap.parse_args()
 
-    client = BinanceAccountClient(
-        api_key=args.api_key, secret=args.secret,
-        server_time_offset_ms=get_server_time_offset_ms(),
-    )
-    with transaction() as con:
-        con.row_factory = sqlite3.Row
-        onboard_credential(con, tenant_id=args.tenant, api_key=args.api_key,
-                           secret=args.secret, client=client,
-                           ip_whitelisted=args.ip_whitelisted)
+    try:
+        client = BinanceAccountClient(
+            api_key=args.api_key, secret=args.secret,
+            server_time_offset_ms=get_server_time_offset_ms(),
+        )
+        with transaction() as con:
+            con.row_factory = sqlite3.Row
+            onboard_credential(con, tenant_id=args.tenant, api_key=args.api_key,
+                               secret=args.secret, client=client,
+                               ip_whitelisted=args.ip_whitelisted)
+    except (BinanceTransportError, BinanceAuthError, BinanceClockSkew,
+            BinanceRateBanned, ValueError, RuntimeError) as e:
+        # Fail-closed: la tx hace rollback → NADA se guardó. Mensaje limpio (ya
+        # scrubbeado para transport), sin traceback ruidoso para el operador.
+        print("Onboarding rechazado: {}: {}".format(type(e).__name__, e))
+        return 1
     print("Credencial Binance read-only spot guardada para tenant {}.".format(args.tenant))
     return 0
 
