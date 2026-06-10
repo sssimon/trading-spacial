@@ -28,8 +28,11 @@ the cookie.
 """
 from __future__ import annotations
 
+import logging
 import os
 import secrets
+import sqlite3
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -82,6 +85,25 @@ from db.transaction import snapshot_connection, transaction
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+log = logging.getLogger("api.auth")
+
+# ── Writer-lock resilience (prod incident 2026-06-10) ────────────────────────
+# Auth writes share SQLite's single writer lock with the background scanner
+# (same process, same signals.db). During slow/cold scan cycles the scanner's
+# write bursts held the lock long enough that login's BEGIN IMMEDIATE writes
+# timed out and 500-ed for every tenant. We use a short per-attempt busy_timeout
+# + a few retries so an interactive login rides out a burst (bounded worst-case
+# latency) instead of failing; the cosmetic last_login write is best-effort.
+_AUTH_WRITE_BUSY_TIMEOUT_MS = 2000
+_AUTH_WRITE_RETRIES = 4
+_AUTH_WRITE_BACKOFF_SEC = 0.25
+
+
+def _is_db_locked(exc: BaseException) -> bool:
+    """True for SQLite 'database is locked' (transient writer-lock contention),
+    distinguished from real errors (missing table/column) which must surface."""
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
 
 
 # ─── Schemas ────────────────────────────────────────────────────────────────
@@ -255,11 +277,41 @@ def _password_hash_for_email(email: str) -> Optional[str]:
 
 
 def _update_last_login(user_id: int) -> None:
-    with transaction() as con:
-        con.execute(
-            "UPDATE users SET last_login_at = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), user_id),
-        )
+    """Best-effort: last_login_at is cosmetic. A writer-lock timeout (scanner
+    contention) must NEVER fail authentication (prod incident 2026-06-10)."""
+    try:
+        with transaction(busy_timeout_ms=_AUTH_WRITE_BUSY_TIMEOUT_MS) as con:
+            con.execute(
+                "UPDATE users SET last_login_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), user_id),
+            )
+    except sqlite3.OperationalError as exc:
+        if not _is_db_locked(exc):
+            raise
+        log.warning("last_login_at update skipped (DB writer-lock busy): %s", exc)
+
+
+def _persist_refresh_token(user: User, *, user_agent, ip) -> str:
+    """Critical login write. Retries on transient 'database is locked' so a
+    background scanner write-burst does not 500 the login. Bounded worst-case
+    wait (~9.5s); the common case succeeds on the first attempt with no delay.
+    A non-lock error is not retried — it surfaces immediately."""
+    last_exc: Optional[sqlite3.OperationalError] = None
+    for attempt in range(_AUTH_WRITE_RETRIES):
+        try:
+            with transaction(busy_timeout_ms=_AUTH_WRITE_BUSY_TIMEOUT_MS) as con:
+                return create_refresh_token(con, user, user_agent=user_agent, ip=ip)
+        except sqlite3.OperationalError as exc:
+            if not _is_db_locked(exc):
+                raise
+            last_exc = exc
+            log.warning(
+                "refresh-token write contended (attempt %d/%d): %s",
+                attempt + 1, _AUTH_WRITE_RETRIES, exc,
+            )
+            time.sleep(_AUTH_WRITE_BACKOFF_SEC * (attempt + 1))
+    assert last_exc is not None  # loop ran ≥1 time
+    raise last_exc
 
 
 # ─── Routes ─────────────────────────────────────────────────────────────────
@@ -344,8 +396,7 @@ def login(request: Request, response: Response, body: LoginRequest):
     _update_last_login(user.id)
 
     access_token = create_access_token(user)
-    with transaction() as con:
-        refresh_token = create_refresh_token(con, user, user_agent=ua, ip=ip)
+    refresh_token = _persist_refresh_token(user, user_agent=ua, ip=ip)
     csrf_token = secrets.token_urlsafe(32)
 
     _set_auth_cookies(

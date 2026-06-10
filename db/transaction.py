@@ -34,10 +34,13 @@ SnapshotConn = NewType("SnapshotConn", sqlite3.Connection)
 
 
 @contextmanager
-def transaction() -> Iterator[sqlite3.Connection]:
+def transaction(busy_timeout_ms: int | None = None) -> Iterator[sqlite3.Connection]:
     """Open a connection, BEGIN IMMEDIATE, COMMIT on success, ROLLBACK on exception, ALWAYS close.
 
-    The yielded sqlite3.Connection has dict-row factory and PRAGMA busy_timeout=5000.
+    The yielded sqlite3.Connection has dict-row factory and PRAGMA busy_timeout
+    (default 15000 ms; see db.connection). `busy_timeout_ms` lets an interactive
+    caller that retries on contention use a shorter per-attempt timeout so total
+    latency stays bounded across retries (auth writes, prod incident 2026-06-10).
 
     Caller contract:
     - MAY use con.execute / executemany / executescript / cursor.
@@ -58,7 +61,11 @@ def transaction() -> Iterator[sqlite3.Connection]:
       (sqlite may have already aborted the tx on certain errors), the
       original exception is preserved and ROLLBACK's error is logged at DEBUG.
     """
-    con = _open_configured_connection()
+    con = (
+        _open_configured_connection()
+        if busy_timeout_ms is None
+        else _open_configured_connection(busy_timeout_ms)
+    )
     try:
         con.execute("BEGIN IMMEDIATE")
         try:
