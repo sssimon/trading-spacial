@@ -3,6 +3,7 @@ import hashlib
 import hmac
 from unittest.mock import patch
 import pytest
+import requests
 
 
 def test_signature_is_hmac_sha256_of_query():
@@ -71,3 +72,53 @@ def test_probe_trading_enabled_when_order_test_succeeds():
     client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
     with patch("data.providers.binance_account._signed_get", return_value=FakeResp()):
         assert client.probe_trading_disabled() is False
+
+
+def test_transport_error_scrubs_signature_from_exception():
+    # BNC-2 §2.4 #4: la firma per-request (la URL lleva &signature=<hmac>) NUNCA
+    # debe filtrarse al mensaje/traceback cuando requests lanza un error de red.
+    from data.providers.binance_account import BinanceAccountClient, BinanceTransportError
+
+    leaky = requests.ConnectionError(
+        "HTTPSConnectionPool(host='api.binance.com'): Max retries exceeded with "
+        "url: /api/v3/account?timestamp=1&recvWindow=5000&signature=DEADBEEFSIGNATURE"
+    )
+    client = BinanceAccountClient(api_key="k", secret="THE_SECRET", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._http_get", side_effect=leaky):
+        with pytest.raises(BinanceTransportError) as ei:
+            client.get_spot_balances()
+    msg = str(ei.value)
+    assert "DEADBEEFSIGNATURE" not in msg
+    assert "signature" not in msg.lower()
+    assert "THE_SECRET" not in msg
+    # `from None` debe suprimir la excepción original (que sí lleva la firma).
+    assert ei.value.__cause__ is None
+    assert ei.value.__suppress_context__ is True
+
+
+def test_minus_1021_raises_clock_skew():
+    from data.providers.binance_account import BinanceAccountClient, BinanceClockSkew
+
+    class FakeResp:
+        status_code = 400
+        def json(self):
+            return {"code": -1021, "msg": "Timestamp for this request is outside of the recvWindow."}
+
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._signed_get", return_value=FakeResp()):
+        with pytest.raises(BinanceClockSkew):
+            client.get_spot_balances()
+
+
+def test_rate_banned_maps_to_typed_error():
+    from data.providers.binance_account import BinanceAccountClient, BinanceRateBanned
+
+    class FakeResp:
+        status_code = 429
+        def json(self):
+            return {"code": -1003, "msg": "Too much request weight used."}
+
+    client = BinanceAccountClient(api_key="k", secret="s", server_time_offset_ms=0)
+    with patch("data.providers.binance_account._signed_get", return_value=FakeResp()):
+        with pytest.raises(BinanceRateBanned):
+            client.get_spot_balances()

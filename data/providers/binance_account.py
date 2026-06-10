@@ -32,6 +32,11 @@ class BinanceRateBanned(Exception):
     """-1003 / 418 / 429: ban temporal por weight."""
 
 
+class BinanceTransportError(Exception):
+    """Fallo de transporte (timeout/conexión). Mensaje SCRUBEADO: nunca incluye
+    la query firmada (lleva &signature=<hmac>) — BNC-2 §2.4 #4."""
+
+
 def _http_get(url, params=None, headers=None, timeout=10):
     """Wrapper fino para que los tests mockeen solo esta llamada."""
     return requests.get(url, params=params, headers=headers, timeout=timeout)
@@ -54,9 +59,16 @@ def _signed_get(api_key, secret, path, params, offset_ms, method="GET"):
     qs = qs + "&signature=" + _sign(secret, qs)
     url = BASE_URL + path + "?" + qs
     headers = {"X-MBX-APIKEY": api_key}
-    if method == "POST":
-        return _http_post(url, headers=headers, timeout=10)
-    return _http_get(url, headers=headers, timeout=10)
+    try:
+        if method == "POST":
+            return _http_post(url, headers=headers, timeout=10)
+        return _http_get(url, headers=headers, timeout=10)
+    except requests.RequestException as e:
+        # La URL firmada lleva &signature=<hmac>; un error de transporte de
+        # requests embebe la URL completa en str(exc). Re-lanzar SCRUBEADO (solo
+        # método + path) y `from None` para suprimir la excepción original del
+        # traceback (BNC-2 §2.4 #4: firma ausente de str(exc)).
+        raise BinanceTransportError(type(e).__name__ + " en " + method + " " + path) from None
 
 
 def get_server_time_offset_ms() -> int:
