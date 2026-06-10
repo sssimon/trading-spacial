@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 
-from binance_sync import reconcile_spot
+from binance_sync import autocreate_spot_holdings, reconcile_spot
 from data.providers.binance_account import (
     BinanceAccountClient, BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
     BinanceTransportError, get_server_time_offset_ms,
@@ -24,9 +24,19 @@ from db.binance_credentials import (
 )
 
 
-def sync_tenant(con: sqlite3.Connection, tenant_id: int) -> dict:
+class _DryRunAbort(Exception):
+    """Sentinel para abortar la tx en --dry-run (rollback: no persiste nada)."""
+
+
+def sync_tenant(
+    con: sqlite3.Connection, tenant_id: int, *, autocreate: bool = False, dry_run: bool = False,
+) -> dict:
     """Reconcilia spot para un tenant. Devuelve el reporte o {status: ...} si falla.
-    Una credencial no-ACTIVE no se sincroniza (fail-closed)."""
+    Una credencial no-ACTIVE no se sincroniza (fail-closed).
+
+    `autocreate` (v0.2): tras reconciliar, auto-crea filas AUTO_DERIVED de los holds
+    nuevos (no-registrados) desde el trade history. `dry_run`: reporta qué crearía
+    sin escribir (el CLI además hace rollback de la tx)."""
     cred = db_get_binance_credential_raw(con, tenant_id)
     if cred is None:
         return {"status": "NO_CREDENTIAL"}
@@ -58,6 +68,10 @@ def sync_tenant(con: sqlite3.Connection, tenant_id: int) -> dict:
 
     report = reconcile_spot(con, tenant_id=tenant_id, balances=balances)
     report["status"] = "ACTIVE"
+    if autocreate:
+        report["autocreate"] = autocreate_spot_holdings(
+            con, tenant_id=tenant_id, client=client, balances=balances, dry_run=dry_run,
+        )
     return report
 
 
@@ -65,11 +79,23 @@ def main() -> int:
     from db.transaction import transaction
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", type=int, required=True)
+    ap.add_argument("--autocreate", action="store_true",
+                    help="v0.2: auto-crea filas AUTO_DERIVED de holds nuevos desde el trade history")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="con --autocreate: reporta qué crearía SIN escribir nada (rollback)")
     args = ap.parse_args()
-    with transaction() as con:
-        con.row_factory = sqlite3.Row
-        report = sync_tenant(con, args.tenant)
-    print(report)
+    holder: dict = {}
+    try:
+        with transaction() as con:
+            con.row_factory = sqlite3.Row
+            holder["report"] = sync_tenant(
+                con, args.tenant, autocreate=args.autocreate, dry_run=args.dry_run,
+            )
+            if args.dry_run:
+                raise _DryRunAbort()   # rollback: el dry-run NO persiste (ni reconcile)
+    except _DryRunAbort:
+        pass
+    print(holder["report"])
     return 0
 
 

@@ -187,6 +187,59 @@ def test_ban_marks_ingest_incompleto(tmp_path):
     assert out["abstained"].get("BNB") == "ingest_incompleto"
 
 
+def test_dry_run_reports_would_create_without_writing(tmp_path):
+    """--dry-run: reporta qué crearía (would-create) SIN escribir en la DB."""
+    con = _fresh_db(tmp_path)
+    try:
+        client = FakeClient(
+            trades={"BNBUSDT": [_fill(id=1, time=1000, is_buyer=True, qty=2, quote_qty=1000)]},
+            filters={"BNBUSDT": {"min_notional": 10.0}},
+            prices={"BNBUSDT": 600.0},
+        )
+        from binance_sync import autocreate_spot_holdings
+        out = autocreate_spot_holdings(
+            con, tenant_id=2, client=client, balances={"BNB": 2.0}, dry_run=True
+        )
+        n = con.execute("SELECT COUNT(*) FROM positions WHERE symbol='BNBUSDT'").fetchone()[0]
+    finally:
+        con.close()
+    assert "BNBUSDT" in out["created"]  # would-create reportado
+    assert n == 0                        # pero NADA escrito
+
+
+def test_sync_tenant_autocreate_wires_report(tmp_path, monkeypatch):
+    """sync_tenant(autocreate=True) corre el descubrimiento y mete el reporte."""
+    from cryptography.fernet import Fernet
+    from unittest.mock import MagicMock, patch
+    monkeypatch.setenv("TRADING_BINANCE_MASTER_KEY", Fernet.generate_key().decode())
+    con = _fresh_db(tmp_path)
+    try:
+        from db.binance_credentials import db_upsert_binance_credential
+        db_upsert_binance_credential(con, tenant_id=2, api_key_public="PUB",
+                                     secret_plaintext="s", scope_detected="READ_ONLY_SPOT",
+                                     ip_whitelisted=True)
+        con.commit()
+        fc = FakeClient(
+            trades={"BNBUSDT": [_fill(id=1, time=1000, is_buyer=True, qty=2, quote_qty=1000)]},
+            filters={"BNBUSDT": {"min_notional": 10.0}},
+            prices={"BNBUSDT": 600.0},
+        )
+        fake = MagicMock()
+        fake.get_spot_balances.return_value = {"BNB": 2.0}
+        fake.get_my_trades.side_effect = fc.get_my_trades
+        fake.get_exchange_filters.side_effect = fc.get_exchange_filters
+        fake.get_ticker_prices.side_effect = fc.get_ticker_prices
+        from tools import sync_binance_spot as sbs
+        with patch.object(sbs, "BinanceAccountClient", return_value=fake), \
+             patch.object(sbs, "get_server_time_offset_ms", return_value=0):
+            report = sbs.sync_tenant(con, 2, autocreate=True)
+        con.commit()
+        created = report["autocreate"]["created"]
+    finally:
+        con.close()
+    assert "BNBUSDT" in created
+
+
 def test_idempotent_second_run_no_duplicate(tmp_path):
     con = _fresh_db(tmp_path)
     try:

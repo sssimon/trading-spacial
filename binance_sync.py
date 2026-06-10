@@ -115,6 +115,7 @@ def _create_auto_derived(
 
 def autocreate_spot_holdings(
     con: sqlite3.Connection, *, tenant_id: int, client, balances: dict[str, float],
+    dry_run: bool = False,
 ) -> dict:
     """Descubre holds spot reales y auto-crea filas AUTO_DERIVED (observabilidad).
 
@@ -169,6 +170,9 @@ def autocreate_spot_holdings(
         min_notional = (client.get_exchange_filters([pair]).get(pair) or {}).get("min_notional")
         if price is not None and min_notional is not None and amount * price < min_notional:
             abstained[pair] = "dust"
+            continue
+        if dry_run:
+            created.append(pair)   # would-create: reporta sin INSERT
             continue
         row = _create_auto_derived(
             con, tenant_id=tenant_id, symbol=pair, qty=amount,
