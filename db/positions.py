@@ -142,6 +142,7 @@ def db_get_positions(
     tenant_id: Optional[int] = None,
     since: Optional[str] = None,
     control_domain: Optional[str] = None,
+    origin_in: Optional[tuple] = None,
 ) -> list:
     """List positions, optionally filtered by status, tenant_id, since, and
     control_domain.
@@ -173,6 +174,13 @@ def db_get_positions(
     if control_domain is not None:
         clauses.append("control_domain=?")
         params.append(control_domain)
+    if origin_in is not None:
+        # BNC-12: el read-model de conducta pasa ('SIGNAL','OPERATOR') para
+        # excluir AUTO_DERIVED (observabilidad, no conducta). Default None = sin
+        # filtro (compat con todos los callers existentes).
+        placeholders = ",".join("?" for _ in origin_in)
+        clauses.append(f"origin IN ({placeholders})")
+        params.extend(origin_in)
     if since is not None:
         # Use exit_ts when filtering closed trades (the historial case);
         # otherwise entry_ts. Both columns are ISO 8601 strings so a
