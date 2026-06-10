@@ -171,6 +171,49 @@ def test_backfill_does_not_touch_auto_derived(tmp_path):
     assert val == "AUTO_DERIVED", "el backfill re-etiquetó AUTO_DERIVED (BNC-12/Kill-a)"
 
 
+def test_migrate_origin_prod_path_alter_and_backfill(tmp_path):
+    """Cubre el path PROD: una `positions` SIN `origin` (DB pre-v0.2) → _migrate_origin
+    ALTER-añade la columna + backfilea.
+
+    Adrian MEDIUM-1: ninguna DB fresca ejercita el branch del ALTER (las
+    recreaciones ya construyen `origin` → el ALTER hace skip). Pero ESE branch es
+    exactamente el que corre en el deploy real (prod: recreaciones idempotentes
+    skip → _migrate_origin ALTER añade origin + backfilea). Este test lo cubre.
+    """
+    db_path = tmp_path / "prod_sim.db"
+    con = sqlite3.connect(str(db_path))
+    try:
+        # positions pre-v0.2: tiene control_domain + scan_id, NO tiene origin.
+        con.execute(
+            "CREATE TABLE positions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, scan_id INTEGER, symbol TEXT NOT NULL, "
+            "direction TEXT, status TEXT, entry_price REAL, entry_ts TEXT, qty REAL, "
+            "tenant_id INTEGER, control_domain TEXT NOT NULL DEFAULT 'INTERNAL', market TEXT)"
+        )
+        con.execute(
+            "INSERT INTO positions (scan_id,symbol,control_domain) VALUES "
+            "(NULL,'BTCUSDT','EXTERNAL'), (7,'ADAUSDT','INTERNAL')"
+        )
+        con.commit()
+        cols_before = {r[1] for r in con.execute("PRAGMA table_info(positions)").fetchall()}
+        assert "origin" not in cols_before, "precondición: la DB simulada NO tiene origin"
+
+        from db.schema import _migrate_origin
+        _migrate_origin(con)   # ejercita el branch del ALTER + el backfill
+        con.commit()
+
+        cols_after = {r[1]: r for r in con.execute("PRAGMA table_info(positions)").fetchall()}
+        assert "origin" in cols_after, "el ALTER no añadió origin en el path prod"
+        _, _, ctype, notnull, dflt, _ = cols_after["origin"]
+        assert (ctype, notnull, dflt) == ("TEXT", 1, "'SIGNAL'")
+        ext = con.execute("SELECT origin FROM positions WHERE symbol='BTCUSDT'").fetchone()[0]
+        intl = con.execute("SELECT origin FROM positions WHERE symbol='ADAUSDT'").fetchone()[0]
+        assert ext == "OPERATOR", "EXTERNAL manual (scan_id NULL) debe backfillear a OPERATOR (path prod)"
+        assert intl == "SIGNAL", "INTERNAL (scan_id set) debe quedar SIGNAL"
+    finally:
+        con.close()
+
+
 def test_backfill_idempotent_second_init(tmp_path):
     """Correr init_db dos veces no re-etiqueta ni rompe (idempotencia total)."""
     con = _fresh_db(tmp_path)
