@@ -440,6 +440,11 @@ def init_db() -> None:
     with transaction() as con_cash:
         _migrate_cash_balance(con_cash)
 
+    # binance_credentials: API key read-only spot por-tenant, cifrada at-rest
+    # (spec 2026-06-10-conexion-binance-solo-lectura §2.2). Idempotente.
+    with transaction() as con_bc:
+        _migrate_binance_credentials(con_bc)
+
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
 # kill_switch_* tables intentionally NOT in this list — kept global for B.1
@@ -879,6 +884,37 @@ def _migrate_cash_balance(con: sqlite3.Connection) -> None:
             "ALTER TABLE capital ADD COLUMN cash_balance_usd REAL NOT NULL DEFAULT 0"
         )
         log.info("DB migration: added cash_balance_usd column to capital (default 0)")
+
+
+def _migrate_binance_credentials(con: sqlite3.Connection) -> None:
+    """Crea la tabla binance_credentials (una fila por tenant; secret cifrada).
+
+    NO en config.secrets.json (global + texto plano) ni en positions (credencial
+    = acceso, no posición). Molde de capital/user_preferences: UNIQUE INDEX por
+    tenant_id. Idempotente (CREATE TABLE/INDEX IF NOT EXISTS).
+
+    Spec: docs/superpowers/specs/es/2026-06-10-conexion-binance-solo-lectura-spec.md §2.2.
+    """
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS binance_credentials (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id       INTEGER NOT NULL,
+            api_key_public  TEXT NOT NULL,
+            secret_enc      BLOB NOT NULL,
+            key_version     INTEGER NOT NULL DEFAULT 1,
+            scope_detected  TEXT,
+            ip_whitelisted  INTEGER NOT NULL DEFAULT 0,
+            status          TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_binance_cred_tenant "
+        "ON binance_credentials(tenant_id)"
+    )
 
 
 def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
