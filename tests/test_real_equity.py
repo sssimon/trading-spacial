@@ -98,3 +98,21 @@ def test_compute_real_equity_excludes_internal_and_handles_missing_price(con):
     assert r["real_equity_usd"] == pytest.approx(100.0)
     # SOL (INTERNAL) absent from holds entirely.
     assert all(h["symbol"] != "SOLUSDT" for h in r["holds"])
+
+
+def test_zero_qty_external_excluded_from_equity(tmp_path):
+    import sqlite3
+    from api.equity import compute_real_equity
+    con = sqlite3.connect(":memory:"); con.row_factory = sqlite3.Row
+    con.execute("CREATE TABLE capital (id INTEGER PRIMARY KEY, tenant_id INTEGER, "
+                "balance REAL, peak_balance REAL, max_drawdown_pct REAL, updated_at TEXT, "
+                "cash_balance_usd REAL DEFAULT 0)")
+    con.execute("CREATE TABLE positions (id INTEGER PRIMARY KEY, symbol TEXT, qty REAL, "
+                "status TEXT, control_domain TEXT, tenant_id INTEGER)")
+    con.execute("INSERT INTO capital (tenant_id, balance, peak_balance, cash_balance_usd, updated_at) "
+                "VALUES (2, 0, 0, 100.0, 't')")
+    con.execute("INSERT INTO positions (symbol, qty, status, control_domain, tenant_id) "
+                "VALUES ('BTCUSDT', 0.0, 'open', 'EXTERNAL', 2)")
+    out = compute_real_equity(con, tenant_id=2, price_lookup={"BTCUSDT": 64000.0})
+    assert out["holds"] == []
+    assert out["real_equity_usd"] == 100.0
