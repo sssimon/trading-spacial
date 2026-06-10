@@ -436,6 +436,10 @@ def init_db() -> None:
         _migrate_control_domain(con_cd)
         _migrate_positions_market(con_cd)
         _install_binance_external_guards(con_cd)
+        # origin (eje de procedencia, v0.2): DESPUÉS de control_domain (el backfill
+        # lo referencia). Fresh DB: las recreaciones ya lo construyen → el ALTER
+        # skip. Prod: las recreaciones skip → el ALTER lo añade. Backfill idempotente.
+        _migrate_origin(con_cd)
 
     # cash_balance_usd en capital: el saldo NO-posición del operador (cash /
     # futuros) para el equity en vivo display-only (v0.1.5). Idempotente.
@@ -918,6 +922,49 @@ def _install_binance_external_guards(con: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_origin(con: sqlite3.Connection) -> None:
+    """Add `origin` (SIGNAL/OPERATOR/AUTO_DERIVED) — eje de PROCEDENCIA.
+
+    Distingue quién FABRICÓ la fila: SIGNAL (scan del sistema), OPERATOR (el
+    operador la registró deliberadamente), AUTO_DERIVED (el sistema la reconstruyó
+    del trade history de Binance, v0.2). El read-model de conducta lee SOLO
+    SIGNAL/OPERATOR; AUTO_DERIVED es observabilidad, NUNCA conducta (BNC-12).
+    Resuelve el hallazgo de Voronov: `scan_id=NULL` era un eje de autoría con dos
+    valores intentando cargar tres.
+
+    Idempotente: PRAGMA-guarded ADD COLUMN (NO try/except — un ALTER fallido en la
+    BEGIN IMMEDIATE marcaría la tx abortable). NOT NULL DEFAULT 'SIGNAL' → toda
+    fila previa = SIGNAL.
+
+    Backfill: las EXTERNAL manuales (scan_id NULL) → OPERATOR. La guarda
+    `origin='SIGNAL' AND scan_id IS NULL` es DOBLEMENTE crítica:
+      - `origin='SIGNAL'` → NUNCA re-etiqueta una fila AUTO_DERIVED (que el
+        sistema fabricó) como OPERATOR; re-correr init_db es seguro (Adrian HIGH-9,
+        Kill (a) del spec: una AUTO_DERIVED re-etiquetada entraría a conducta).
+      - `scan_id IS NULL` → solo las claramente-manuales; una EXTERNAL con scan_id
+        (no debería existir) se deja como está, no se asume OPERATOR.
+
+    Corre DESPUÉS de _migrate_control_domain (el backfill referencia control_domain).
+    Spec: docs/superpowers/specs/es/2026-06-10-binance-v02-autocreacion-observabilidad-spec.md §2.
+    """
+    cols = {row[1] for row in con.execute("PRAGMA table_info(positions)").fetchall()}
+    if "origin" not in cols:
+        con.execute(
+            "ALTER TABLE positions ADD COLUMN origin TEXT NOT NULL DEFAULT 'SIGNAL'"
+        )
+        log.info("DB migration: added origin column to positions (default SIGNAL)")
+    con.execute(
+        "UPDATE positions SET origin='OPERATOR' "
+        "WHERE control_domain='EXTERNAL' AND origin='SIGNAL' AND scan_id IS NULL"
+    )
+    n = con.execute("SELECT changes()").fetchone()[0]
+    if n:
+        log.info(
+            "_migrate_origin: backfilled %d EXTERNAL manual rows to origin='OPERATOR'.",
+            n,
+        )
+
+
 def _migrate_cash_balance(con: sqlite3.Connection) -> None:
     """Add `cash_balance_usd` to capital (saldo no-posición del operador).
 
@@ -1170,6 +1217,7 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             market      TEXT,
+            origin      TEXT    NOT NULL DEFAULT 'SIGNAL',
             CHECK (qty IS NOT NULL OR status = 'legacy_unmeasurable')
         )
         """
@@ -1181,7 +1229,7 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain", "market",
+        "control_domain", "market", "origin",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
@@ -1193,7 +1241,8 @@ def _migrate_qty_not_null(con: sqlite3.Connection) -> None:
         # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
         # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
-        else ("'INTERNAL'" if col == "control_domain" else "NULL")
+        else ("'INTERNAL'" if col == "control_domain"
+              else ("'SIGNAL'" if col == "origin" else "NULL"))
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1301,6 +1350,7 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             market      TEXT,
+            origin      TEXT    NOT NULL DEFAULT 'SIGNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable')
         )
         """
@@ -1310,7 +1360,7 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain", "market",
+        "control_domain", "market", "origin",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
@@ -1322,7 +1372,8 @@ def _migrate_qty_positive(con: sqlite3.Connection) -> None:
         # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
         # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
-        else ("'INTERNAL'" if col == "control_domain" else "NULL")
+        else ("'INTERNAL'" if col == "control_domain"
+              else ("'SIGNAL'" if col == "origin" else "NULL"))
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1425,6 +1476,7 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             market      TEXT,
+            origin      TEXT    NOT NULL DEFAULT 'SIGNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant'))
         )
@@ -1435,7 +1487,7 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain", "market",
+        "control_domain", "market", "origin",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
@@ -1447,7 +1499,8 @@ def _migrate_tenant_id_not_null(con: sqlite3.Connection) -> None:
         # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
         # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
-        else ("'INTERNAL'" if col == "control_domain" else "NULL")
+        else ("'INTERNAL'" if col == "control_domain"
+              else ("'SIGNAL'" if col == "origin" else "NULL"))
         for col in TARGET_COLS
     ]
     insert_sql = (
@@ -1572,6 +1625,7 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
             tenant_id   INTEGER,
             control_domain TEXT NOT NULL DEFAULT 'INTERNAL',
             market      TEXT,
+            origin      TEXT    NOT NULL DEFAULT 'SIGNAL',
             CHECK ((qty IS NOT NULL AND qty > 0) OR status = 'legacy_unmeasurable'),
             CHECK (tenant_id IS NOT NULL OR status IN ('legacy_unmeasurable', 'legacy_no_tenant')),
             CHECK (direction IN ('LONG', 'SHORT') OR status = 'legacy_unmeasurable')
@@ -1583,7 +1637,7 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
         "entry_ts", "sl_price", "tp_price", "size_usd", "qty",
         "exit_price", "exit_ts", "exit_reason", "pnl_usd", "pnl_pct",
         "notes", "atr_entry", "be_mult", "tenant_id",
-        "control_domain", "market",
+        "control_domain", "market", "origin",
     ]
     select_expressions = [
         # control_domain: NOT NULL DEFAULT 'INTERNAL' — si la fila previa no lo
@@ -1595,7 +1649,8 @@ def _migrate_direction_enum(con: sqlite3.Connection) -> None:
         # se borraba en cada recreación y reabría la landmine BNC-4 (incidente
         # 2026-06-10, mismo class que control_domain #578).
         col if col in existing_cols
-        else ("'INTERNAL'" if col == "control_domain" else "NULL")
+        else ("'INTERNAL'" if col == "control_domain"
+              else ("'SIGNAL'" if col == "origin" else "NULL"))
         for col in TARGET_COLS
     ]
     insert_sql = (
