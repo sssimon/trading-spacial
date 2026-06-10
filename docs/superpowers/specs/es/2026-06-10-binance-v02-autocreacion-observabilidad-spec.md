@@ -111,6 +111,7 @@ Lectura **read-only, on-read** (como `compute_real_equity`), sobre holdings EXTE
 - **BNC-15 (identidad).** Idempotencia por `(tenant_id, symbol, market, direction)`; ACB recomputado completo cada sync (sin cursor); re-sync no doble-cuenta.
 - **BNC-16 (foto, no historial).** Refleja holds vivos; no reconstruye cerradas (sesgo de supervivencia declarado; inerte porque conducta no lee AUTO_DERIVED).
 - **BNC-17 (riesgo ≠ conducta).** La señal de riesgo (§7) afirma HECHOS del holding (underwater, age, sin_stop); nunca infiere apertura/cierre deliberado; vive en observabilidad, no en el eje `i`.
+- **BNC-18 (I/O fuera del writer-lock — Halberg, revisión holística).** TODA la I/O de red (balances + myTrades/ticker/exchangeInfo) corre FUERA de cualquier transacción (`plan_spot_autocreate`, fase 1); solo los writes (reconcile + INSERTs) van en una tx CORTA (`apply_spot_autocreate`, fase 2). El `BEGIN IMMEDIATE` NUNCA se sostiene durante la latencia de Binance → no reproduce el incidente de contención del login (2026-06-10). Esto hace el sync seguro concurrente con tráfico vivo y apto para el auto-loop futuro.
 - Heredados: BNC-1 (read-only; myTrades USER_DATA), BNC-4 (trigger market⟹EXTERNAL), BNC-11 (firma de compute_real_equity intacta).
 
 ## 10. Consistencia cross-documento

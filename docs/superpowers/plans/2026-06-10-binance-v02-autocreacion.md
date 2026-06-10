@@ -53,3 +53,21 @@
 
 ## Diferido (POST-SHIP, explícito)
 `PositionClosure(OBSERVED)` (auto-realizar cierres); auto-clasificación venta/transfer; Earn (LD*); cursor incremental; reconstrucción de cerradas; futuros; re-derivar BTC/ETH con ACB real.
+
+## Estado de implementación (2026-06-10 — TODAS las tareas HECHAS)
+- **T1** eje `origin` — `48cb14f`+`bb2b7e1` (revisada Adrian+Halberg: CORRECTA, corre seguro en prod).
+- **T2** filtro conducta (BNC-12) — `25f88b1` (revisada: BNC-12 cerrado, sin bypass).
+- **T3** cliente myTrades/exchangeInfo/ticker — `efee4a9`.
+- **T4** ACB — `5e1a289`+`4239ba4` (fix eps RELATIVO para memecoins, Halberg).
+- **T6** señal de riesgo §7 — `3a989e3`.
+- **T5** descubrimiento + auto-creación — `5755b1f`.
+- **T7** orquestador CLI + dry-run — `d3e2515`.
+- **Revisión holística** (Adrian+Halberg+coherencia): 0 BLOCKERS, 6 invariantes BNC-12..17 + 6 fixes F1/F2/F4/F8/F9/eps CONFIRMADOS. Una salvedad de Halberg → refactor.
+- **Refactor writer-lock** (`db463f5`, decisión de Samuel): el `sync --autocreate` hacía I/O de red DENTRO del `BEGIN IMMEDIATE` (reproducía la contención del login). Split `plan_spot_autocreate` (I/O, sin lock) + `apply_spot_autocreate` (writes, tx corta); `sync_tenant` fase1 I/O / fase2 writes. **El writer-lock ya NO se sostiene durante la red.**
+- Gate verde **3347 passed** en el checkpoint final.
+
+## Notas de implementación / scope (de las revisiones)
+- **Adrian #4:** el INSERT AUTO_DERIVED se hizo en una función NUEVA `_create_auto_derived` (binance_sync.py), NO extendiendo `register_external` (que mantiene su idempotencia-por-entry_ts del path manual). Funcionalmente mejor: no contamina el path OPERATOR. (La spec §5 decía "extender register_external"; se implementó como función dedicada.)
+- **Multi-quote (Adrian #2) — fuera de scope v0.2:** si un asset tiene trades en DOS quotes, se usa el primero de `_QUOTES`; el ACB cubre solo ese par. Aceptable para el caso del papá (BNB/PEPE single-quote). Merge cross-quote = POST-SHIP.
+- **Dust-sin-precio (Adrian #3):** si no se puede valuar (sin ticker/minNotional), se CREA (create-in-doubt — tiene trades reales = posición real; §7 lo marca `no_valuado`). Política deliberada; alternativa "abstenerse" = decisión futura.
+- **§11-abierta (health.py):** `compute_rolling_metrics` no filtra origin; inerte en v0.2 (AUTO_DERIVED nunca llega a `closed` salvo cierre humano). Añadir filtro SI se habilita `PositionClosure(OBSERVED)`.
