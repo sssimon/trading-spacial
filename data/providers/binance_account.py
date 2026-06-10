@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
 import urllib.parse
 
@@ -18,6 +19,14 @@ import requests
 
 BASE_URL = "https://api.binance.com"
 RECV_WINDOW_MS = 5000
+# myTrades pagina por fromId; 1000 = máximo de Binance por página (weight 20).
+_MYTRADES_PAGE_LIMIT = 1000
+
+
+def _json_compact(values: list) -> str:
+    """JSON sin espacios para el param `symbols` de los endpoints públicos
+    (exchangeInfo/ticker aceptan symbols=[\"A\",\"B\"] URL-encoded)."""
+    return json.dumps(values, separators=(",", ":"))
 
 
 class BinanceAuthError(Exception):
@@ -85,7 +94,9 @@ def _raise_for_error_code(resp):
         body = resp.json()
     except Exception:
         body = {}
-    code = body.get("code")
+    # Un endpoint exitoso de lista (myTrades, ticker/price con symbols) devuelve un
+    # JSON array, no un dict con 'code'. .get solo aplica a dict (error firmado).
+    code = body.get("code") if isinstance(body, dict) else None
     if code == -2015:
         raise BinanceAuthError("-2015: " + body.get("msg", ""))
     if code == -1021:
@@ -136,3 +147,69 @@ class BinanceAccountClient:
             return False  # order/test aceptado -> la key SI puede operar
         # Otro error (p.ej. parametro) -- no concluyente; fail-closed a "no validado".
         raise RuntimeError("order/test no concluyente: HTTP " + str(resp.status_code) + " code=" + str(code))
+
+    # ─── v0.2: trade history + filtros + precio (read-only) ──────────────────
+
+    def get_my_trades(self, symbol: str) -> list[dict]:
+        """TODOS los fills spot del símbolo (USER_DATA, read-only), paginando por
+        fromId hasta agotar. Devuelve la lista completa de fills crudos de Binance
+        (campos: id, orderId, price, qty, quoteQty, commission, commissionAsset,
+        time, isBuyer, isMaker).
+
+        Si Binance banea por weight a mitad (BinanceRateBanned PROPAGA): el caller
+        marca el símbolo `ingest_incompleto` y NO persiste un ACB truncado — un ACB
+        sobre un PREFIJO de la historia es incorrecto, no incompleto (spec F8/§3).
+        symbol es OBLIGATORIO en myTrades (Binance no lista 'lo que operaste')."""
+        fills: list[dict] = []
+        from_id = 0
+        while True:
+            resp = _signed_get(
+                self._api_key, self._secret, "/api/v3/myTrades",
+                {"symbol": symbol, "limit": _MYTRADES_PAGE_LIMIT, "fromId": from_id},
+                self._offset,
+            )
+            _raise_for_error_code(resp)
+            page = resp.json()
+            if not page:
+                break
+            fills.extend(page)
+            if len(page) < _MYTRADES_PAGE_LIMIT:
+                break
+            from_id = max(int(f["id"]) for f in page) + 1
+        return fills
+
+    def get_exchange_filters(self, symbols: list[str]) -> dict:
+        """{symbol: {min_notional, min_qty}} desde /api/v3/exchangeInfo (PÚBLICO).
+
+        `min_notional` del filtro NOTIONAL (o MIN_NOTIONAL legacy) = el valor
+        mínimo (qty*precio) vendible → umbral de dust/inclusión per-símbolo
+        (spec §4, mejor que un hardcoded). `min_qty` del LOT_SIZE. Un símbolo
+        inexistente en el catálogo se omite del dict."""
+        if not symbols:
+            return {}
+        resp = _http_get(BASE_URL + "/api/v3/exchangeInfo",
+                         params={"symbols": _json_compact(symbols)}, timeout=10)
+        _raise_for_error_code(resp)
+        out: dict = {}
+        for s in resp.json().get("symbols", []):
+            min_notional = None
+            min_qty = None
+            for f in s.get("filters", []):
+                ft = f.get("filterType")
+                if ft in ("NOTIONAL", "MIN_NOTIONAL") and f.get("minNotional") is not None:
+                    min_notional = float(f["minNotional"])
+                elif ft == "LOT_SIZE" and f.get("minQty") is not None:
+                    min_qty = float(f["minQty"])
+            out[s["symbol"]] = {"min_notional": min_notional, "min_qty": min_qty}
+        return out
+
+    def get_ticker_prices(self, symbols: list[str]) -> dict:
+        """{symbol: precio} desde /api/v3/ticker/price (PÚBLICO). Para §7 (valuar
+        holds / underwater). Un símbolo sin precio se OMITE del dict → el caller
+        se abstiene (estado `no_valuado`), nunca asume 'sin riesgo' (spec F1)."""
+        if not symbols:
+            return {}
+        resp = _http_get(BASE_URL + "/api/v3/ticker/price",
+                         params={"symbols": _json_compact(symbols)}, timeout=10)
+        _raise_for_error_code(resp)
+        return {row["symbol"]: float(row["price"]) for row in resp.json()}

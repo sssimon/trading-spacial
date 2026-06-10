@@ -154,6 +154,15 @@ CANONICAL_POSITIONS_COLUMNS: tuple[ColumnSpec, ...] = (
     # trg_market_implies_external_*, garantiza estructuralmente que una fila con
     # market seteado es EXTERNAL. Spec: 2026-06-10-conexion-binance-solo-lectura.
     ColumnSpec("market", "TEXT"),
+    # origin: eje de PROCEDENCIA — quién FABRICÓ la fila. SIGNAL (scan del
+    # sistema), OPERATOR (registro manual deliberado), AUTO_DERIVED (el sistema
+    # la reconstruyó del trade history de Binance, v0.2). El read-model de
+    # conducta lee SOLO SIGNAL/OPERATOR; AUTO_DERIVED es observabilidad, nunca
+    # conducta (BNC-12). NOT NULL DEFAULT 'SIGNAL' → toda fila previa = SIGNAL;
+    # el backfill lleva las EXTERNAL manuales (scan_id NULL) a OPERATOR. Añadida
+    # por _migrate_origin tras las recreaciones (como control_domain/market) y
+    # enhebrada en las 4 recreaciones. Spec: 2026-06-10-binance-v02-autocreacion.
+    ColumnSpec("origin", "TEXT", nullable=False, default="'SIGNAL'"),
 )
 
 

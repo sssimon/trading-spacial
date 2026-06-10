@@ -31,13 +31,19 @@ OUTPUT_DIR = "data/realizacion"
 # MANUAL_AGENT del lado resultado; ver spec eje-conducta REV 2 §6/§7.)
 MANUAL_REASONS = {"MANUAL", "MANUAL_AGENT"}
 
+# BNC-12: el read-model de conducta lee SOLO actos del operador/señal
+# (origin IN SIGNAL/OPERATOR). Las filas AUTO_DERIVED (reconstruidas por el
+# sistema del trade history de Binance) son OBSERVABILIDAD, nunca conducta — si
+# entraran, el sistema "llamaría disciplina a la suerte" (Voronov). El filtro
+# vive AQUÍ, en el QUERY, NO en episode.py (que es proyección pura).
+# Spec: 2026-06-10-binance-v02-autocreacion-observabilidad-spec.md §2.
 _QUERY = (
     "SELECT json_group_array(json_object("
     "'symbol', symbol, 'direction', direction, 'size_usd', size_usd,"
     "'pnl_usd', pnl_usd, 'pnl_pct', pnl_pct, 'exit_reason', exit_reason,"
     "'entry_ts', entry_ts, 'exit_ts', exit_ts, 'scan_id', scan_id)) "
     "FROM positions WHERE tenant_id={tenant} AND status='closed' "
-    "AND pnl_usd IS NOT NULL"
+    "AND pnl_usd IS NOT NULL AND origin IN ('SIGNAL', 'OPERATOR')"
 )
 
 

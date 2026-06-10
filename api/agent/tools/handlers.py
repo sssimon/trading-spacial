@@ -262,14 +262,21 @@ def get_closed_trades(*, tenant_id: int, window: str = "30d") -> dict:
     from datetime import datetime, timedelta, timezone
     from db.positions import db_get_positions
 
+    # BNC-12: el copiloto razona sobre los trades del operador/señal, NUNCA sobre
+    # filas AUTO_DERIVED (holds reconstruidos por el sistema del trade history de
+    # Binance = observabilidad, no conducta). origin_in las excluye.
+    _CONDUCT_ORIGINS = ("SIGNAL", "OPERATOR")
     with snapshot_connection() as con:
         if window == "all":
-            rows = db_get_positions(con, status="closed", tenant_id=tenant_id)
+            rows = db_get_positions(
+                con, status="closed", tenant_id=tenant_id, origin_in=_CONDUCT_ORIGINS,
+            )
         else:
             days = {"7d": 7, "30d": 30, "90d": 90}.get(window, 30)
             cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             rows = db_get_positions(
                 con, status="closed", tenant_id=tenant_id, since=cutoff_iso,
+                origin_in=_CONDUCT_ORIGINS,
             )
     return {"trades": [_position_to_summary(r) for r in rows]}
 
