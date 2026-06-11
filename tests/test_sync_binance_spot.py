@@ -9,6 +9,7 @@ mockean BinanceAccountClient. Debe: saltar credenciales no-ACTIVE, mapear errore
 de cliente al estado de la credencial, y tratar un blip de transporte como
 transitorio (TRANSPORT_ERROR, credencial SIGUE ACTIVE).
 """
+import logging
 import sqlite3
 from unittest.mock import patch
 
@@ -182,7 +183,7 @@ class TestObservedOrdersEnSync:
         assert report["observed_orders"]["observed"] == 2
         assert _count_observed_orders(db_path) == 2
 
-    def test_fallo_de_open_orders_omite_paso_completo(self, db_path):
+    def test_fallo_de_open_orders_omite_paso_completo(self, db_path, caplog):
         """Un BinanceRateBanned en get_open_orders → paso SKIPPED.
 
         El snapshot previo de observed_orders queda INTACTO (F8: parcial
@@ -200,7 +201,8 @@ class TestObservedOrdersEnSync:
              patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
             Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
             Cli.return_value.get_open_orders.side_effect = BinanceRateBanned("429")
-            report = sync_tenant(2)
+            with caplog.at_level(logging.WARNING, logger="tools.sync_binance_spot"):
+                report = sync_tenant(2)
         # Paso omitido completo.
         assert report["observed_orders"] == "SKIPPED"
         # Snapshot previo intacto (F8: sin borrado parcial).
@@ -211,6 +213,11 @@ class TestObservedOrdersEnSync:
         assert report["status"] == "ACTIVE"
         # Credencial sigue ACTIVE — fallo del paso ≠ fallo de credencial.
         assert _status(db_path) == "ACTIVE"
+        # Observabilidad: la línea WARNING fue emitida con causa visible.
+        assert any(
+            "OBSERVED_ORDERS_SKIPPED" in r.message and "429" in r.message
+            for r in caplog.records
+        )
 
     def test_dry_run_no_persiste_observed_orders(self, db_path):
         """dry_run=True → el report muestra las órdenes pero la tabla queda vacía."""

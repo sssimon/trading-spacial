@@ -86,12 +86,13 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
         # v0.3: órdenes de protección abiertas. Fallo aquí = paso OMITIDO
         # completo este ciclo (ni snapshot parcial ni limpieza por un fallo
         # de red — eco F8: parcial es incorrecto, no incompleto). Spec §5.4.
+        # No se degrada la credencial — fallo del paso ≠ fallo de la credencial.
         try:
             observed = classify_open_orders(client.get_open_orders(), balances)
         except (BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
                 BinanceTransportError) as e:
             log.warning("OBSERVED_ORDERS_SKIPPED tenant=%s causa=%s",
-                        tenant_id, type(e).__name__)
+                        tenant_id, e)
         plan = plan_spot_autocreate(
             client=client, balances=balances, existing_symbols=existing,
         ) if autocreate else None
