@@ -114,3 +114,68 @@ class TestMigracionObservedOrders:
                 btc_api.DB_FILE = original
         finally:
             os.environ.pop("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", None)
+
+
+from binance_sync import classify_open_orders
+
+
+def _orden(**kw):
+    base = {"symbol": "BTCUSDT", "orderId": 1, "orderListId": -1,
+            "side": "SELL", "type": "STOP_LOSS_LIMIT",
+            "price": "49000", "stopPrice": "50000",
+            "origQty": "0.5", "executedQty": "0"}
+    base.update(kw)
+    return base
+
+
+class TestClassifyOpenOrders:
+    def test_oco_completo_dos_patas_mismo_grupo(self):
+        orders = [
+            _orden(orderId=1, orderListId=33, type="STOP_LOSS_LIMIT",
+                   stopPrice="50000", price="49900"),
+            _orden(orderId=2, orderListId=33, type="LIMIT_MAKER",
+                   price="75000", stopPrice="0"),
+        ]
+        out = classify_open_orders(orders, {"BTC": 2.0})
+        assert len(out) == 2
+        sl = next(o for o in out if o["kind"] == "SL")
+        tp = next(o for o in out if o["kind"] == "TP")
+        assert sl["price"] == 50000.0          # SL usa stopPrice
+        assert tp["price"] == 75000.0          # LIMIT_MAKER usa price
+        assert sl["oco_group"] == tp["oco_group"] == 33
+        assert sl["pct_holding"] == pytest.approx(0.25)   # 0.5 de 2.0
+
+    def test_take_profit_limit_usa_stop_price(self):
+        out = classify_open_orders(
+            [_orden(type="TAKE_PROFIT_LIMIT", stopPrice="80000", price="79900")],
+            {"BTC": 1.0})
+        assert out[0]["kind"] == "TP"
+        assert out[0]["price"] == 80000.0
+
+    def test_limit_venta_simple_es_tp(self):
+        out = classify_open_orders(
+            [_orden(type="LIMIT", price="70000")], {"BTC": 1.0})
+        assert out[0]["kind"] == "TP"
+        assert out[0]["price"] == 70000.0
+        assert out[0]["oco_group"] is None     # orderListId=-1 → suelta
+
+    def test_buy_se_ignora(self):
+        assert classify_open_orders([_orden(side="BUY")], {"BTC": 1.0}) == []
+
+    def test_qty_restante_descuenta_ejecutado(self):
+        out = classify_open_orders(
+            [_orden(origQty="1.0", executedQty="0.4")], {"BTC": 2.0})
+        assert out[0]["qty"] == pytest.approx(0.6)
+        assert out[0]["pct_holding"] == pytest.approx(0.3)
+
+    def test_orden_mayor_que_holding_pct_sin_clamp(self):
+        out = classify_open_orders([_orden(origQty="3.0")], {"BTC": 2.0})
+        assert out[0]["pct_holding"] == pytest.approx(1.5)   # hecho observado
+
+    def test_holding_desconocido_pct_null(self):
+        out = classify_open_orders([_orden(symbol="PEPEUSDT")], {"BTC": 2.0})
+        assert out[0]["pct_holding"] is None   # se abstiene, no inventa
+
+    def test_orden_completamente_ejecutada_se_omite(self):
+        assert classify_open_orders(
+            [_orden(origQty="0.5", executedQty="0.5")], {"BTC": 2.0}) == []

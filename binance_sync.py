@@ -36,6 +36,53 @@ def base_asset(symbol: str) -> str:
     return s
 
 
+_SL_TYPES = ("STOP_LOSS", "STOP_LOSS_LIMIT")
+_TP_STOP_TYPES = ("TAKE_PROFIT", "TAKE_PROFIT_LIMIT")
+
+
+def classify_open_orders(orders: list[dict], holdings_qty: dict[str, float]) -> list[dict]:
+    """Función PURA (sin red, sin DB): órdenes crudas de get_open_orders() →
+    [{symbol, kind, price, qty, pct_holding, order_id, oco_group}].
+
+    Mapeo (solo side=SELL — un BUY es entrada pendiente, no protección):
+    STOP_LOSS* → SL (stopPrice); TAKE_PROFIT* → TP (stopPrice);
+    LIMIT_MAKER (pata alta de OCO) y LIMIT venta → TP (price).
+    Patas OCO comparten orderListId → oco_group (orderListId=-1 → None).
+    qty = origQty - executedQty (lo vivo). pct_holding = qty / holding del
+    base asset (`holdings_qty` = balances {asset: free+locked}); sin holding
+    conocido → None (se abstiene); orden > holding → pct real >1 SIN clamp
+    (hecho observado, no se maquilla).
+
+    Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §3.
+    """
+    out: list[dict] = []
+    for o in orders:
+        if o.get("side") != "SELL":
+            continue
+        otype = o.get("type")
+        if otype in _SL_TYPES:
+            kind, price = "SL", float(o["stopPrice"])
+        elif otype in _TP_STOP_TYPES:
+            kind, price = "TP", float(o["stopPrice"])
+        elif otype in ("LIMIT_MAKER", "LIMIT"):
+            kind, price = "TP", float(o["price"])
+        else:
+            continue  # tipo desconocido/futuro: no se clasifica, no se inventa
+        qty = float(o["origQty"]) - float(o.get("executedQty", 0) or 0)
+        if qty <= 0 or price <= 0:
+            continue
+        symbol = o["symbol"].upper()
+        held = holdings_qty.get(base_asset(symbol))
+        pct = (qty / held) if held else None
+        olist = int(o.get("orderListId", -1))
+        out.append({
+            "symbol": symbol, "kind": kind, "price": price, "qty": qty,
+            "pct_holding": pct, "order_id": int(o["orderId"]),
+            "oco_group": olist if olist != -1 else None,
+        })
+    return out
+
+
 def reconcile_spot(
     con: sqlite3.Connection, *, tenant_id: int, balances: dict[str, float], dust: float = 1e-6,
 ) -> dict:
