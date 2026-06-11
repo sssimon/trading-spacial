@@ -1786,7 +1786,9 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
 
 
 def _migrate_observed_orders(con: sqlite3.Connection) -> None:
-    """Tabla observed_orders — Binance v0.3 (SL/TP observados, spec 2026-06-11 §4).
+    """Tabla observed_orders — Binance v0.3 (SL/TP observados).
+
+    Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §4.
 
     Snapshot de las órdenes de protección abiertas (SL/TP/OCO) observadas en
     la cuenta spot del tenant. Semántica fuente-de-verdad: cada sync hace

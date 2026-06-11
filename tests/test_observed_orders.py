@@ -22,7 +22,6 @@ def _fresh_db(tmp_path) -> sqlite3.Connection:
             init_db()
             con = sqlite3.connect(str(db_path))
             con.isolation_level = None  # autocommit — los INSERTs de test se ven solos
-            con.execute("PRAGMA foreign_keys = ON")
             return con
         finally:
             btc_api.DB_FILE = original
@@ -92,6 +91,12 @@ class TestMigracionObservedOrders:
         )
         n = con.execute("SELECT COUNT(*) FROM observed_orders WHERE order_id=100").fetchone()[0]
         assert n == 1
+
+        row = con.execute(
+            "SELECT pct_holding, oco_group FROM observed_orders WHERE order_id=100"
+        ).fetchone()
+        assert row[0] is None  # pct_holding — NULL es estado semántico (spec §4: "se abstiene, no inventa")
+        assert row[1] is None  # oco_group — NULL es estado semántico
 
     def test_migracion_idempotente(self, tmp_path):
         """Correr init_db dos veces no debe fallar (CREATE IF NOT EXISTS)."""
