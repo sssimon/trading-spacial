@@ -14,7 +14,7 @@ describe('ObservedOrdersList', () => {
   it('muestra cada orden con su porcentaje', () => {
     render(<ObservedOrdersList orders={[sl, tp]} />);
     expect(screen.getByText(/SL/)).toBeInTheDocument();
-    expect(screen.getAllByText(/25%/u, { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/25%/u)).toHaveLength(2);
     expect(screen.getByText(/TP/)).toBeInTheDocument();
   });
 

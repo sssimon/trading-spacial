@@ -9,16 +9,16 @@
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid var(--nbc-border-dim, #2a2e39);
+  border: 1px solid var(--nbc-border-dim);
 }
 
-.orderSl { color: var(--bear, #f6465d); }
-.orderTp { color: var(--bull, #0ecb81); }
+.orderSl { color: var(--bear); }
+.orderTp { color: var(--bull); }
 
 .noStop {
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 4px;
-  color: var(--warn, #f0b90b);
-  border: 1px dashed var(--warn, #f0b90b);
+  color: var(--warn);
+  border: 1px dashed var(--warn);
 }
