@@ -203,8 +203,9 @@ class TestObservedOrdersEnSync:
             Cli.return_value.get_open_orders.side_effect = BinanceRateBanned("429")
             with caplog.at_level(logging.WARNING, logger="tools.sync_binance_spot"):
                 report = sync_tenant(2)
-        # Paso omitido completo.
-        assert report["observed_orders"] == "SKIPPED"
+        # Paso omitido completo — siempre dict, nunca string.
+        assert report["observed_orders"]["skipped"] is True
+        assert "429" in report["observed_orders"]["causa"]
         # Snapshot previo intacto (F8: sin borrado parcial).
         assert _count_observed_orders(db_path) == 1
         # sl_price de la fila EXTERNAL no se limpió.
@@ -218,6 +219,38 @@ class TestObservedOrdersEnSync:
             "OBSERVED_ORDERS_SKIPPED" in r.message and "429" in r.message
             for r in caplog.records
         )
+
+    def test_payload_malformado_omite_paso(self, db_path, caplog):
+        """Un dict malformado en get_open_orders (p.ej. stopPrice ausente en un
+        STOP_LOSS_LIMIT) → KeyError en classify_open_orders → paso SKIPPED completo.
+
+        El sync continúa (status=ACTIVE) y la credencial queda ACTIVE.
+        El report["observed_orders"] es siempre dict con skipped=True.
+        """
+        from tools.sync_binance_spot import sync_tenant
+        _add_cred(db_path)
+        # SELL STOP_LOSS_LIMIT sin la clave stopPrice → KeyError en classify_open_orders.
+        malformed_order = [
+            {
+                "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_LOSS_LIMIT",
+                "orderId": 201, "orderListId": -1,
+                # stopPrice ausente deliberadamente
+                "price": "49900.0",
+                "origQty": "0.5", "executedQty": "0.0",
+            }
+        ]
+        with patch("tools.sync_binance_spot.get_server_time_offset_ms", return_value=0), \
+             patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
+            Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
+            Cli.return_value.get_open_orders.return_value = malformed_order
+            with caplog.at_level(logging.WARNING, logger="tools.sync_binance_spot"):
+                report = sync_tenant(2)
+        # Paso omitido — dict con skipped=True.
+        assert report["observed_orders"]["skipped"] is True
+        # El sync completó su alcance principal.
+        assert report["status"] == "ACTIVE"
+        # La credencial sigue ACTIVE — payload malformado ≠ fallo de credencial.
+        assert _status(db_path) == "ACTIVE"
 
     def test_dry_run_no_persiste_observed_orders(self, db_path):
         """dry_run=True → el report muestra las órdenes pero la tabla queda vacía."""

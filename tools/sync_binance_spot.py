@@ -77,6 +77,7 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
         }
 
     observed = None
+    observed_skip_causa = None
     try:
         client = BinanceAccountClient(
             api_key=cred["api_key_public"], secret=secret,
@@ -85,12 +86,14 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
         balances = client.get_spot_balances()
         # v0.3: órdenes de protección abiertas. Fallo aquí = paso OMITIDO
         # completo este ciclo (ni snapshot parcial ni limpieza por un fallo
-        # de red — eco F8: parcial es incorrecto, no incompleto). Spec §5.4.
+        # de red o payload malformado — eco F8: parcial es incorrecto, no
+        # incompleto). Spec §5.4.
         # No se degrada la credencial — fallo del paso ≠ fallo de la credencial.
         try:
             observed = classify_open_orders(client.get_open_orders(), balances)
         except (BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
-                BinanceTransportError) as e:
+                BinanceTransportError, KeyError, ValueError, TypeError) as e:
+            observed_skip_causa = str(e)
             log.warning("OBSERVED_ORDERS_SKIPPED tenant=%s causa=%s",
                         tenant_id, e)
         plan = plan_spot_autocreate(
@@ -127,7 +130,7 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
                     observed_at=datetime.now(timezone.utc).isoformat(),
                 )
             else:
-                report["observed_orders"] = "SKIPPED"
+                report["observed_orders"] = {"skipped": True, "causa": observed_skip_causa}
             holder["report"] = report
             if dry_run:
                 raise _DryRunAbort()   # rollback: el dry-run NO persiste

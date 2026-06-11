@@ -178,6 +178,8 @@ Todas las migraciones del cluster corren bajo UNA sola `transaction()` — fallo
 
 - **`apply_*` nunca abre su propia `transaction()`:** recibe `con` del caller. Si abriera su propia transacción, el caller no podría componerla con otros `apply_*` en una sola unidad de trabajo atómica.
 
+- **Punto ciego cross-quote en `apply_observed_orders`:** el match entre órdenes y filas de posición es por símbolo exacto. Un SL colocado bajo otra quote (p.ej. BTCUSDC) NO se refleja en la fila BTCUSDT. Hoy `autocreate` nombra las filas `asset+USDT`, por lo que el comportamiento es consistente; pero si un usuario opera manualmente bajo una quote alternativa, ese SL/TP queda invisible para el summary.
+
 - **Migración idempotente = `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`:** sin `DROP`, sin datos borrados en la migración. Si la tabla ya existe (deploy subsiguiente), la migración es un no-op.
 
 ## Verify Checklist

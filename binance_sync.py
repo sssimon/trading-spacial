@@ -96,6 +96,12 @@ def apply_observed_orders(
         por igual; filas INTERNAL intocables (su SL/TP es del camino de
         control check_position_stops).
 
+    Punto ciego cross-quote: el match es por símbolo exacto. Un SL colocado
+    bajo otra quote (p.ej. BTCUSDC) NO se refleja en la fila BTCUSDT. Hoy
+    autocreate nombra las filas `asset+USDT`, así que el comportamiento es
+    consistente; pero si un usuario opera BTCUSDC manualmente, ese SL/TP
+    queda invisible para esta función.
+
     Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §5.
     """
     con.execute("DELETE FROM observed_orders WHERE tenant_id=?", (tenant_id,))
