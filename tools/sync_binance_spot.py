@@ -12,9 +12,14 @@ Spec: docs/superpowers/specs/es/2026-06-10-conexion-binance-solo-lectura-spec.md
 from __future__ import annotations
 
 import argparse
+import logging
 import sqlite3
+from datetime import datetime, timezone
 
-from binance_sync import apply_spot_autocreate, plan_spot_autocreate, reconcile_spot
+from binance_sync import (
+    apply_observed_orders, apply_spot_autocreate, classify_open_orders,
+    plan_spot_autocreate, reconcile_spot,
+)
 from data.providers.binance_account import (
     BinanceAccountClient, BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
     BinanceTransportError, get_server_time_offset_ms,
@@ -22,6 +27,8 @@ from data.providers.binance_account import (
 from db.binance_credentials import (
     db_get_binance_credential_raw, db_get_decrypted_secret, db_set_credential_status,
 )
+
+log = logging.getLogger(__name__)
 
 
 class _DryRunAbort(Exception):
@@ -69,12 +76,22 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
             ).fetchall()
         }
 
+    observed = None
     try:
         client = BinanceAccountClient(
             api_key=cred["api_key_public"], secret=secret,
             server_time_offset_ms=get_server_time_offset_ms(),
         )
         balances = client.get_spot_balances()
+        # v0.3: órdenes de protección abiertas. Fallo aquí = paso OMITIDO
+        # completo este ciclo (ni snapshot parcial ni limpieza por un fallo
+        # de red — eco F8: parcial es incorrecto, no incompleto). Spec §5.4.
+        try:
+            observed = classify_open_orders(client.get_open_orders(), balances)
+        except (BinanceAuthError, BinanceClockSkew, BinanceRateBanned,
+                BinanceTransportError) as e:
+            log.warning("OBSERVED_ORDERS_SKIPPED tenant=%s causa=%s",
+                        tenant_id, type(e).__name__)
         plan = plan_spot_autocreate(
             client=client, balances=balances, existing_symbols=existing,
         ) if autocreate else None
@@ -103,6 +120,13 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
             if autocreate:
                 created = apply_spot_autocreate(con, tenant_id=tenant_id, plan=plan["plan"])
                 report["autocreate"] = {"created": created, "abstained": plan["abstained"]}
+            if observed is not None:
+                report["observed_orders"] = apply_observed_orders(
+                    con, tenant_id=tenant_id, classified=observed,
+                    observed_at=datetime.now(timezone.utc).isoformat(),
+                )
+            else:
+                report["observed_orders"] = "SKIPPED"
             holder["report"] = report
             if dry_run:
                 raise _DryRunAbort()   # rollback: el dry-run NO persiste
