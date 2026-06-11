@@ -213,3 +213,18 @@ class BinanceAccountClient:
                          params={"symbols": _json_compact(symbols)}, timeout=10)
         _raise_for_error_code(resp)
         return {row["symbol"]: float(row["price"]) for row in resp.json()}
+
+    # ─── v0.3: órdenes abiertas observadas (read-only) ────────────────────────
+
+    def get_open_orders(self) -> list[dict]:
+        """TODAS las órdenes abiertas spot de la cuenta (USER_DATA, read-only).
+
+        SIN parámetro `symbol` (una sola llamada, weight 80): snapshot atómico
+        de la cuenta — evita iterar por símbolo (más llamadas, snapshot no
+        atómico). Devuelve la lista CRUDA de Binance; la clasificación SL/TP
+        vive en binance_sync.classify_open_orders (cliente delgado, patrón
+        get_my_trades). Spec v0.3 §2."""
+        resp = _signed_get(self._api_key, self._secret, "/api/v3/openOrders",
+                           {}, self._offset)
+        _raise_for_error_code(resp)
+        return resp.json()
