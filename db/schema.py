@@ -450,6 +450,7 @@ def init_db() -> None:
     # (spec 2026-06-10-conexion-binance-solo-lectura §2.2). Idempotente.
     with transaction() as con_bc:
         _migrate_binance_credentials(con_bc)
+        _migrate_observed_orders(con_bc)  # v0.3: tabla independiente, mismo eje binance
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -1782,3 +1783,37 @@ def _migrate_idempotency_keys(con: sqlite3.Connection) -> None:
         "_migrate_idempotency_keys: idempotency_keys table + expires index "
         "ensured."
     )
+
+
+def _migrate_observed_orders(con: sqlite3.Connection) -> None:
+    """Tabla observed_orders — Binance v0.3 (SL/TP observados, spec 2026-06-11 §4).
+
+    Snapshot de las órdenes de protección abiertas (SL/TP/OCO) observadas en
+    la cuenta spot del tenant. Semántica fuente-de-verdad: cada sync hace
+    DELETE WHERE tenant_id + reinserta (sin estado incremental, mismo
+    principio que el ACB recomputado de v0.2). Capa de enforcement Schema:
+    dominio de kind, positividad de price/qty y unicidad por orden los
+    rechaza el motor, no un comentario.
+
+    Idempotente: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    """
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS observed_orders (
+               id           INTEGER PRIMARY KEY,
+               tenant_id    INTEGER NOT NULL,
+               symbol       TEXT    NOT NULL,
+               kind         TEXT    NOT NULL CHECK (kind IN ('SL','TP')),
+               price        REAL    NOT NULL CHECK (price > 0),
+               qty          REAL    NOT NULL CHECK (qty > 0),
+               pct_holding  REAL,
+               order_id     INTEGER NOT NULL,
+               oco_group    INTEGER,
+               observed_at  TEXT    NOT NULL,
+               UNIQUE (tenant_id, order_id)
+           )"""
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_observed_orders_tenant_symbol "
+        "ON observed_orders(tenant_id, symbol)"
+    )
+    log.info("_migrate_observed_orders: observed_orders table + index ensured.")
