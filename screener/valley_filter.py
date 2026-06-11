@@ -92,6 +92,9 @@ def measure_consolidation(bars: list[dict]) -> dict:
     Devuelve SIEMPRE las 4 claves:
       en_rango (bool), pct_rango (float), semanas (int), vol_percentil (float).
     pct_rango = (max-min)/mediana sobre la ventana de consolidación.
+    semanas = cantidad de bloques consecutivos de 7 días (desde lo más reciente
+    hacia atrás sobre TODA la serie) cuyo rango ≤ RANGE_BAND_MAX; no acotado por
+    CONSOLIDATION_WINDOW_DAYS.
     vol_percentil = posición de la volatilidad de 30d en su historia de 1 año
     (0.0 = la más baja que ha tenido; 1.0 = la más alta)."""
     ventana = bars[-CONSOLIDATION_WINDOW_DAYS:]
@@ -104,6 +107,8 @@ def measure_consolidation(bars: list[dict]) -> dict:
 
     # Semanas dentro de banda: cuenta semanas recientes (bloques de 7 días)
     # cuyo rango propio ≤ RANGE_BAND_MAX, desde la más reciente hacia atrás.
+    # NOTA: semanas NO está acotado por CONSOLIDATION_WINDOW_DAYS — cuenta hacia
+    # atrás por toda la serie, así que puede exceder las 12 semanas de la ventana.
     semanas = 0
     i = len(bars)
     while i - 7 >= 0:
