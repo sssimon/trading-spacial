@@ -83,6 +83,55 @@ def classify_open_orders(orders: list[dict], holdings_qty: dict[str, float]) -> 
     return out
 
 
+def apply_observed_orders(
+    con: sqlite3.Connection, *, tenant_id: int, classified: list[dict], observed_at: str,
+) -> dict:
+    """FASE WRITE (tx CORTA del caller, sin I/O): snapshot fuente-de-verdad.
+
+    (a) DELETE + reinserta observed_orders del tenant (sin estado incremental).
+    (b) Resumen en cada fila EXTERNAL open: sl_price/tp_price = la orden de
+        mayor qty de su kind; sin orden de ese kind → NULL (decisión Samuel
+        2026-06-11: sin orden abierta = sin protección real — el dashboard
+        nunca muestra protección ficticia). Aplica a OPERATOR y AUTO_DERIVED
+        por igual; filas INTERNAL intocables (su SL/TP es del camino de
+        control check_position_stops).
+
+    Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §5.
+    """
+    con.execute("DELETE FROM observed_orders WHERE tenant_id=?", (tenant_id,))
+    for c in classified:
+        con.execute(
+            """INSERT INTO observed_orders
+                   (tenant_id, symbol, kind, price, qty, pct_holding,
+                    order_id, oco_group, observed_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (tenant_id, c["symbol"], c["kind"], c["price"], c["qty"],
+             c["pct_holding"], c["order_id"], c["oco_group"], observed_at),
+        )
+    # Mejor orden por (symbol, kind) = la de mayor qty.
+    best: dict[str, dict[str, dict]] = {}
+    for c in classified:
+        slot = best.setdefault(c["symbol"], {})
+        cur = slot.get(c["kind"])
+        if cur is None or c["qty"] > cur["qty"]:
+            slot[c["kind"]] = c
+    rows = con.execute(
+        "SELECT id, symbol FROM positions "
+        "WHERE tenant_id=? AND status='open' AND control_domain='EXTERNAL'",
+        (tenant_id,),
+    ).fetchall()
+    summarized: list[str] = []
+    for r in rows:
+        slot = best.get(r["symbol"], {})
+        sl, tp = slot.get("SL"), slot.get("TP")
+        con.execute(
+            "UPDATE positions SET sl_price=?, tp_price=? WHERE id=?",
+            (sl["price"] if sl else None, tp["price"] if tp else None, r["id"]),
+        )
+        summarized.append(r["symbol"])
+    return {"observed": len(classified), "summarized": summarized}
+
+
 def reconcile_spot(
     con: sqlite3.Connection, *, tenant_id: int, balances: dict[str, float], dust: float = 1e-6,
 ) -> dict:

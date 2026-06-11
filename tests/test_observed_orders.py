@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 
-from binance_sync import classify_open_orders
+from binance_sync import classify_open_orders, apply_observed_orders
 
 
 def _fresh_db(tmp_path) -> sqlite3.Connection:
@@ -178,3 +178,102 @@ class TestClassifyOpenOrders:
     def test_orden_completamente_ejecutada_se_omite(self):
         assert classify_open_orders(
             [_orden(origQty="0.5", executedQty="0.5")], {"BTC": 2.0}) == []
+
+
+@pytest.fixture
+def con_with_positions(tmp_path):
+    con = _fresh_db(tmp_path)
+    con.row_factory = sqlite3.Row
+    # tenant 1, BTCUSDT, EXTERNAL — con sl_price/tp_price tecleados (para probar la sobreescritura).
+    con.execute(
+        "INSERT INTO positions "
+        "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+        "qty, tenant_id, control_domain) "
+        "VALUES ('BTCUSDT','LONG','open',60000,'2026-06-11T00:00:00',45000,80000,"
+        "0.5,1,'EXTERNAL')"
+    )
+    # tenant 1, ETHUSDT, INTERNAL — jamás debe tocarse.
+    con.execute(
+        "INSERT INTO positions "
+        "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+        "qty, tenant_id, control_domain) "
+        "VALUES ('ETHUSDT','LONG','open',3000,'2026-06-11T00:00:00',2500,4000,"
+        "1.0,1,'INTERNAL')"
+    )
+    yield con
+    con.close()
+
+
+_OBSERVED_AT = "2026-06-11T12:00:00+00:00"
+
+
+def _clasificada(**kw):
+    base = {"symbol": "BTCUSDT", "kind": "SL", "price": 50000.0, "qty": 0.5,
+            "pct_holding": 0.25, "order_id": 1, "oco_group": None}
+    base.update(kw)
+    return base
+
+
+class TestApplyObservedOrders:
+    def test_snapshot_inserta_y_resume_en_fila_external(self, con_with_positions):
+        con = con_with_positions
+        apply_observed_orders(con, tenant_id=1, classified=[
+            _clasificada(order_id=1, kind="SL", price=50000.0, qty=0.5),
+            _clasificada(order_id=2, kind="TP", price=75000.0, qty=0.5),
+        ], observed_at=_OBSERVED_AT)
+        rows = con.execute("SELECT * FROM observed_orders WHERE tenant_id=1").fetchall()
+        assert len(rows) == 2
+        pos = con.execute(
+            "SELECT sl_price, tp_price FROM positions "
+            "WHERE tenant_id=1 AND symbol='BTCUSDT'").fetchone()
+        assert pos["sl_price"] == 50000.0
+        assert pos["tp_price"] == 75000.0
+
+    def test_resumen_toma_orden_de_mayor_qty(self, con_with_positions):
+        con = con_with_positions
+        apply_observed_orders(con, tenant_id=1, classified=[
+            _clasificada(order_id=1, kind="SL", price=48000.0, qty=0.2),
+            _clasificada(order_id=2, kind="SL", price=50000.0, qty=1.0),
+        ], observed_at=_OBSERVED_AT)
+        pos = con.execute(
+            "SELECT sl_price FROM positions WHERE tenant_id=1 AND symbol='BTCUSDT'"
+        ).fetchone()
+        assert pos["sl_price"] == 50000.0      # la de qty 1.0 gana
+
+    def test_sin_orden_limpia_a_null(self, con_with_positions):
+        con = con_with_positions   # la fila arranca con sl_price/tp_price tecleados
+        apply_observed_orders(con, tenant_id=1, classified=[], observed_at=_OBSERVED_AT)
+        pos = con.execute(
+            "SELECT sl_price, tp_price FROM positions "
+            "WHERE tenant_id=1 AND symbol='BTCUSDT'").fetchone()
+        assert pos["sl_price"] is None         # fuente de verdad: sin orden = sin SL
+        assert pos["tp_price"] is None
+
+    def test_idempotente_dos_corridas_mismo_estado(self, con_with_positions):
+        con = con_with_positions
+        plan = [_clasificada(order_id=1)]
+        apply_observed_orders(con, tenant_id=1, classified=plan, observed_at=_OBSERVED_AT)
+        apply_observed_orders(con, tenant_id=1, classified=plan, observed_at=_OBSERVED_AT)
+        rows = con.execute("SELECT * FROM observed_orders WHERE tenant_id=1").fetchall()
+        assert len(rows) == 1                  # delete+insert: no duplica
+
+    def test_aislamiento_per_tenant(self, con_with_positions):
+        con = con_with_positions
+        con.execute(
+            "INSERT INTO observed_orders "
+            "(tenant_id, symbol, kind, price, qty, order_id, observed_at) "
+            "VALUES (2, 'ETHUSDT', 'SL', 3000, 1, 99, ?)", (_OBSERVED_AT,))
+        apply_observed_orders(con, tenant_id=1, classified=[], observed_at=_OBSERVED_AT)
+        t2 = con.execute("SELECT * FROM observed_orders WHERE tenant_id=2").fetchall()
+        assert len(t2) == 1                    # el snapshot de 1 no toca a 2
+
+    def test_fila_internal_jamas_tocada(self, con_with_positions):
+        con = con_with_positions
+        before = con.execute(
+            "SELECT sl_price, tp_price FROM positions "
+            "WHERE tenant_id=1 AND control_domain='INTERNAL'").fetchone()
+        apply_observed_orders(con, tenant_id=1, classified=[], observed_at=_OBSERVED_AT)
+        after = con.execute(
+            "SELECT sl_price, tp_price FROM positions "
+            "WHERE tenant_id=1 AND control_domain='INTERNAL'").fetchone()
+        assert dict(before) == dict(after)
