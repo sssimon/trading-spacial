@@ -20,6 +20,11 @@ FLAT_RANGE_PCT = 0.005             # (high-low)/close < esto ⟹ vela "plana"
 FLAT_MAX_FRACTION = 0.5            # > esta fracción de velas planas ⟹ libro muerto
 FLAT_WINDOW_DAYS = 90              # ventana reciente para medir velas planas
 
+# ── Umbrales de consolidación geométrica (arranque; calibrables, spec §4) ───
+CONSOLIDATION_WINDOW_DAYS = 84     # 12 semanas
+RANGE_BAND_MAX = 0.25              # (max-min)/mediana ≤ esto ⟹ en rango
+VOL_PERCENTILE_WINDOW_DAYS = 365   # historia para el percentil de volatilidad
+
 
 def _quote_vols(bars: list[dict]) -> list[float]:
     return [float(b["quote_volume"]) for b in bars]
@@ -64,3 +69,66 @@ def classify_liveness(bars: list[dict]) -> tuple[bool, list[str]]:
         razones.append("velas_planas")
 
     return (len(razones) == 0, razones)
+
+
+def _realized_vol(bars: list[dict]) -> float:
+    """Desviación de retornos diarios close-to-close (proxy de volatilidad)."""
+    closes = [float(b["close"]) for b in bars]
+    if len(closes) < 2:
+        return 0.0
+    rets = [(closes[i] - closes[i - 1]) / closes[i - 1]
+            for i in range(1, len(closes)) if closes[i - 1] != 0]
+    if len(rets) < 2:
+        return 0.0
+    m = sum(rets) / len(rets)
+    var = sum((r - m) ** 2 for r in rets) / (len(rets) - 1)
+    return var ** 0.5
+
+
+def measure_consolidation(bars: list[dict]) -> dict:
+    """¿El precio está geométricamente en rango AHORA? Hecho descriptivo del
+    presente — NO afirma que sea buena entrada (spec §4).
+
+    Devuelve SIEMPRE las 4 claves:
+      en_rango (bool), pct_rango (float), semanas (int), vol_percentil (float).
+    pct_rango = (max-min)/mediana sobre la ventana de consolidación.
+    vol_percentil = posición de la volatilidad de 30d en su historia de 1 año
+    (0.0 = la más baja que ha tenido; 1.0 = la más alta)."""
+    ventana = bars[-CONSOLIDATION_WINDOW_DAYS:]
+    closes = [float(b["close"]) for b in ventana]
+    med = median(closes) if closes else 1.0
+    hi = max(float(b["high"]) for b in ventana) if ventana else 0.0
+    lo = min(float(b["low"]) for b in ventana) if ventana else 0.0
+    pct_rango = (hi - lo) / med if med else float("inf")
+    en_rango = pct_rango <= RANGE_BAND_MAX
+
+    # Semanas dentro de banda: cuenta semanas recientes (bloques de 7 días)
+    # cuyo rango propio ≤ RANGE_BAND_MAX, desde la más reciente hacia atrás.
+    semanas = 0
+    i = len(bars)
+    while i - 7 >= 0:
+        bloque = bars[i - 7:i]
+        b_hi = max(float(b["high"]) for b in bloque)
+        b_lo = min(float(b["low"]) for b in bloque)
+        b_med = median([float(b["close"]) for b in bloque]) or 1.0
+        if (b_hi - b_lo) / b_med <= RANGE_BAND_MAX:
+            semanas += 1
+            i -= 7
+        else:
+            break
+
+    # Percentil de volatilidad: vol de los últimos 30d vs la distribución de
+    # vol de ventanas de 30d a lo largo del último año.
+    vol_actual = _realized_vol(bars[-30:])
+    hist = bars[-VOL_PERCENTILE_WINDOW_DAYS:]
+    muestras = []
+    for j in range(30, len(hist) + 1, 7):  # paso semanal para no sobre-muestrear
+        muestras.append(_realized_vol(hist[j - 30:j]))
+    if muestras:
+        menores = sum(1 for v in muestras if v <= vol_actual)
+        vol_percentil = menores / len(muestras)
+    else:
+        vol_percentil = 0.0
+
+    return {"en_rango": en_rango, "pct_rango": pct_rango,
+            "semanas": semanas, "vol_percentil": vol_percentil}

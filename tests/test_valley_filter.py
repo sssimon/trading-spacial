@@ -3,7 +3,7 @@
 Spec: docs/superpowers/specs/es/2026-06-11-screener-valles-filtro-vida-design.md §7.
 Cero red, cero DB — todo sobre barras diarias sintéticas.
 """
-from screener.valley_filter import classify_liveness
+from screener.valley_filter import classify_liveness, measure_consolidation
 
 
 def _bar(t, close, quote_vol, *, high=None, low=None):
@@ -52,3 +52,29 @@ class TestClassifyLiveness:
         estable = _serie(200, quote_vol=700_000.0)  # bajo pero constante y > piso
         vivo, razones = classify_liveness(estable)
         assert vivo is True, f"volumen bajo-estable debe vivir, razones={razones}"
+
+
+class TestMeasureConsolidation:
+    def test_valle_en_rango_estrecho(self):
+        # 120 días oscilando dentro de ±3% de 1.0 → en rango.
+        bars = []
+        for i in range(120):
+            c = 1.0 + (0.03 if i % 2 else -0.03)  # ±3%
+            bars.append(_bar(i * 86_400_000, c, 1_000_000.0,
+                             high=c * 1.005, low=c * 0.995))
+        out = measure_consolidation(bars)
+        assert out["en_rango"] is True
+        assert out["pct_rango"] < 0.25
+        assert out["semanas"] >= 1
+
+    def test_tendencia_no_esta_en_rango(self):
+        # Precio subiendo de 1.0 a 2.0 → NO en rango (rango ancho).
+        bars = [_bar(i * 86_400_000, 1.0 + i / 120.0, 1_000_000.0) for i in range(120)]
+        out = measure_consolidation(bars)
+        assert out["en_rango"] is False
+        assert out["pct_rango"] > 0.25
+
+    def test_reporta_metricas_aunque_no_este_en_rango(self):
+        bars = [_bar(i * 86_400_000, 1.0 + i / 60.0, 1_000_000.0) for i in range(120)]
+        out = measure_consolidation(bars)
+        assert set(out.keys()) == {"en_rango", "pct_rango", "semanas", "vol_percentil"}
