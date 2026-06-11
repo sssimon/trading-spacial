@@ -137,3 +137,50 @@ def measure_consolidation(bars: list[dict]) -> dict:
 
     return {"en_rango": en_rango, "pct_rango": pct_rango,
             "semanas": semanas, "vol_percentil": vol_percentil}
+
+
+def liquidity_value(bars: list[dict]) -> float:
+    """Liquidez como HECHO: mediana del volumen USDT de los últimos 30 días.
+    Es el criterio de ORDEN NEUTRAL — un hecho, no una medida de 'calidad'."""
+    vols = _quote_vols(bars[-30:])
+    return median(vols) if vols else 0.0
+
+
+def _distancia_ath_pct(bars: list[dict]) -> float:
+    """% por debajo del máximo histórico de la serie (dato informativo, NO
+    criterio de filtro ni de orden — spec §4)."""
+    ath = max(float(b["high"]) for b in bars) if bars else 0.0
+    last = float(bars[-1]["close"]) if bars else 0.0
+    if ath <= 0:
+        return 0.0
+    return (ath - last) / ath
+
+
+def evaluate_symbol(symbol: str, bars: list[dict]) -> dict | None:
+    """Evalúa un símbolo. Devuelve la candidata (dict de HECHOS) si está VIVA
+    y EN RANGO; None en cualquier otro caso. Cero ranking, cero claim.
+
+    El dict resultante NO incluye ningún score de 'atractivo' — sólo hechos
+    descriptivos que el humano interpreta (spec §0, §1)."""
+    vivo, razones = classify_liveness(bars)
+    if not vivo:
+        return None
+    cons = measure_consolidation(bars)
+    if not cons["en_rango"]:
+        return None
+    return {
+        "symbol": symbol,
+        "price": float(bars[-1]["close"]),
+        "pct_rango": cons["pct_rango"],
+        "semanas_consolidando": cons["semanas"],
+        "vol_percentil": cons["vol_percentil"],
+        "volumen_usd_dia": liquidity_value(bars),
+        "distancia_ath_pct": _distancia_ath_pct(bars),
+        "razones_vida": razones,  # [] cuando viva; presente por simetría
+    }
+
+
+def order_neutral(candidatas: list[dict]) -> list[dict]:
+    """Orden NEUTRAL por liquidez descendente (hecho). NO ordena por 'calidad
+    de valle' — ese ranking es la celda B del programa, prohibido aquí."""
+    return sorted(candidatas, key=lambda c: c.get("volumen_usd_dia", 0.0), reverse=True)
