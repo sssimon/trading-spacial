@@ -31,6 +31,7 @@ Then read this file fully before doing anything else in this session.
 - Cluster D enforcement (#471 / #470 / #473) merged: `qty > 0`, `tenant_id NOT NULL`, idempotency unique-index, body-fingerprint idempotency.
 - Per-user data isolation (Epic B / #253) shipped; inviting non-Samuel users on `trading.sdar.dev` unblocked since 2026-05-16.
 - Holdout dataset locked at `data/holdout/`; read-guard A (`open_holdout`) + B (CI AST scanner) active.
+- Binance v0.3: SL/TP observados (openOrders → observed_orders + resumen fuente-de-verdad en filas EXTERNAL).
 
 **Not yet built:**
 - Portfolio-level capital pooling, leverage cap across symbols, aggregate drawdown enforcement (deferred — separate future epic).
