@@ -3,5 +3,5 @@
 // Backend response types live in types.ts (unchanged).
 // ============================================================
 
-export type MainTab = 'mercado' | 'posiciones' | 'kill-switch' | 'historial' | 'autotune';
+export type MainTab = 'mercado' | 'posiciones' | 'kill-switch' | 'historial' | 'autotune' | 'valles';
 export type SymbolsFilter = 'all' | 'signals' | 'fresh';

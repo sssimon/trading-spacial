@@ -501,3 +501,22 @@ export interface TestDeliveryResponse {
   receipts: TestDeliveryReceipt[];
   reason:   TestDeliveryReason;
 }
+
+// ---- Vista Valles A — screener de consolidación (sin score de atractivo) ----
+
+export interface ValleyCandidate {
+  symbol:               string;
+  price:                number;
+  pct_rango:            number;
+  semanas_consolidando: number;
+  vol_percentil:        number;
+  volumen_usd_dia:      number;
+  distancia_ath_pct:    number;
+  razones_vida:         string[];
+}
+
+export interface ValleySnapshot {
+  generated_at: string | null;
+  coverage:     { universe: number; evaluated: number; complete: boolean };
+  candidates:   ValleyCandidate[];
+}

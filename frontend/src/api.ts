@@ -408,3 +408,9 @@ export async function putPreferences(
 export async function testPreferencesDelivery(): Promise<TestDeliveryResponse> {
   return request<TestDeliveryResponse>('/preferences/test', { method: 'POST' });
 }
+
+// ---- Vista Valles A (#VT7) — GET /valley-candidates ----------------------
+
+export function getValleyCandidates() {
+  return request<import('./types').ValleySnapshot>('/valley-candidates');
+}
