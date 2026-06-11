@@ -1741,6 +1741,95 @@ class TestPositionsAPI:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  TESTS — GET /positions adjunta observed_orders a filas EXTERNAL (v0.3 §6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGetPositionsObservedOrders:
+    """Verifica que GET /positions adjunta observed_orders solo en filas EXTERNAL.
+
+    Sigue exactamente el patrón de TestPositionsAPI: tmp_path + monkeypatch +
+    btc_api.init_db() + FastAPI stripped-app con dependency_overrides.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_test_app(self, tmp_path, monkeypatch):
+        import btc_api
+        db_path = str(tmp_path / "test_obs_api.db")
+        monkeypatch.setattr(btc_api, "DB_FILE", db_path)
+        cfg_path = _patch_config_files(monkeypatch, tmp_path)
+        with open(cfg_path, "w") as f:
+            json.dump({"webhook_url": "", "webhook_secret": "",
+                       "notify_setup_only": False, "scan_interval_sec": 300}, f)
+        monkeypatch.setattr(btc_api, "DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setattr(btc_api, "LOGS_DIR", str(tmp_path / "logs"))
+        monkeypatch.setattr(btc_api, "POSITIONS_JSON_FILE",
+                            str(tmp_path / "data" / "positions_summary.json"))
+        monkeypatch.setattr(btc_api, "SIGNALS_LOG_FILE",
+                            str(tmp_path / "logs" / "signals.log"))
+        os.environ["MIGRATE_QTY_ALLOW_BULK_QUARANTINE"] = "1"
+        try:
+            btc_api.init_db()
+        finally:
+            os.environ.pop("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", None)
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from fastapi import FastAPI
+        import api.positions as _pos
+        from auth.dependencies import get_current_tenant_id
+        from api.deps import verify_api_key
+
+        test_app = FastAPI()
+        test_app.get("/positions")(_pos.list_positions)
+        test_app.dependency_overrides[get_current_tenant_id] = lambda: 1
+        test_app.dependency_overrides[verify_api_key] = lambda: None
+        return TestClient(test_app)
+
+    def test_external_trae_observed_orders_internal_no_trae_campo(self, client):
+        """EXTERNAL: observed_orders presente con la fila.
+        INTERNAL: campo observed_orders ausente (no vacío — AUSENTE)."""
+        # Seed: una posición EXTERNAL y una INTERNAL para tenant 1
+        with transaction() as con:
+            con.execute(
+                "INSERT INTO positions "
+                "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+                "qty, tenant_id, control_domain) "
+                "VALUES ('BTCUSDT','LONG','open',60000,'2026-06-11T00:00:00',45000,80000,"
+                "0.5,1,'EXTERNAL')"
+            )
+            con.execute(
+                "INSERT INTO positions "
+                "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+                "qty, tenant_id, control_domain) "
+                "VALUES ('ETHUSDT','LONG','open',3000,'2026-06-11T00:00:00',2500,4000,"
+                "1.0,1,'INTERNAL')"
+            )
+            con.execute(
+                "INSERT INTO observed_orders "
+                "(tenant_id, symbol, kind, price, qty, order_id, observed_at) "
+                "VALUES (1, 'BTCUSDT', 'SL', 50000, 0.5, 1, '2026-06-11T00:00:00')"
+            )
+
+        r = client.get("/positions")
+        assert r.status_code == 200
+        positions = r.json()["positions"]
+        assert len(positions) == 2
+
+        ext = next(p for p in positions if p["symbol"] == "BTCUSDT")
+        intl = next(p for p in positions if p["symbol"] == "ETHUSDT")
+
+        # EXTERNAL: campo presente con la fila seeded
+        assert "observed_orders" in ext
+        assert len(ext["observed_orders"]) == 1
+        assert ext["observed_orders"][0]["kind"] == "SL"
+        assert ext["observed_orders"][0]["price"] == 50000.0
+
+        # INTERNAL: campo AUSENTE (no vacío, ausente)
+        assert "observed_orders" not in intl
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — Signal deduplication
 # ─────────────────────────────────────────────────────────────────────────────
 

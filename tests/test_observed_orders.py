@@ -277,3 +277,20 @@ class TestApplyObservedOrders:
             "SELECT sl_price, tp_price FROM positions "
             "WHERE tenant_id=1 AND control_domain='INTERNAL'").fetchone()
         assert dict(before) == dict(after)
+
+
+class TestDbGetObservedOrders:
+    def test_devuelve_solo_el_tenant_ordenado(self, con_with_positions):
+        from db.observed_orders import db_get_observed_orders
+        con = con_with_positions
+        for t, sym, kind, oid in [(1, "BTCUSDT", "SL", 1), (1, "BTCUSDT", "TP", 2),
+                                  (2, "ETHUSDT", "SL", 3)]:
+            con.execute(
+                "INSERT INTO observed_orders "
+                "(tenant_id, symbol, kind, price, qty, order_id, observed_at) "
+                "VALUES (?, ?, ?, 100, 1, ?, '2026-06-11T00:00:00')",
+                (t, sym, kind, oid))
+        out = db_get_observed_orders(con, tenant_id=1)
+        assert len(out) == 2
+        assert all(o["symbol"] == "BTCUSDT" for o in out)
+        assert isinstance(out[0], dict)

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from api.config import load_config
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id, require_role
+from db.observed_orders import db_get_observed_orders
 from db.positions import (
     _calc_pnl,
     db_get_positions,
@@ -282,6 +283,15 @@ def list_positions(
     # writer lock.
     with snapshot_connection() as con:
         positions = db_get_positions(con, status, tenant_id=tenant_id)
+        observed = db_get_observed_orders(con, tenant_id=tenant_id)
+    # v0.3: adjuntar las órdenes observadas SOLO a filas EXTERNAL (las
+    # INTERNAL no llevan el campo — su SL/TP es del camino de control).
+    by_symbol: dict = {}
+    for o in observed:
+        by_symbol.setdefault(o["symbol"], []).append(o)
+    for p in positions:
+        if p.get("control_domain") == "EXTERNAL":
+            p["observed_orders"] = by_symbol.get(p["symbol"], [])
     return {"total": len(positions), "positions": positions}
 
 
