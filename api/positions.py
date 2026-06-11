@@ -284,13 +284,16 @@ def list_positions(
     with snapshot_connection() as con:
         positions = db_get_positions(con, status, tenant_id=tenant_id)
         observed = db_get_observed_orders(con, tenant_id=tenant_id)
-    # v0.3: adjuntar las órdenes observadas SOLO a filas EXTERNAL (las
+    # v0.3: adjuntar las órdenes observadas SOLO a filas EXTERNAL open (las
     # INTERNAL no llevan el campo — su SL/TP es del camino de control).
+    # Solo filas open — el snapshot describe la protección del holding AHORA,
+    # no la historia; pegar el snapshot actual sobre una fila cerrada sería
+    # semánticamente incorrecto.
     by_symbol: dict = {}
     for o in observed:
         by_symbol.setdefault(o["symbol"], []).append(o)
     for p in positions:
-        if p.get("control_domain") == "EXTERNAL":
+        if p.get("control_domain") == "EXTERNAL" and p.get("status") == "open":
             p["observed_orders"] = by_symbol.get(p["symbol"], [])
     return {"total": len(positions), "positions": positions}
 

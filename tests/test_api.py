@@ -1828,6 +1828,49 @@ class TestGetPositionsObservedOrders:
         # INTERNAL: campo AUSENTE (no vacío, ausente)
         assert "observed_orders" not in intl
 
+    def test_closed_external_no_trae_observed_orders(self, client):
+        """Una fila EXTERNAL cerrada NO debe llevar observed_orders aunque
+        exista un snapshot activo para el mismo símbolo/tenant.
+        El snapshot describe la protección del holding AHORA, no la historia.
+        Verificado con status=all para que la fila cerrada aparezca."""
+        with transaction() as con:
+            # Fila EXTERNAL open (debe recibir el campo)
+            con.execute(
+                "INSERT INTO positions "
+                "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+                "qty, tenant_id, control_domain) "
+                "VALUES ('SOLUSDT','LONG','open',140,'2026-06-11T00:00:00',120,180,"
+                "1.0,1,'EXTERNAL')"
+            )
+            # Fila EXTERNAL closed del mismo símbolo (NO debe recibir el campo)
+            con.execute(
+                "INSERT INTO positions "
+                "(symbol, direction, status, entry_price, entry_ts, sl_price, tp_price, "
+                "qty, tenant_id, control_domain, exit_price, exit_reason) "
+                "VALUES ('SOLUSDT','LONG','closed',100,'2026-06-10T00:00:00',80,150,"
+                "1.0,1,'EXTERNAL',140,'TP_HIT')"
+            )
+            # Observed order activa para SOLUSDT
+            con.execute(
+                "INSERT INTO observed_orders "
+                "(tenant_id, symbol, kind, price, qty, order_id, observed_at) "
+                "VALUES (1, 'SOLUSDT', 'SL', 120, 1.0, 99, '2026-06-11T00:00:00')"
+            )
+
+        r = client.get("/positions?status=all")
+        assert r.status_code == 200
+        positions = r.json()["positions"]
+
+        open_row = next(p for p in positions if p["symbol"] == "SOLUSDT" and p["status"] == "open")
+        closed_row = next(p for p in positions if p["symbol"] == "SOLUSDT" and p["status"] == "closed")
+
+        # La fila open EXTERNAL sí lleva el snapshot
+        assert "observed_orders" in open_row
+        assert len(open_row["observed_orders"]) == 1
+
+        # La fila closed EXTERNAL NO lleva el campo (snapshot es del ahora, no la historia)
+        assert "observed_orders" not in closed_row
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTS — Signal deduplication
