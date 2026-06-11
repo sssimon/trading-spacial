@@ -1,7 +1,7 @@
 # tests/test_binance_account_client.py
 import hashlib
 import hmac
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import pytest
 import requests
 
@@ -230,3 +230,50 @@ def test_public_methods_empty_symbols_no_call():
         assert client.get_exchange_filters([]) == {}
         assert client.get_ticker_prices([]) == {}
     m.assert_not_called()
+
+
+# ─── v0.3: get_open_orders (Task 1) ───────────────────────────────────────────
+
+
+class TestGetOpenOrders:
+    def test_devuelve_lista_cruda_y_firma_el_request(self):
+        from data.providers.binance_account import BinanceAccountClient
+
+        captured = {}
+
+        def fake_get(url, params=None, headers=None, timeout=10):
+            captured["url"] = url
+            captured["headers"] = headers
+            resp = Mock()
+            resp.status_code = 200
+            resp.json.return_value = [
+                {"symbol": "BTCUSDT", "orderId": 7, "orderListId": 33,
+                 "side": "SELL", "type": "STOP_LOSS_LIMIT",
+                 "price": "49000", "stopPrice": "50000",
+                 "origQty": "0.5", "executedQty": "0"},
+            ]
+            return resp
+
+        client = BinanceAccountClient(api_key="K", secret="S")
+        with patch("data.providers.binance_account._http_get", side_effect=fake_get):
+            orders = client.get_open_orders()
+
+        assert orders[0]["orderId"] == 7
+        assert "/api/v3/openOrders" in captured["url"]
+        assert "signature=" in captured["url"]          # request firmado
+        assert "symbol=" not in captured["url"]         # SIN symbol: toda la cuenta
+        assert captured["headers"]["X-MBX-APIKEY"] == "K"
+
+    def test_error_2015_levanta_auth_error(self):
+        from data.providers.binance_account import BinanceAccountClient, BinanceAuthError
+
+        def fake_get(url, params=None, headers=None, timeout=10):
+            resp = Mock()
+            resp.status_code = 400
+            resp.json.return_value = {"code": -2015, "msg": "Invalid API-key"}
+            return resp
+
+        client = BinanceAccountClient(api_key="K", secret="S")
+        with patch("data.providers.binance_account._http_get", side_effect=fake_get):
+            with pytest.raises(BinanceAuthError):
+                client.get_open_orders()

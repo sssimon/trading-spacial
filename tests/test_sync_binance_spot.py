@@ -9,6 +9,7 @@ mockean BinanceAccountClient. Debe: saltar credenciales no-ACTIVE, mapear errore
 de cliente al estado de la credencial, y tratar un blip de transporte como
 transitorio (TRANSPORT_ERROR, credencial SIGUE ACTIVE).
 """
+import logging
 import sqlite3
 from unittest.mock import patch
 
@@ -86,3 +87,181 @@ def test_auth_error_sets_status_auth_failed(db_path):
         out = sync_tenant(2)
     assert out["status"] == "AUTH_FAILED"
     assert _status(db_path) == "AUTH_FAILED"  # persistido, fail-closed
+
+
+# ---------------------------------------------------------------------------
+# TestObservedOrdersEnSync — v0.3: captura SL/TP observados en sync_tenant
+# ---------------------------------------------------------------------------
+
+# Fixture: OCO SELL de BTCUSDT (dos patas: STOP_LOSS_LIMIT + LIMIT_MAKER).
+_OCO_BTCUSDT = [
+    {
+        "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_LOSS_LIMIT",
+        "orderId": 101, "orderListId": 33,
+        "stopPrice": "50000.0", "price": "49900.0",
+        "origQty": "0.5", "executedQty": "0.0",
+    },
+    {
+        "symbol": "BTCUSDT", "side": "SELL", "type": "LIMIT_MAKER",
+        "orderId": 102, "orderListId": 33,
+        "stopPrice": "0.0", "price": "75000.0",
+        "origQty": "0.5", "executedQty": "0.0",
+    },
+]
+
+_BALANCES_BTC = {"BTC": 2.0}
+
+
+def _count_observed_orders(db_path, tenant_id=2):
+    """Cuenta filas de observed_orders para un tenant."""
+    con = sqlite3.connect(db_path)
+    try:
+        return con.execute(
+            "SELECT COUNT(*) FROM observed_orders WHERE tenant_id=?", (tenant_id,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+
+def _insert_snapshot(db_path, tenant_id=2):
+    """Inserta un snapshot previo en observed_orders para simular estado anterior."""
+    con = sqlite3.connect(db_path)
+    try:
+        con.execute(
+            """INSERT INTO observed_orders
+                   (tenant_id, symbol, kind, price, qty, order_id, observed_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (tenant_id, "ETHUSDT", "SL", 3000.0, 1.0, 999, "2026-01-01T00:00:00+00:00"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _insert_external_position(db_path, tenant_id=2, symbol="BTCUSDT", sl_price=50000.0):
+    """Inserta una fila EXTERNAL open con sl_price para comprobar que no se limpia."""
+    con = sqlite3.connect(db_path)
+    try:
+        con.execute(
+            """INSERT INTO positions
+                   (scan_id, symbol, direction, status, entry_price, entry_ts,
+                    sl_price, tp_price, size_usd, qty, tenant_id,
+                    control_domain, market, origin)
+               VALUES (NULL, ?, 'LONG', 'open', 60000.0, '2026-01-01T00:00:00+00:00',
+                       ?, NULL, 30000.0, 0.5, ?, 'EXTERNAL', 'SPOT', 'OPERATOR')""",
+            (symbol, sl_price, tenant_id),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _get_sl_price(db_path, tenant_id=2, symbol="BTCUSDT"):
+    con = sqlite3.connect(db_path)
+    try:
+        row = con.execute(
+            "SELECT sl_price FROM positions "
+            "WHERE tenant_id=? AND symbol=? AND control_domain='EXTERNAL' AND status='open'",
+            (tenant_id, symbol),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        con.close()
+
+
+class TestObservedOrdersEnSync:
+
+    def test_sync_captura_y_persiste_observed_orders(self, db_path):
+        """sync_tenant persiste las órdenes OCO y el report refleja el conteo."""
+        from tools.sync_binance_spot import sync_tenant
+        _add_cred(db_path)
+        with patch("tools.sync_binance_spot.get_server_time_offset_ms", return_value=0), \
+             patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
+            Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
+            Cli.return_value.get_open_orders.return_value = _OCO_BTCUSDT
+            report = sync_tenant(2)
+        assert report["observed_orders"]["observed"] == 2
+        assert _count_observed_orders(db_path) == 2
+
+    def test_fallo_de_open_orders_omite_paso_completo(self, db_path, caplog):
+        """Un BinanceRateBanned en get_open_orders → paso SKIPPED.
+
+        El snapshot previo de observed_orders queda INTACTO (F8: parcial
+        incorrecto). sl_price de la fila EXTERNAL no se limpia. El resto del
+        sync corre (report status=ACTIVE). La credencial NO se marca RATE_BANNED
+        (fallo del paso, no de la credencial).
+        """
+        from tools.sync_binance_spot import sync_tenant
+        from data.providers.binance_account import BinanceRateBanned
+        _add_cred(db_path)
+        # Pre-condición: snapshot previo + fila EXTERNAL con sl_price no-NULL.
+        _insert_snapshot(db_path)
+        _insert_external_position(db_path, sl_price=50000.0)
+        with patch("tools.sync_binance_spot.get_server_time_offset_ms", return_value=0), \
+             patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
+            Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
+            Cli.return_value.get_open_orders.side_effect = BinanceRateBanned("429")
+            with caplog.at_level(logging.WARNING, logger="tools.sync_binance_spot"):
+                report = sync_tenant(2)
+        # Paso omitido completo — siempre dict, nunca string.
+        assert report["observed_orders"]["skipped"] is True
+        assert "429" in report["observed_orders"]["causa"]
+        # Snapshot previo intacto (F8: sin borrado parcial).
+        assert _count_observed_orders(db_path) == 1
+        # sl_price de la fila EXTERNAL no se limpió.
+        assert _get_sl_price(db_path) == 50000.0
+        # El resto del sync corrió.
+        assert report["status"] == "ACTIVE"
+        # Credencial sigue ACTIVE — fallo del paso ≠ fallo de credencial.
+        assert _status(db_path) == "ACTIVE"
+        # Observabilidad: la línea WARNING fue emitida con causa visible.
+        assert any(
+            "OBSERVED_ORDERS_SKIPPED" in r.message and "429" in r.message
+            for r in caplog.records
+        )
+
+    def test_payload_malformado_omite_paso(self, db_path, caplog):
+        """Un dict malformado en get_open_orders (p.ej. stopPrice ausente en un
+        STOP_LOSS_LIMIT) → KeyError en classify_open_orders → paso SKIPPED completo.
+
+        El sync continúa (status=ACTIVE) y la credencial queda ACTIVE.
+        El report["observed_orders"] es siempre dict con skipped=True.
+        """
+        from tools.sync_binance_spot import sync_tenant
+        _add_cred(db_path)
+        # SELL STOP_LOSS_LIMIT sin la clave stopPrice → KeyError en classify_open_orders.
+        malformed_order = [
+            {
+                "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_LOSS_LIMIT",
+                "orderId": 201, "orderListId": -1,
+                # stopPrice ausente deliberadamente
+                "price": "49900.0",
+                "origQty": "0.5", "executedQty": "0.0",
+            }
+        ]
+        with patch("tools.sync_binance_spot.get_server_time_offset_ms", return_value=0), \
+             patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
+            Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
+            Cli.return_value.get_open_orders.return_value = malformed_order
+            with caplog.at_level(logging.WARNING, logger="tools.sync_binance_spot"):
+                report = sync_tenant(2)
+        # Paso omitido — dict con skipped=True.
+        assert report["observed_orders"]["skipped"] is True
+        # El sync completó su alcance principal.
+        assert report["status"] == "ACTIVE"
+        # La credencial sigue ACTIVE — payload malformado ≠ fallo de credencial.
+        assert _status(db_path) == "ACTIVE"
+
+    def test_dry_run_no_persiste_observed_orders(self, db_path):
+        """dry_run=True → el report muestra las órdenes pero la tabla queda vacía."""
+        from tools.sync_binance_spot import sync_tenant
+        _add_cred(db_path)
+        with patch("tools.sync_binance_spot.get_server_time_offset_ms", return_value=0), \
+             patch("tools.sync_binance_spot.BinanceAccountClient") as Cli:
+            Cli.return_value.get_spot_balances.return_value = _BALANCES_BTC
+            Cli.return_value.get_open_orders.return_value = _OCO_BTCUSDT
+            report = sync_tenant(2, dry_run=True)
+        # El report contiene las órdenes...
+        assert report["observed_orders"]["observed"] == 2
+        # ...pero la tabla queda vacía por el rollback de _DryRunAbort.
+        assert _count_observed_orders(db_path) == 0

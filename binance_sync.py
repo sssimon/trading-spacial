@@ -36,6 +36,108 @@ def base_asset(symbol: str) -> str:
     return s
 
 
+_SL_TYPES = ("STOP_LOSS", "STOP_LOSS_LIMIT")
+_TP_STOP_TYPES = ("TAKE_PROFIT", "TAKE_PROFIT_LIMIT")
+
+
+def classify_open_orders(orders: list[dict], holdings_qty: dict[str, float]) -> list[dict]:
+    """Función PURA (sin red, sin DB): órdenes crudas de get_open_orders() →
+    [{symbol, kind, price, qty, pct_holding, order_id, oco_group}].
+
+    Mapeo (solo side=SELL — un BUY es entrada pendiente, no protección):
+    STOP_LOSS* → SL (stopPrice); TAKE_PROFIT* → TP (stopPrice);
+    LIMIT_MAKER (pata alta de OCO) y LIMIT venta → TP (price).
+    Patas OCO comparten orderListId → oco_group (orderListId=-1 → None).
+    qty = origQty - executedQty (lo vivo). pct_holding = qty / holding del
+    base asset (`holdings_qty` = balances {asset: free+locked}); sin holding
+    conocido → None (se abstiene); orden > holding → pct real >1 SIN clamp
+    (hecho observado, no se maquilla).
+
+    Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §3.
+    """
+    out: list[dict] = []
+    for o in orders:
+        if o.get("side") != "SELL":
+            continue
+        otype = o.get("type")
+        if otype in _SL_TYPES:
+            kind, price = "SL", float(o["stopPrice"])
+        elif otype in _TP_STOP_TYPES:
+            kind, price = "TP", float(o["stopPrice"])
+        elif otype in ("LIMIT_MAKER", "LIMIT"):
+            kind, price = "TP", float(o["price"])
+        else:
+            continue  # tipo desconocido/futuro: no se clasifica, no se inventa
+        qty = float(o["origQty"]) - float(o.get("executedQty", 0) or 0)
+        if qty <= 0 or price <= 0:
+            continue
+        symbol = o["symbol"].upper()
+        held = holdings_qty.get(base_asset(symbol))
+        pct = (qty / held) if held else None
+        olist = int(o.get("orderListId", -1))
+        out.append({
+            "symbol": symbol, "kind": kind, "price": price, "qty": qty,
+            "pct_holding": pct, "order_id": int(o["orderId"]),
+            "oco_group": olist if olist != -1 else None,
+        })
+    return out
+
+
+def apply_observed_orders(
+    con: sqlite3.Connection, *, tenant_id: int, classified: list[dict], observed_at: str,
+) -> dict:
+    """FASE WRITE (tx CORTA del caller, sin I/O): snapshot fuente-de-verdad.
+
+    (a) DELETE + reinserta observed_orders del tenant (sin estado incremental).
+    (b) Resumen en cada fila EXTERNAL open: sl_price/tp_price = la orden de
+        mayor qty de su kind; sin orden de ese kind → NULL (decisión Samuel
+        2026-06-11: sin orden abierta = sin protección real — el dashboard
+        nunca muestra protección ficticia). Aplica a OPERATOR y AUTO_DERIVED
+        por igual; filas INTERNAL intocables (su SL/TP es del camino de
+        control check_position_stops).
+
+    Punto ciego cross-quote: el match es por símbolo exacto. Un SL colocado
+    bajo otra quote (p.ej. BTCUSDC) NO se refleja en la fila BTCUSDT. Hoy
+    autocreate nombra las filas `asset+USDT`, así que el comportamiento es
+    consistente; pero si un usuario opera BTCUSDC manualmente, ese SL/TP
+    queda invisible para esta función.
+
+    Spec: docs/superpowers/specs/es/2026-06-11-binance-v03-sl-tp-observados-spec.md §5.
+    """
+    con.execute("DELETE FROM observed_orders WHERE tenant_id=?", (tenant_id,))
+    for c in classified:
+        con.execute(
+            """INSERT INTO observed_orders
+                   (tenant_id, symbol, kind, price, qty, pct_holding,
+                    order_id, oco_group, observed_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (tenant_id, c["symbol"], c["kind"], c["price"], c["qty"],
+             c["pct_holding"], c["order_id"], c["oco_group"], observed_at),
+        )
+    # Mejor orden por (symbol, kind) = la de mayor qty.
+    best: dict[str, dict[str, dict]] = {}
+    for c in classified:
+        slot = best.setdefault(c["symbol"], {})
+        cur = slot.get(c["kind"])
+        if cur is None or c["qty"] > cur["qty"]:
+            slot[c["kind"]] = c
+    rows = con.execute(
+        "SELECT id, symbol FROM positions "
+        "WHERE tenant_id=? AND status='open' AND control_domain='EXTERNAL'",
+        (tenant_id,),
+    ).fetchall()
+    summarized: list[str] = []
+    for r in rows:
+        slot = best.get(r["symbol"], {})
+        sl, tp = slot.get("SL"), slot.get("TP")
+        con.execute(
+            "UPDATE positions SET sl_price=?, tp_price=? WHERE id=?",
+            (sl["price"] if sl else None, tp["price"] if tp else None, r["id"]),
+        )
+        summarized.append(r["symbol"])
+    return {"observed": len(classified), "summarized": summarized}
+
+
 def reconcile_spot(
     con: sqlite3.Connection, *, tenant_id: int, balances: dict[str, float], dust: float = 1e-6,
 ) -> dict:

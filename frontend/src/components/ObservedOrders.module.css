@@ -1,0 +1,33 @@
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.order {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--nbc-border-dim);
+}
+
+.orderSl { color: var(--bear); }
+.orderTp { color: var(--bull); }
+
+.noStop {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--warn);
+  border: 1px dashed var(--warn);
+}
+
+.ocoPair {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--nbc-border-dim);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
