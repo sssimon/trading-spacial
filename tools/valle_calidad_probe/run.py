@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import statistics
 from contextlib import closing
 from datetime import datetime, timezone
 
@@ -104,7 +105,7 @@ def main(*, db_path: str = DB_PATH, out_dir: str = _OUT_DIR) -> dict:
     with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as con:
         fp = input_fingerprint(con, study_end_ms)
         symbols = [r[0] for r in con.execute(
-            "SELECT DISTINCT symbol FROM spot_klines").fetchall()]
+            "SELECT DISTINCT symbol FROM spot_klines ORDER BY symbol").fetchall()]
         for sym in symbols:
             rows = con.execute(
                 "SELECT open_time, open, high, low, close, volume, quote_volume "
@@ -115,8 +116,8 @@ def main(*, db_path: str = DB_PATH, out_dir: str = _OUT_DIR) -> dict:
             if not eps:
                 continue
             # mediana de dollar-volume diario del símbolo (asigna tier v3w).
-            vols = sorted(b["quote_volume"] for b in bars)
-            mv = vols[len(vols) // 2] if vols else 0.0
+            vols = [b["quote_volume"] for b in bars]
+            mv = statistics.median(vols) if vols else 0.0
             tier = tier_for_volume(mv, cutoffs)
 
             def _fill_cost(notional, *, median_daily_dollar_vol, forced_close):
@@ -132,8 +133,9 @@ def main(*, db_path: str = DB_PATH, out_dir: str = _OUT_DIR) -> dict:
 
     verdict = evaluate_verdict(valle, no_valle)
     verdict["fingerprint"] = fp
-    verdict["coordenada"] = {"edicion": 2, "candidata": "valle-calidad",
-                             "tipo": "sondeo-pre-celda", "verbo": "F"}
+    verdict["coordenada"] = {"edicion": 2, "celda": "valle-calidad-probe",
+                             "candidata": "valle-calidad", "tipo": "sondeo-pre-celda",
+                             "verbo": "S"}
     verdict["fecha"] = STUDY_END  # estampar la ventana, no la fecha de corrida (determinismo)
 
     # Robustez (REPORTE, no gate — pre-registro §Robustez): la diferencia partida
