@@ -224,6 +224,20 @@ export interface Position {
   pnl_pct:     number | null;
   notes:       string | null;
   atr_entry:   number | null;
+  observed_orders?: ObservedOrder[];   // v0.3: solo filas EXTERNAL
+}
+
+// Binance v0.3 — orden de protección observada en la cuenta spot (read-only).
+// Solo presente en posiciones EXTERNAL; el backend la adjunta en GET /positions.
+export interface ObservedOrder {
+  symbol:      string;
+  kind:        'SL' | 'TP';
+  price:       number;
+  qty:         number;
+  pct_holding: number | null;   // null = holding sin qty conocida (se abstiene)
+  order_id:    number;
+  oco_group:   number | null;   // patas OCO comparten grupo
+  observed_at: string;
 }
 
 export interface PositionsResponse {

@@ -19,6 +19,7 @@ import styles from './PositionsView.module.css';
 import type { Position, SymbolStatus, Capital } from '../types';
 import { formatPrice } from '../utils';
 import { getPositionInsight, type PositionInsight } from '../helpers/position-insight';
+import { ObservedOrdersList } from './ObservedOrders';
 
 // ── Public types ─────────────────────────────────────────────
 
@@ -345,6 +346,8 @@ const PositionCard: React.FC<PositionCardProps> = ({
             </>
           )}
         </div>
+
+        {p.observed_orders && <ObservedOrdersList orders={p.observed_orders} />}
       </div>
 
       {/* Insight row */}

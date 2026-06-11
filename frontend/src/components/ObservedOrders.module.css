@@ -1,0 +1,24 @@
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.order {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--nbc-border-dim, #2a2e39);
+}
+
+.orderSl { color: var(--bear, #f6465d); }
+.orderTp { color: var(--bull, #0ecb81); }
+
+.noStop {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--warn, #f0b90b);
+  border: 1px dashed var(--warn, #f0b90b);
+}
