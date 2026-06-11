@@ -9,6 +9,8 @@ import sqlite3
 
 import pytest
 
+from binance_sync import classify_open_orders
+
 
 def _fresh_db(tmp_path) -> sqlite3.Connection:
     db_path = tmp_path / "observed_orders_test.db"
@@ -114,9 +116,6 @@ class TestMigracionObservedOrders:
                 btc_api.DB_FILE = original
         finally:
             os.environ.pop("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", None)
-
-
-from binance_sync import classify_open_orders
 
 
 def _orden(**kw):
