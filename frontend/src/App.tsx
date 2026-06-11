@@ -36,6 +36,7 @@ import {
   updatePosition,
   getHealthDashboard,
   getPreferences,
+  getValleyCandidates,
 } from './api';
 import type {
   SymbolStatus,
@@ -77,6 +78,8 @@ import KillSwitchView, { type AskAgentPayload as KsAskAgentPayload } from './com
 import { type CardVerdict } from './helpers/kill-switch-copilot';
 import HistorialView from './components/HistorialView';
 import type { ClosedTrade } from './helpers/historial';
+import { ValleysView } from './components/ValleysView';
+import type { ValleySnapshot } from './types';
 
 // New components
 import LeftRail from './components/LeftRail';
@@ -158,6 +161,13 @@ const App: React.FC = () => {
   // Kill-switch dashboard. Polled alongside everything else in fetchAll.
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
 
+  // Vista Valles A — loaded on-demand when the tab is first opened.
+  const [valleys, setValleys] = useState<ValleySnapshot>({
+    generated_at: null,
+    coverage: { universe: 0, evaluated: 0, complete: false },
+    candidates: [],
+  });
+
   // ── data fetching ──────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
@@ -207,6 +217,13 @@ const App: React.FC = () => {
       }).catch(() => {});  // silent: badge stays in default state on error
     }
   }, [openOverlay]);
+
+  // Vista Valles A — load on-demand when the tab is first opened.
+  useEffect(() => {
+    if (mainTab === 'valles') {
+      getValleyCandidates().then(setValleys).catch(() => {});
+    }
+  }, [mainTab]);
 
   // ── derived state ──────────────────────────────────────
   const lastRefreshTs = lastRefresh ? lastRefresh.getTime() : null;
@@ -739,6 +756,11 @@ const App: React.FC = () => {
                 mobile={mobile}
               />
             </ErrorBoundary>
+          )}
+
+          {/* ── Valles (Análisis → Valles) ─────────── */}
+          {mainTab === 'valles' && (
+            <ValleysView snapshot={valleys} loading={false} />
           )}
 
           <footer className={appStyles.footer}>

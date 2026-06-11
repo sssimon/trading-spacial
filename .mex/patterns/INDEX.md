@@ -17,6 +17,7 @@ last_updated: 2026-06-04
 | Touch the backtest cost model / calibration (v3 two-body bound) | [cost-model-v3.md](cost-model-v3.md) |
 | Abrir, correr o cerrar una celda del programa de edge (Edición 1) | [estudiar-una-celda.md](estudiar-una-celda.md) |
 | Extender el sync read-only de Binance con un paso nuevo | [extender-sync-binance.md](extender-sync-binance.md) |
+| Refrescar la lista de candidatas del screener de valles | [correr-screener-valles.md](correr-screener-valles.md) |
 
 ## How to grow this index
 

@@ -50,6 +50,7 @@ const LeftRail: React.FC<LeftRailProps> = ({
   const analysisItems: RailItemDef[] = [
     { id: 'tune', label: 'Auto-tune', icon: 'tune', badge: hasPendingTune ? 'PEND' : undefined, tab: 'autotune' },
     { id: 'history', label: 'Historial', icon: 'history', tab: 'historial' },
+    { id: 'valles', label: 'Valles', icon: 'history', tab: 'valles' },
   ];
 
   return (
