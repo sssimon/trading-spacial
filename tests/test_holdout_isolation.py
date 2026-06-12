@@ -114,6 +114,12 @@ HOLDOUT_LEGITIMATE_MODULES: set[str] = {
     # contains NEITHER token — i.e. this test ENFORCES holdout isolation (same
     # rationale as this scanner's own whitelisting). No data/holdout/ access.
     "tests/test_celda4_stat_arb.py",
+    # Valle-calidad probe candado (2026-06-11). The literal 'holdout' appears
+    # ONLY as the FORBIDDEN needle of test_no_importa_holdout, which asserts that
+    # tools/valle_calidad_probe/run.py contains NO holdout reference — i.e. this
+    # test ENFORCES probe isolation (same rationale as test_celda4_stat_arb.py).
+    # No data/holdout/ access whatsoever.
+    "tests/test_valle_probe_run.py",
 }
 
 # Directories that don't contain trading code; scanning them would be noise
