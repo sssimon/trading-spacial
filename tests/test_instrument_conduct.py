@@ -84,3 +84,19 @@ def test_entry_fuera_de_zona():
                         entry_ts="2026-01-01T00:00:00+00:00",
                         exit_ts="2026-01-01T01:00:00+00:00", procedencia="observado")
     assert c["entry_en_zona"] is False
+
+
+def test_sl_hit_sin_rungs_no_es_escalonado():
+    # Un STOP_HIT con cero rungs llenos es salida ÚNICA, no escalonada.
+    p = _plan()
+    events = [
+        {"tipo": "PLAN_CONFIRMED", "procedencia": "observado"},
+        {"tipo": "STOP_HIT", "procedencia": "observado"},
+    ]
+    fs = _replay(p, events)
+    c = compute_conduct(p, events, fs, entry_price=100.0,
+                        entry_ts="2026-01-01T00:00:00+00:00",
+                        exit_ts="2026-01-01T06:00:00+00:00", procedencia="observado")
+    assert c["cierre_en_plan"] is True      # el SL es parte del plan
+    assert c["escalono"] is False           # pero NO escalonó (salida única)
+    assert c["rungs_honrados"] == 0

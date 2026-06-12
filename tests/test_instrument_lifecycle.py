@@ -77,3 +77,8 @@ def test_eventos_tras_closed_son_noop():
     s2 = step(s, {"tipo": "RUNG_FILLED", "order_id": "B", "rung_index": 0,
                   "procedencia": "observado"}, p)
     assert s2 == s
+
+
+def test_position_gone_cierra_como_reconciled():
+    s = step(_s0(), {"tipo": "POSITION_GONE", "procedencia": "observado"}, _plan())
+    assert s.fase == "CLOSED" and s.close_reason == "RECONCILED"

@@ -29,7 +29,7 @@ def compute_conduct(plan, events: list[dict], final_state, *, entry_price: float
 
     rungs_honrados = len(final_state.rungs_llenos)
     cierre_en_plan = final_state.close_reason != "MANUAL"
-    escalono = cierre_en_plan or rungs_honrados > 0
+    escalono = rungs_honrados > 0
     hold_hours = _hours_between(entry_ts, exit_ts)
 
     return {
