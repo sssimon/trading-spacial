@@ -38,3 +38,17 @@ def _pivots(bars: list[dict], k: int) -> tuple[list[float], list[float]]:
         if all(lo < float(b["low"]) for b in vecinos):
             bajos.append(lo)
     return altos, bajos
+
+
+def _round_confluence(precio_bajo: float, precio_alto: float) -> list[float]:
+    """Números redondos notables dentro de [bajo, alto]. ANOTACIÓN observable —
+    NO reubica el nivel (spec §3.3). Paso a un orden por debajo de la magnitud:
+    step = 10^(floor(log10(alto)) - 1). Como las bandas son estrechas, da 0–1."""
+    if precio_alto <= 0:
+        return []
+    step = 10 ** (math.floor(math.log10(precio_alto)) - 1)
+    if step <= 0:
+        return []
+    primero = math.ceil(precio_bajo / step)
+    ultimo = math.floor(precio_alto / step)
+    return [round(step * m, 10) for m in range(primero, ultimo + 1)]

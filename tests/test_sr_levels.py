@@ -33,3 +33,20 @@ def test_meseta_plana_no_es_pivote():
     bars = [_bar(h, 9) for h in highs]
     altos, _ = _pivots(bars, k=1)
     assert altos == []
+
+
+# ── Task 2: _round_confluence ────────────────────────────────────────────────
+from screener.sr_levels import _round_confluence
+
+
+def test_confluencia_detecta_redondo_en_banda():
+    assert _round_confluence(69000.0, 69200.0) == [69000.0]
+
+
+def test_confluencia_vacia_si_no_hay_redondo():
+    assert _round_confluence(69100.0, 69200.0) == []
+
+
+def test_confluencia_precio_pequeno():
+    res = _round_confluence(5.95e-6, 6.05e-6)
+    assert any(abs(x - 6.0e-6) < 1e-12 for x in res)
