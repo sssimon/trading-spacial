@@ -521,6 +521,30 @@ export interface ValleySnapshot {
   candidates:   ValleyCandidate[];
 }
 
+// ---- D.1 Detector neutral de S/R (zonas, sin veredicto). Spec §4 ----
+export interface SrZona {
+  tipo:                'resistencia' | 'soporte';
+  precio_bajo:         number;
+  precio_alto:         number;
+  centro:              number;
+  toques:              number;
+  confluencia_redondo: number[];
+}
+export interface SrRef { centro: number; dist_pct: number; }
+export interface SrUbicacion {
+  dentro_de: SrZona | null;
+  techo:     SrRef | null;
+  piso:      SrRef | null;
+}
+export interface SrLevels {
+  symbol:       string;
+  estado:       'ok' | 'no_disponible';
+  generated_at: string | null;
+  price_live:   number | null;
+  zonas:        SrZona[];
+  ubicacion:    SrUbicacion;
+}
+
 // Dossier C — hechos citados de un proyecto (sin veredicto). Spec §2.
 export interface DossierMiembro { nombre: string; rol: string | null; enlaces: string[]; fuente: string; }
 export interface DossierCanal { url: string | null; activo: 'si' | 'no' | 'desconocido'; fuente: string | null; }
