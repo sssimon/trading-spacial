@@ -33,6 +33,7 @@ Then read this file fully before doing anything else in this session.
 - Holdout dataset locked at `data/holdout/`; read-guard A (`open_holdout`) + B (CI AST scanner) active.
 - Binance v0.3: SL/TP observados (openOrders → observed_orders + resumen fuente-de-verdad en filas EXTERNAL).
 - Vista Valles A: screener de vida + consolidación (observabilidad, lista neutral; ranking=celda B diferida, dossier=C diferido).
+- Dossier C: due-diligence de hechos citados (Exa + DeepSeek extracción), sin veredicto, caché TTL 7d, botón en Valles.
 
 **Not yet built:**
 - Portfolio-level capital pooling, leverage cap across symbols, aggregate drawdown enforcement (deferred — separate future epic).
