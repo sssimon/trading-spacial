@@ -29,9 +29,18 @@ _DOMINIOS = {
 
 EXTRACTION_PROMPT = (
     "Sos un EXTRACTOR de hechos, no un analista. Te doy contenido web con sus "
-    "URLs. Llená el JSON del esquema SOLO con hechos presentes en el contenido, "
-    "y para cada hecho poné en `fuente` la URL exacta de donde lo sacaste. Si un "
-    "hecho no está en el contenido, omitilo (no lo inventes). "
+    "URLs. Devolvé UN JSON con EXACTAMENTE estas claves (sin agregar otras):\n"
+    '{"equipo": [{"nombre": "", "rol": "", "enlaces": [], "fuente": "URL"}], '
+    '"equipo_identificado": true, '
+    '"presencia": {"sitio_web": {"url": "", "activo": "si|no|desconocido", "fuente": "URL"}, '
+    '"github": {...}, "twitter": {...}, "telegram_discord": {...}, "whitepaper": {...}}, '
+    '"actividad": {"ultimo_commit_github": {"valor": "", "fuente": "URL"}, '
+    '"ultimo_release": {...}, "ultimo_post_anuncio": {...}}, '
+    '"financiacion": [{"descripcion": "ronda/monto/inversores", "fecha": "", "fuente": "URL"}], '
+    '"hitos": [{"descripcion": "", "fecha": "", "fuente": "URL"}]}\n'
+    "Para cada hecho, `fuente` DEBE ser la URL EXACTA, copiada tal cual, de uno de "
+    "los bloques `URL:` que te di. Si un hecho no está en el contenido, omitilo (no "
+    "lo inventes); omití también las claves de presencia/actividad que no encuentres. "
     "PROHIBIDO: opinar, evaluar, recomendar, predecir, calificar el proyecto, o "
     "agregar cualquier campo que no esté en el esquema. Devolvé SOLO el JSON."
 )
