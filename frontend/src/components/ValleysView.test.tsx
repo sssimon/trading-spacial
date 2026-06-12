@@ -40,4 +40,9 @@ describe('ValleysView', () => {
     render(<ValleysView snapshot={vacio} loading={false} />);
     expect(screen.getByText(/sin foto|aún no/i)).toBeInTheDocument();
   });
+
+  it('ofrece un botón "Niveles" por candidata', () => {
+    render(<ValleysView snapshot={snap} loading={false} />);
+    expect(screen.getAllByRole('button', { name: /niveles/i })).toHaveLength(2);
+  });
 });

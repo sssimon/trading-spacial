@@ -5,10 +5,11 @@
 // ============================================================
 
 import React, { useState } from 'react';
-import type { ValleySnapshot, Dossier } from '../types';
-import { getDossier } from '../api';
+import type { ValleySnapshot, Dossier, SrLevels } from '../types';
+import { getDossier, getLevels } from '../api';
 import { formatPrice } from '../utils';
 import { ProjectDossier } from './ProjectDossier';
+import { LevelsPanel } from './LevelsPanel';
 import styles from './ValleysView.module.css';
 
 export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({
@@ -16,6 +17,8 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
 }) => {
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [dossierLoading, setDossierLoading] = useState(false);
+  const [levels, setLevels] = useState<SrLevels | null>(null);
+  const [levelsLoading, setLevelsLoading] = useState(false);
 
   if (loading) return <div className={styles.empty}>Cargando…</div>;
   const { generated_at, coverage, candidates } = snapshot;
@@ -61,6 +64,16 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
                       .finally(() => setDossierLoading(false));
                   }}
                 >Dossier</button>
+                <button
+                  className={styles.dossierBtn}
+                  onClick={() => {
+                    setLevels(null);
+                    setLevelsLoading(true);
+                    getLevels(c.symbol)
+                      .then(setLevels)
+                      .finally(() => setLevelsLoading(false));
+                  }}
+                >Niveles</button>
               </td>
             </tr>
           ))}
@@ -68,6 +81,9 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
       </table>
       {(dossier || dossierLoading) && (
         <ProjectDossier dossier={dossier!} loading={dossierLoading} />
+      )}
+      {(levels || levelsLoading) && (
+        <LevelsPanel levels={levels!} loading={levelsLoading} />
       )}
     </div>
   );
