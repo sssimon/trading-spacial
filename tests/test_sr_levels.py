@@ -124,3 +124,16 @@ def test_detect_levels_clasifica_y_ordena():
     assert res["toques"] == 2 and res["centro"] == 110.0
     assert sop["toques"] == 2 and sop["centro"] == 90.0
     assert [z["centro"] for z in zonas] == [90.0, 110.0]
+
+
+def test_locate_precio_cero_no_revienta():
+    zonas = [_zona("soporte", 64800, 65400, 65100, 3)]
+    u = locate_price(0, zonas)
+    assert u["techo"] is None          # 0 no está por debajo de ninguna banda
+    assert u["piso"] is None
+    # no debe lanzar ZeroDivisionError; si alguna ref existiera, dist_pct sería None
+
+
+def test_detect_levels_pocas_velas_devuelve_vacio():
+    # con menos de 2*PIVOT_REACH+1 velas no hay pivotes confirmables → []
+    assert detect_levels([_bar(10, 9) for _ in range(5)]) == []

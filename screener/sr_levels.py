@@ -92,6 +92,9 @@ def locate_price(price: float, zonas: list[dict]) -> dict:
     dentro_de: zona que contiene al precio (la de más toques si hay varias), o None.
     techo: zona inmediata por encima (menor centro con precio_bajo > price).
     piso: zona inmediata por debajo (mayor centro con precio_alto < price)."""
+    if price <= 0:
+        return {"dentro_de": None, "techo": None, "piso": None}
+
     dentro = [z for z in zonas if z["precio_bajo"] <= price <= z["precio_alto"]]
     dentro_de = max(dentro, key=lambda z: z["toques"]) if dentro else None
     arriba = [z for z in zonas if z["precio_bajo"] > price]
