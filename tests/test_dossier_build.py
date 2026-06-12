@@ -96,3 +96,12 @@ def test_extract_no_dict_es_no_disponible():
         return ["esto no es un dict"]   # crudo.get(...) → AttributeError
     d = build_dossier("ADAUSDT", exa_search=_exa_ok, extract_fn=extract)
     assert d.estado_general == "no_disponible"
+
+
+def test_prompt_incluye_el_esquema_objetivo():
+    # Regresión: DeepSeek necesita las claves EXACTAS del esquema en el prompt, o
+    # inventa su propia estructura (devolvió {"hechos": ...} → todo opaco en prod).
+    p = EXTRACTION_PROMPT
+    for clave in ("equipo", "equipo_identificado", "presencia", "actividad",
+                  "financiacion", "hitos"):
+        assert f'"{clave}"' in p, f"el prompt debe especificar la clave {clave!r}"
