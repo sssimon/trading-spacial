@@ -24,10 +24,13 @@ _TTL_SECONDS = 7 * 24 * 3600   # 7 días (spec §5)
 
 
 def _fresh(generated_at: str) -> bool:
-    """¿La foto de caché sigue dentro del TTL?"""
+    """¿La foto de caché sigue dentro del TTL? Tolera timestamps naive o con
+    offset (normaliza a UTC); un valor no parseable cuenta como stale."""
     try:
-        ts = datetime.fromisoformat(generated_at)
-    except ValueError:
+        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
         return False
     age = (datetime.now(timezone.utc) - ts).total_seconds()
     return age < _TTL_SECONDS
@@ -40,14 +43,22 @@ def get_dossier(symbol: str, refresh: bool = Query(False)) -> dict:
     El dossier NUNCA 500ea por fallo externo: build_dossier_live devuelve un
     Dossier con estado 'no_disponible' si Exa/DeepSeek fallan."""
     symbol = symbol.upper()
+    if len(symbol) > 20:
+        symbol = symbol[:20]
 
     if not refresh:
         with snapshot_connection() as con:
             cached = db_get_dossier(con, symbol)
         if cached is not None and _fresh(cached["generated_at"]):
-            return json.loads(cached["dossier_json"])
+            try:
+                return json.loads(cached["dossier_json"])
+            except json.JSONDecodeError:
+                log.warning("DOSSIER_CACHE_CORRUPTA symbol=%s — regenerando", symbol)
+                # cae a regeneración abajo
 
     # ── Generación: red FUERA de la tx. ──
+    # Race aceptada: dos requests simultáneas del mismo símbolo sin caché ambas
+    # generan (doble gasto Exa); el segundo INSERT OR REPLACE gana sin corromper.
     dossier = build_dossier_live(symbol)
     generated_at = datetime.now(timezone.utc).isoformat()
     dossier.generated_at = generated_at
