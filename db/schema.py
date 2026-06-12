@@ -452,6 +452,7 @@ def init_db() -> None:
         _migrate_binance_credentials(con_bc)
         _migrate_observed_orders(con_bc)  # v0.3: tabla independiente, mismo eje binance
         _migrate_project_dossiers(con_bc)   # dossier C: caché global, mismo bloque
+        _migrate_conduct_episodes(con_bc)   # instrumento F1: ledger de conducta
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -1840,3 +1841,41 @@ def _migrate_project_dossiers(con: sqlite3.Connection) -> None:
            )"""
     )
     log.info("_migrate_project_dossiers: project_dossiers table ensured.")
+
+
+def _migrate_conduct_episodes(con: sqlite3.Connection) -> None:
+    """Tabla conduct_episodes — ledger de conducta del instrumento (Fase 1).
+
+    Un EpisodioDeConducción REALIZED por posición falsada: la conducta medida
+    (adherencia BE, sl respetado, rungs honrados, hold, cierre en plan) vs. el
+    plan derivado de D.1, con su procedencia (observado|declarado). Escrita solo
+    por tools.lifecycle_falsifier. Idempotente: CREATE TABLE IF NOT EXISTS.
+
+    Spec: docs/superpowers/specs/es/2026-06-12-instrumento-lifecycle-conducta-design.md §8.
+    """
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS conduct_episodes (
+               id              INTEGER PRIMARY KEY AUTOINCREMENT,
+               position_id     INTEGER,
+               symbol          TEXT    NOT NULL,
+               tenant_id       INTEGER,
+               entry_ts        TEXT    NOT NULL,
+               exit_ts         TEXT,
+               procedencia     TEXT    NOT NULL,
+               entry_en_zona   INTEGER,
+               sl_respetado    INTEGER,
+               adherencia_be   INTEGER,
+               rungs_honrados  INTEGER,
+               cierre_en_plan  INTEGER,
+               hold_hours      REAL,
+               close_reason    TEXT,
+               plan_json       TEXT,
+               reproduced      INTEGER NOT NULL,
+               created_ts      TEXT    NOT NULL
+           )"""
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conduct_episodes_tenant "
+        "ON conduct_episodes(tenant_id)"
+    )
+    log.info("_migrate_conduct_episodes: conduct_episodes table + index ensured.")
