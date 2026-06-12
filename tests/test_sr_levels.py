@@ -74,3 +74,33 @@ def test_centro_es_mediana_no_redondo():
     zonas = _cluster([64800.0, 65100.0, 65400.0], "soporte", tol_pct=0.02, min_touches=1)
     assert zonas[0]["centro"] == 65100.0
     assert 65000.0 in zonas[0]["confluencia_redondo"]
+
+
+# ── Task 4: locate_price ─────────────────────────────────────────────────────
+from screener.sr_levels import locate_price
+
+
+def _zona(tipo, bajo, alto, centro, toques):
+    return {"tipo": tipo, "precio_bajo": bajo, "precio_alto": alto,
+            "centro": centro, "toques": toques, "confluencia_redondo": []}
+
+
+def test_locate_entre_zonas():
+    zonas = [_zona("soporte", 64800, 65400, 65100, 3),
+             _zona("resistencia", 69000, 69200, 69100, 4)]
+    u = locate_price(67230, zonas)
+    assert u["dentro_de"] is None
+    assert u["techo"]["centro"] == 69100
+    assert u["piso"]["centro"] == 65100
+    assert u["piso"]["dist_pct"] == round((65100 - 67230) / 67230 * 100, 2)
+
+
+def test_locate_dentro_de_zona():
+    zonas = [_zona("soporte", 64800, 65400, 65100, 3)]
+    u = locate_price(65000, zonas)
+    assert u["dentro_de"]["centro"] == 65100
+    assert u["techo"] is None and u["piso"] is None
+
+
+def test_locate_sin_zonas():
+    assert locate_price(100.0, []) == {"dentro_de": None, "techo": None, "piso": None}

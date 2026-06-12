@@ -84,3 +84,25 @@ def _cluster(precios: list[float], tipo: str, tol_pct: float,
             "confluencia_redondo": _round_confluence(bajo, alto),
         })
     return zonas
+
+
+def locate_price(price: float, zonas: list[dict]) -> dict:
+    """Ubica el precio vivo respecto a las zonas — HECHOS geométricos, no consejo.
+
+    dentro_de: zona que contiene al precio (la de más toques si hay varias), o None.
+    techo: zona inmediata por encima (menor centro con precio_bajo > price).
+    piso: zona inmediata por debajo (mayor centro con precio_alto < price)."""
+    dentro = [z for z in zonas if z["precio_bajo"] <= price <= z["precio_alto"]]
+    dentro_de = max(dentro, key=lambda z: z["toques"]) if dentro else None
+    arriba = [z for z in zonas if z["precio_bajo"] > price]
+    abajo = [z for z in zonas if z["precio_alto"] < price]
+    techo = min(arriba, key=lambda z: z["centro"]) if arriba else None
+    piso = max(abajo, key=lambda z: z["centro"]) if abajo else None
+
+    def _ref(z: dict | None) -> dict | None:
+        if z is None:
+            return None
+        return {"centro": z["centro"],
+                "dist_pct": round((z["centro"] - price) / price * 100, 2)}
+
+    return {"dentro_de": dentro_de, "techo": _ref(techo), "piso": _ref(piso)}
