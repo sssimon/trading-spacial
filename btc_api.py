@@ -89,6 +89,7 @@ from api.agent.router import router as agent_router
 from api.agent.history import router as agent_history_router
 from api.valleys import router as valleys_router
 from api.dossier import router as dossier_router
+from api.levels import router as levels_router
 from btc_scanner import scan  # noqa: F401 — patch("btc_api.scan", ...) in test_api.py line 421
 from data import market_data as md  # used directly at line 145; patch.object(btc_api.md) in test_api.py
 # DB_FILE: monkeypatched as btc_api.DB_FILE by ~25 test files to redirect SQLite path
@@ -308,6 +309,7 @@ app.include_router(agent_router)
 app.include_router(agent_history_router)
 app.include_router(valleys_router)
 app.include_router(dossier_router)
+app.include_router(levels_router)
 
 
 @app.get("/", summary="Bienvenida y estado general")

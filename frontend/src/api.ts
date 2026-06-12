@@ -421,3 +421,9 @@ export function getDossier(symbol: string, refresh = false) {
   const q = refresh ? '?refresh=true' : '';
   return request<import('./types').Dossier>(`/dossier/${symbol}${q}`);
 }
+
+// ---- D.1 niveles S/R — GET /levels/:symbol -------------------------------
+
+export function getLevels(symbol: string) {
+  return request<import('./types').SrLevels>(`/levels/${symbol}`);
+}

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getSymbols, getStatus,
   getCapital, putCapital, getPreferences, putPreferences,
+  getLevels,
 } from './api';
 
 const originalFetch = globalThis.fetch;
@@ -166,6 +167,42 @@ describe('api client', () => {
       expect(body.min_score).toBe(6);
       expect(body).not.toHaveProperty('tenant_id');
       expect(body).not.toHaveProperty('user_id');
+    });
+  });
+
+  // ============================================================
+  // D.1 getLevels
+  // ============================================================
+
+  describe('getLevels', () => {
+    it('hits /api/levels/BTCUSDT and returns typed payload', async () => {
+      const payload = {
+        symbol: 'BTCUSDT',
+        estado: 'ok',
+        generated_at: '2026-06-12T00:00:00+00:00',
+        price_live: 67230,
+        zonas: [
+          { tipo: 'soporte', precio_bajo: 64800, precio_alto: 65400, centro: 65100, toques: 3, confluencia_redondo: [65000] },
+          { tipo: 'resistencia', precio_bajo: 69000, precio_alto: 69200, centro: 69100, toques: 4, confluencia_redondo: [69000] },
+        ],
+        ubicacion: {
+          dentro_de: null,
+          techo: { centro: 69100, dist_pct: 2.78 },
+          piso: { centro: 65100, dist_pct: -3.17 },
+        },
+      };
+      const spy = vi.fn<typeof fetch>(async () => jsonResponse(payload));
+      globalThis.fetch = spy;
+
+      const resp = await getLevels('BTCUSDT');
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0][0])).toContain('/levels/BTCUSDT');
+      expect(resp.symbol).toBe('BTCUSDT');
+      expect(resp.estado).toBe('ok');
+      expect(resp.price_live).toBe(67230);
+      expect(resp.zonas).toHaveLength(2);
+      expect(resp.ubicacion.techo?.centro).toBe(69100);
     });
   });
 
