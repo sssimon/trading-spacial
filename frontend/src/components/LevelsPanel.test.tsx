@@ -35,4 +35,20 @@ describe('LevelsPanel', () => {
     expect(/recomend|comprar|vender|señal|signal|buy|sell|score|veredicto/i
       .test(container.textContent ?? '')).toBe(false);
   });
+
+  it('muestra la ubicación "dentro de zona" cuando el precio está en una banda', () => {
+    const dentro: SrLevels = {
+      symbol: 'BTCUSDT', estado: 'ok', generated_at: '2026-06-12T00:00:00+00:00',
+      price_live: 65100,
+      zonas: [
+        { tipo: 'soporte', precio_bajo: 64800, precio_alto: 65400, centro: 65100, toques: 3, confluencia_redondo: [65000] },
+      ],
+      ubicacion: {
+        dentro_de: { tipo: 'soporte', precio_bajo: 64800, precio_alto: 65400, centro: 65100, toques: 3, confluencia_redondo: [65000] },
+        techo: null, piso: null,
+      },
+    };
+    render(<LevelsPanel levels={dentro} loading={false} />);
+    expect(screen.getByText(/dentro de la zona/i)).toBeInTheDocument();
+  });
 });
