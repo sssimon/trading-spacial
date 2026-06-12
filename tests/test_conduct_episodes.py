@@ -1,18 +1,19 @@
 """Tests de la tabla conduct_episodes + helpers (instrumento, Fase 1). Spec §8."""
 import sqlite3
 
+import pytest
+
 from db.conduct_episodes import db_put_episode, db_get_episodes
 
 
 def _con():
     con = sqlite3.connect(":memory:")
-    con.row_factory = sqlite3.Row
     con.execute("""
         CREATE TABLE conduct_episodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            position_id INTEGER, symbol TEXT NOT NULL, tenant_id INTEGER,
+            position_id INTEGER, symbol TEXT NOT NULL, tenant_id INTEGER NOT NULL,
             entry_ts TEXT NOT NULL, exit_ts TEXT,
-            procedencia TEXT NOT NULL,
+            procedencia TEXT NOT NULL CHECK (procedencia IN ('observado','declarado')),
             entry_en_zona INTEGER, sl_respetado INTEGER, adherencia_be INTEGER,
             rungs_honrados INTEGER, cierre_en_plan INTEGER, hold_hours REAL,
             close_reason TEXT, plan_json TEXT, reproduced INTEGER NOT NULL,
@@ -59,3 +60,13 @@ def test_get_filtra_por_tenant():
                        conduct=_conduct(), plan_json="{}", reproduced=True,
                        created_ts="2026-06-12T00:00:00+00:00")
     assert len(db_get_episodes(con, tenant_id=2)) == 1
+
+
+def test_procedencia_invalida_rechazada():
+    con = _con()
+    bad = {**_conduct(), "procedencia": "inventada"}
+    with pytest.raises(sqlite3.IntegrityError):
+        db_put_episode(con, position_id=1, symbol="BTCUSDT", tenant_id=2,
+                       entry_ts="2026-01-01T00:00:00+00:00", exit_ts=None,
+                       conduct=bad, plan_json="{}", reproduced=True,
+                       created_ts="2026-06-12T00:00:00+00:00")

@@ -452,7 +452,11 @@ def init_db() -> None:
         _migrate_binance_credentials(con_bc)
         _migrate_observed_orders(con_bc)  # v0.3: tabla independiente, mismo eje binance
         _migrate_project_dossiers(con_bc)   # dossier C: caché global, mismo bloque
-        _migrate_conduct_episodes(con_bc)   # instrumento F1: ledger de conducta
+
+    # conduct_episodes: ledger de conducta del instrumento (Fase 1) — un
+    # EpisodioDeConducción REALIZED por posición falsada. Idempotente.
+    with transaction() as con_ce:
+        _migrate_conduct_episodes(con_ce)
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -1858,10 +1862,10 @@ def _migrate_conduct_episodes(con: sqlite3.Connection) -> None:
                id              INTEGER PRIMARY KEY AUTOINCREMENT,
                position_id     INTEGER,
                symbol          TEXT    NOT NULL,
-               tenant_id       INTEGER,
+               tenant_id       INTEGER NOT NULL,
                entry_ts        TEXT    NOT NULL,
                exit_ts         TEXT,
-               procedencia     TEXT    NOT NULL,
+               procedencia     TEXT    NOT NULL CHECK (procedencia IN ('observado','declarado')),
                entry_en_zona   INTEGER,
                sl_respetado    INTEGER,
                adherencia_be   INTEGER,
