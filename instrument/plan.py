@@ -28,7 +28,7 @@ class Plan:
     entry_price: float
     entry_zone: dict | None
     sl_price: float
-    rungs: list   # list[Rung], ascendente por tp_price
+    rungs: tuple   # tuple[Rung, ...], ascendente por tp_price — inmutable (BNC)
     runner_frac: float
 
 
@@ -59,7 +59,7 @@ def derive_plan(zonas: list[dict], entry_price: float, *,
     n = len(resistencias)
     if n == 0:
         return Plan(entry_price=entry_price, entry_zone=entry_zone, sl_price=sl_price,
-                    rungs=[], runner_frac=(1.0 if runner_on else 0.0))
+                    rungs=(), runner_frac=(1.0 if runner_on else 0.0))
 
     fracs = SIZE_SCHEDULE[:n]
     total = sum(fracs)
@@ -75,7 +75,7 @@ def derive_plan(zonas: list[dict], entry_price: float, *,
         else:
             # Absorber déficit del runner si no hay rungs secundarios
             runner = max(0.0, runner - deficit)
-    rungs = [Rung(tp_price=z["centro"], size_frac=s, zona_origen=z)
-             for z, s in zip(resistencias, scaled)]
+    rungs = tuple(Rung(tp_price=z["centro"], size_frac=s, zona_origen=z)
+                  for z, s in zip(resistencias, scaled))
     return Plan(entry_price=entry_price, entry_zone=entry_zone, sl_price=sl_price,
                 rungs=rungs, runner_frac=runner)

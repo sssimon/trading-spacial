@@ -34,7 +34,10 @@ def reproduce_position(pos: dict, zonas: list[dict]) -> dict:
     entry = float(pos["entry_price"])
     exit_price = float(pos["exit_price"]) if pos.get("exit_price") is not None else None
     plan = derive_plan(zonas, entry)
-    procedencia = "observado"   # F1: posiciones reales del enlace Binance
+    # Procedencia derivada del eje origin (BNC-12): OPERATOR = el operador la
+    # declaró (declarado); SIGNAL = el sistema la observó (observado). AUTO_DERIVED
+    # ya está excluida del conjunto (nunca es conducta).
+    procedencia = "declarado" if pos.get("origin") == "OPERATOR" else "observado"
 
     events: list[dict] = [{"tipo": "PLAN_CONFIRMED", "procedencia": procedencia}]
     reproduced = False
@@ -69,6 +72,10 @@ def reproduce_position(pos: dict, zonas: list[dict]) -> dict:
         entry_ts=pos["entry_ts"], exit_ts=pos.get("exit_ts") or pos["entry_ts"],
         procedencia=procedencia,
     )
+    # close_reason del ledger = el motivo REAL de cierre de la posición (hecho),
+    # no el artefacto STOP_HIT del replay del envelope.
+    if pos.get("exit_reason"):
+        conduct["close_reason"] = pos["exit_reason"]
     return {"reproduced": reproduced, "conduct": conduct,
             "plan_json": json.dumps({"sl_price": plan.sl_price,
                                      "rungs": [r.tp_price for r in plan.rungs],
@@ -100,8 +107,9 @@ def _closed_positions(tenant_id: int) -> list[dict]:
         con.row_factory = sqlite3.Row
         rows = con.execute(
             """SELECT id, symbol, entry_price, entry_ts, exit_price, exit_ts,
-                      exit_reason, tenant_id
-               FROM positions WHERE status='closed' AND tenant_id=?
+                      exit_reason, tenant_id, origin
+               FROM positions
+               WHERE status='closed' AND tenant_id=? AND origin IN ('SIGNAL','OPERATOR')
                ORDER BY entry_ts""", (tenant_id,)).fetchall()
     return [dict(r) for r in rows]
 

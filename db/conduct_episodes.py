@@ -24,6 +24,7 @@ def _bool_to_int(v):
 def db_put_episode(con: sqlite3.Connection, *, position_id, symbol, tenant_id,
                    entry_ts, exit_ts, conduct: dict, plan_json: str,
                    reproduced: bool, created_ts: str) -> None:
+    # Nota: 'escalono' NO se persiste — es derivable de rungs_honrados>0 (spec §7 lo deja como hecho derivado).
     con.execute(
         """INSERT INTO conduct_episodes
            (position_id, symbol, tenant_id, entry_ts, exit_ts, procedencia,

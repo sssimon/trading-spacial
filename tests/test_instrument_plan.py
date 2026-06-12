@@ -61,5 +61,5 @@ def test_entry_zone_es_el_soporte_que_contiene_al_entry():
 def test_sin_resistencias_todo_es_runner():
     zonas = [_z("soporte", 94, 96, 95)]
     p = derive_plan(zonas, entry_price=100.0)
-    assert p.rungs == []
+    assert p.rungs == ()
     assert p.runner_frac == 1.0

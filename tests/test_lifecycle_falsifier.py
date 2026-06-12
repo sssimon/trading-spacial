@@ -18,20 +18,25 @@ def _zonas():
 def test_reproduce_cierre_en_tp_dentro_de_tolerancia():
     pos = {"symbol": "BTCUSDT", "entry_price": 100.0,
            "entry_ts": "2026-01-01T00:00:00+00:00", "exit_ts": "2026-01-03T00:00:00+00:00",
-           "exit_price": 105.0, "exit_reason": "TP_HIT", "tenant_id": 2, "id": 7}
+           "exit_price": 105.0, "exit_reason": "TP_HIT", "tenant_id": 2, "id": 7,
+           "origin": "OPERATOR"}
     res = reproduce_position(pos, _zonas())
     assert res["reproduced"] is True
     assert res["conduct"]["rungs_honrados"] >= 1
     assert res["conduct"]["cierre_en_plan"] is True
+    assert res["conduct"]["close_reason"] == "TP_HIT"   # Fix 2: real exit_reason, no artefacto STOP_HIT
+    assert res["conduct"]["procedencia"] == "declarado"  # Fix 1b: origin=OPERATOR → declarado
 
 
 def test_reproduce_cierre_en_sl():
     pos = {"symbol": "BTCUSDT", "entry_price": 100.0,
            "entry_ts": "2026-01-01T00:00:00+00:00", "exit_ts": "2026-01-02T00:00:00+00:00",
-           "exit_price": 93.06, "exit_reason": "SL_HIT", "tenant_id": 2, "id": 8}
+           "exit_price": 93.06, "exit_reason": "SL_HIT", "tenant_id": 2, "id": 8,
+           "origin": "SIGNAL"}
     res = reproduce_position(pos, _zonas())
     assert res["reproduced"] is True
     assert res["conduct"]["close_reason"] == "SL_HIT"
+    assert res["conduct"]["procedencia"] == "observado"  # Fix 1b: origin=SIGNAL → observado
 
 
 def test_exit_fuera_de_todo_no_reproducible():
