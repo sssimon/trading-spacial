@@ -52,3 +52,35 @@ def _round_confluence(precio_bajo: float, precio_alto: float) -> list[float]:
     primero = math.ceil(precio_bajo / step)
     ultimo = math.floor(precio_alto / step)
     return [round(step * m, 10) for m in range(primero, ultimo + 1)]
+
+
+def _cluster(precios: list[float], tipo: str, tol_pct: float,
+             min_touches: int) -> list[dict]:
+    """Agrupa pivotes cercanos en zonas. Un precio entra al clúster si está
+    dentro de tol_pct del CENTRO corriente (mediana); si no, abre uno nuevo.
+    Cada clúster con ≥min_touches produce una zona de HECHOS (spec §3.2)."""
+    if not precios:
+        return []
+    ordenados = sorted(precios)
+    grupos: list[list[float]] = [[ordenados[0]]]
+    for p in ordenados[1:]:
+        centro = median(grupos[-1])
+        if centro > 0 and abs(p - centro) / centro <= tol_pct:
+            grupos[-1].append(p)
+        else:
+            grupos.append([p])
+
+    zonas: list[dict] = []
+    for g in grupos:
+        if len(g) < min_touches:
+            continue
+        bajo, alto = min(g), max(g)
+        zonas.append({
+            "tipo": tipo,
+            "precio_bajo": bajo,
+            "precio_alto": alto,
+            "centro": float(median(g)),
+            "toques": len(g),
+            "confluencia_redondo": _round_confluence(bajo, alto),
+        })
+    return zonas

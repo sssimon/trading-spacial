@@ -50,3 +50,27 @@ def test_confluencia_vacia_si_no_hay_redondo():
 def test_confluencia_precio_pequeno():
     res = _round_confluence(5.95e-6, 6.05e-6)
     assert any(abs(x - 6.0e-6) < 1e-12 for x in res)
+
+
+# ── Task 3: _cluster ─────────────────────────────────────────────────────────
+from screener.sr_levels import _cluster
+
+
+def test_cluster_agrupa_dentro_de_tolerancia():
+    zonas = _cluster([100.0, 100.5, 110.0], "soporte", tol_pct=0.0075, min_touches=1)
+    assert len(zonas) == 2
+    assert zonas[0]["toques"] == 2
+    assert zonas[0]["centro"] == 100.25
+    assert zonas[0]["tipo"] == "soporte"
+    assert zonas[0]["precio_bajo"] == 100.0 and zonas[0]["precio_alto"] == 100.5
+
+
+def test_cluster_min_touches_filtra_giros_sueltos():
+    zonas = _cluster([100.0, 200.0], "resistencia", tol_pct=0.0075, min_touches=2)
+    assert zonas == []
+
+
+def test_centro_es_mediana_no_redondo():
+    zonas = _cluster([64800.0, 65100.0, 65400.0], "soporte", tol_pct=0.02, min_touches=1)
+    assert zonas[0]["centro"] == 65100.0
+    assert 65000.0 in zonas[0]["confluencia_redondo"]
