@@ -1,0 +1,63 @@
+"""API del dossier de due-diligence (C). GET /dossier/{symbol} con caché TTL.
+
+Read-only respecto al estado del usuario, NO per-tenant (el dossier de un
+proyecto es global). La generación (Exa + DeepSeek) corre FUERA de toda
+transacción (red); solo el upsert de caché va en una tx corta. Spec §3.1, §4.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Query
+
+from db.dossiers import db_get_dossier, db_put_dossier
+from db.transaction import snapshot_connection, transaction
+from research.dossier import build_dossier_live
+
+log = logging.getLogger("api.dossier")
+
+router = APIRouter(tags=["dossier"])
+
+_TTL_SECONDS = 7 * 24 * 3600   # 7 días (spec §5)
+
+
+def _fresh(generated_at: str) -> bool:
+    """¿La foto de caché sigue dentro del TTL?"""
+    try:
+        ts = datetime.fromisoformat(generated_at)
+    except ValueError:
+        return False
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    return age < _TTL_SECONDS
+
+
+@router.get("/dossier/{symbol}", summary="Dossier de hechos citados de un proyecto")
+def get_dossier(symbol: str, refresh: bool = Query(False)) -> dict:
+    """Devuelve el dossier del símbolo. Caché-hit fresco → lo sirve; miss o
+    `refresh=true` o caché stale → genera (Exa+DeepSeek), cachea y devuelve.
+    El dossier NUNCA 500ea por fallo externo: build_dossier_live devuelve un
+    Dossier con estado 'no_disponible' si Exa/DeepSeek fallan."""
+    symbol = symbol.upper()
+
+    if not refresh:
+        with snapshot_connection() as con:
+            cached = db_get_dossier(con, symbol)
+        if cached is not None and _fresh(cached["generated_at"]):
+            return json.loads(cached["dossier_json"])
+
+    # ── Generación: red FUERA de la tx. ──
+    dossier = build_dossier_live(symbol)
+    generated_at = datetime.now(timezone.utc).isoformat()
+    dossier.generated_at = generated_at
+    payload = dossier.model_dump()
+
+    # ── Caché: tx corta, sin I/O. NO cachear los 'no_disponible' (fallo
+    #    técnico transitorio — que el próximo intento reintente). ──
+    if dossier.estado_general != "no_disponible":
+        with transaction() as con:
+            db_put_dossier(con, symbol=symbol,
+                           dossier_json=json.dumps(payload, ensure_ascii=False),
+                           generated_at=generated_at)
+    return payload
