@@ -12,6 +12,7 @@ import logging
 import os
 
 import requests
+from pydantic import ValidationError
 
 from .exa_client import ExaClient, ExaUnavailable
 from .schemas import Canal, Cita, Dossier, Hito, MiembroEquipo
@@ -68,7 +69,10 @@ def deepseek_extract(content: str, prompt: str) -> dict:
     r = _http_post(DEEPSEEK_URL, json=body, headers=headers, timeout=60)
     if r.status_code != 200:
         raise RuntimeError(f"deepseek HTTP {r.status_code}")
-    return json.loads(r.json()["choices"][0]["message"]["content"])
+    choices = r.json().get("choices") or []
+    if not choices:
+        raise RuntimeError("deepseek vacío: choices ausente o vacío")
+    return json.loads(choices[0]["message"]["content"])
 
 
 def _anchor_ok(fuente: str | None, url_set: set) -> bool:
@@ -88,9 +92,11 @@ def build_dossier(symbol: str, *, exa_search, extract_fn) -> Dossier:
     try:
         for plantilla in _DOMINIOS.values():
             for b in exa_search(plantilla.format(base=base)):
+                url = b.get("url")
+                if not url or url in url_set:
+                    continue
+                url_set.add(url)
                 bloques.append(b)
-                if b.get("url"):
-                    url_set.add(b["url"])
     except ExaUnavailable as e:
         log.warning("DOSSIER_NO_DISPONIBLE symbol=%s causa=exa:%s", symbol, e)
         return Dossier(symbol=symbol, estado_general="no_disponible")
@@ -104,26 +110,39 @@ def build_dossier(symbol: str, *, exa_search, extract_fn) -> Dossier:
         return Dossier(symbol=symbol, estado_general="no_disponible")
 
     # ── Candado anti-alucinación + construcción tipada ──
-    equipo = [
-        MiembroEquipo(**m) for m in crudo.get("equipo", [])
-        if _anchor_ok(m.get("fuente"), url_set)
-    ]
-    presencia = {
-        k: Canal(**v) for k, v in crudo.get("presencia", {}).items()
-        if _anchor_ok(v.get("fuente"), url_set)
-    }
-    actividad = {
-        k: Cita(**v) for k, v in crudo.get("actividad", {}).items()
-        if _anchor_ok(v.get("fuente"), url_set)
-    }
-    financiacion = [
-        Hito(**h) for h in crudo.get("financiacion", [])
-        if _anchor_ok(h.get("fuente"), url_set)
-    ]
-    hitos = [
-        Hito(**h) for h in crudo.get("hitos", [])
-        if _anchor_ok(h.get("fuente"), url_set)
-    ]
+    try:
+        equipo = [
+            MiembroEquipo(**m) for m in crudo.get("equipo", [])
+            if _anchor_ok(m.get("fuente"), url_set)
+        ]
+        presencia = {
+            k: Canal(**v) for k, v in crudo.get("presencia", {}).items()
+            if _anchor_ok(v.get("fuente"), url_set)
+        }
+        actividad = {
+            k: Cita(**v) for k, v in crudo.get("actividad", {}).items()
+            if _anchor_ok(v.get("fuente"), url_set)
+        }
+        financiacion = [
+            Hito(**h) for h in crudo.get("financiacion", [])
+            if _anchor_ok(h.get("fuente"), url_set)
+        ]
+        hitos = [
+            Hito(**h) for h in crudo.get("hitos", [])
+            if _anchor_ok(h.get("fuente"), url_set)
+        ]
+
+        # ── Fix #4: observabilidad del candado (cuántos hechos fueron descartados) ──
+        crudo_total = (len(crudo.get("equipo", [])) + len(crudo.get("presencia", {}))
+                       + len(crudo.get("actividad", {})) + len(crudo.get("financiacion", []))
+                       + len(crudo.get("hitos", [])))
+        kept = len(equipo) + len(presencia) + len(actividad) + len(financiacion) + len(hitos)
+        if crudo_total > kept:
+            log.debug("DOSSIER_ANCLA_DESCARTO symbol=%s descartados=%d", symbol, crudo_total - kept)
+
+    except (ValidationError, TypeError, AttributeError, KeyError) as e:
+        log.warning("DOSSIER_NO_DISPONIBLE symbol=%s causa=malformado:%s", symbol, e)
+        return Dossier(symbol=symbol, estado_general="no_disponible")
 
     # ── Estado derivado de hechos (rastreable vs opaco) ──
     no_encontrado: list[str] = []

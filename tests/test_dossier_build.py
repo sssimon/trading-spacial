@@ -80,3 +80,19 @@ def test_prompt_prohibe_opinar():
     assert "prohibido" in p
     for verbo in ("opinar", "evaluar", "recomendar", "predecir", "calificar"):
         assert verbo in p
+
+
+def test_extract_malformado_anclado_es_no_disponible():
+    # Hecho anclado (fuente en el set) pero estructuralmente inválido (sin 'nombre').
+    def extract(content, prompt):
+        return {"equipo": [{"fuente": "https://cardano.org"}],  # falta 'nombre' → ValidationError
+                "presencia": {}, "actividad": {}, "financiacion": [], "hitos": []}
+    d = build_dossier("ADAUSDT", exa_search=_exa_ok, extract_fn=extract)
+    assert d.estado_general == "no_disponible"
+
+
+def test_extract_no_dict_es_no_disponible():
+    def extract(content, prompt):
+        return ["esto no es un dict"]   # crudo.get(...) → AttributeError
+    d = build_dossier("ADAUSDT", exa_search=_exa_ok, extract_fn=extract)
+    assert d.estado_general == "no_disponible"
