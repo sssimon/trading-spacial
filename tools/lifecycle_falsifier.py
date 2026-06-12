@@ -43,6 +43,9 @@ def reproduce_position(pos: dict, zonas: list[dict]) -> dict:
         events.append({"tipo": "STOP_HIT", "procedencia": procedencia})
         reproduced = True
     else:
+        # Aproximación de ENVELOPE (sin libro de fills): si el exit alcanzó un
+        # precio, los rungs en/por-debajo de ese precio se habrían llenado en el
+        # camino (estrategia de scale-out). hit_idx = el rung más alto alcanzado.
         hit_idx = None
         for i, r in enumerate(plan.rungs):
             if exit_price is not None and (exit_price >= r.tp_price or _close(exit_price, r.tp_price)):
@@ -74,7 +77,6 @@ def reproduce_position(pos: dict, zonas: list[dict]) -> dict:
 
 # ── I/O (network + DB) — cubierto sólo por smoke test -m network ────────────
 
-import time  # noqa: E402  (deliberado: imports de red/DB fuera del módulo puro)
 from datetime import datetime, timezone
 
 from data.providers.binance import BinanceAdapter
@@ -109,31 +111,33 @@ def main(tenant_id: int = 2) -> int:
     now = datetime.now(timezone.utc).isoformat()
     positions = _closed_positions(tenant_id)
 
-    # Regeneración idempotente: el ledger es una FOTO de la conducta histórica;
-    # re-correr el arnés borra y reescribe las filas del tenant (snapshot
-    # semantics, mismo principio que observed_orders).
-    with transaction() as con:
-        con.execute("DELETE FROM conduct_episodes WHERE tenant_id=?", (tenant_id,))
-
-    reproduced = insuficiente = 0
+    # ── Fase de RED (sin transacción): reconstruye D.1 y computa cada episodio. ──
+    resultados: list[tuple[dict, dict]] = []   # (pos, reproduce_position result)
+    datos_insuficientes = 0
     for pos in positions:
         try:
             zonas = detect_levels(_bars_as_of(pos["symbol"], pos["entry_ts"]))
         except Exception as e:  # noqa: BLE001 — fallo de red/símbolo = datos insuficientes
             log.warning("FALSIFIER_SKIP symbol=%s causa=%s", pos["symbol"], e)
-            insuficiente += 1
+            datos_insuficientes += 1
             continue
-        res = reproduce_position(pos, zonas)
-        with transaction() as con:
+        resultados.append((pos, reproduce_position(pos, zonas)))
+
+    # ── Persistencia ATÓMICA: DELETE + todos los inserts en UNA transacción. El
+    #    ledger es una foto regenerable; re-correr lo reemplaza sin estado parcial. ──
+    with transaction() as con:
+        con.execute("DELETE FROM conduct_episodes WHERE tenant_id=?", (tenant_id,))
+        for pos, res in resultados:
             db_put_episode(con, position_id=pos["id"], symbol=pos["symbol"],
                            tenant_id=tenant_id, entry_ts=pos["entry_ts"],
                            exit_ts=pos.get("exit_ts"), conduct=res["conduct"],
                            plan_json=res["plan_json"], reproduced=res["reproduced"],
                            created_ts=now)
-        reproduced += int(res["reproduced"])
-        insuficiente += int(not res["reproduced"])
-    print(f"conduct_episodes: {len(positions)} posiciones · "
-          f"{reproduced} reproducidas · {insuficiente} fuera de plan/datos insuficientes")
+
+    reproducidas = sum(1 for _, r in resultados if r["reproduced"])
+    fuera_de_plan = sum(1 for _, r in resultados if not r["reproduced"])
+    print(f"conduct_episodes: {len(positions)} posiciones · {reproducidas} reproducidas · "
+          f"{fuera_de_plan} fuera de plan · {datos_insuficientes} datos insuficientes")
     return 0
 
 

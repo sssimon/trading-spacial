@@ -1,5 +1,7 @@
 """Tests del arnés de falsación (instrumento, Fase 1). La pieza pura
 reproduce_position se testea sin red ni DB. Spec §6."""
+import pytest
+
 from tools.lifecycle_falsifier import reproduce_position
 
 
@@ -47,9 +49,6 @@ def test_sin_zonas_no_reproducible():
            "exit_price": 100.0, "exit_reason": "MANUAL", "tenant_id": 2, "id": 10}
     res = reproduce_position(pos, [])
     assert res["reproduced"] is False
-
-
-import pytest
 
 
 @pytest.mark.network
