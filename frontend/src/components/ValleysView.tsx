@@ -4,14 +4,19 @@
 // presenta hechos, no juicios.
 // ============================================================
 
-import React from 'react';
-import type { ValleySnapshot } from '../types';
+import React, { useState } from 'react';
+import type { ValleySnapshot, Dossier } from '../types';
+import { getDossier } from '../api';
 import { formatPrice } from '../utils';
+import { ProjectDossier } from './ProjectDossier';
 import styles from './ValleysView.module.css';
 
 export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({
   snapshot, loading,
 }) => {
+  const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(false);
+
   if (loading) return <div className={styles.empty}>Cargando…</div>;
   const { generated_at, coverage, candidates } = snapshot;
   if (!generated_at || candidates.length === 0) {
@@ -32,7 +37,7 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
         <thead>
           <tr>
             <th>Símbolo</th><th>Precio</th><th>Rango</th><th>Semanas</th>
-            <th>Vol. percentil</th><th>Volumen/día</th><th>Desde máx.</th>
+            <th>Vol. percentil</th><th>Volumen/día</th><th>Desde máx.</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -45,10 +50,25 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
               <td className="num">{Math.round(c.vol_percentil * 100)}%</td>
               <td className="num">${Math.round(c.volumen_usd_dia).toLocaleString('en-US')}</td>
               <td className="num">−{(c.distancia_ath_pct * 100).toFixed(0)}%</td>
+              <td>
+                <button
+                  className={styles.dossierBtn}
+                  onClick={() => {
+                    setDossier(null);
+                    setDossierLoading(true);
+                    getDossier(c.symbol)
+                      .then(setDossier)
+                      .finally(() => setDossierLoading(false));
+                  }}
+                >Dossier</button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {(dossier || dossierLoading) && (
+        <ProjectDossier dossier={dossier!} loading={dossierLoading} />
+      )}
     </div>
   );
 };

@@ -520,3 +520,21 @@ export interface ValleySnapshot {
   coverage:     { universe: number; evaluated: number; complete: boolean };
   candidates:   ValleyCandidate[];
 }
+
+// Dossier C — hechos citados de un proyecto (sin veredicto). Spec §2.
+export interface DossierMiembro { nombre: string; rol: string | null; enlaces: string[]; fuente: string; }
+export interface DossierCanal { url: string | null; activo: 'si' | 'no' | 'desconocido'; fuente: string | null; }
+export interface DossierCita { valor: string; fuente: string; }
+export interface DossierHito { descripcion: string; fecha: string | null; fuente: string; }
+export interface Dossier {
+  symbol:              string;
+  equipo:              DossierMiembro[];
+  equipo_identificado: boolean;
+  presencia:           Record<string, DossierCanal>;
+  actividad:           Record<string, DossierCita>;
+  financiacion:        DossierHito[];
+  hitos:               DossierHito[];
+  estado_general:      'rastreable' | 'opaco' | 'no_disponible';
+  no_encontrado_en:    string[];
+  generated_at:        string | null;
+}
