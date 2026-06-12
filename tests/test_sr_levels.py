@@ -104,3 +104,23 @@ def test_locate_dentro_de_zona():
 
 def test_locate_sin_zonas():
     assert locate_price(100.0, []) == {"dentro_de": None, "techo": None, "piso": None}
+
+
+# ── Task 5: detect_levels ────────────────────────────────────────────────────
+from screener.sr_levels import detect_levels
+
+
+def test_detect_levels_clasifica_y_ordena():
+    bars = [_bar(100, 100) for _ in range(40)]
+    for i in (5, 20):
+        bars[i] = _bar(110, 100)
+    for i in (12, 30):
+        bars[i] = _bar(100, 90)
+    zonas = detect_levels(bars)
+
+    assert {z["tipo"] for z in zonas} == {"resistencia", "soporte"}
+    res = [z for z in zonas if z["tipo"] == "resistencia"][0]
+    sop = [z for z in zonas if z["tipo"] == "soporte"][0]
+    assert res["toques"] == 2 and res["centro"] == 110.0
+    assert sop["toques"] == 2 and sop["centro"] == 90.0
+    assert [z["centro"] for z in zonas] == [90.0, 110.0]

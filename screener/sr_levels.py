@@ -106,3 +106,12 @@ def locate_price(price: float, zonas: list[dict]) -> dict:
                 "dist_pct": round((z["centro"] - price) / price * 100, 2)}
 
     return {"dentro_de": dentro_de, "techo": _ref(techo), "piso": _ref(piso)}
+
+
+def detect_levels(bars: list[dict]) -> list[dict]:
+    """Velas diarias → zonas S/R ordenadas por centro ascendente. Única función
+    que el endpoint llama además de locate_price. Sin red, sin DB (spec §3.5)."""
+    altos, bajos = _pivots(bars, PIVOT_REACH)
+    zonas = (_cluster(altos, "resistencia", CLUSTER_TOL_PCT, MIN_TOUCHES)
+             + _cluster(bajos, "soporte", CLUSTER_TOL_PCT, MIN_TOUCHES))
+    return sorted(zonas, key=lambda z: z["centro"])
