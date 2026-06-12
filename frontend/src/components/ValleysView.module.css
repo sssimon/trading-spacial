@@ -9,3 +9,8 @@
 .table th:first-child, .table td:first-child { text-align: left; }
 .table td { padding: 6px 10px; border-bottom: 1px solid var(--nbc-border-dim); }
 .sym { font-weight: 600; }
+.dossierBtn {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  border: 1px solid var(--nbc-border-dim); background: transparent;
+  color: var(--nbc-fg-muted); cursor: pointer;
+}

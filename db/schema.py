@@ -451,6 +451,7 @@ def init_db() -> None:
     with transaction() as con_bc:
         _migrate_binance_credentials(con_bc)
         _migrate_observed_orders(con_bc)  # v0.3: tabla independiente, mismo eje binance
+        _migrate_project_dossiers(con_bc)   # dossier C: caché global, mismo bloque
 
 
 # Per-user tables that need a tenant_id column (Epic B B.1).
@@ -1819,3 +1820,23 @@ def _migrate_observed_orders(con: sqlite3.Connection) -> None:
         "ON observed_orders(tenant_id, symbol)"
     )
     log.info("_migrate_observed_orders: observed_orders table + index ensured.")
+
+
+def _migrate_project_dossiers(con: sqlite3.Connection) -> None:
+    """Tabla project_dossiers — caché global del dossier de due-diligence (C).
+
+    Global (NO per-tenant): el dossier de un proyecto es información pública,
+    idéntica para todos. PK por symbol → INSERT OR REPLACE es el upsert natural.
+    El TTL (7 días) se enforza en el read del endpoint (api/dossier.py), no en
+    el schema. Idempotente: CREATE TABLE IF NOT EXISTS.
+
+    Spec: docs/superpowers/specs/es/2026-06-12-dossier-due-diligence-design.md §4.
+    """
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS project_dossiers (
+               symbol        TEXT PRIMARY KEY,
+               dossier_json  TEXT NOT NULL,
+               generated_at  TEXT NOT NULL
+           )"""
+    )
+    log.info("_migrate_project_dossiers: project_dossiers table ensured.")

@@ -414,3 +414,10 @@ export async function testPreferencesDelivery(): Promise<TestDeliveryResponse> {
 export function getValleyCandidates() {
   return request<import('./types').ValleySnapshot>('/valley-candidates');
 }
+
+// ---- Dossier C — GET /dossier/:symbol ------------------------------------
+
+export function getDossier(symbol: string, refresh = false) {
+  const q = refresh ? '?refresh=true' : '';
+  return request<import('./types').Dossier>(`/dossier/${symbol}${q}`);
+}

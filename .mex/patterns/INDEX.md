@@ -18,6 +18,7 @@ last_updated: 2026-06-04
 | Abrir, correr o cerrar una celda del programa de edge (Edición 1) | [estudiar-una-celda.md](estudiar-una-celda.md) |
 | Extender el sync read-only de Binance con un paso nuevo | [extender-sync-binance.md](extender-sync-binance.md) |
 | Refrescar la lista de candidatas del screener de valles | [correr-screener-valles.md](correr-screener-valles.md) |
+| Generar un dossier de due-diligence de un proyecto | [generar-un-dossier.md](generar-un-dossier.md) |
 
 ## How to grow this index
 
