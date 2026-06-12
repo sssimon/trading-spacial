@@ -4,7 +4,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.levels import router
+from api.levels import router, BinanceUnavailable
 
 
 def _app():
@@ -36,7 +36,7 @@ def test_payload_ok():
 
 
 def test_binance_caido_es_no_disponible_sin_500():
-    with patch("api.levels._fetch_daily_bars", side_effect=RuntimeError("klines HTTP 503")):
+    with patch("api.levels._fetch_daily_bars", side_effect=BinanceUnavailable("klines HTTP 503")):
         r = _app().get("/levels/BTCUSDT")
     assert r.status_code == 200
     assert r.json()["estado"] == "no_disponible"
@@ -45,9 +45,18 @@ def test_binance_caido_es_no_disponible_sin_500():
 
 
 def test_symbol_invalido_es_no_disponible():
-    with patch("api.levels._fetch_daily_bars", side_effect=RuntimeError("klines HTTP 400")):
+    with patch("api.levels._fetch_daily_bars", side_effect=BinanceUnavailable("klines HTTP 400")):
         r = _app().get("/levels/NOPEUSDT")
     assert r.json()["estado"] == "no_disponible"
+
+
+def test_precio_falla_es_no_disponible():
+    with patch("api.levels._fetch_daily_bars", return_value=_bars()), \
+         patch("api.levels._fetch_live_price", side_effect=BinanceUnavailable("price HTTP 503")):
+        r = _app().get("/levels/BTCUSDT")
+    assert r.status_code == 200
+    assert r.json()["estado"] == "no_disponible"
+    assert r.json()["price_live"] is None
 
 
 def test_endpoint_no_toca_db():

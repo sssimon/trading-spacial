@@ -22,16 +22,23 @@ _KLINES_URL = "https://api.binance.com/api/v3/klines"
 _PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 
 
+class BinanceUnavailable(Exception):
+    """Fallo EXTERNO de Binance (red, rate-ban, HTTP no-200, payload inesperado).
+    Distinto de un bug interno: solo esto mapea a 'no_disponible'."""
+
+
 def _http_get(url, params=None, timeout=15):
     return requests.get(url, params=params, timeout=timeout)
 
 
 def _fetch_daily_bars(symbol: str) -> list[dict]:
-    """Velas 1d del contrato puro (índices 0,1,2,3,4,5,7). Lanza en no-200."""
+    """Velas 1d del contrato puro (índices 0,1,2,3,4,5,7). Lanza BinanceUnavailable en no-200."""
     r = _http_get(_KLINES_URL,
                   params={"symbol": symbol, "interval": "1d", "limit": LOOKBACK_DAYS})
+    if r.status_code in (429, 418):
+        raise BinanceUnavailable(f"rate banned HTTP {r.status_code}")
     if r.status_code != 200:
-        raise RuntimeError(f"klines HTTP {r.status_code}")
+        raise BinanceUnavailable(f"klines HTTP {r.status_code}")
     return [
         {"open_time": int(x[0]), "open": float(x[1]), "high": float(x[2]),
          "low": float(x[3]), "close": float(x[4]), "volume": float(x[5]),
@@ -41,11 +48,17 @@ def _fetch_daily_bars(symbol: str) -> list[dict]:
 
 
 def _fetch_live_price(symbol: str) -> float:
-    """Precio spot vivo (/ticker/price). Lanza en no-200 o payload inesperado."""
+    """Precio spot vivo (/ticker/price). Lanza BinanceUnavailable en cualquier
+    fallo externo: rate-ban, HTTP no-200, o payload sin 'price' numérico."""
     r = _http_get(_PRICE_URL, params={"symbol": symbol})
+    if r.status_code in (429, 418):
+        raise BinanceUnavailable(f"rate banned HTTP {r.status_code}")
     if r.status_code != 200:
-        raise RuntimeError(f"price HTTP {r.status_code}")
-    return float(r.json()["price"])
+        raise BinanceUnavailable(f"price HTTP {r.status_code}")
+    try:
+        return float(r.json()["price"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise BinanceUnavailable(f"price payload inesperado: {e}") from e
 
 
 def _no_disponible(symbol: str) -> dict:
@@ -62,7 +75,7 @@ def get_levels(symbol: str) -> dict:
     try:
         bars = _fetch_daily_bars(symbol)
         price = _fetch_live_price(symbol)
-    except (requests.RequestException, RuntimeError, KeyError, ValueError) as e:
+    except (requests.RequestException, BinanceUnavailable) as e:
         log.warning("LEVELS_NO_DISPONIBLE symbol=%s causa=%s", symbol, e)
         return _no_disponible(symbol)
 
