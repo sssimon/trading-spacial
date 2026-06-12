@@ -1,0 +1,16 @@
+/* frontend/src/components/LevelsPanel.module.css */
+.wrap { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 12px; margin-top: 12px; }
+.head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.sym { font-weight: 600; }
+.price { font-variant-numeric: tabular-nums; }
+.ts { margin-left: auto; opacity: 0.6; font-size: 0.85em; }
+.sec { margin: 8px 0; }
+.sec h4 { margin: 4px 0; font-size: 0.9em; opacity: 0.8; }
+.row { display: flex; gap: 12px; padding: 3px 0; font-variant-numeric: tabular-nums; font-size: 0.9em; }
+.banda { min-width: 12em; }
+.centro { opacity: 0.85; }
+.toques { opacity: 0.7; }
+.redondo { opacity: 0.6; font-style: italic; }
+.locator { display: flex; gap: 18px; padding: 6px 0; border-top: 1px dashed var(--border, #2a2a2a); border-bottom: 1px dashed var(--border, #2a2a2a); margin: 6px 0; font-variant-numeric: tabular-nums; }
+.empty { opacity: 0.7; padding: 12px; }
+.gap { opacity: 0.7; }
