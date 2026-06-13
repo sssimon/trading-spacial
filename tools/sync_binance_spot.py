@@ -136,7 +136,73 @@ def sync_tenant(tenant_id: int, *, autocreate: bool = False, dry_run: bool = Fal
                 raise _DryRunAbort()   # rollback: el dry-run NO persiste
     except _DryRunAbort:
         pass
+    if not dry_run and holder.get("report", {}).get("status") == "ACTIVE":
+        holder["report"]["track_live"] = track_live(tenant_id)
     return holder["report"]
+
+
+def track_live(tenant_id: int) -> dict:
+    """Tras el sync: avanza el estado vivo de cada plan activo desde los
+    observed_orders frescos + la qty real. Read-only sobre positions; escribe
+    lifecycle_states + (al cierre) conduct_episodes. Sin push, sin PositionClosure."""
+    import json
+    from db.transaction import snapshot_connection, transaction
+    from db.lifecycle_states import (
+        db_list_active, db_update_state, plan_from_json, state_from_row,
+    )
+    from db.conduct_episodes import db_put_episode
+    from instrument.tracker import advance_live, finalize_conduct
+
+    now = datetime.now(timezone.utc).isoformat()
+    with snapshot_connection() as con:
+        con.row_factory = sqlite3.Row
+        activos = list(db_list_active(con, tenant_id=tenant_id))
+
+    avanzados = cerrados = 0
+    for row in activos:
+        symbol = row["symbol"]
+        with snapshot_connection() as con:
+            con.row_factory = sqlite3.Row
+            pos = con.execute(
+                "SELECT qty FROM positions WHERE symbol=? AND tenant_id=? "
+                "AND status='open' AND control_domain='EXTERNAL' LIMIT 1",
+                (symbol, tenant_id)).fetchone()
+            obs_rows = con.execute(
+                "SELECT kind, price, qty, order_id FROM observed_orders "
+                "WHERE tenant_id=? AND symbol=?", (tenant_id, symbol)).fetchall()
+        if pos is None:
+            continue
+        curr_qty = float(pos["qty"] or 0.0)
+        curr_observed = [dict(o) for o in obs_rows]
+        plan = plan_from_json(row["plan_json"])
+        state = state_from_row(row)
+        prev_observed = json.loads(row["prev_observed_json"] or "[]")
+        prev_qty = row["prev_qty"] if row["prev_qty"] is not None else curr_qty
+        prev_events = json.loads(row["events_json"] or "[]")
+
+        new_state, new_events = advance_live(plan, state, prev_observed, curr_observed,
+                                             prev_qty, curr_qty)
+        all_events = prev_events + new_events
+        if new_state.fase == "CLOSED":
+            conduct = finalize_conduct(plan, all_events, new_state,
+                                       entry_price=row["entry_price"],
+                                       entry_ts=row["confirmed_at"], exit_ts=now)
+            with transaction() as con:
+                db_put_episode(con, position_id=row["position_id"], symbol=symbol,
+                               tenant_id=tenant_id, entry_ts=row["confirmed_at"],
+                               exit_ts=now, conduct=conduct, plan_json=row["plan_json"],
+                               reproduced=True, created_ts=now)
+                db_update_state(con, row_id=row["id"], estado_vivo="cerrado",
+                                state=new_state, events=all_events,
+                                prev_observed=curr_observed, prev_qty=curr_qty, updated_at=now)
+            cerrados += 1
+        else:
+            with transaction() as con:
+                db_update_state(con, row_id=row["id"], estado_vivo=row["estado_vivo"],
+                                state=new_state, events=all_events,
+                                prev_observed=curr_observed, prev_qty=curr_qty, updated_at=now)
+            avanzados += 1
+    return {"avanzados": avanzados, "cerrados": cerrados}
 
 
 def main() -> int:

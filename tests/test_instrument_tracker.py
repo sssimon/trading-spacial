@@ -131,3 +131,13 @@ def test_dos_tps_en_un_tick_dan_dos_rung_filled():
     evs = detect_transitions(p, _armed(p), prev, curr, prev_qty=1.0, curr_qty=0.3)
     rungs = sorted(e["rung_index"] for e in evs if e["tipo"] == "RUNG_FILLED")
     assert rungs == [0, 1]
+
+
+import pytest
+
+
+@pytest.mark.network
+def test_track_live_smoke():
+    from tools.sync_binance_spot import track_live
+    res = track_live(2)
+    assert "avanzados" in res and "cerrados" in res
