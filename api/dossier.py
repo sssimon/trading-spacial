@@ -14,6 +14,7 @@ from fastapi import APIRouter, Query
 
 from db.dossiers import db_get_dossier, db_put_dossier
 from db.transaction import snapshot_connection, transaction
+from freshness import LiveSnapshot
 from research.dossier import build_dossier_live
 
 log = logging.getLogger("api.dossier")
@@ -21,6 +22,7 @@ log = logging.getLogger("api.dossier")
 router = APIRouter(tags=["dossier"])
 
 _TTL_SECONDS = 7 * 24 * 3600   # 7 días (spec §5)
+FRESCURA_DOSSIER_SEG = 7 * 24 * 3600
 
 
 def _fresh(generated_at: str) -> bool:
@@ -51,7 +53,10 @@ def get_dossier(symbol: str, refresh: bool = Query(False)) -> dict:
             cached = db_get_dossier(con, symbol)
         if cached is not None and _fresh(cached["generated_at"]):
             try:
-                return json.loads(cached["dossier_json"])
+                hit = json.loads(cached["dossier_json"])
+                return LiveSnapshot(payload=hit,
+                                    generated_at=hit.get("generated_at"),
+                                    umbral_seg=FRESCURA_DOSSIER_SEG).to_response()
             except json.JSONDecodeError:
                 log.warning("DOSSIER_CACHE_CORRUPTA symbol=%s — regenerando", symbol)
                 # cae a regeneración abajo
@@ -71,4 +76,6 @@ def get_dossier(symbol: str, refresh: bool = Query(False)) -> dict:
             db_put_dossier(con, symbol=symbol,
                            dossier_json=json.dumps(payload, ensure_ascii=False),
                            generated_at=generated_at)
-    return payload
+    return LiveSnapshot(payload=payload,
+                        generated_at=payload.get("generated_at"),
+                        umbral_seg=FRESCURA_DOSSIER_SEG).to_response()

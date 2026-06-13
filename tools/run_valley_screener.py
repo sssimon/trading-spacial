@@ -83,12 +83,18 @@ def build_snapshot(*, pause_s: float = 0.0) -> dict:
     }
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO)
-    snap = build_snapshot(pause_s=0.05)  # pausa suave para no golpear el rate-limit
+def regenerate(*, pause_s: float = 0.05) -> dict:
+    """build_snapshot + escribe el JSON. Usado por main() y por screener_loop."""
+    snap = build_snapshot(pause_s=pause_s)
     os.makedirs(os.path.dirname(_OUTPUT), exist_ok=True)
     with open(_OUTPUT, "w", encoding="utf-8") as f:
         json.dump(snap, f, indent=2, ensure_ascii=False)
+    return snap
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO)
+    snap = regenerate()
     cov = snap["coverage"]
     print(f"valley_candidates.json: {len(snap['candidates'])} candidatas; "
           f"cobertura {cov['evaluated']}/{cov['universe']} "

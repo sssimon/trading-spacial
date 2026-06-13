@@ -42,6 +42,8 @@ log = logging.getLogger("scanner.runtime")
 SCAN_INTERVAL_SEC = 300
 SYMBOLS_REFRESH_SEC = 3600
 BINANCE_INFO_REFRESH_SEC = 6 * 3600
+SCREENER_INTERVAL_SEC = 21600   # 6h (spec §5)
+SYNC_INTERVAL_SEC = 300         # 5min (spec §5)
 
 _BACKUP_INTERVAL_CYCLES = 288  # ~24h at 5min cycles (288 × 5min = 1440min)
 _backup_cycles_since_last = 0
@@ -400,17 +402,97 @@ def scanner_loop(stop_event: threading.Event | None = None):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  SCREENER LOOP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _regenerate_screener() -> None:
+    from tools.run_valley_screener import regenerate  # noqa: PLC0415
+    snap = regenerate()
+    log.info("screener_loop: %d candidatas", len(snap.get("candidates", [])))
+
+
+def _screener_cycle() -> None:
+    try:
+        _regenerate_screener()
+    except Exception as e:  # noqa: BLE001 — fail-soft: un ciclo malo no mata el thread
+        log.warning("screener_loop ciclo falló: %s", e)
+
+
+def screener_loop(stop_event: threading.Event | None = None) -> None:
+    """Regenera la foto del screener cada SCREENER_INTERVAL_SEC. Spec §1."""
+    if stop_event is None:
+        stop_event = threading.Event()
+    from api.config import load_config  # noqa: PLC0415
+    interval = load_config().get("screener_interval_sec", SCREENER_INTERVAL_SEC)
+    while not stop_event.is_set():
+        _screener_cycle()
+        if stop_event.wait(interval):
+            break
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SYNC LOOP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _active_tenants() -> list[int]:
+    from db.transaction import snapshot_connection  # noqa: PLC0415
+    from db.binance_credentials import db_list_active_credential_tenants  # noqa: PLC0415
+    with snapshot_connection() as con:
+        return db_list_active_credential_tenants(con)
+
+
+def _sync_one(tenant_id: int) -> None:
+    from tools.sync_binance_spot import sync_tenant  # noqa: PLC0415
+    sync_tenant(tenant_id)
+
+
+def _sync_cycle(stop_event: threading.Event) -> None:
+    try:
+        tenants = _active_tenants()
+    except Exception as e:  # noqa: BLE001
+        log.warning("sync_loop: no se pudo listar tenants: %s", e)
+        return
+    for tid in tenants:
+        if stop_event.is_set():
+            break
+        try:
+            _sync_one(tid)
+        except Exception as e:  # noqa: BLE001 — un tenant no tumba al resto
+            log.warning("sync_loop tenant=%s falló: %s", tid, e)
+
+
+def sync_loop(stop_event: threading.Event | None = None) -> None:
+    """Sincroniza Binance de cada tenant ACTIVE cada SYNC_INTERVAL_SEC (alimenta
+    observed_orders + el track_live de F3a). Spec §1."""
+    if stop_event is None:
+        stop_event = threading.Event()
+    from api.config import load_config  # noqa: PLC0415
+    interval = load_config().get("sync_interval_sec", SYNC_INTERVAL_SEC)
+    while not stop_event.is_set():
+        _sync_cycle(stop_event)
+        if stop_event.wait(interval):
+            break
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  THREAD MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def start_scanner_thread():
-    """Launch the three managed background threads with shared ownership.
+    """Launch the five managed background threads with shared ownership.
 
-    Creates a single `stop_event` that all three loops respect (scanner via
-    interruptible `stop_event.wait()` between cycles; health + calibrator
-    via the `stop_event` parameter they already accepted but never
-    received from this caller). Registers the threads in `_managed_threads`
-    so `stop_managed_threads()` can join them on lifespan teardown.
+    Creates a single `stop_event` that all five loops respect (scanner via
+    interruptible `stop_event.wait()` between cycles; health + calibrator +
+    screener + sync via the `stop_event` parameter). Registers the threads in
+    `_managed_threads` so `stop_managed_threads()` can join them on lifespan
+    teardown.
+
+    Threads managed:
+      1. crypto-scanner       — main scan loop
+      2. health-monitor       — daily kill-switch sweep (#138)
+      3. kill-switch-calibrator — auto-calibrator (#214 B4b.1)
+      4. screener_loop        — valley screener regen every 6h (spec §5)
+      5. sync_loop            — Binance sync per active tenant every 5min (spec §5)
 
     Backward-compatible return: still returns the scanner thread (the
     pre-#495-fix shape) so existing callers (`btc_api.lifespan`, tests)
@@ -460,11 +542,28 @@ def start_scanner_thread():
     calibrator_thread.start()
     _managed_threads.append(calibrator_thread)
     log.info("Kill switch v2 calibrator thread started (daily @ 00:00 UTC)")
+
+    screener_thread = threading.Thread(
+        target=screener_loop, name="screener_loop",
+        kwargs={"stop_event": _thread_stop_event}, daemon=True,
+    )
+    screener_thread.start()
+    _managed_threads.append(screener_thread)
+    log.info("Screener loop thread started (every 6h)")
+
+    sync_thread = threading.Thread(
+        target=sync_loop, name="sync_loop",
+        kwargs={"stop_event": _thread_stop_event}, daemon=True,
+    )
+    sync_thread.start()
+    _managed_threads.append(sync_thread)
+    log.info("Sync loop thread started (every 5min)")
+
     return t
 
 
 def stop_managed_threads(timeout_per_thread: float = 2.0) -> dict[str, bool]:
-    """Signal and join the three managed background threads.
+    """Signal and join all managed background threads (five after the liveness fix).
 
     Called from the lifespan teardown. Sets the shared stop_event (which
     breaks each loop's interruptible sleep within ≤1 wake-up cycle),

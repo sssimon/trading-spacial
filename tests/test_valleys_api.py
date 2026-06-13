@@ -36,3 +36,49 @@ def test_foto_ausente_devuelve_vacio_no_500(tmp_path, monkeypatch):
     assert body["candidates"] == []
     assert body["coverage"]["complete"] is False
     assert body["generated_at"] is None
+
+
+# ── Nuevos tests de frescura (Task 2) ─────────────────────────────────────────
+
+import json
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+from fastapi import FastAPI
+
+from api.valleys import router as _valleys_router
+
+
+def _veapp():
+    app = FastAPI()
+    app.include_router(_valleys_router)
+    return TestClient(app)
+
+
+def test_valles_sin_foto_es_muerto_no_vacio_mudo(tmp_path):
+    with patch("api.valleys._OUTPUT", str(tmp_path / "nope.json")):
+        r = _veapp().get("/valley-candidates")
+    assert r.status_code == 200
+    assert r.json()["frescura"]["estado"] == "muerto"
+
+
+def test_valles_foto_vieja_es_rancia(tmp_path):
+    viejo = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    p = tmp_path / "foto.json"
+    p.write_text(json.dumps({"generated_at": viejo,
+                             "coverage": {"universe": 1, "evaluated": 1, "complete": True},
+                             "candidates": []}), encoding="utf-8")
+    with patch("api.valleys._OUTPUT", str(p)):
+        r = _veapp().get("/valley-candidates")
+    assert r.json()["frescura"]["estado"] == "rancio"
+
+
+def test_valles_foto_fresca_es_fresca(tmp_path):
+    ahora = datetime.now(timezone.utc).isoformat()
+    p = tmp_path / "foto_fresca.json"
+    p.write_text(json.dumps({"generated_at": ahora,
+                             "coverage": {"universe": 1, "evaluated": 1, "complete": True},
+                             "candidates": []}), encoding="utf-8")
+    with patch("api.valleys._OUTPUT", str(p)):
+        r = _veapp().get("/valley-candidates")
+    assert r.json()["frescura"]["estado"] == "fresco"
