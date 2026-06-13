@@ -55,3 +55,39 @@ def test_rung_ya_lleno_no_se_reemite():
     candle = {"open": 100, "high": 106, "low": 99, "close": 105}
     evs = resolve_fills(p, _armed(p, rungs_llenos=frozenset({0})), candle)
     assert all(e.get("rung_index") != 0 for e in evs)
+
+
+from instrument.simulate import simulate_plan
+
+
+def test_simula_tp1_luego_be_cierra_be_hit():
+    p = _plan()
+    candles = [
+        {"open": 100, "high": 106, "low": 99, "close": 105},
+        {"open": 105, "high": 107, "low": 99, "close": 100},
+    ]
+    events, st = simulate_plan(p, candles)
+    assert st.fase == "CLOSED" and st.close_reason == "BE_HIT"
+    assert events[0]["tipo"] == "PLAN_CONFIRMED"
+
+
+def test_simula_solo_cae_cierra_sl_hit():
+    p = _plan()
+    candles = [{"open": 100, "high": 101, "low": 90, "close": 92}]
+    _, st = simulate_plan(p, candles)
+    assert st.close_reason == "SL_HIT"
+
+
+def test_simula_sube_toda_la_escalera_sim_end():
+    p = _plan()
+    candles = [{"open": 100, "high": 112, "low": 99, "close": 111}]
+    _, st = simulate_plan(p, candles)
+    assert st.rungs_llenos == frozenset({0, 1})
+    assert st.close_reason == "SIM_END"
+
+
+def test_simula_nunca_toca_nada_sim_end():
+    p = _plan()
+    candles = [{"open": 100, "high": 101, "low": 99, "close": 100} for _ in range(3)]
+    _, st = simulate_plan(p, candles)
+    assert st.close_reason == "SIM_END"
