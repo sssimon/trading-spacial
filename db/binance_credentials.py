@@ -81,6 +81,12 @@ def db_set_credential_status(con: sqlite3.Connection, tenant_id: int, status: st
     )
 
 
+def db_list_active_credential_tenants(con: sqlite3.Connection) -> list[int]:
+    """tenant_ids con credencial Binance ACTIVE (el sync_loop itera estos). Puro."""
+    cur = con.execute("SELECT tenant_id FROM binance_credentials WHERE status='ACTIVE'")
+    return [int(r[0]) for r in cur.fetchall()]
+
+
 def get_credential_metadata(con: sqlite3.Connection, tenant_id: int) -> Optional[dict]:
     """Metadatos seguros para el frontend: NUNCA la secret, ni cifrada."""
     row = db_get_binance_credential_raw(con, tenant_id)
