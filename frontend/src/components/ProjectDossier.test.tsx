@@ -45,4 +45,13 @@ describe('ProjectDossier', () => {
     const { container } = render(<ProjectDossier dossier={rastreable} loading={false} />);
     expect(/recomend|comprar|potencial|score|veredicto/i.test(container.textContent ?? '')).toBe(false);
   });
+
+  it('muestra la frescura del dossier cuando está presente', () => {
+    const conFrescura: Dossier = {
+      ...rastreable,
+      frescura: { estado: 'rancio', edad_seg: 600000, generated_at: 'x', umbral_seg: 604800 },
+    };
+    render(<ProjectDossier dossier={conFrescura} loading={false} />);
+    expect(screen.getByText(/rancia|hace/i)).toBeInTheDocument();
+  });
 });

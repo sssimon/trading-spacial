@@ -29,7 +29,7 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
   if (!generated_at || candidates.length === 0) {
     return (
       <div className={styles.empty}>
-        Aún no hay foto del screener. Corré <code>python -m tools.run_valley_screener</code>.
+        Aún no hay foto del screener — se genera automáticamente cada pocas horas.
       </div>
     );
   }

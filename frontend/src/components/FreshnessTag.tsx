@@ -18,7 +18,7 @@ function _hace(edad_seg: number | null): string {
 export const FreshnessTag: React.FC<{ frescura?: Frescura }> = ({ frescura }) => {
   if (!frescura) return null;
   if (frescura.estado === 'muerto') {
-    return <span className={`${styles.tag} ${styles.muerto}`}>sin foto — el screener no ha corrido</span>;
+    return <span className={`${styles.tag} ${styles.muerto}`}>sin foto — el screener aún no ha completado un ciclo</span>;
   }
   if (frescura.estado === 'rancio') {
     return <span className={`${styles.tag} ${styles.rancio}`}>foto {_hace(frescura.edad_seg)} · rancia</span>;

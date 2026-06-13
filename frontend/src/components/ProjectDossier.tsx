@@ -7,6 +7,7 @@
 
 import React from 'react';
 import type { Dossier } from '../types';
+import { FreshnessTag } from './FreshnessTag';
 import styles from './ProjectDossier.module.css';
 
 // Fuente: ancla cada hecho a su URL de origen.
@@ -35,6 +36,7 @@ export const ProjectDossier: React.FC<{ dossier: Dossier; loading: boolean }> = 
         {d.generated_at && (
           <span className={styles.ts}>{new Date(d.generated_at).toLocaleDateString('es-ES')}</span>
         )}
+        {d.frescura && <FreshnessTag frescura={d.frescura} />}
       </header>
 
       {d.estado_general === 'opaco' && d.no_encontrado_en.length > 0 && (

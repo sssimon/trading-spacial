@@ -508,6 +508,7 @@ export interface Frescura {
   estado:       'fresco' | 'rancio' | 'muerto';
   edad_seg:     number | null;
   generated_at: string | null;
+  umbral_seg:   number;
 }
 
 export interface ValleyCandidate {
@@ -584,4 +585,5 @@ export interface Dossier {
   estado_general:      'rastreable' | 'opaco' | 'no_disponible';
   no_encontrado_en:    string[];
   generated_at:        string | null;
+  frescura?:           Frescura;
 }
