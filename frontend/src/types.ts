@@ -504,6 +504,12 @@ export interface TestDeliveryResponse {
 
 // ---- Vista Valles A — screener de consolidación (sin score de atractivo) ----
 
+export interface Frescura {
+  estado:       'fresco' | 'rancio' | 'muerto';
+  edad_seg:     number | null;
+  generated_at: string | null;
+}
+
 export interface ValleyCandidate {
   symbol:               string;
   price:                number;
@@ -519,6 +525,7 @@ export interface ValleySnapshot {
   generated_at: string | null;
   coverage:     { universe: number; evaluated: number; complete: boolean };
   candidates:   ValleyCandidate[];
+  frescura?:    Frescura;
 }
 
 // ---- D.1 Detector neutral de S/R (zonas, sin veredicto). Spec §4 ----

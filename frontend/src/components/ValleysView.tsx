@@ -11,6 +11,7 @@ import { formatPrice } from '../utils';
 import { ProjectDossier } from './ProjectDossier';
 import { LevelsPanel } from './LevelsPanel';
 import { CoinCard } from './CoinCard';
+import { FreshnessTag } from './FreshnessTag';
 import styles from './ValleysView.module.css';
 
 export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({
@@ -49,6 +50,7 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
         Foto del {new Date(generated_at).toLocaleString('es-ES')} · cobertura{' '}
         {coverage.evaluated} / {coverage.universe}
         {!coverage.complete && ' (incompleta)'}
+        {snapshot.frescura && <>{' '}<FreshnessTag frescura={snapshot.frescura} /></>}
       </div>
       <table className={styles.table}>
         <thead>
