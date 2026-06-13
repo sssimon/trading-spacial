@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getSymbols, getStatus,
   getCapital, putCapital, getPreferences, putPreferences,
-  getLevels,
+  getLevels, getValleyEval,
 } from './api';
 
 const originalFetch = globalThis.fetch;
@@ -203,6 +203,23 @@ describe('api client', () => {
       expect(resp.price_live).toBe(67230);
       expect(resp.zonas).toHaveLength(2);
       expect(resp.ubicacion.techo?.centro).toBe(69100);
+    });
+  });
+
+  // ============================================================
+  // F3b getValleyEval
+  // ============================================================
+
+  describe('getValleyEval', () => {
+    afterEach(() => vi.restoreAllMocks());
+    it('pide GET /valley-eval/:symbol', async () => {
+      const payload = { symbol: 'ADAUSDT', estado: 'ok', candidata: true, pct_rango: 0.18 };
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
+      const res = await getValleyEval('ADAUSDT');
+      expect(res.candidata).toBe(true);
+      expect(spy.mock.calls[0][0]).toContain('/valley-eval/ADAUSDT');
     });
   });
 

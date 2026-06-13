@@ -427,3 +427,8 @@ export function getDossier(symbol: string, refresh = false) {
 export function getLevels(symbol: string) {
   return request<import('./types').SrLevels>(`/levels/${symbol}`);
 }
+
+// ---- F3b A on-demand — GET /valley-eval/:symbol ----
+export function getValleyEval(symbol: string) {
+  return request<import('./types').ValleyEval>(`/valley-eval/${symbol}`);
+}

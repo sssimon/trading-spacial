@@ -545,6 +545,22 @@ export interface SrLevels {
   ubicacion:    SrUbicacion;
 }
 
+// ---- F3b: A on-demand (vida + rango de una moneda). Spec §2 ----
+export interface ValleyEval {
+  symbol:                string;
+  estado:                'ok' | 'no_disponible';
+  candidata?:            boolean;
+  vivo?:                 boolean;
+  razones_muerte?:       string[];
+  price?:                number;
+  pct_rango?:            number;
+  semanas_consolidando?: number;
+  vol_percentil?:        number;
+  volumen_usd_dia?:      number;
+  distancia_ath_pct?:    number;
+  razones_vida?:         string[];
+}
+
 // Dossier C — hechos citados de un proyecto (sin veredicto). Spec §2.
 export interface DossierMiembro { nombre: string; rol: string | null; enlaces: string[]; fuente: string; }
 export interface DossierCanal { url: string | null; activo: 'si' | 'no' | 'desconocido'; fuente: string | null; }
