@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.plan import router, construir_hechos
+from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
 
 
@@ -13,6 +14,7 @@ def _app():
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_current_tenant_id] = lambda: 2
+    app.dependency_overrides[verify_api_key] = lambda: None
     return TestClient(app)
 
 
@@ -66,3 +68,21 @@ def test_vista_router_registrado():
     import btc_api
     rutas = {getattr(r, "path", None) for r in btc_api.app.routes}
     assert "/plan/{symbol}" in rutas
+
+
+def test_vista_sin_plan_activo_devuelve_none(monkeypatch, tmp_path):
+    import btc_api
+    monkeypatch.setattr(btc_api, "DB_FILE", str(tmp_path / "d.db"))
+    os.environ["MIGRATE_QTY_ALLOW_BULK_QUARANTINE"] = "1"
+    try:
+        from db.schema import init_db
+        init_db()
+    finally:
+        os.environ.pop("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", None)
+    r = _app().get("/plan/NOPEUSDT")
+    assert r.status_code == 200 and r.json()["estado_vivo"] is None
+
+
+def test_confirm_payload_incompleto_es_422():
+    r = _app().post("/plan/confirm", json={"symbol": "BTCUSDT"})   # falta entry_price
+    assert r.status_code == 422

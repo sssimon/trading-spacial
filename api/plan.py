@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
+import requests
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
+from api.deps import verify_api_key
+from api.levels import BinanceUnavailable
 from auth.dependencies import get_current_tenant_id
 from screener.sr_levels import detect_levels
 from instrument.plan import derive_plan
@@ -20,6 +23,12 @@ from db.transaction import snapshot_connection, transaction
 
 log = logging.getLogger("api.plan")
 router = APIRouter(tags=["plan"])
+
+
+class PlanConfirmRequest(BaseModel):
+    symbol: str
+    entry_price: float
+    position_id: int | None = None
 
 
 def _zonas_now(symbol: str) -> list[dict]:
@@ -59,19 +68,30 @@ def construir_hechos(*, rungs_llenos: list, be_movido: bool, estado_vivo: str,
 @router.get("/plan/derive/{symbol}", summary="Deriva el plan desde D.1 (NO persiste)")
 def derive(symbol: str, entry_price: float = Query(...)) -> dict:
     """El operador revisa el plan antes de confirmarlo. NO escribe nada."""
-    zonas = _zonas_now(symbol.upper())
+    symbol = symbol.upper()[:20]
+    try:
+        zonas = _zonas_now(symbol)
+    except (requests.RequestException, BinanceUnavailable, RuntimeError) as e:
+        log.warning("PLAN_DERIVE_NO_DISPONIBLE symbol=%s causa=%s", symbol, e)
+        raise HTTPException(status_code=503, detail="Binance no disponible — reintentá")
     return _plan_payload(derive_plan(zonas, entry_price))
 
 
-@router.post("/plan/confirm", summary="Confirma el plan revisado → crea la fila viva")
-def confirm(payload: dict, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
+@router.post("/plan/confirm", dependencies=[Depends(verify_api_key)],  # TODO(auth-cleanup): añadir require_role("admin") cuando se barra el resto de writes
+             summary="Confirma el plan revisado → crea la fila viva")
+def confirm(req: PlanConfirmRequest, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
     """El operador confirma en frío. Crea la fila lifecycle_states. La red (D.1)
     corre FUERA de la tx corta del insert."""
-    symbol = str(payload["symbol"]).upper()
-    entry_price = float(payload["entry_price"])
-    position_id = payload.get("position_id")
+    symbol = req.symbol.upper()[:20]
+    entry_price = req.entry_price
+    position_id = req.position_id
 
-    zonas = _zonas_now(symbol)
+    try:
+        zonas = _zonas_now(symbol)
+    except (requests.RequestException, BinanceUnavailable, RuntimeError) as e:
+        log.warning("PLAN_DERIVE_NO_DISPONIBLE symbol=%s causa=%s", symbol, e)
+        raise HTTPException(status_code=503, detail="Binance no disponible — reintentá")
+
     plan = derive_plan(zonas, entry_price)
     state = LifecycleState(plan_id=0, fase="CONFIRMED", sl_actual=plan.sl_price)
     now = datetime.now(timezone.utc).isoformat()
@@ -88,9 +108,8 @@ def confirm(payload: dict, tenant_id: int = Depends(get_current_tenant_id)) -> d
 def vista(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
     """PULL: el estado vivo. Hechos, nunca instrucciones. Sin plan activo →
     estado_vivo None (la UI muestra 'sin plan')."""
-    symbol = symbol.upper()
+    symbol = symbol.upper()[:20]
     with snapshot_connection() as con:
-        con.row_factory = sqlite3.Row
         row = db_get_active_state(con, tenant_id=tenant_id, symbol=symbol)
     if row is None:
         return {"symbol": symbol, "estado_vivo": None}
