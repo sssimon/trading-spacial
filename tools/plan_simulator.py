@@ -2,8 +2,8 @@
 
 Corre simulate_plan sobre las posiciones REALES cerradas (filtro BNC-12) con
 frames diarios, y verifica PARIDAD contra el envelope real. Reporta tres cubos:
-máquina legal, paridad, divergencias. SIN PnL, SIN tabla nueva. check_parity es
-PURO; la red (frames) y la lectura DB viven en main(). Spec §5.
+simuladas, paridad, divergencias, no_aplica. SIN PnL, SIN tabla nueva.
+check_parity es PURO; la red (frames) y la lectura DB viven en main(). Spec §5.
 
 Uso: python -m tools.plan_simulator   (network-marked; corre a propósito)
 """
@@ -21,19 +21,25 @@ log = logging.getLogger("tools.plan_simulator")
 
 
 def check_parity(sim_state, pos: dict, plan) -> dict:
-    """PURO. ¿El cierre del sim corresponde direccionalmente al cierre real?
-    real SL ↔ sim SL_HIT/BE_HIT; real TP ↔ sim tocó al menos un rung. Spec §5."""
+    """PURO. Compara el cierre del sim con el real. Spec §5.
+    - real SL ↔ sim SL_HIT/BE_HIT → paridad.
+    - real TP ↔ sim tocó ≥1 rung → paridad.
+    - real MANUAL/TIME_LIMIT (fuera de plan) → parity=None (NO aplica al refutador:
+      el operador salió fuera de plan, no es una refutación de la máquina).
+    - resto → divergencia."""
     real = (pos.get("exit_reason") or "").upper()
     sim = sim_state.close_reason or ""
     real_sl = "SL" in real
     real_tp = "TP" in real
+    if not real_sl and not real_tp:
+        return {"parity": None, "motivo": f"real fuera de plan ({real or '?'})"}
     sim_sl = sim in ("SL_HIT", "BE_HIT")
     sim_toco_rung = bool(sim_state.rungs_llenos)
     if real_sl and sim_sl:
         return {"parity": True, "motivo": "ambos SL"}
     if real_tp and sim_toco_rung:
         return {"parity": True, "motivo": "ambos tocaron TP"}
-    return {"parity": False, "motivo": f"real={real or '?'} sim={sim or '?'}"}
+    return {"parity": False, "motivo": f"real={real} sim={sim or '?'}"}
 
 
 def _forward_candles(symbol: str, entry_ts: str, exit_ts: str | None) -> list[dict]:
@@ -44,6 +50,7 @@ def _forward_candles(symbol: str, entry_ts: str, exit_ts: str | None) -> list[di
     if df.empty:
         return []
     idx = df.index
+    # get_cached_data hoy devuelve índice naive; la rama tz es red de seguridad si eso cambia.
     if getattr(idx, "tz", None) is not None:
         df = df.set_index(idx.tz_convert("UTC").tz_localize(None))
     df = df[df.index >= start.replace(tzinfo=None)]
@@ -57,7 +64,7 @@ def _forward_candles(symbol: str, entry_ts: str, exit_ts: str | None) -> list[di
 def main(tenant_id: int = 2) -> int:
     logging.basicConfig(level=logging.INFO)
     positions = _closed_positions(tenant_id)
-    legal = parity = diverg = 0
+    simuladas = parity = diverg = no_aplica = 0
     divergencias: list[dict] = []
     for pos in positions:
         try:
@@ -68,17 +75,19 @@ def main(tenant_id: int = 2) -> int:
             continue
         if not candles:
             continue
+        simuladas += 1
         plan = derive_plan(zonas, float(pos["entry_price"]))
         _, st = simulate_plan(plan, candles)
-        legal += int(st.fase == "CLOSED")
         res = check_parity(st, pos, plan)
-        if res["parity"]:
+        if res["parity"] is True:
             parity += 1
-        else:
+        elif res["parity"] is False:
             diverg += 1
             divergencias.append({"symbol": pos["symbol"], "id": pos["id"], **res})
-    print(f"plan_simulator: {len(positions)} posiciones · {legal} máquina-legal · "
-          f"{parity} paridad · {diverg} divergencias")
+        else:
+            no_aplica += 1
+    print(f"plan_simulator: {simuladas} simuladas · {parity} paridad · "
+          f"{diverg} divergencias · {no_aplica} fuera de plan")
     for d in divergencias:
         print(f"  DIVERGENCIA {d['symbol']}#{d['id']}: {d['motivo']}")
     return 0

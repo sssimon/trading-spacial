@@ -41,3 +41,30 @@ def test_forward_candles_devuelve_velas():
                                "2025-02-01T00:00:00+00:00")
     assert len(candles) > 5
     assert all({"open", "high", "low", "close"} <= set(c) for c in candles)
+
+
+def test_manual_real_es_no_aplica():
+    st = LifecycleState(plan_id=0, fase="CLOSED", close_reason="SIM_END")
+    r = check_parity(st, {"exit_reason": "MANUAL"}, _plan())
+    assert r["parity"] is None
+    assert "fuera de plan" in r["motivo"]
+
+
+def test_time_limit_real_es_no_aplica():
+    st = LifecycleState(plan_id=0, fase="CLOSED", close_reason="SL_HIT")
+    r = check_parity(st, {"exit_reason": "TIME_LIMIT_HIT"}, _plan())
+    assert r["parity"] is None
+
+
+def test_real_sl_sim_sin_sl_es_divergencia():
+    # real SL pero el sim no cerró por SL (cerró por SIM_END sin rungs) → divergencia
+    st = LifecycleState(plan_id=0, fase="CLOSED", close_reason="SIM_END",
+                        rungs_llenos=frozenset())
+    r = check_parity(st, {"exit_reason": "SL_HIT"}, _plan())
+    assert r["parity"] is False
+
+
+def test_exit_reason_vacio_es_no_aplica():
+    st = LifecycleState(plan_id=0, fase="CLOSED", close_reason="SIM_END")
+    r = check_parity(st, {"exit_reason": None}, _plan())
+    assert r["parity"] is None
