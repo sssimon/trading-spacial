@@ -18,10 +18,14 @@ def resolve_fills(plan, state: LifecycleState, candle: dict) -> list[dict]:
 
     1. SL primero (pesimista): si el SL está armado y la vela lo toca → STOP_HIT.
     2. Si no: cada rung no-lleno con high ≥ tp_price (orden ascendente) → RUNG_FILLED;
-       tras llenarse el rung 0 → SL_MOVED a entry (regla BE del plan)."""
+       tras llenarse el rung 0 → SL_MOVED a entry (regla BE del plan).
+
+    Nota: SL_MOVED se agrupa DESPUÉS de todos los RUNG_FILLED de la misma vela; el swap
+    a intradía necesitará hilarlo distinto."""
     low = float(candle["low"])
     high = float(candle["high"])
 
+    # sl_actual == 0.0 = SL aún no armado; se omite hasta que el simulador lo siembre.
     if state.sl_actual > 0 and low <= state.sl_actual:
         return [{"tipo": "STOP_HIT", "procedencia": "observado"}]
 
@@ -47,6 +51,8 @@ def simulate_plan(plan, candles: list[dict]) -> tuple[list[dict], LifecycleState
     honesta: el plan habría aguantado más que los datos disponibles). Puro. Spec §4."""
     confirm = {"tipo": "PLAN_CONFIRMED", "procedencia": "observado"}
     state = step(LifecycleState(plan_id=0), confirm, plan)
+    # PLAN_CONFIRMED deja sl_actual=0 a propósito (en F1 vivo el SL lo arma el
+    # operador); aquí, sin operador en el loop, el simulador siembra el SL del plan.
     state = replace(state, sl_actual=plan.sl_price)
     events: list[dict] = [confirm]
 

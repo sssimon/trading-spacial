@@ -1,7 +1,7 @@
 """Tests del simulador determinista (instrumento F2). Puro: sin red, sin DB. Spec §3/§4."""
 from instrument.plan import derive_plan
 from instrument.lifecycle import LifecycleState
-from instrument.simulate import resolve_fills
+from instrument.simulate import resolve_fills, simulate_plan
 
 
 def _z(tipo, bajo, alto, centro):
@@ -54,10 +54,7 @@ def test_rung_ya_lleno_no_se_reemite():
     p = _plan()
     candle = {"open": 100, "high": 106, "low": 99, "close": 105}
     evs = resolve_fills(p, _armed(p, rungs_llenos=frozenset({0})), candle)
-    assert all(e.get("rung_index") != 0 for e in evs)
-
-
-from instrument.simulate import simulate_plan
+    assert not any(e["tipo"] == "RUNG_FILLED" and e["rung_index"] == 0 for e in evs)
 
 
 def test_simula_tp1_luego_be_cierra_be_hit():
@@ -91,3 +88,11 @@ def test_simula_nunca_toca_nada_sim_end():
     candles = [{"open": 100, "high": 101, "low": 99, "close": 100} for _ in range(3)]
     _, st = simulate_plan(p, candles)
     assert st.close_reason == "SIM_END"
+
+
+def test_simula_lista_vacia_es_sim_end_inmediato():
+    p = _plan()
+    events, st = simulate_plan(p, [])
+    assert st.fase == "CLOSED" and st.close_reason == "SIM_END"
+    assert events == [{"tipo": "PLAN_CONFIRMED", "procedencia": "observado"},
+                      {"tipo": "SIM_END", "procedencia": "observado"}]
