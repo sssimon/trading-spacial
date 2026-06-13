@@ -86,6 +86,14 @@ def confirm(req: PlanConfirmRequest, tenant_id: int = Depends(get_current_tenant
     entry_price = req.entry_price
     position_id = req.position_id
 
+    if position_id is not None:
+        with snapshot_connection() as con:
+            r = con.execute("SELECT origin FROM positions WHERE id=? AND tenant_id=?",
+                            (position_id, tenant_id)).fetchone()
+        if r is not None and r[0] == "AUTO_DERIVED":
+            raise HTTPException(status_code=422,
+                                detail="posición AUTO_DERIVED no admite plan de conducta (BNC-12)")
+
     try:
         zonas = _zonas_now(symbol)
     except (requests.RequestException, BinanceUnavailable, RuntimeError) as e:

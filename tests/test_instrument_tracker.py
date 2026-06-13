@@ -1,4 +1,5 @@
 """Tests del detector/tracker en vivo (instrumento F3a). Puro: sin red, sin DB. Spec §5."""
+import pytest
 from instrument.plan import derive_plan
 from instrument.lifecycle import LifecycleState
 from instrument.tracker import detect_transitions
@@ -133,11 +134,37 @@ def test_dos_tps_en_un_tick_dan_dos_rung_filled():
     assert rungs == [0, 1]
 
 
-import pytest
-
-
 @pytest.mark.network
 def test_track_live_smoke():
     from tools.sync_binance_spot import track_live
     res = track_live(2)
     assert "avanzados" in res and "cerrados" in res
+
+
+def test_track_live_posicion_cerrada_finaliza(monkeypatch, tmp_path):
+    import btc_api, os, sqlite3
+    monkeypatch.setattr(btc_api, "DB_FILE", str(tmp_path / "d.db"))
+    os.environ["MIGRATE_QTY_ALLOW_BULK_QUARANTINE"] = "1"
+    try:
+        from db.schema import init_db
+        init_db()
+    finally:
+        os.environ.pop("MIGRATE_QTY_ALLOW_BULK_QUARANTINE", None)
+    from db.transaction import transaction
+    from db.lifecycle_states import db_put_state, db_get_active_state
+    from db.conduct_episodes import db_get_episodes
+    p = _plan()
+    s = LifecycleState(plan_id=0, fase="CONFIRMED", sl_actual=p.sl_price)
+    with transaction() as con:
+        db_put_state(con, position_id=None, symbol="BTCUSDT", tenant_id=2, estado_vivo="activo",
+                     plan=p, state=s, entry_price=100.0, qty_original=1.0, events=[],
+                     prev_observed=[], prev_qty=1.0, confirmed_at="2026-06-13T00:00:00+00:00",
+                     updated_at="2026-06-13T00:00:00+00:00")
+    # no hay posición open EXTERNAL → pos is None → POSITION_GONE → cerrado + conducta
+    from tools.sync_binance_spot import track_live
+    res = track_live(2)
+    assert res["cerrados"] == 1
+    with __import__("db.transaction", fromlist=["snapshot_connection"]).snapshot_connection() as con:
+        con.row_factory = sqlite3.Row
+        assert db_get_active_state(con, tenant_id=2, symbol="BTCUSDT") is None  # ya no activo
+        assert len(db_get_episodes(con, tenant_id=2)) == 1                       # conducta persistida
