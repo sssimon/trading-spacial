@@ -16,6 +16,7 @@ import requests
 from fastapi import APIRouter
 
 from api.levels import BinanceUnavailable, _fetch_daily_bars
+from freshness import LiveSnapshot
 from screener.valley_filter import classify_liveness, evaluate_symbol
 
 log = logging.getLogger("api.valleys")
@@ -24,6 +25,8 @@ router = APIRouter(tags=["valleys"])
 
 _OUTPUT = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                        "data", "valley_candidates.json")
+
+FRESCURA_VALLES_SEG = 43200   # 12 horas
 
 _EMPTY = {"generated_at": None,
           "coverage": {"universe": 0, "evaluated": 0, "complete": False},
@@ -52,13 +55,17 @@ def get_valley_eval(symbol: str) -> dict:
 
 @router.get("/valley-candidates", summary="Candidatas del screener de valles (vivas + en rango)")
 def get_valley_candidates() -> dict:
-    """Devuelve la foto del screener. Si aún no se ha corrido el comando, la
-    respuesta es vacía con complete=False (no 500) — la UI muestra 'sin foto'."""
+    """Devuelve la foto del screener con su FRESCURA en el contrato. Archivo
+    ausente → estado 'muerto' (el screener no ha corrido), distinto de una foto
+    vieja → 'rancio'. No más vacío mudo."""
     if not os.path.exists(_OUTPUT):
-        return dict(_EMPTY)
+        return LiveSnapshot(payload=dict(_EMPTY), generated_at=None,
+                            umbral_seg=FRESCURA_VALLES_SEG).to_response()
     try:
         with open(_OUTPUT, encoding="utf-8") as f:
-            return json.load(f)
+            snap = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         log.error("VALLEY_SNAPSHOT_UNREADABLE causa=%s", e)
-        return dict(_EMPTY)
+        snap = dict(_EMPTY)
+    return LiveSnapshot(payload=snap, generated_at=snap.get("generated_at"),
+                        umbral_seg=FRESCURA_VALLES_SEG).to_response()
