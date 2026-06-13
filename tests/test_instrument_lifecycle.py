@@ -82,3 +82,8 @@ def test_eventos_tras_closed_son_noop():
 def test_position_gone_cierra_como_reconciled():
     s = step(_s0(), {"tipo": "POSITION_GONE", "procedencia": "observado"}, _plan())
     assert s.fase == "CLOSED" and s.close_reason == "RECONCILED"
+
+
+def test_sim_end_cierra_como_sim_end():
+    s = step(_s0(), {"tipo": "SIM_END", "procedencia": "observado"}, _plan())
+    assert s.fase == "CLOSED" and s.close_reason == "SIM_END"

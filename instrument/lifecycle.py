@@ -58,4 +58,7 @@ def step(state: LifecycleState, event: dict, plan) -> LifecycleState:
     if tipo == "POSITION_GONE":
         return replace(state, fase="CLOSED", close_reason="RECONCILED")
 
+    if tipo == "SIM_END":
+        return replace(state, fase="CLOSED", close_reason="SIM_END")
+
     return state   # evento desconocido: ignorado
