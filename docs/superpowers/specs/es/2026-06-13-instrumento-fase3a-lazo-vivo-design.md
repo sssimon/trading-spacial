@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_states (
     sl_actual           REAL,
     be_movido           INTEGER NOT NULL,    -- 0/1
     size_restante_frac  REAL,
+    events_json         TEXT    NOT NULL DEFAULT '[]',  -- audit de eventos vivos (para conducta al cierre)
     prev_observed_json  TEXT,               -- último snapshot de observed_orders (para el delta)
     prev_qty            REAL,
     confirmed_at        TEXT    NOT NULL,
