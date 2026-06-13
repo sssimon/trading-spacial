@@ -10,6 +10,7 @@ import { getDossier, getLevels } from '../api';
 import { formatPrice } from '../utils';
 import { ProjectDossier } from './ProjectDossier';
 import { LevelsPanel } from './LevelsPanel';
+import { CoinCard } from './CoinCard';
 import styles from './ValleysView.module.css';
 
 export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({
@@ -19,6 +20,8 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
   const [dossierLoading, setDossierLoading] = useState(false);
   const [levels, setLevels] = useState<SrLevels | null>(null);
   const [levelsLoading, setLevelsLoading] = useState(false);
+  const [cardInput, setCardInput] = useState('');
+  const [cardSymbol, setCardSymbol] = useState('');
 
   if (loading) return <div className={styles.empty}>Cargando…</div>;
   const { generated_at, coverage, candidates } = snapshot;
@@ -31,6 +34,17 @@ export const ValleysView: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
   }
   return (
     <div className={styles.wrap}>
+      <form
+        onSubmit={(e) => { e.preventDefault(); setCardSymbol(cardInput.trim().toUpperCase()); }}
+      >
+        <input
+          value={cardInput}
+          onChange={(e) => setCardInput(e.target.value)}
+          placeholder="Símbolo (ej. SOLUSDT)"
+        />
+        <button type="submit">Ver tarjeta</button>
+      </form>
+      {cardSymbol && <CoinCard symbol={cardSymbol} />}
       <div className={`${styles.meta} prose`}>
         Foto del {new Date(generated_at).toLocaleString('es-ES')} · cobertura{' '}
         {coverage.evaluated} / {coverage.universe}
