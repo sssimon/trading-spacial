@@ -69,11 +69,11 @@ Read-only sobre `positions`; sin `PositionClosure`; red fuera de tx.
 2. Para cada una: reconstruye las zonas de D.1 al momento de la entrada (`detect_levels` sobre velas diarias hasta `entry_ts` — reutiliza el `_bars_as_of` de `tools/lifecycle_falsifier.py` o su equivalente), `derive_plan`.
 3. Trae las velas diarias **hacia adelante** desde `entry_ts` (`get_cached_data(symbol, "1d", entry_ts)`), recortadas hasta `exit_ts` + un margen.
 4. `simulate_plan(plan, candles)` → `(events, final_state)`.
-5. **Paridad** contra el envelope real:
-   - **máquina legal:** `final_state` nunca quedó en un estado imposible (lo garantiza `step`; se afirma).
-   - **paridad:** ¿el cierre del sim corresponde al cierre real? Mapear: real `exit_reason` SL-like ↔ sim `close_reason ∈ {SL_HIT, BE_HIT}`; real TP-like ↔ sim cerró por rungs; y el `exit_price` real cae cerca del nivel donde el sim cerró (tolerancia, reutilizar `_close` 0.5%).
-   - **divergencia:** si no hay paridad, registrar el caso con su motivo (sim dice X, realidad Y).
-6. **Reporte tabular:** contadores `{simuladas, máquina_legal, paridad, divergencias}` + la lista de divergencias con motivo. **Sin tabla nueva, sin PnL.**
+5. **Paridad** contra el envelope real (`check_parity`, puro) — **solo direccional**:
+   - **paridad:** el cierre del sim corresponde al real. Mapeo: real `exit_reason` SL-like ↔ sim `close_reason ∈ {SL_HIT, BE_HIT}`; real TP-like ↔ sim tocó ≥1 rung. (NO se compara `exit_price` contra el nivel: el cierre diario del sim no es comparable al fill real sin slippage — la paridad es direccional, más conservadora.)
+   - **no aplica:** real `exit_reason` MANUAL/MANUAL_AGENT/TIME_LIMIT_HIT (o vacío) → `parity=None`. El operador salió **fuera de plan**; el autopilot no tiene análogo, así que NO es una refutación de la máquina (eso es conducta, territorio de F1/F3). No cuenta como divergencia.
+   - **divergencia:** real SL/TP pero el sim NO coincide → se registra con su motivo (sim dice X, realidad Y).
+6. **Reporte tabular:** contadores `{simuladas, paridad, divergencias, no_aplica}` + la lista de divergencias con motivo. **Sin tabla nueva, sin PnL.** (Nota: se descartó un contador "máquina-legal" — `simulate_plan` siempre cierra vía `SIM_END`, así que era tautológico.)
 
 Uso: `python -m tools.plan_simulator` (network-marked; corre a propósito).
 
