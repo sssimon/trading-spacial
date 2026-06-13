@@ -426,7 +426,8 @@ def screener_loop(stop_event: threading.Event | None = None) -> None:
     interval = load_config().get("screener_interval_sec", SCREENER_INTERVAL_SEC)
     while not stop_event.is_set():
         _screener_cycle()
-        stop_event.wait(interval)
+        if stop_event.wait(interval):
+            break
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -469,7 +470,8 @@ def sync_loop(stop_event: threading.Event | None = None) -> None:
     interval = load_config().get("sync_interval_sec", SYNC_INTERVAL_SEC)
     while not stop_event.is_set():
         _sync_cycle(stop_event)
-        stop_event.wait(interval)
+        if stop_event.wait(interval):
+            break
 
 
 # ─────────────────────────────────────────────────────────────────────────────

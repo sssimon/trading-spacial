@@ -39,3 +39,11 @@ def test_loop_respeta_stop_event():
     with patch("scanner.runtime._screener_cycle") as cyc:
         screener_loop(stop_event=ev)
     assert cyc.call_count == 0
+
+
+def test_sync_loop_respeta_stop_event():
+    from scanner.runtime import sync_loop
+    ev = threading.Event(); ev.set()
+    with patch("scanner.runtime._sync_cycle") as cyc:
+        sync_loop(stop_event=ev)
+    assert cyc.call_count == 0
