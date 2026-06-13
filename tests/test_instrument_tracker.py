@@ -67,3 +67,34 @@ def test_qty_cero_es_stop_hit():
     p = _plan()
     evs = detect_transitions(p, _armed(p), [_sl(p.sl_price, 99)], [], prev_qty=1.0, curr_qty=0.0)
     assert any(e["tipo"] == "STOP_HIT" for e in evs)
+
+
+# ── Task 2: advance_live ────────────────────────────────────────────────────
+from instrument.tracker import advance_live
+
+
+def test_advance_live_aplica_rung_y_avanza():
+    p = _plan()
+    prev = [_tp(105, 11), _sl(p.sl_price, 99)]
+    curr = [_sl(p.sl_price, 99)]
+    new, events = advance_live(p, _armed(p), prev, curr, prev_qty=1.0, curr_qty=0.5)
+    assert 0 in new.rungs_llenos
+    assert "11" in new.consumed_order_ids
+    assert any(e["tipo"] == "RUNG_FILLED" for e in events)
+    assert new.fase == "RUNNING"
+
+
+def test_advance_live_cierre_lleva_a_closed():
+    p = _plan()
+    new, events = advance_live(p, _armed(p), [_sl(p.sl_price, 99)], [],
+                               prev_qty=1.0, curr_qty=0.0)
+    assert new.fase == "CLOSED"
+    assert new.close_reason in ("SL_HIT", "BE_HIT")
+
+
+def test_advance_live_sin_cambios_no_avanza():
+    p = _plan()
+    obs = [_sl(p.sl_price, 99)]
+    new, events = advance_live(p, _armed(p), obs, obs, prev_qty=1.0, curr_qty=1.0)
+    assert events == []
+    assert new.fase == "CONFIRMED"
