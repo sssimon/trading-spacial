@@ -45,4 +45,10 @@ describe('ValleysView', () => {
     render(<ValleysView snapshot={snap} loading={false} />);
     expect(screen.getAllByRole('button', { name: /niveles/i })).toHaveLength(2);
   });
+
+  it('ofrece un input de símbolo para abrir la tarjeta', () => {
+    render(<ValleysView snapshot={snap} loading={false} />);
+    expect(screen.getByPlaceholderText(/símbolo/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ver tarjeta/i })).toBeInTheDocument();
+  });
 });
