@@ -89,7 +89,7 @@ def test_advance_live_cierre_lleva_a_closed():
     new, events = advance_live(p, _armed(p), [_sl(p.sl_price, 99)], [],
                                prev_qty=1.0, curr_qty=0.0)
     assert new.fase == "CLOSED"
-    assert new.close_reason in ("SL_HIT", "BE_HIT")
+    assert new.close_reason == "SL_HIT"
 
 
 def test_advance_live_sin_cambios_no_avanza():
@@ -122,3 +122,12 @@ def test_finalize_conduct_al_cierre():
     assert c["rungs_honrados"] == 1
     assert c["procedencia"] == "observado"
     assert "hold_hours" in c
+
+
+def test_dos_tps_en_un_tick_dan_dos_rung_filled():
+    p = _plan()
+    prev = [_tp(105, 11), _tp(110, 12), _sl(p.sl_price, 99)]
+    curr = [_sl(p.sl_price, 99)]   # ambos TP desaparecen, qty baja
+    evs = detect_transitions(p, _armed(p), prev, curr, prev_qty=1.0, curr_qty=0.3)
+    rungs = sorted(e["rung_index"] for e in evs if e["tipo"] == "RUNG_FILLED")
+    assert rungs == [0, 1]

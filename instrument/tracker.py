@@ -21,18 +21,24 @@ def detect_transitions(plan, state: LifecycleState, prev_observed: list[dict],
                        curr_observed: list[dict], prev_qty: float,
                        curr_qty: float) -> list[dict]:
     """Snapshots de observed_orders (prev/curr) + qty → eventos para step(). Puro."""
+    if state.fase == "CLOSED":
+        return []   # terminal: no se re-emiten eventos sobre un estado cerrado
+
     proc = "observado"
     events: list[dict] = []
-    curr_ids = {o["order_id"] for o in curr_observed}
+    curr_ids = {str(o["order_id"]) for o in curr_observed}   # normaliza a str (consistente con consumed_order_ids)
     qty_dropped = curr_qty < prev_qty - _EPS
 
     if qty_dropped:
         for o in prev_observed:
             oid = str(o["order_id"])
-            if o.get("kind") != "TP" or o["order_id"] in curr_ids:
+            if o.get("kind") != "TP" or oid in curr_ids:
                 continue
             if oid in state.consumed_order_ids:
                 continue
+            # Asume precios de TP distintos por rung (vienen de zonas de resistencia
+            # distintas). break tras el primer match: con rungs a <0.5% podría
+            # mis-atribuir, pero derive_plan no produce rungs tan juntos.
             for i, r in enumerate(plan.rungs):
                 if i in state.rungs_llenos:
                     continue
