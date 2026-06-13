@@ -71,3 +71,14 @@ def test_valles_foto_vieja_es_rancia(tmp_path):
     with patch("api.valleys._OUTPUT", str(p)):
         r = _veapp().get("/valley-candidates")
     assert r.json()["frescura"]["estado"] == "rancio"
+
+
+def test_valles_foto_fresca_es_fresca(tmp_path):
+    ahora = datetime.now(timezone.utc).isoformat()
+    p = tmp_path / "foto_fresca.json"
+    p.write_text(json.dumps({"generated_at": ahora,
+                             "coverage": {"universe": 1, "evaluated": 1, "complete": True},
+                             "candidates": []}), encoding="utf-8")
+    with patch("api.valleys._OUTPUT", str(p)):
+        r = _veapp().get("/valley-candidates")
+    assert r.json()["frescura"]["estado"] == "fresco"

@@ -33,6 +33,8 @@ def test_genera_y_cachea_en_miss(monkeypatch, tmp_path):
         r = _app().get("/dossier/ADAUSDT")
     assert r.status_code == 200
     assert r.json()["estado_general"] == "opaco"
+    assert "frescura" in r.json()
+    assert r.json()["frescura"]["estado"] in ("fresco", "rancio", "muerto")
     assert gen.call_count == 1
     # Segunda llamada: caché-hit, NO regenera.
     with patch("api.dossier.build_dossier_live", side_effect=_fake_dossier) as gen2:
