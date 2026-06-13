@@ -98,3 +98,27 @@ def test_advance_live_sin_cambios_no_avanza():
     new, events = advance_live(p, _armed(p), obs, obs, prev_qty=1.0, curr_qty=1.0)
     assert events == []
     assert new.fase == "CONFIRMED"
+
+
+# ── Task 6: finalize_conduct ────────────────────────────────────────────────
+from instrument.tracker import finalize_conduct
+
+
+def test_finalize_conduct_al_cierre():
+    p = _plan()
+    events = [
+        {"tipo": "RUNG_FILLED", "order_id": "11", "rung_index": 0, "procedencia": "observado"},
+        {"tipo": "SL_MOVED", "nuevo_sl": p.entry_price, "procedencia": "observado"},
+        {"tipo": "STOP_HIT", "procedencia": "observado"},
+    ]
+    from instrument.lifecycle import LifecycleState, step
+    st = LifecycleState(plan_id=0, fase="CONFIRMED", sl_actual=p.sl_price)
+    for e in events:
+        st = step(st, e, p)
+    c = finalize_conduct(p, events, st, entry_price=100.0,
+                         entry_ts="2026-06-10T00:00:00+00:00",
+                         exit_ts="2026-06-12T00:00:00+00:00")
+    assert c["adherencia_be"] is True
+    assert c["rungs_honrados"] == 1
+    assert c["procedencia"] == "observado"
+    assert "hold_hours" in c
