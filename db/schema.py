@@ -1915,6 +1915,7 @@ def _migrate_lifecycle_states(con: sqlite3.Connection) -> None:
                sl_actual            REAL,
                be_movido            INTEGER NOT NULL,
                size_restante_frac   REAL,
+               close_reason         TEXT,
                events_json          TEXT    NOT NULL DEFAULT '[]',
                prev_observed_json   TEXT,
                prev_qty             REAL,
@@ -1923,6 +1924,16 @@ def _migrate_lifecycle_states(con: sqlite3.Connection) -> None:
                UNIQUE (tenant_id, symbol, confirmed_at)
            )"""
     )
+    # Migración idempotente: ADD COLUMN close_reason si la tabla ya existía sin ella.
+    # PRAGMA-guarded (NOT try/except) para que la tx BEGIN IMMEDIATE no quede
+    # marcada como abortable si la columna ya existe (patrón Serrano HIGH 1).
+    ls_cols = {
+        row[1]
+        for row in con.execute("PRAGMA table_info(lifecycle_states)").fetchall()
+    }
+    if "close_reason" not in ls_cols:
+        con.execute("ALTER TABLE lifecycle_states ADD COLUMN close_reason TEXT")
+        log.info("_migrate_lifecycle_states: added close_reason column to lifecycle_states")
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_lifecycle_states_tenant "
         "ON lifecycle_states(tenant_id, estado_vivo)"
