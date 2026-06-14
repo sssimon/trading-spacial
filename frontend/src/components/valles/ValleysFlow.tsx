@@ -62,7 +62,7 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
             {/* §4.1 — promesa de solo-hechos, no veredicto de operabilidad */}
             <span className={styles.vwBrandTag}>los hechos, lente por lente — la decisión es tuya</span>
           </div>
-          {step > 0 && (
+          {step > 0 && sym && (
             <div className={styles.vwSteps} role="group" aria-label={`Paso ${lensIdx + 1} de ${LENS.length}`}>
               <span className={styles.vwStepCount}>Paso {Math.min(lensIdx + 1, LENS.length)} de {LENS.length}</span>
               {LENS.map((l, i) => (
@@ -87,7 +87,7 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
             : React.isValidElement(screen) ? React.cloneElement(screen, { key: cur + sym } as never) : screen}
         </div>
 
-        {step > 0 && cur !== 'pick' && (
+        {step > 0 && cur !== 'pick' && sym && (
           <div className={styles.vwNav}>
             <div className={styles.vwNavInner}>
               <button className={`${styles.vwBtn} ${styles.vwBtnGhost}`} onClick={() => go((s) => s - 1)} disabled={step <= 1}>← Atrás</button>
@@ -98,7 +98,7 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
           </div>
         )}
 
-        {!dock && step >= 1 && <button className={styles.vwFab} onClick={() => setDock(true)} aria-label="Preguntar al copiloto">◈</button>}
+        {!dock && step >= 1 && sym && <button className={styles.vwFab} onClick={() => setDock(true)} aria-label="Preguntar al copiloto">◈</button>}
         {dock && <Copilot onClose={() => setDock(false)} />}
       </div>
     </div>
