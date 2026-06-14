@@ -26,6 +26,7 @@ const BottomNav: React.FC<BottomNavProps> = ({ active, counts, onSelect }) => {
     { id: 'mercado',     label: 'Mercado',    icon: 'mercado',    count: counts.market },
     { id: 'posiciones',  label: 'Posiciones', icon: 'positions',  count: counts.positions },
     { id: 'kill-switch', label: 'Kill-sw.',   icon: 'killswitch', count: counts.killswitch },
+    { id: 'valles',      label: 'Valles',     icon: 'history' },
     { id: 'menu',        label: 'Más',        icon: 'config' },
   ];
 
