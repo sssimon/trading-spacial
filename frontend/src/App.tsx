@@ -78,7 +78,7 @@ import KillSwitchView, { type AskAgentPayload as KsAskAgentPayload } from './com
 import { type CardVerdict } from './helpers/kill-switch-copilot';
 import HistorialView from './components/HistorialView';
 import type { ClosedTrade } from './helpers/historial';
-import { ValleysView } from './components/ValleysView';
+import { ValleysFlow } from './components/valles/ValleysFlow';
 import type { ValleySnapshot } from './types';
 
 // New components
@@ -167,6 +167,7 @@ const App: React.FC = () => {
     coverage: { universe: 0, evaluated: 0, complete: false },
     candidates: [],
   });
+  const [valleysLoading, setValleysLoading] = useState(false);
 
   // ── data fetching ──────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -221,7 +222,8 @@ const App: React.FC = () => {
   // Vista Valles A — load on-demand when the tab is first opened.
   useEffect(() => {
     if (mainTab === 'valles') {
-      getValleyCandidates().then(setValleys).catch(() => {});
+      setValleysLoading(true);
+      getValleyCandidates().then(setValleys).catch(() => {}).finally(() => setValleysLoading(false));
     }
   }, [mainTab]);
 
@@ -760,7 +762,7 @@ const App: React.FC = () => {
 
           {/* ── Valles (Análisis → Valles) ─────────── */}
           {mainTab === 'valles' && (
-            <ValleysView snapshot={valleys} loading={false} />
+            <ValleysFlow snapshot={valleys} loading={valleysLoading} />
           )}
 
           <footer className={appStyles.footer}>
