@@ -1,6 +1,0 @@
-.card { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 12px; margin-top: 12px; }
-.head { font-weight: 600; font-size: 1.1em; margin-bottom: 8px; }
-.sec { border-top: 1px solid var(--border, #2a2a2a); padding: 8px 0; }
-.sec h4 { margin: 0 0 4px; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.04em; }
-.row { font-variant-numeric: tabular-nums; }
-.empty { opacity: 0.7; }
