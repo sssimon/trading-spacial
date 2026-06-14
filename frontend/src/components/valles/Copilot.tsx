@@ -10,18 +10,18 @@ const VERDICT  = /(compr|conviene|mejor|vend|buena|mala)/i;
 
 export function canned(qRaw: string): CannedReply {
   const q = (qRaw || '').toLowerCase();
-  if (SIZING.test(q)) return { refusal: true, tag: 'no te dice cuánto', html: <>El tamaño lo decides tú, a propósito. Valles no te dice cuánto poner — solo te muestra los hechos para que decidas con tu criterio.</> };
+  if (SIZING.test(q)) return { refusal: true, tag: 'no te dice cuánto', html: <>El tamaño lo decides tú, a propósito. Valles no te dice cuánto poner. Solo te muestra los hechos para que decidas con tu criterio.</> };
   if (DECISION.test(q) || VERDICT.test(q)) return { refusal: true, tag: 'no decide', html: <>No te digo si comprar ni cuál es "la mejor". No existe un puntaje de calidad: la herramienta muestra hechos y el veredicto es tuyo.</> };
   if (q.includes('valle') || q.includes('quiet') || q.includes('viva')) return { tag: 'fact', html: <>"En valle" quiere decir que la moneda <b>se mueve poco</b>, dentro de una franja angosta, durante varias semanas. Es una descripción del gráfico, no un consejo.</> };
   if (q.includes('viej') || q.includes('fresc') || q.includes('ranci') || q.includes('actual')) return { tag: 'fact', html: <>Cada lectura te dice su edad. Si algo es de hace varios días te aviso que pudo cambiar.</> };
   return { tag: 'fact', html: <>Te leo hechos: si está viva, dónde está el precio respecto a sus paredes, y quién está detrás con su fuente. Pregúntame por cualquiera.</> };
 }
 
-const SUGG = ['¿Qué quiere decir "en valle"?', '¿Está vieja la info?', '¿Cuál conviene comprar?', '¿Cuánto pongo?'];
+const SUGG = ['¿Qué quiere decir "en valle"?', '¿Está vieja la información?', '¿Cuál conviene comprar?', '¿Cuánto pongo?'];
 type Msg = { role: 'user' | 'assistant'; html: React.ReactNode; tag?: string; refusal?: boolean };
 
 export const Copilot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const [msgs, setMsgs] = useState<Msg[]>([{ role: 'assistant', tag: 'fact', html: <>Te leo los hechos de las tres lentes. No predigo, no rankeo, y no te digo cuánto poner.</> }]);
+  const [msgs, setMsgs] = useState<Msg[]>([{ role: 'assistant', tag: 'fact', html: <>Te leo los hechos de las tres lentes. No predigo, no digo cuál es mejor, y no te digo cuánto poner.</> }]);
   const [input, setInput] = useState('');
   const scroll = useRef<HTMLDivElement>(null);
   useEffect(() => { if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }, [msgs]);

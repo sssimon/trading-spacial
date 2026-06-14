@@ -27,10 +27,10 @@ export const NivelesScreen: React.FC<{ symbol: string; state: AsyncState<SrLevel
     let lead: string, say: React.ReactNode, ratio: number;
     if (inside && inside.tipo === 'soporte') {
       lead = 'El precio está sobre un piso'; ratio = 0.7;
-      say = <>Es un piso donde el precio <b>ya giró ahí {inside.toques} veces</b> antes — un hecho del gráfico.</>;
+      say = <>Es un piso donde el precio <b>ya giró ahí {inside.toques} veces</b> antes.</>;
     } else if (inside && inside.tipo === 'resistencia') {
       lead = 'El precio está contra un techo'; ratio = 0.3;
-      say = <>Es un techo donde el precio <b>ya giró ahí {inside.toques} veces</b> antes — un hecho del gráfico.</>;
+      say = <>Es un techo donde el precio <b>ya giró ahí {inside.toques} veces</b> antes.</>;
     } else {
       lead = 'Está en el medio';
       const t = u.techo ? u.techo.dist_pct : 1, p = u.piso ? Math.abs(u.piso.dist_pct) : 1;

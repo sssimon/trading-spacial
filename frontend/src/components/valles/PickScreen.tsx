@@ -24,7 +24,7 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
 
       {candidates.length > 0 && (
         <p className={styles.vwPickLead}>
-          Son las que ahora mismo se mueven poco y siguen vivas — el filtro que hace Valles,
+          Son las que ahora mismo se mueven poco y siguen vivas: el filtro que hace Valles,
           mecánico, no un consejo. Elige una para mirarla de cerca con las tres lentes.
         </p>
       )}

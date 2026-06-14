@@ -8,7 +8,7 @@ import styles from './valles.module.css';
 const RAZONES_MUERTE: Record<string, string> = {
   volumen_bajo_piso: 'El volumen está por debajo del piso que se pide.',
   volumen_agonizante: 'El volumen viene cayendo hasta casi apagarse.',
-  velas_planas: 'Las velas están casi planas — apenas se mueve.',
+  velas_planas: 'Las velas están casi planas: apenas se mueve.',
   historia_insuficiente: 'No hay suficiente historia para evaluarla.',
 };
 
