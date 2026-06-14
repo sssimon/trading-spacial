@@ -1,6 +1,6 @@
 // atoms.test.tsx
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { Eyebrow, Loading, Callout } from './atoms';
 
 it('Eyebrow muestra el nombre humano y el símbolo', () => {
