@@ -1,6 +1,6 @@
 // recap.test.ts
-import { describe, it, expect } from 'vitest';
-import { vidaRecap, nivelesRecap, dossierRecap } from './recap';
+import { it, expect } from 'vitest';
+import { vidaRecap, dossierRecap } from './recap';
 
 it('vidaRecap distingue viva / muy quieta / sin dato', () => {
   expect(vidaRecap({ symbol: 'X', estado: 'ok', candidata: true } as never)).toBe('Viva y tranquila');

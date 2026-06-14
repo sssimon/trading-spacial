@@ -1,6 +1,6 @@
 // NivelesScreen.test.tsx
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { NivelesScreen } from './NivelesScreen';
 import type { AsyncState } from './useValleyBundle';
 import type { SrLevels } from '../../types';
