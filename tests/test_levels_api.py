@@ -68,6 +68,14 @@ def test_endpoint_no_toca_db():
 
 
 def test_router_registrado_en_la_app():
+    # Guarda la regresión "alguien borró el include_router(levels_router)" de
+    # forma determinista, vía inspección de fuente (mismo idioma que
+    # test_endpoint_no_toca_db arriba). NO se lee btc_api.app.routes: ese
+    # singleton puede observarse a medio construir según el orden de import del
+    # arnés (import re-entrante vía db/connection.py), un artefacto del test
+    # que no afirma nada sobre el código. El comportamiento runtime de la ruta
+    # ya está cubierto por los _app()-tests de este archivo (test_payload_ok…).
+    import inspect
+
     import btc_api
-    rutas = {getattr(r, "path", None) for r in btc_api.app.routes}
-    assert "/levels/{symbol}" in rutas
+    assert "include_router(levels_router)" in inspect.getsource(btc_api)
