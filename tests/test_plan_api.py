@@ -65,9 +65,16 @@ def test_hechos_reportan_tp1_y_be():
 
 
 def test_vista_router_registrado():
+    # Guarda la regresión "alguien borró el include_router(plan_router)" de
+    # forma determinista, vía inspección de fuente (mismo idioma que
+    # test_endpoint_no_toca_db en test_levels_api). NO se lee btc_api.app.routes:
+    # ese singleton puede observarse a medio construir según el orden de import
+    # del arnés (import re-entrante vía db/connection.py). El comportamiento
+    # runtime de los endpoints ya está cubierto por los _app()-tests de arriba.
+    import inspect
+
     import btc_api
-    rutas = {getattr(r, "path", None) for r in btc_api.app.routes}
-    assert "/plan/{symbol}" in rutas
+    assert "include_router(plan_router)" in inspect.getsource(btc_api)
 
 
 def test_vista_sin_plan_activo_devuelve_none(monkeypatch, tmp_path):

@@ -96,21 +96,32 @@ def test_agent_side_effects_idempotency_key_is_unique(tmp_db):
 
 
 def _seed_two_tenant_positions(con):
-    """Seed two open + two closed positions per tenant in the same symbol."""
+    """Seed two open + two closed positions per tenant in the same symbol.
+
+    Timestamps are relative to *now* so the two closed trades stay comfortably
+    inside the 30d window of get_closed_trades regardless of the calendar date.
+    Hardcoded 2026-05-15 dates crossed the (now - 30d) boundary on 2026-06-14,
+    making get_closed_trades return 1 of 2 trades — a horario flake (assert 1 == 2).
+    """
+    from datetime import datetime, timedelta, timezone
+    base_ts = datetime.now(timezone.utc) - timedelta(days=3)
+    entry_iso = base_ts.isoformat()
+    exit1_iso = (base_ts + timedelta(hours=2)).isoformat()
+    exit2_iso = (base_ts + timedelta(hours=5)).isoformat()
     for tid, base_price in ((1, 50_000.0), (2, 60_000.0)):
         for direction, status, exit_price, exit_ts, pnl in (
-            ("LONG", "open",   None,            None,                       None),
-            ("LONG", "open",   None,            None,                       None),
-            ("LONG", "closed", base_price * 1.02, "2026-05-15T12:00:00+00:00",  base_price * 0.02),
-            ("LONG", "closed", base_price * 0.98, "2026-05-15T15:00:00+00:00", -base_price * 0.02),
+            ("LONG", "open",   None,            None,      None),
+            ("LONG", "open",   None,            None,      None),
+            ("LONG", "closed", base_price * 1.02, exit1_iso,  base_price * 0.02),
+            ("LONG", "closed", base_price * 0.98, exit2_iso, -base_price * 0.02),
         ):
             con.execute(
                 "INSERT INTO positions "
                 "(symbol, direction, status, entry_price, entry_ts, size_usd, qty, "
                 " exit_price, exit_ts, pnl_usd, tenant_id) "
-                "VALUES ('BTCUSDT', ?, ?, ?, '2026-05-15T10:00:00+00:00', 1000, 0.02, "
+                "VALUES ('BTCUSDT', ?, ?, ?, ?, 1000, 0.02, "
                 " ?, ?, ?, ?)",
-                (direction, status, base_price, exit_price, exit_ts, pnl, tid),
+                (direction, status, base_price, entry_iso, exit_price, exit_ts, pnl, tid),
             )
     # No con.commit() — db.transaction's context manager COMMITs on clean
     # exit; calling commit() here would leave the outer CM with no active

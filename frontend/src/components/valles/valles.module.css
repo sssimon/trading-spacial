@@ -1,0 +1,520 @@
+/* ============================================================
+   valles.module.css — tema CÁLIDO de Valles (paper / editorial calmo)
+   Portado de valles-warm.css. CONFINADO a .vwRoot.
+   NO declara nada en :root ni en html/body/* (eso repintaría toda la app).
+   Las fuentes (Source Serif 4 + Instrument Sans) se cargan vía <link> en
+   frontend/index.html, siguiendo el patrón existente del codebase.
+
+   Paleta: papel cálido, tinta cálida, un solo acento ARCILLA.
+   Verde salvia / ocre = SOLO frescura (no juicio). Slate = dato neutro.
+   Serif (Source Serif 4) para preguntas, respuestas y números.
+   Sans (Instrument Sans) para todo lo demás.
+   ============================================================ */
+
+.vwRoot {
+  /* tokens (hex de contraste ya corregidos · §7) */
+  --paper: #F4F0E8; --paper-2: #EFE9DD;
+  --card: #FBF9F4; --card-edge: #E4DCCC; --card-edge-2: #D8CDB8;
+  --ink: #2A2722; --ink-2: #5C564A;
+  --ink-3: #6E6757;   /* era #8A8270 (3.35:1, reprueba) → ~4.6:1 */
+  --ink-4: #6F6856;   /* era #ABA08A (2.27:1, reprueba) → ~4.6:1 */
+  --clay: #B8542E; --clay-deep: #9A4424; --clay-soft: #EDD9CC; --clay-tint: #F3E6DC;
+  --sage: #5E7048; --sage-soft: #E2E6D4; --sage-tint: #ECEFE2;
+  --ochre: #8A5E1C;   /* era #A9772A (3.45:1, reprueba; color de "atención") → ~5:1 */
+  --ochre-soft: #EFE0C4; --ochre-tint: #F2E8D4;
+  --slate: #4C5A66;
+  --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --maxw: 660px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================
+   SHELL — viewport completo, columna centrada, un foco
+   ============================================================ */
+.vw {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* barra superior fina: wordmark + progreso de las tres lentes */
+.vwTop {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px clamp(20px, 5vw, 56px);
+  max-width: 1100px;
+}
+.vwBrand { display: flex; align-items: center; gap: 11px; }
+.vwBrandMark {
+  width: 26px; height: 26px; flex: none;
+  display: grid; place-items: center;
+  border: 1.5px solid var(--clay);
+  border-radius: 50%;
+  color: var(--clay);
+  font-family: var(--serif);
+  font-size: 14px;
+}
+.vwBrandName {
+  font-family: var(--serif);
+  font-size: 19px; font-weight: 600;
+  letter-spacing: 0.01em; color: var(--ink);
+}
+.vwBrandTag {
+  font-size: 12.5px; color: var(--ink-3);
+  border-left: 1px solid var(--card-edge-2);
+  padding-left: 11px; margin-left: 3px;
+}
+
+/* progreso de pasos (tres lentes) */
+.vwSteps { display: flex; align-items: center; gap: 4px; }
+.vwStep {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 4px;
+  font-size: 13px; color: var(--ink-4);
+  cursor: pointer; background: none; border: none;
+  font-family: var(--sans);
+  transition: color 160ms var(--ease);
+}
+.vwStep:disabled { cursor: default; }
+.vwStepN {
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--card-edge-2);
+  font-size: 12px; color: var(--ink-4);
+  transition: all 200ms var(--ease);
+}
+.vwStepDone .vwStepN { border-color: var(--sage); color: var(--sage); }
+.vwStepActive { color: var(--ink); }
+.vwStepActive .vwStepN { border-color: var(--clay); background: var(--clay); color: #fff; }
+.vwStepSep { width: 16px; height: 1px; background: var(--card-edge-2); }
+
+/* "Paso X de Y" — texto del contador de pasos (móvil / fallback compacto) */
+.vwStepCount {
+  font-size: 13px; color: var(--ink-3);
+  letter-spacing: 0.02em;
+  font-family: var(--sans);
+}
+
+/* área central — un único foco, centrado vertical */
+.vwStage {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(16px, 4vh, 48px) clamp(20px, 5vw, 56px) 130px;
+}
+.vwScreen {
+  width: 100%;
+  max-width: var(--maxw);
+  opacity: 1;
+  animation: vwIn 520ms var(--ease);
+}
+@keyframes vwIn {
+  from { transform: translateY(16px); }
+  to   { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vwScreen { animation: none; }
+}
+
+/* eyebrow: moneda + frescura corta */
+.vwEyebrow {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.vwEyebrowCoin {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--clay-deep);   /* §7 — texto-clay legible */
+}
+.vwEyebrowSym { font-size: 12.5px; color: var(--ink-4); letter-spacing: 0.06em; }
+
+/* la pregunta grande (serif) */
+.vwQuestion {
+  font-family: var(--serif);
+  font-size: clamp(26px, 4.2vw, 38px);
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.vwQuestion .num { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   RESPUESTA — el bloque grande de una sola lente
+   ============================================================ */
+.vwAnswer { margin-top: 26px; }
+.vwAnswerRow { display: flex; align-items: flex-start; gap: 18px; }
+.vwAnswerRow > div:last-child { flex: 1; min-width: 0; }
+.vwAnswerIcon {
+  width: 56px; height: 56px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 14px;
+  font-size: 26px;
+  /* §4.2 — icono de respuesta NEUTRO (sin verde/ámbar de juicio).
+     sage/ochre se reservan para frescura. */
+  background: var(--paper-2); color: var(--slate);
+  border: 1px solid var(--card-edge-2);
+}
+.vwAnswerLead {
+  font-family: var(--serif);
+  font-size: clamp(22px, 3vw, 28px);
+  font-weight: 600; line-height: 1.22;
+  color: var(--ink); letter-spacing: -0.01em;
+}
+.vwAnswerSay {
+  font-size: 18px; line-height: 1.6; color: var(--ink-2);   /* §7 — cuerpo ≥18px */
+  margin-top: 8px; text-wrap: pretty;
+}
+.vwAnswerSay b { color: var(--ink); font-weight: 600; }
+
+/* hechos en palabras */
+.vwFacts { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
+.vwFact {
+  display: flex; align-items: flex-start; gap: 13px;
+  font-size: 18px; line-height: 1.5; color: var(--ink);   /* §7 — cuerpo ≥18px */
+}
+.vwFactB { color: var(--clay-deep); flex: none; margin-top: 1px; font-size: 14px; }   /* §7 — texto-clay legible */
+.vwFact b { font-weight: 600; }
+
+/* ============================================================
+   DIBUJO 2 — el edificio de niveles (Niveles)
+   ============================================================ */
+.vwLevels { margin-top: 30px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 26px; align-items: center; }
+.vwBuilding { position: relative; height: 280px; }
+.vwFloor {
+  position: absolute; left: 0; right: 0; height: 58px;
+  border-radius: 11px; display: flex; align-items: center; gap: 12px;
+  padding: 0 16px;
+}
+/* §4.2 — bandas de niveles en un mismo neutro (no piso=verde / techo=ámbar) */
+.vwFloorTecho { top: 0; background: var(--card); border: 1px solid var(--card-edge-2); color: var(--ink-2); }
+.vwFloorPiso  { bottom: 0; background: var(--card); border: 1px solid var(--card-edge-2); color: var(--ink-2); }
+.vwFloorArrow { font-size: 18px; color: var(--slate); }
+.vwFloorLbl { font-size: 14px; color: var(--ink-2); line-height: 1.3; }
+.vwFloorLbl b { display: block; font-family: var(--serif); font-size: 18px; color: var(--ink); font-weight: 600; }
+/* línea de "estás acá" */
+.vwHere { position: absolute; left: -6px; right: -6px; display: flex; align-items: center; gap: 0; }
+.vwHereDot { width: 16px; height: 16px; border-radius: 50%; background: var(--clay); box-shadow: 0 0 0 6px var(--clay-tint); flex: none; z-index: 2; }
+.vwHereLine { flex: 1; border-top: 2px dashed var(--clay); opacity: 0.6; }
+.vwHereTag { font-size: 13px; color: #fff; background: var(--clay); padding: 4px 11px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
+.vwLevelsRead { display: flex; flex-direction: column; gap: 20px; }
+.vwDistK { font-size: 13.5px; color: var(--ink-3); }
+.vwDistV { font-family: var(--serif); font-size: 23px; font-weight: 600; margin-top: 3px; color: var(--ink); }
+
+/* nota neutral */
+.vwNeutral {
+  margin-top: 26px; padding: 15px 18px;
+  background: var(--card); border: 1px solid var(--card-edge); border-radius: 12px;
+  border-left: 3px solid var(--slate);
+  font-size: 15px; line-height: 1.55; color: var(--ink-2);
+}
+.vwNeutral b { color: var(--ink); font-weight: 600; }
+
+/* ============================================================
+   FUNDAMENTALES — quién está detrás
+   ============================================================ */
+.vwPeople { margin-top: 24px; display: flex; flex-direction: column; gap: 14px; }
+.vwPerson { display: flex; align-items: center; gap: 15px; }
+.vwPerson > div:last-child { flex: 1; min-width: 0; }
+.vwPersonFace {
+  width: 46px; height: 46px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--clay-tint); color: var(--clay); font-size: 19px;
+}
+.vwPersonName { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); }
+.vwPersonRole { font-size: 16px; color: var(--ink-2); margin-top: 1px; }   /* §7 — ≥16px */
+.vwChannels { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+.vwChannel {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 10px 15px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--card-edge);
+  font-size: 14.5px; color: var(--ink); text-decoration: none;
+  transition: all 140ms var(--ease);
+}
+.vwChannel:hover { border-color: var(--clay); color: var(--clay-deep); }
+.vwChannelDot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.vwChannelDot_si { background: var(--sage); }
+.vwChannelDot_no { background: var(--clay); }
+.vwChannelDot_desconocido { background: var(--ink-4); }
+/* etiqueta inline de estado del canal ("activo/inactivo/sin confirmar") */
+.vwChannelState { font-size: 12.5px; color: var(--ink-3); letter-spacing: 0.02em; }
+/* enlace "fuente" */
+.vwSrc {
+  font-size: 12.5px; color: var(--clay-deep); text-decoration: none;
+  border-bottom: 1px solid var(--clay-soft);
+  transition: color 140ms var(--ease);
+}
+.vwSrc:hover { color: var(--clay); border-bottom-color: var(--clay); }
+
+/* fundamentales frescos (sage = frescura, uso legítimo) */
+.vwFundFresh {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--sage);
+}
+
+/* ============================================================
+   ESTADO viejo / sin datos
+   ============================================================ */
+.vwCallout {
+  margin-top: 24px; display: flex; gap: 16px; align-items: flex-start;
+  padding: 18px 20px; border-radius: 14px;
+}
+.vwCalloutOchre { background: var(--ochre-tint); border: 1px solid #E4CF9E; }
+.vwCalloutMute { background: var(--card); border: 1px dashed var(--card-edge-2); }
+.vwCalloutIcon { font-size: 22px; flex: none; }
+.vwCalloutOchre .vwCalloutIcon { color: var(--ochre); }
+.vwCalloutMute .vwCalloutIcon { color: var(--ink-3); }
+.vwCallout > div { flex: 1; min-width: 0; }
+.vwCalloutTitle { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); }
+.vwCalloutSub { font-size: 16px; line-height: 1.55; color: var(--ink-2); margin-top: 4px; }   /* §7 — ≥16px */
+.vwCalloutRetry {
+  margin-top: 12px; font-family: var(--sans); font-size: 14px; font-weight: 500;
+  color: var(--clay-deep); background: none; border: 1px solid var(--clay-soft);
+  padding: 8px 14px; border-radius: 999px; cursor: pointer;
+}
+.vwCalloutRetry:hover { background: var(--clay-soft); }
+
+/* ============================================================
+   "VER LOS NÚMEROS" — divulgación progresiva
+   ============================================================ */
+.vwMore { margin-top: 28px; border-top: 1px solid var(--card-edge); padding-top: 6px; }
+.vwMoreToggle {
+  width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 0; background: none; border: none; cursor: pointer;
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  letter-spacing: 0.04em; color: var(--ink-3);
+  transition: color 140ms var(--ease);
+}
+.vwMoreToggle:hover { color: var(--clay); }
+.vwMoreCaret { transition: transform 200ms var(--ease); display: inline-block; }
+.vwMoreCaretOpen { transform: rotate(90deg); }
+.vwMorePanel {
+  padding: 8px 0 6px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--card-edge); border: 1px solid var(--card-edge);
+  border-radius: 10px; overflow: hidden; margin-top: 6px;
+}
+.vwNum { background: var(--card); padding: 13px 15px; }
+.vwNumK { font-size: 12px; color: var(--ink-3); letter-spacing: 0.02em; }
+.vwNumV { font-family: var(--serif); font-size: 19px; color: var(--ink); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.vwNumNote { font-size: 12px; color: var(--ink-4); margin-top: 2px; }
+
+/* ============================================================
+   PANTALLA: elegir moneda
+   ============================================================ */
+.vwPickQ {
+  font-family: var(--serif);
+  font-size: clamp(28px, 4.6vw, 42px);
+  font-weight: 500; line-height: 1.12; letter-spacing: -0.015em;
+  color: var(--ink); text-wrap: balance;
+}
+.vwPickLead { font-size: 18px; color: var(--ink-2); margin-top: 14px; line-height: 1.55; max-width: 32em; }   /* §7 — ≥18px */
+
+/* lista de candidatas de hoy (la foto del screener) */
+.vwCands { margin-top: 30px; display: flex; flex-direction: column; gap: 10px; }
+.vwCand {
+  display: flex; align-items: center; gap: 18px; width: 100%; text-align: left; cursor: pointer;
+  background: var(--card); border: 1px solid var(--card-edge); border-radius: 14px;
+  padding: 16px 20px; transition: all 160ms var(--ease);
+}
+.vwCand:hover { border-color: var(--clay); transform: translateX(3px); box-shadow: 0 10px 24px -18px rgba(42,39,34,0.45); }
+.vwCandId { min-width: 148px; flex: none; }
+.vwCandName { font-family: var(--serif); font-size: 19px; font-weight: 600; color: var(--ink); line-height: 1.1; }
+.vwCandSym { font-size: 12px; color: var(--ink-3); letter-spacing: 0.05em; margin-top: 2px; }
+.vwCandFact { flex: 1; min-width: 0; font-size: 15px; color: var(--ink-2); line-height: 1.4; }
+.vwCandFact b { color: var(--ink); font-weight: 600; }
+.vwCandTag {
+  display: inline-flex; align-items: center; gap: 6px; margin-right: 11px;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+  color: var(--sage); background: var(--sage-tint); border: 1px solid #C9D2B2;
+  border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+}
+.vwCandPrice { font-family: var(--serif); font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; flex: none; }
+.vwCandGo { color: var(--clay); font-size: 18px; flex: none; transition: transform 160ms var(--ease); }
+.vwCand:hover .vwCandGo { transform: translateX(3px); }
+
+/* meta honesta: cobertura + orden */
+.vwEntryMeta {
+  margin-top: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  font-size: 13px; color: var(--ink-3);
+}
+.vwEntryMeta b { color: var(--ink-2); font-weight: 600; }
+.vwEntrySep { width: 4px; height: 4px; border-radius: 50%; background: var(--card-edge-2); }
+
+/* búsqueda secundaria (para algo fuera de la lista) */
+.vwEntrySearch { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--card-edge); }
+.vwEntrySearchLabel { font-size: 14px; color: var(--ink-2); margin-bottom: 10px; }
+.vwPickSearch {
+  margin-top: 22px; display: flex; align-items: center; gap: 11px;
+  background: var(--card); border: 1px solid var(--card-edge); border-radius: 999px;
+  padding: 13px 20px; max-width: 360px;
+}
+.vwPickSearch:focus-within { border-color: var(--clay); }
+.vwPickSearch span { color: var(--ink-3); font-size: 17px; }
+.vwPickSearch input {
+  flex: 1; border: none; outline: none; background: none;
+  font-family: var(--sans); font-size: 16px; color: var(--ink);
+}
+.vwPickSearch input::placeholder { color: var(--ink-4); }
+
+/* ============================================================
+   PANTALLA: cierre honesto
+   ============================================================ */
+.vwCloseIcon {
+  width: 52px; height: 52px; border-radius: 50%;
+  display: grid; place-items: center; margin-bottom: 22px;
+  border: 1.5px solid var(--clay); color: var(--clay-deep); font-size: 22px;   /* §7 — texto-clay legible */
+}
+.vwCloseTitle {
+  font-family: var(--serif);
+  font-size: clamp(27px, 4.4vw, 38px); font-weight: 500;
+  line-height: 1.18; letter-spacing: -0.012em; color: var(--ink); text-wrap: balance;
+}
+.vwCloseBody { font-size: 18px; line-height: 1.62; color: var(--ink-2); margin-top: 18px; text-wrap: pretty; }   /* §7 — ≥18px */
+.vwCloseRecap { margin-top: 26px; display: flex; flex-direction: column; gap: 10px; }
+.vwRecap {
+  display: flex; align-items: center; gap: 13px;
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--card-edge); border-radius: 12px;
+}
+.vwRecapN { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--clay-tint); color: var(--clay); font-size: 13px; font-weight: 600; }
+.vwRecapQ { font-size: 16px; color: var(--ink-3); min-width: 0; }   /* §7 — ≥16px */
+.vwRecapA { font-family: var(--serif); font-size: 16px; color: var(--ink); font-weight: 600; margin-left: auto; white-space: nowrap; padding-left: 14px; }
+.vwCloseActions { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 12px; }
+
+/* ============================================================
+   NAV inferior — atrás / siguiente (fijo)
+   ============================================================ */
+.vwNav {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px clamp(20px, 5vw, 56px);
+  background: linear-gradient(180deg, transparent, var(--paper) 38%);
+  pointer-events: none;
+}
+.vwNavInner { width: 100%; max-width: var(--maxw); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; pointer-events: auto; }
+.vwBtn {
+  font-family: var(--sans); font-size: 15.5px; font-weight: 500;
+  border-radius: 999px; cursor: pointer; border: 1px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  min-height: 48px;   /* §7 — táctil ≥48px */
+  transition: all 160ms var(--ease);
+}
+.vwBtnPrimary { background: var(--clay); color: #fff; padding: 14px 26px; }
+.vwBtnPrimary:hover { background: var(--clay-deep); transform: translateY(-1px); }
+.vwBtnGhost { background: none; color: var(--ink-2); padding: 14px 18px; }
+.vwBtnGhost:hover { color: var(--ink); }
+.vwBtnOutline { background: none; color: var(--clay-deep); border-color: var(--clay-soft); padding: 13px 22px; }
+.vwBtnOutline:hover { background: var(--clay-soft); }
+.vwBtn:disabled { opacity: 0.4; cursor: default; }   /* §7 — deshabilitado VISIBLE-inactivo (no opacity:0) */
+
+/* ============================================================
+   COPILOTO — overlay cálido, mock (pull, no push)
+   ============================================================ */
+.vwFab {
+  position: fixed; right: 24px; bottom: 92px; z-index: 40;
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--clay); color: #fff; border: none; cursor: pointer;
+  font-size: 22px; box-shadow: 0 12px 30px -10px rgba(184,84,46,0.6);
+  display: grid; place-items: center;
+  transition: transform 180ms var(--ease);
+}
+.vwFab:hover { transform: scale(1.06); }
+
+.vwDock {
+  position: fixed; right: 0; top: 0; bottom: 0; z-index: 50;
+  width: min(420px, 100vw);
+  background: var(--card);
+  border-left: 1px solid var(--card-edge-2);
+  box-shadow: -24px 0 60px -30px rgba(42,39,34,0.5);
+  display: flex; flex-direction: column;
+  animation: vwDockIn 320ms var(--ease) both;
+}
+@keyframes vwDockIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.vwDockHd { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--card-edge); }
+.vwDockAvatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--clay); color: var(--clay); font-size: 16px; }
+.vwDockName { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
+.vwDockSub { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; display: flex; align-items: center; gap: 6px; }
+.vwDockSub::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--sage); }
+.vwDockClose {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--ink-3); font-size: 22px; line-height: 1;
+  min-width: 48px; min-height: 48px; display: grid; place-items: center;   /* §7 — táctil ≥48px */
+}
+.vwDockClose:hover { color: var(--ink); }
+.vwDockScroll { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.vwMsg { display: flex; flex-direction: column; gap: 5px; }
+.vwMsgUser { align-items: flex-end; }
+.vwBubble { max-width: 88%; padding: 11px 15px; border-radius: 16px; font-size: 16px; line-height: 1.5; background: var(--paper-2); color: var(--ink); border-bottom-left-radius: 5px; }   /* §7 — ≥16px */
+.vwBubble b { font-weight: 600; }
+.vwMsgUser .vwBubble { background: var(--clay); color: #fff; border-bottom-right-radius: 5px; border-bottom-left-radius: 16px; }
+.vwBubbleRefusal { background: var(--ochre-tint); border: 1px solid #E4CF9E; }
+.vwTag {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;   /* §7 — ≥12px */
+  color: var(--ochre); margin-left: 4px;
+}
+.vwTagFact { color: var(--sage); }
+.vwDockSugg { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 20px 12px; }
+.vwSugg {
+  font-family: var(--sans); font-size: 12.5px; color: var(--ink-2);
+  background: var(--paper-2); border: 1px solid var(--card-edge); border-radius: 999px;
+  padding: 7px 12px; cursor: pointer;
+  min-height: 48px; display: inline-flex; align-items: center;   /* §7 — táctil ≥48px */
+}
+.vwSugg:hover { border-color: var(--clay); color: var(--clay-deep); }
+.vwDockInput { display: flex; align-items: center; gap: 9px; padding: 14px 20px; border-top: 1px solid var(--card-edge); }
+.vwDockInput input { flex: 1; border: 1px solid var(--card-edge); background: var(--paper); border-radius: 999px; padding: 11px 16px; font-family: var(--sans); font-size: 14.5px; color: var(--ink); outline: none; }
+.vwDockInput input:focus { border-color: var(--clay); }
+.vwDockSend { width: 48px; height: 48px; flex: none; border-radius: 50%; background: var(--clay); color: #fff; border: none; cursor: pointer; font-size: 16px; }   /* §7 — táctil ≥48px */
+.vwDockSend:disabled { opacity: 0.4; cursor: default; }
+.vwScrim { position: fixed; inset: 0; z-index: 49; background: rgba(42,39,34,0.28); animation: vwFade 240ms ease both; }
+@keyframes vwFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============================================================
+   CORRECCIONES TRANSVERSALES (§7) — foco visible y motion
+   ============================================================ */
+/* §7 — foco visible (no existe en el handoff) */
+.vwRoot :where(button, a, input, [tabindex]):focus-visible {
+  outline: 3px solid var(--clay-deep); outline-offset: 2px;
+}
+
+/* §7 — reduced-motion global dentro del árbol cálido */
+@media (prefers-reduced-motion: reduce) {
+  .vwRoot *, .vwRoot *::before, .vwRoot *::after {
+    animation-duration: 0.001ms !important; transition-duration: 0.001ms !important;
+  }
+  .vwCand, .vwFab, .vwMoreCaret { transform: none !important; }
+}
+
+/* §7 — stepper: labels SIEMPRE visibles (no display:none <720px) */
+.vwStepLabel { display: inline; }
+
+/* ============================================================
+   MÓVIL
+   ============================================================ */
+@media (max-width: 640px) {
+  .vwLevels { grid-template-columns: 1fr; gap: 18px; }
+  .vwBuilding { height: 240px; }
+  .vwMorePanel { grid-template-columns: 1fr; }
+  .vwBrandTag { display: none; }
+  .vwStage { padding-bottom: 120px; }
+  .vwCand { flex-wrap: wrap; gap: 8px 14px; }
+  .vwCandId { min-width: 0; }
+  .vwCandFact { flex-basis: 100%; order: 3; }
+  .vwCandPrice { margin-left: auto; }
+}
