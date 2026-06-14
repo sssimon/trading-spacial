@@ -22,14 +22,14 @@ export const FundScreen: React.FC<{ symbol: string; state: AsyncState<Dossier>; 
     answer = <Loading label="Buscando quién está detrás…" />;
   } else if (error || !data || data.estado_general === 'no_disponible') {
     answer = (
-      <Callout tone="mute" icon="×" title="No se pudo averiguar ahora" sub="Falló la búsqueda — es un problema de la herramienta, no del proyecto.">
+      <Callout tone="mute" icon="×" title="No se pudo averiguar ahora" sub="Falló la búsqueda. Es un problema de la herramienta, no del proyecto.">
         <Retry onClick={onRefresh} />
       </Callout>
     );
   } else if (data.estado_general === 'opaco') {
     answer = (
       <Callout tone="ochre" icon="◍" title="No se encontró quién está detrás"
-        sub={<>Se buscó equipo, presencia y actividad pública, y <b>no apareció nada</b>. Eso es un dato sobre el proyecto — no es una falla de la herramienta.{data.no_encontrado_en.length > 0 && <> No se halló en: {data.no_encontrado_en.join(', ')}.</>}</>} />
+        sub={<>Se buscó equipo, presencia y actividad pública, y <b>no apareció nada</b>. Eso es un dato sobre el proyecto, no una falla de la herramienta.{data.no_encontrado_en.length > 0 && <> No se halló en: {data.no_encontrado_en.join(', ')}.</>}</>} />
     );
   } else {
     answer = (
