@@ -1,4 +1,5 @@
 .tag { font-size: 0.8em; padding: 1px 6px; border-radius: 4px; }
-.fresco { opacity: 0.6; }
-.rancio { color: #c79a3a; }
-.muerto { color: #c0564b; }
+/* WCAG AA (≥4.5:1) sobre el fondo cálido --paper #F4F0E8 */
+.fresco { color: #5E7048; } /* sage — 4.75:1 sobre paper */
+.rancio { color: #8A5E1C; } /* ochre-deep — 5.00:1 sobre paper */
+.muerto { color: #9A4424; } /* clay-deep — 5.73:1 sobre paper */
