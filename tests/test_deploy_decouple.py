@@ -151,3 +151,43 @@ def test_defaults_preserve_today(monkeypatch):
     with TestClient(btc_api.app):
         pass
     assert calls["init_db"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TASK 3: /health/live — readiness probe (proceso + schema, sin scanner)
+# TASK 4: /health — gatea sobre frescura DB del scanner
+# ---------------------------------------------------------------------------
+
+def test_health_live_ok_without_scanner(monkeypatch):
+    from fastapi.testclient import TestClient
+    import btc_api
+    monkeypatch.setenv("RUN_SCANNER", "0"); monkeypatch.setenv("SKIP_DB_INIT", "1"); monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    with TestClient(btc_api.app) as c:
+        r = c.get("/health/live")
+    assert r.status_code == 200 and r.json()["ready"] is True
+
+
+def test_health_503_when_scanner_stale(monkeypatch):
+    from fastapi.testclient import TestClient
+    import btc_api
+    from api import scanner_liveness
+    monkeypatch.setenv("RUN_SCANNER", "0"); monkeypatch.setenv("SKIP_DB_INIT", "1"); monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
+                        lambda: {"last_scan_ts": None, "scans_total": 0, "signals_total": 0})
+    with TestClient(btc_api.app) as c:
+        r = c.get("/health")
+    assert r.status_code == 503
+    assert "errors" not in r.json()["checks"]
+
+
+def test_health_200_when_scanner_fresh(monkeypatch):
+    from fastapi.testclient import TestClient
+    import btc_api
+    from api import scanner_liveness
+    from datetime import datetime, timezone
+    monkeypatch.setenv("RUN_SCANNER", "0"); monkeypatch.setenv("SKIP_DB_INIT", "1"); monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
+                        lambda: {"last_scan_ts": datetime.now(timezone.utc).isoformat(), "scans_total": 5, "signals_total": 1})
+    with TestClient(btc_api.app) as c:
+        r = c.get("/health")
+    assert r.status_code == 200 and r.json()["checks"]["scanner"] == "fresco"

@@ -39,13 +39,16 @@ def client(monkeypatch, tmp_path):
 
 
 def test_health_liveness_no_scanner(client):
-    """GET /health returns 503 when scanner is not running."""
+    """GET /health returns 503 when no scans exist in DB (scanner never ran)."""
     r = client.get("/health")
     assert r.status_code == 503
     body = r.json()
     assert body["healthy"] is False
     assert body["checks"]["database"] == "ok"
-    assert body["checks"]["scanner"] == "stopped"
+    # Nuevo contrato: scanner liveness viene de la DB; sin scans → "muerto".
+    # "stopped" era el contrato viejo basado en memoria de proceso (PR6→PR8).
+    assert body["checks"]["scanner"] == "muerto"
+    assert "errors" not in body["checks"]
 
 
 def test_health_symbols_auth_empty(client):
