@@ -43,6 +43,23 @@ CONTROL = ("control-hechos", "¿Qué quiere decir que una moneda está \"en vall
 K = 3  # corridas por pregunta (el modelo no es determinista)
 
 
+def _load_dotenv(path: str) -> None:
+    """Carga un .env mínimo (KEY=VALUE por línea) en os.environ, sin depender
+    de python-dotenv (no está instalado en este entorno). No pisa vars ya
+    seteadas en el entorno real."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+
+
 async def _run_one(provider, pregunta: str) -> dict:
     from api.agent.loop import run_turn, TextDelta, Refusal, MessageEnd, ToolUseStart
 
@@ -73,6 +90,9 @@ async def _run_one(provider, pregunta: str) -> dict:
 
 
 async def main() -> int:
+    _load_dotenv(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+
     from api.agent.providers.registry import (
         get_provider_for_model, UnknownProviderError,
     )
