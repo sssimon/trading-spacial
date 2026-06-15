@@ -469,6 +469,23 @@
   color: var(--ochre); margin-left: 4px;
 }
 .vwTagFact { color: var(--sage); }
+
+/* "Pensando": tres puntos en una sola burbuja, sin tag. */
+.vwTyping { display: inline-flex; align-items: center; gap: 5px; padding: 2px 0; }
+.vwTypingDot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3);
+  animation: vwTypingBlink 1.4s ease-in-out infinite both;
+}
+.vwTypingDot:nth-child(2) { animation-delay: 0.2s; }
+.vwTypingDot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes vwTypingBlink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vwTypingDot { animation: none; opacity: 0.5; }
+}
+
 .vwDockSugg { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 20px 12px; }
 .vwSugg {
   font-family: var(--sans); font-size: 12.5px; color: var(--ink-2);

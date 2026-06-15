@@ -810,7 +810,10 @@ const App: React.FC = () => {
         agentEnabled={AGENT_ENABLED}
       />
 
-      {AGENT_ENABLED && (
+      {/* El copiloto global de la app NO se monta en el tab Valles: esa
+          sección tiene su propio copiloto (surface 'valles') y los dos FABs
+          se solapaban. Una sección, un agente. */}
+      {AGENT_ENABLED && mainTab !== 'valles' && (
         <AgentDock
           open={dockOpen}
           onOpen={() => openDock()}
