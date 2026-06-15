@@ -63,6 +63,7 @@ SURFACE_MODEL_DEFAULTS: dict[str, str] = {
     "kill_switch":   "deepseek-reasoner",
     "autotune":      "deepseek-reasoner",
     "historial":     "deepseek-chat",
+    "valles":        "deepseek-chat",
 }
 
 
@@ -84,6 +85,23 @@ ALLOWED_MODELS: frozenset[str] = frozenset({
     # the frontend renders the reasoning in a collapsible panel.
     "deepseek-reasoner",
 })
+
+
+# Modelos que emiten chain-of-thought por el canal reasoning_delta (sin
+# guard en el loop). Prohibidos en surfaces cuya doctrina no tolera fuga
+# de razonamiento crudo. Ver valles spec §6.4.
+REASONER_MODELS: frozenset[str] = frozenset({"deepseek-reasoner"})
+REASONER_FORBIDDEN_SURFACES: frozenset[str] = frozenset({"valles"})
+
+
+def assert_model_allowed_for_surface(surface: str, model: str) -> None:
+    """Raise ValueError si `surface` prohíbe reasoners y `model` lo es.
+    Estructural — no depende de que nadie 'recuerde' no configurarlo."""
+    if surface in REASONER_FORBIDDEN_SURFACES and model in REASONER_MODELS:
+        raise ValueError(
+            f"surface {surface!r} prohíbe modelos reasoner (canal "
+            f"reasoning_delta sin guard); recibido {model!r}"
+        )
 
 
 def default_model_for_surface(surface: str) -> str:
