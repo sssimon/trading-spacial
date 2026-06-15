@@ -26,3 +26,12 @@ def test_valles_forbids_reasoner():
         assert_model_allowed_for_surface("valles", "deepseek-reasoner")
     # un surface normal sí permite reasoner:
     assert_model_allowed_for_surface("kill_switch", "deepseek-reasoner")
+
+
+def test_registry_surfaces_match_model_defaults():
+    """ALL_SURFACES (registry) debe coincidir con SURFACE_MODEL_DEFAULTS.
+    test_agent_models.py ya ata models↔prompts↔router Literal; esta es la
+    4ta esquina (registry) que cerraba el plan §6.1."""
+    from api.agent.tools.registry import ALL_SURFACES
+    from api.agent.models import SURFACE_MODEL_DEFAULTS
+    assert set(ALL_SURFACES) == set(SURFACE_MODEL_DEFAULTS.keys())
