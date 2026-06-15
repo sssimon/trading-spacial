@@ -48,3 +48,12 @@ def test_valley_eval_no_disponible_carries_frescura():
         out = valleys_mod.get_valley_eval("ADAUSDT")
     assert out["estado"] == "no_disponible"
     assert out["frescura"]["estado"] == "muerto"
+
+
+def test_dossier_already_conformant():
+    # /dossier ya envuelve en LiveSnapshot (api/dossier.py). Aserción de
+    # regresión: el contrato no debe perderse en un refactor futuro.
+    import inspect, api.dossier as dossier_mod
+    src = inspect.getsource(dossier_mod.get_dossier)
+    assert "LiveSnapshot" in src
+    assert "to_response()" in src

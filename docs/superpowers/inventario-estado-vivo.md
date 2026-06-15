@@ -18,6 +18,8 @@ Spec: `docs/superpowers/specs/es/2026-06-13-liveness-frescura-huerfanos-design.m
 |---|---|---|---|---|
 | `GET /valley-candidates` | `tools.run_valley_screener.regenerate` | `screener_loop` (lifespan, 6h) | `LiveSnapshot` | **migrado** |
 | `GET /dossier/{symbol}` | `research.dossier.build_dossier_live` | on-request (auto-cura tras TTL) | `LiveSnapshot` | **migrado** |
+| `GET /levels/{symbol}` | Binance on-request (vivo cada request, sin caché) | n/a (no cruza snapshot) | `LiveSnapshot` | **migrado** · plan `2026-06-15-valles-copiloto-agente-real` PASO 0 |
+| `GET /valley-eval/{symbol}` | Binance on-request (vivo cada request, sin caché) | n/a (no cruza snapshot) | `LiveSnapshot` | **migrado** · plan `2026-06-15-valles-copiloto-agente-real` PASO 0 |
 | `observed_orders` + F3a `track_live` | `tools.sync_binance_spot.sync_tenant` | `sync_loop` (lifespan, 5min) | estado en DB (`updated_at`) | **migrado (latido)** · deuda: sin `LiveSnapshot` en el reader |
 | `symbols_status.json` | `update_symbols_json` | `scanner_loop` (lifespan) | trae `updated_at` | **respira-vía-scanner** · deuda: sin `LiveSnapshot` |
 | `equity` | computado on-read (`compute_real_equity`) | n/a (vivo por consulta) | n/a | **respira** (no cruza frontera-snapshot) |
