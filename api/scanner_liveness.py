@@ -42,7 +42,18 @@ def _query_scanner_facts() -> dict:
             last_scan_ts = row[0] if row else None
     except sqlite3.OperationalError:
         return dict(_EMPTY_FACTS)
-    return {"last_scan_ts": last_scan_ts}
+    return {"last_scan_ts": _normalize_scan_ts(last_scan_ts)}
+
+
+def _normalize_scan_ts(ts: str | None) -> str | None:
+    """El `ts` de la tabla `scans` se guarda como 'YYYY-MM-DD HH:MM:SS UTC'
+    (NO ISO-8601 — viene del campo `timestamp` del reporte del scanner). El
+    sufijo ' UTC' rompe `datetime.fromisoformat` en `LiveSnapshot._edad_seg`
+    → edad=None → 'muerto' permanente. Lo normalizamos a un offset parseable.
+    Idempotente para ts ya en ISO (sin ' UTC' que reemplazar)."""
+    if not ts:
+        return None
+    return ts.replace(" UTC", "+00:00")
 
 
 def scanner_liveness(*, umbral_seg: float = 900.0) -> dict:

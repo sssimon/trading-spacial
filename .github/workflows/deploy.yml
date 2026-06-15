@@ -112,8 +112,11 @@ jobs:
           # /health after restart on the large prod DB. The prior single-shot
           # "sleep 15 + one curl" failed 5 of 6 recent deploys even when the
           # rsync + restart had already succeeded — a false-red. Retry instead.
+          # /health/live = readiness (proceso + schema), el gate correcto para
+          # un deploy. /health es frescura del scanner (503 en la ventana de
+          # ~minutos tras restart hasta el primer ciclo) → NO sirve de readiness.
           for i in $(seq 1 12); do
-            if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health" >/dev/null 2>&1; then
+            if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health/live" >/dev/null 2>&1; then
               echo "Health check passed (attempt ${i}/12)."
               exit 0
             fi
