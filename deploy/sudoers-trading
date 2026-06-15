@@ -1,0 +1,25 @@
+# /etc/sudoers.d/trading-deploy  (instalar: sudo install -m 0440 deploy/sudoers-trading /etc/sudoers.d/trading-deploy && sudo visudo -c)
+#
+# Allow-list ACOTADO de comandos que el deploy de CI (usuario ubuntu) corre sin
+# password. Solo estos binarios con estos args — NO un `systemctl *` abierto ni
+# escritura libre a /etc/nginx. El include de nginx lo reescribe el deploy vía
+# un mv de un tmpfile a /etc/nginx/conf.d/trading-upstream.conf, que es chown
+# ubuntu:ubuntu (ver CUTOVER.md), así NO necesita sudo para el mv.
+#
+# Rutas de binarios en Ubuntu 24: systemctl=/usr/bin/systemctl, nginx=/usr/sbin/nginx.
+Cmnd_Alias TRADING_DEPLOY = \
+    /usr/bin/systemctl start trading-api@8100, \
+    /usr/bin/systemctl start trading-api@8101, \
+    /usr/bin/systemctl stop trading-api@8100, \
+    /usr/bin/systemctl stop trading-api@8101, \
+    /usr/bin/systemctl restart trading-api@8100, \
+    /usr/bin/systemctl restart trading-api@8101, \
+    /usr/bin/systemctl restart trading-scanner, \
+    /usr/bin/systemctl is-active trading-api@8100, \
+    /usr/bin/systemctl is-active trading-api@8101, \
+    /usr/bin/systemctl is-active trading-scanner, \
+    /usr/bin/systemctl daemon-reload, \
+    /usr/sbin/nginx -t, \
+    /usr/sbin/nginx -s reload
+
+ubuntu ALL=(root) NOPASSWD: TRADING_DEPLOY

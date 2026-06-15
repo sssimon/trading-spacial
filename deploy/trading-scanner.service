@@ -1,0 +1,30 @@
+# /etc/systemd/system/trading-scanner.service
+# Scanner desacoplado de la API (epic deploy zero-downtime). Dueño del schema +
+# los 5 threads escritores. Type=notify: envía READY=1 tras el DDL (scanner_main
+# ._sd_notify), así las APIs ordenadas After= esperan a que el schema exista —
+# cierra el crash-loop de reboot. Fuente de verdad versionada en deploy/.
+[Unit]
+Description=Trading Spacial — scanner desacoplado (schema owner + 5 threads)
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=ubuntu
+WorkingDirectory=/var/www/trading
+EnvironmentFile=/var/www/trading/.env
+Environment=RUN_SCANNER=1 RUN_AS_SERVICE=1
+ExecStart=/var/www/trading/.venv/bin/python /var/www/trading/scanner_main.py
+Restart=on-failure
+RestartSec=5
+# Margen para que stop_managed_threads junte los 5 threads (un slider del
+# calibrator en vuelo puede tardar) sin SIGKILL a media transacción.
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/trading
+
+[Install]
+WantedBy=multi-user.target

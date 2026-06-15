@@ -1,0 +1,30 @@
+# /etc/systemd/system/trading-api@.service
+# API web-only (template; instancia por puerto: trading-api@8100 / @8101).
+# RUN_SCANNER=0 (no arranca el scanner) + SKIP_DB_INIT=1 (el scanner-service es
+# el dueño del schema). Blue-green detrás de nginx. Fuente de verdad en deploy/.
+[Unit]
+Description=Trading Spacial — API web-only (puerto %i)
+# After= con el scanner en Type=notify ESPERA su READY=1 (post-DDL) → en reboot
+# el schema existe cuando esta API (SKIP_DB_INIT=1) arranca. Wants= (no Requires)
+# = dependencia suave: si el scanner cae luego, la API sigue sirviendo.
+After=network.target trading-scanner.service
+Wants=trading-scanner.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/trading
+EnvironmentFile=/var/www/trading/.env
+Environment=RUN_SCANNER=0 SKIP_DB_INIT=1 RUN_AS_SERVICE=1
+# --timeout-graceful-shutdown 30: drena requests/SSE en vuelo al hacer stop.
+ExecStart=/var/www/trading/.venv/bin/uvicorn btc_api:app --host 127.0.0.1 --port %i --timeout-graceful-shutdown 30
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/trading
+
+[Install]
+WantedBy=multi-user.target
