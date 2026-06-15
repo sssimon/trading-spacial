@@ -1,6 +1,80 @@
 import os, glob, sqlite3
 
 
+def test_scanner_liveness_from_db(monkeypatch):
+    from api import scanner_liveness
+    from datetime import datetime, timezone, timedelta
+    reciente = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+    monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
+                        lambda: {"last_scan_ts": reciente, "scans_total": 10, "signals_total": 2})
+    snap = scanner_liveness.scanner_liveness(umbral_seg=900)
+    assert snap["frescura"]["estado"] == "fresco"
+    assert snap["scans_total"] == 10
+
+
+def test_scanner_liveness_muerto_sin_scans(monkeypatch):
+    from api import scanner_liveness
+    monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
+                        lambda: {"last_scan_ts": None, "scans_total": 0, "signals_total": 0})
+    snap = scanner_liveness.scanner_liveness(umbral_seg=900)
+    assert snap["frescura"]["estado"] == "muerto"
+
+
+def test_scanner_liveness_query_sql_valida(tmp_path, monkeypatch):
+    """Valida que _query_scanner_facts usa los nombres de columna reales del schema:
+    ts (columna de tiempo) y señal (columna de señal). Crea un in-memory DB con el
+    schema real de scans y verifica que la query no falla.
+    Columnas verificadas en db/schema.py línea 126-142 y db/signals.py línea 39-44."""
+    import sqlite3 as _sqlite3
+    import db.connection as conn_mod
+    import db.transaction as tx_mod
+    from contextlib import contextmanager
+
+    # Crear una DB in-memory con el schema real de scans
+    mem_con = _sqlite3.connect(":memory:")
+    mem_con.row_factory = _sqlite3.Row
+    mem_con.execute("""
+        CREATE TABLE scans (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          TEXT    NOT NULL,
+            symbol      TEXT    NOT NULL DEFAULT 'BTCUSDT',
+            estado      TEXT    NOT NULL,
+            señal       INTEGER NOT NULL DEFAULT 0,
+            setup       INTEGER NOT NULL DEFAULT 0,
+            price       REAL,
+            lrc_pct     REAL,
+            rsi_1h      REAL,
+            score       INTEGER,
+            score_label TEXT,
+            macro_ok    INTEGER,
+            gatillo     INTEGER,
+            payload     TEXT
+        )
+    """)
+    # Insertar una fila de señal activa
+    from datetime import datetime, timezone, timedelta
+    ts_reciente = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    mem_con.execute(
+        "INSERT INTO scans (ts, symbol, estado, señal) VALUES (?, 'BTCUSDT', 'ok', 1)",
+        (ts_reciente,)
+    )
+    mem_con.commit()
+
+    # Monkeypatch snapshot_connection para devolver la DB en memoria
+    from api import scanner_liveness
+
+    @contextmanager
+    def fake_snapshot():
+        yield mem_con
+
+    monkeypatch.setattr(scanner_liveness, "_snapshot_connection", fake_snapshot)
+
+    facts = scanner_liveness._query_scanner_facts()
+    assert facts["scans_total"] == 1
+    assert facts["signals_total"] == 1
+    assert facts["last_scan_ts"] is not None
+
+
 def test_backup_db_atomic_no_partial_on_failure(tmp_path, monkeypatch):
     import db.connection as conn
     src = tmp_path / "signals.db"
