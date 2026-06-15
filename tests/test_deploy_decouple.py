@@ -249,3 +249,42 @@ def test_status_scanner_from_db(monkeypatch):
     assert r.status_code == 200
     # el estado del scanner ahora trae 'frescura' (DB), no el dict de memoria con 'running'
     assert "frescura" in r.json()["scanner_state"]
+
+
+# ---------------------------------------------------------------------------
+# TASK 9: scanner_main.py — entrypoint del scanner-service (sd_notify)
+# ---------------------------------------------------------------------------
+
+def test_scanner_main_importable_and_sd_notify_noop(monkeypatch):
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+    import importlib
+    import scanner_main
+    importlib.reload(scanner_main)
+    # sin NOTIFY_SOCKET, _sd_notify es no-op y no lanza
+    scanner_main._sd_notify("READY=1")
+
+
+def test_scanner_main_sd_notify_writes_to_socket(tmp_path, monkeypatch):
+    import sys
+    import importlib
+    import pytest
+
+    # AF_UNIX SOCK_DGRAM puede no estar disponible en algunos runners de Windows.
+    socket = pytest.importorskip("socket")
+    if not hasattr(socket, "AF_UNIX"):
+        pytest.skip("AF_UNIX no disponible en este runner")
+
+    import scanner_main
+    importlib.reload(scanner_main)
+
+    sock_path = str(tmp_path / "notify.sock")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        srv.bind(sock_path)
+        srv.settimeout(2)
+        monkeypatch.setenv("NOTIFY_SOCKET", sock_path)
+        scanner_main._sd_notify("READY=1")
+        data, _ = srv.recvfrom(64)
+        assert data == b"READY=1"
+    finally:
+        srv.close()
