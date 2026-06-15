@@ -95,6 +95,27 @@ class ProposeApplyTuneIn(BaseModel):
     rationale:  str = Field(..., min_length=10, max_length=500)
 
 
+# ── Valles copiloto — lentes (read-only) ────────────────────────────────
+
+
+class GetValleyEvalIn(BaseModel):
+    """Evalúa vida + rango de UNA moneda (lente Vida)."""
+    symbol: str = Field(..., min_length=2, max_length=20,
+                        description="Ticker, e.g. 'BTCUSDT' o 'BTC'")
+
+
+class GetLevelsIn(BaseModel):
+    """Niveles S/R neutrales + ubicación del precio vivo (lente Niveles)."""
+    symbol: str = Field(..., min_length=2, max_length=20,
+                        description="Ticker, e.g. 'BTCUSDT' o 'BTC'")
+
+
+class GetDossierIn(BaseModel):
+    """Quién está detrás del proyecto, con fuentes (lente Dossier)."""
+    symbol: str = Field(..., min_length=2, max_length=20,
+                        description="Ticker, e.g. 'BTCUSDT' o 'BTC'")
+
+
 # Convenience map for the registry. Order here is the canonical tool
 # ordering used in the system prompt's tool documentation block.
 TOOL_INPUT_SCHEMAS: dict[str, type[BaseModel]] = {
@@ -111,4 +132,8 @@ TOOL_INPUT_SCHEMAS: dict[str, type[BaseModel]] = {
     "propose_close_position":      ProposeClosePositionIn,
     "propose_reactivate_symbol":   ProposeReactivateSymbolIn,
     "propose_apply_tune":          ProposeApplyTuneIn,
+    # Valles copiloto — lentes (read-only).
+    "get_valley_eval":             GetValleyEvalIn,
+    "get_levels":                  GetLevelsIn,
+    "get_dossier":                 GetDossierIn,
 }
