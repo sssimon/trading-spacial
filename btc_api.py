@@ -244,18 +244,23 @@ async def lifespan(app: FastAPI):
     # rather than on the first /auth/login request.
     _jwt_secret()
 
-    log.info("Initializing DB schema…")
-    init_db()
-    with transaction() as con:
-        init_auth_db(con)
-        init_system_state(con)
+    if os.getenv("SKIP_DB_INIT") != "1":
+        log.info("Initializing DB schema…")
+        init_db()
+        with transaction() as con:
+            init_auth_db(con)
+            init_system_state(con)
+        # First-time setup gate. Picks one of three paths (env / cli / web)
+        # or no-ops if a user already exists.
+        _bootstrap_first_user()
+    else:
+        log.info("SKIP_DB_INIT=1 — schema y bootstrap los hace trading-scanner.service")
 
-    # First-time setup gate. Picks one of three paths (env / cli / web)
-    # or no-ops if a user already exists.
-    _bootstrap_first_user()
-
-    log.info("Starting scanner thread…")
-    start_scanner_thread()
+    if os.getenv("RUN_SCANNER", "1") == "1":
+        log.info("Starting scanner thread…")
+        start_scanner_thread()
+    else:
+        log.info("RUN_SCANNER=0 — instancia web-only, scanner desacoplado")
     yield
     # #495 root-cause fix: deterministic teardown of the three managed
     # background threads (scanner, health monitor, kill-switch calibrator).

@@ -105,3 +105,49 @@ def test_backup_db_success_creates_final(tmp_path, monkeypatch):
     conn.backup_db()
     finals = glob.glob(os.path.join(str(bdir), "signals_*.db"))
     assert len(finals) == 1 and not finals[0].endswith(".tmp")
+
+
+# ---------------------------------------------------------------------------
+# TASK 7: Gates RUN_SCANNER y SKIP_DB_INIT
+# ---------------------------------------------------------------------------
+
+def test_run_scanner_0_no_threads(monkeypatch):
+    import scanner.runtime as rt
+    from fastapi.testclient import TestClient
+    import btc_api
+    monkeypatch.setenv("RUN_SCANNER", "0")
+    monkeypatch.setenv("SKIP_DB_INIT", "1")
+    monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    rt._managed_threads.clear()
+    with TestClient(btc_api.app):
+        pass
+    assert rt._managed_threads == [], "RUN_SCANNER=0 NO debe arrancar threads"
+
+
+def test_skip_db_init_no_ddl_no_bootstrap(monkeypatch):
+    import btc_api
+    from fastapi.testclient import TestClient
+    calls = {"init_db": 0, "bootstrap": 0}
+    monkeypatch.setattr(btc_api, "init_db", lambda *a, **k: calls.__setitem__("init_db", calls["init_db"] + 1))
+    monkeypatch.setattr(btc_api, "_bootstrap_first_user", lambda *a, **k: calls.__setitem__("bootstrap", calls["bootstrap"] + 1))
+    monkeypatch.setenv("RUN_SCANNER", "0")
+    monkeypatch.setenv("SKIP_DB_INIT", "1")
+    monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    with TestClient(btc_api.app):
+        pass
+    assert calls["init_db"] == 0 and calls["bootstrap"] == 0
+
+
+def test_defaults_preserve_today(monkeypatch):
+    # Sin env → DDL corre + scanner arranca (comportamiento de hoy).
+    import btc_api
+    from fastapi.testclient import TestClient
+    calls = {"init_db": 0}
+    monkeypatch.setattr(btc_api, "init_db", lambda *a, **k: calls.__setitem__("init_db", calls["init_db"] + 1))
+    monkeypatch.setattr(btc_api, "start_scanner_thread", lambda *a, **k: None)
+    monkeypatch.delenv("RUN_SCANNER", raising=False)
+    monkeypatch.delenv("SKIP_DB_INIT", raising=False)
+    monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    with TestClient(btc_api.app):
+        pass
+    assert calls["init_db"] == 1
