@@ -191,3 +191,61 @@ def test_health_200_when_scanner_fresh(monkeypatch):
     with TestClient(btc_api.app) as c:
         r = c.get("/health")
     assert r.status_code == 200 and r.json()["checks"]["scanner"] == "fresco"
+
+
+# ---------------------------------------------------------------------------
+# DEPLOY DECOUPLE: /scan 409 + /status scanner_state de la DB
+# ---------------------------------------------------------------------------
+
+def test_scan_409_on_web_only(monkeypatch):
+    """RUN_SCANNER=0 → POST /scan devuelve 409 antes de ejecutar nada."""
+    from fastapi.testclient import TestClient
+    import btc_api
+    from api.deps import verify_api_key
+    from auth.dependencies import get_current_user
+    from auth.models import User
+
+    monkeypatch.setenv("RUN_SCANNER", "0")
+    monkeypatch.setenv("SKIP_DB_INIT", "1")
+    monkeypatch.setenv("RUN_AS_SERVICE", "0")
+
+    fake_admin = User(
+        id=1, email="admin@test.com", role="admin",
+        is_active=True, created_at="2026-01-01T00:00:00",
+        password_changed_at="2026-01-01T00:00:00",
+    )
+    btc_api.app.dependency_overrides[verify_api_key] = lambda: None
+    btc_api.app.dependency_overrides[get_current_user] = lambda: fake_admin
+    try:
+        with TestClient(btc_api.app) as c:
+            r = c.post("/scan")
+    finally:
+        btc_api.app.dependency_overrides.pop(verify_api_key, None)
+        btc_api.app.dependency_overrides.pop(get_current_user, None)
+
+    assert r.status_code == 409
+
+
+def test_status_scanner_from_db(monkeypatch):
+    """RUN_SCANNER=0 → GET /status devuelve scanner_state con frescura (de la DB, no de memoria)."""
+    from fastapi.testclient import TestClient
+    import btc_api
+    from api import scanner_liveness
+    from api.deps import verify_api_key
+
+    monkeypatch.setenv("RUN_SCANNER", "0")
+    monkeypatch.setenv("SKIP_DB_INIT", "1")
+    monkeypatch.setenv("RUN_AS_SERVICE", "0")
+    monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
+                        lambda: {"last_scan_ts": None, "scans_total": 0, "signals_total": 0})
+
+    btc_api.app.dependency_overrides[verify_api_key] = lambda: None
+    try:
+        with TestClient(btc_api.app) as c:
+            r = c.get("/status")
+    finally:
+        btc_api.app.dependency_overrides.pop(verify_api_key, None)
+
+    assert r.status_code == 200
+    # el estado del scanner ahora trae 'frescura' (DB), no el dict de memoria con 'running'
+    assert "frescura" in r.json()["scanner_state"]
