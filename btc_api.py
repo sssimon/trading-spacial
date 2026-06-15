@@ -23,7 +23,7 @@ except ImportError:
     pass
 
 import requests as req_lib  # tests patch btc_api.req_lib.post (test_api.py); also used directly at line 187
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -57,6 +57,7 @@ from api.config import CONFIG_FILE, DEFAULTS_FILE, SECRETS_FILE, get_config, sav
 from api.config import router as config_router
 from api.deps import verify_api_key
 from api.health import router as health_router
+from api.scanner_liveness import scanner_liveness
 from api.capital import router as capital_router
 from api.kill_switch import router as kill_switch_router
 from api.notifications import router as notifications_router
@@ -244,18 +245,23 @@ async def lifespan(app: FastAPI):
     # rather than on the first /auth/login request.
     _jwt_secret()
 
-    log.info("Initializing DB schema…")
-    init_db()
-    with transaction() as con:
-        init_auth_db(con)
-        init_system_state(con)
+    if os.getenv("SKIP_DB_INIT") != "1":
+        log.info("Initializing DB schema…")
+        init_db()
+        with transaction() as con:
+            init_auth_db(con)
+            init_system_state(con)
+        # First-time setup gate. Picks one of three paths (env / cli / web)
+        # or no-ops if a user already exists.
+        _bootstrap_first_user()
+    else:
+        log.info("SKIP_DB_INIT=1 — schema y bootstrap los hace trading-scanner.service")
 
-    # First-time setup gate. Picks one of three paths (env / cli / web)
-    # or no-ops if a user already exists.
-    _bootstrap_first_user()
-
-    log.info("Starting scanner thread…")
-    start_scanner_thread()
+    if os.getenv("RUN_SCANNER", "1") == "1":
+        log.info("Starting scanner thread…")
+        start_scanner_thread()
+    else:
+        log.info("RUN_SCANNER=0 — instancia web-only, scanner desacoplado")
     yield
     # #495 root-cause fix: deterministic teardown of the three managed
     # background threads (scanner, health monitor, kill-switch calibrator).
@@ -320,10 +326,10 @@ def root():
     return {
         "service":     "Crypto Scanner API — Ultimate Macro V6.0",
         "version":     "2.0.0",
-        "symbols":     _scanner_state.get("symbols_active", []),
+        "symbols":     get_active_symbols(),
         "num_symbols": cfg.get("num_symbols", 20),
         "docs":        f"http://localhost:{API_PORT}/docs",
-        "scanner":     _scanner_state,
+        "scanner":     scanner_liveness(),
         "webhook_configurado": bool(cfg.get("webhook_url")),
     }
 
@@ -353,7 +359,7 @@ def get_ticker():
                 "changes": cached_payload.get("changes", {}),
                 "cached":  True}
 
-    symbols = _scanner_state.get("symbols_active") or get_active_symbols()
+    symbols = get_active_symbols()
     try:
         # Binance rejects whitespace inside the symbols array. Compact JSON
         # (no spaces) is required: `["BTC","ETH"]` not `["BTC", "ETH"]`.
@@ -438,7 +444,7 @@ def get_macro():
 def list_symbols():
     """Retorna el último escaneo de cada símbolo, ordenado por señal y score."""
     import json as _json  # noqa: PLC0415 — local import keeps the module-level surface unchanged
-    symbols = _scanner_state.get("symbols_active") or get_active_symbols()
+    symbols = get_active_symbols()
     # READ via snapshot_connection (WAL-concurrent, no writer lock) — #494
     with snapshot_connection() as con:
         rows    = get_signals_summary(con)
@@ -476,7 +482,7 @@ def status():
     with snapshot_connection() as con:
         latest = get_latest_scan(con)
     return {
-        "scanner_state": _scanner_state,
+        "scanner_state": scanner_liveness(),
         "ultimo_escaneo": {
             "ts":      latest["ts"]      if latest else None,
             "symbol":  latest["symbol"]  if latest else None,
@@ -500,6 +506,8 @@ def force_scan(
     symbol: Optional[str] = Query(None, description="Par a escanear (ej: ETHUSDT). Sin valor escanea todos.")
 ):
     """Ejecuta el scanner ahora. Sin symbol escanea todos los pares activos."""
+    if os.getenv("RUN_SCANNER", "1") != "1":
+        raise HTTPException(status_code=409, detail="scan corre en trading-scanner.service")
     cfg     = load_config()
     symbols = [symbol.upper()] if symbol else get_active_symbols(cfg.get("num_symbols", 20))
     results = [execute_scan_for_symbol(sym, cfg) for sym in symbols]

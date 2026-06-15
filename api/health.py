@@ -104,13 +104,30 @@ def post_health_reactivate(symbol: str, body: ReactivateRequest):
     return {"ok": True, "symbol": symbol.upper(), "state": get_symbol_state(symbol.upper())}
 
 
-@router.get("/health", summary="Health check for monitoring and Docker")
+@router.get("/health/live", summary="Readiness: proceso + schema listos (sin scanner)")
+def health_live():
+    """Readiness probe: 200 si uvicorn responde y el schema está presente.
+
+    Usa SELECT 1 FROM users LIMIT 1 (tabla canónica) — no bare SELECT 1 —
+    para detectar schema incompleto. No toca el scanner.
+    Es la ruta que el deploy poll-ea para confirmar que la instancia está lista.
+    """
+    try:
+        with snapshot_connection() as con:
+            con.execute("SELECT 1 FROM users LIMIT 1")
+        return {"ready": True}
+    except Exception as e:
+        return JSONResponse(content={"ready": False, "detail": str(e)}, status_code=503)
+
+
+@router.get("/health", summary="Health check (liveness del scanner vía DB)")
 def health_check():
-    """Returns system health status. HTTP 200 = healthy, 503 = degraded."""
-    # Lazy import to avoid circular dep: btc_api imports api.health at module
-    # load time, so we cannot import btc_api at the top of this module.
-    import btc_api as _btc_api  # noqa: PLC0415
-    _scanner_state = _btc_api._scanner_state
+    """Returns system health status. HTTP 200 = healthy, 503 = degraded.
+
+    Deriva la liveness del scanner de la DB via api.scanner_liveness —
+    funciona en instancias web-only donde no hay scanner thread en proceso.
+    """
+    from api.scanner_liveness import scanner_liveness  # noqa: PLC0415
 
     checks = {}
 
@@ -122,32 +139,15 @@ def health_check():
     except Exception as e:
         checks["database"] = f"error: {e}"
 
-    # Scanner thread status
-    checks["scanner"] = "ok" if _scanner_state.get("running") else "stopped"
+    snap = scanner_liveness()
+    fr = snap["frescura"]["estado"]
+    checks["scanner"] = fr
+    checks["scan_freshness"] = fr
+    checks["scans_total"] = snap.get("scans_total", 0)
+    checks["signals_total"] = snap.get("signals_total", 0)
 
-    # Last scan freshness
-    last_ts = _scanner_state.get("last_scan_ts")
-    if last_ts:
-        try:
-            last_dt = datetime.fromisoformat(last_ts)
-            age_sec = (datetime.now(timezone.utc) - last_dt).total_seconds()
-            cfg = load_config()
-            interval = cfg.get("scan_interval_sec", 300)
-            checks["scan_freshness"] = "ok" if age_sec < interval * 3 else f"stale ({int(age_sec)}s ago)"
-        except Exception:
-            checks["scan_freshness"] = "unknown"
-    else:
-        checks["scan_freshness"] = "no_scans_yet"
-
-    # Stats
-    checks["scans_total"] = _scanner_state.get("scans_total", 0)
-    checks["signals_total"] = _scanner_state.get("signals_total", 0)
-    checks["errors"] = _scanner_state.get("errors", 0)
-
-    healthy = checks["database"] == "ok" and checks["scanner"] == "ok"
-    status_code = 200 if healthy else 503
-
+    healthy = checks["database"] == "ok" and fr == "fresco"
     return JSONResponse(
         content={"healthy": healthy, "checks": checks},
-        status_code=status_code
+        status_code=200 if healthy else 503
     )

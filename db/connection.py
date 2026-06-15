@@ -110,16 +110,23 @@ def backup_db() -> None:
     os.makedirs(_BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(_BACKUP_DIR, f"signals_{timestamp}.db")
+    tmp_path = backup_path + ".tmp"
     try:
         with closing(sqlite3.connect(db_file)) as src:
-            with closing(sqlite3.connect(backup_path)) as dst:
+            with closing(sqlite3.connect(tmp_path)) as dst:
                 src.backup(dst)
+        os.replace(tmp_path, backup_path)
         log.info(f"DB backup: {backup_path}")
-        # Cleanup old backups
+        # Cleanup old backups — pattern excludes *.tmp intentionally
         backups = sorted(glob.glob(os.path.join(_BACKUP_DIR, "signals_*.db")))
         for old in backups[:-_BACKUP_MAX_FILES]:
             os.remove(old)
             log.info(f"DB backup removed: {old}")
     except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
         log.warning(f"DB backup failed: {e}")
 
