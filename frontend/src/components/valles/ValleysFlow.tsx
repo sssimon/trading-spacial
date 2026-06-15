@@ -99,7 +99,7 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
         )}
 
         {!dock && step >= 1 && sym && <button className={styles.vwFab} onClick={() => setDock(true)} aria-label="Preguntar al copiloto">◈</button>}
-        {dock && <Copilot onClose={() => setDock(false)} />}
+        {dock && <Copilot onClose={() => setDock(false)} symbol={sym || undefined} />}
       </div>
     </div>
   );

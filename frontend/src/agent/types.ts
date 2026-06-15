@@ -218,7 +218,8 @@ export type AgentSurface =
   | 'symbol_detail'
   | 'kill_switch'
   | 'autotune'
-  | 'historial';
+  | 'historial'
+  | 'valles';
 
 export interface AgentContextHints {
   symbol?:      string;
