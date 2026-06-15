@@ -121,9 +121,17 @@ class ErrorEvent:
     user_message: str
 
 
+@dataclass(frozen=True)
+class Refusal:
+    """Rechazo doctrinal de Valles: el verdict_guard descartó el contenido
+    del turno. Lleva el mensaje fijo que ve el usuario. El MessageEnd que
+    sigue carga el usage/cost reales (el turno se pagó). Ver spec §6.3/§6.7."""
+    user_message: str
+
+
 LoopEvent = (
     TextDelta | ReasoningDelta | ToolUseStart | ToolUseResult
-    | ProposalEvent | MessageEnd | ErrorEvent
+    | ProposalEvent | MessageEnd | ErrorEvent | Refusal
 )
 
 

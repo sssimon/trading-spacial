@@ -28,6 +28,7 @@ from api.agent.loop import (
     MessageEnd,
     ProposalEvent,
     ReasoningDelta,
+    Refusal,
     TextDelta,
     ToolUseResult,
     ToolUseStart,
@@ -144,5 +145,7 @@ async def sse_serialize(
                 "reason":       ev.reason,
                 "user_message": ev.user_message,
             })
+        elif isinstance(ev, Refusal):
+            yield _sse_frame("refusal", {"user_message": ev.user_message})
         else:
             log.warning("sse_serialize: dropping unknown event type %s", type(ev))
