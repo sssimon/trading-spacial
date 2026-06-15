@@ -79,6 +79,7 @@ def _bypass_role_or_none() -> str | None:
 # /auth/login and /auth/refresh are entry points: no session yet.
 _PUBLIC_PATHS_EXACT: frozenset = frozenset({
     "/health",       # <-- exact match ONLY; see comment above
+    "/health/live",  # readiness probe (deploy blue-green + monitoring) — público
     "/auth/login",
     "/auth/refresh",
     "/openapi.json",

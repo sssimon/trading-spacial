@@ -6,10 +6,10 @@ def test_scanner_liveness_from_db(monkeypatch):
     from datetime import datetime, timezone, timedelta
     reciente = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
     monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
-                        lambda: {"last_scan_ts": reciente, "scans_total": 10, "signals_total": 2})
+                        lambda: {"last_scan_ts": reciente})
     snap = scanner_liveness.scanner_liveness(umbral_seg=900)
     assert snap["frescura"]["estado"] == "fresco"
-    assert snap["scans_total"] == 10
+    assert snap["last_scan_ts"] == reciente
 
 
 def test_scanner_liveness_muerto_sin_scans(monkeypatch):
@@ -18,6 +18,28 @@ def test_scanner_liveness_muerto_sin_scans(monkeypatch):
                         lambda: {"last_scan_ts": None, "scans_total": 0, "signals_total": 0})
     snap = scanner_liveness.scanner_liveness(umbral_seg=900)
     assert snap["frescura"]["estado"] == "muerto"
+
+
+def test_scanner_liveness_query_is_cheap_no_full_scan():
+    # Regresión PR1: /health corría COUNT(*)+MAX(ts) (~8s c/u) sobre la tabla
+    # scans grande de prod → timeout del health probe. El query DEBE ser barato
+    # (ORDER BY id DESC LIMIT 1, id-indexed). Guard contra que vuelva el full-scan.
+    import inspect
+    from api import scanner_liveness
+    # Aislar el CUERPO (sin docstring, que menciona COUNT/MAX en prosa).
+    src = inspect.getsource(scanner_liveness._query_scanner_facts)
+    body = src.split('"""', 2)[-1].upper()   # todo tras el docstring
+    assert "ORDER BY ID DESC LIMIT 1" in body
+    assert "COUNT(" not in body, "COUNT(*) es full-scan en la tabla scans grande"
+    assert "MAX(" not in body, "MAX(ts) es full-scan"
+
+
+def test_health_live_is_public():
+    # El readiness probe lo pollea el deploy blue-green (PR2) sin auth y un
+    # monitor externo — DEBE estar exento del AuthMiddleware o da 401 (lo dio
+    # en prod tras PR1).
+    from auth.middleware import _PUBLIC_PATHS_EXACT
+    assert "/health/live" in _PUBLIC_PATHS_EXACT
 
 
 def test_scanner_liveness_query_sql_valida(tmp_path, monkeypatch):
@@ -70,9 +92,9 @@ def test_scanner_liveness_query_sql_valida(tmp_path, monkeypatch):
     monkeypatch.setattr(scanner_liveness, "_snapshot_connection", fake_snapshot)
 
     facts = scanner_liveness._query_scanner_facts()
-    assert facts["scans_total"] == 1
-    assert facts["signals_total"] == 1
+    # Query barato (ORDER BY id DESC LIMIT 1): solo el último ts, sin COUNT/MAX.
     assert facts["last_scan_ts"] is not None
+    assert "scans_total" not in facts   # full-scans eliminados (regresión PR1)
 
 
 def test_backup_db_atomic_no_partial_on_failure(tmp_path, monkeypatch):
