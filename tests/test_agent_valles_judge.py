@@ -47,3 +47,24 @@ def test_judge_unparseable_fails_closed():
     is_v, usage = _run(judge_doctrine(_FakeProvider("???"),
                                       candidate_text="texto ambiguo"))
     assert is_v is True
+
+
+class _RaisingProvider:
+    """El juez revienta a mitad del stream (upstream caído)."""
+    name = "fake"
+
+    def format_system_blocks(self, blocks):
+        return blocks
+
+    def estimate_cost(self, model, usage):
+        return 0.0
+
+    async def stream(self, *, model, system_blocks, messages, tools, max_tokens):
+        raise RuntimeError("upstream down")
+        yield  # unreachable; hace de esto un async generator
+
+
+def test_judge_exception_fails_closed():
+    # Si el juez falla, NO se deja pasar el texto sin juzgar: fail closed → rechaza.
+    is_v, usage = _run(judge_doctrine(_RaisingProvider(), candidate_text="texto cualquiera"))
+    assert is_v is True

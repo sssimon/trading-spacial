@@ -165,6 +165,21 @@ def test_valles_multihop_intermediate_text_buffered(monkeypatch):
     assert isinstance(events[-1], MessageEnd)
 
 
+def test_valles_empty_terminal_text_no_judge_no_crash(monkeypatch):
+    # final_content sin bloque de texto → full_text="" → el juez NO se llama
+    # (guarda full_text.strip()) y el guard no revienta; MessageEnd limpio.
+    # (Brecha de cobertura señalada por Halberg al revisar el commit del loop.)
+    def _boom(*a, **k):
+        raise AssertionError("el juez no debe llamarse con texto vacío")
+    monkeypatch.setattr(loop_mod, "judge_doctrine", _boom)
+    provider = _ScriptedProvider([("", "end_turn", False)])
+    events = _run_turn(provider, "valles", monkeypatch)
+
+    assert not any(isinstance(e, TextDelta) for e in events)
+    assert not any(isinstance(e, Refusal) for e in events)
+    assert isinstance(events[-1], MessageEnd)
+
+
 def test_refusal_event_serializes():
     from api.agent.loop import Refusal
     from api.agent.streaming import sse_serialize
