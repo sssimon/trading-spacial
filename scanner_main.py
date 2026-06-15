@@ -9,8 +9,10 @@ import signal
 import socket
 import sys
 
-os.environ.setdefault("RUN_AS_SERVICE", "1")
-os.environ.setdefault("RUN_SCANNER", "1")
+# OJO: NO mutar os.environ a nivel de módulo. Importar este módulo (p.ej. en
+# tests) no debe setear RUN_AS_SERVICE/RUN_SCANNER en el proceso — eso filtra
+# a tests posteriores bajo ejecución serial (CI), disparando el guard
+# anti-pytest del lifespan. Los defaults se setean dentro de main().
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +36,9 @@ def _sd_notify(state: str) -> None:
 
 
 def main() -> int:
+    # Defaults del servicio — aquí, NO a nivel de módulo (ver nota arriba).
+    os.environ.setdefault("RUN_AS_SERVICE", "1")
+    os.environ.setdefault("RUN_SCANNER", "1")
     # Imports diferidos: el módulo debe importar sin tocar la DB.
     from db.schema import init_db          # btc_api.py:99 — NO db.connection
     from db.transaction import transaction

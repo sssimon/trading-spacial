@@ -264,6 +264,33 @@ def test_scanner_main_importable_and_sd_notify_noop(monkeypatch):
     scanner_main._sd_notify("READY=1")
 
 
+def test_scanner_main_import_does_not_leak_run_as_service(monkeypatch):
+    # Importar scanner_main NO debe setear RUN_AS_SERVICE en el proceso. Si lo
+    # hiciera (setdefault a nivel de módulo), bajo CI serial filtraría a
+    # test_setup.py → el guard anti-pytest del lifespan revienta. Regresión real.
+    import os, importlib
+    monkeypatch.delenv("RUN_AS_SERVICE", raising=False)
+    import scanner_main
+    importlib.reload(scanner_main)
+    assert os.environ.get("RUN_AS_SERVICE") is None, "import scanner_main filtró RUN_AS_SERVICE"
+
+
+def test_scanner_liveness_missing_table_is_muerto(monkeypatch):
+    # Una API web-only que consulta antes de que el scanner cree el schema
+    # debe degradar a 'muerto', no lanzar 500.
+    import sqlite3
+    from api import scanner_liveness
+
+    class _Con:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a): raise sqlite3.OperationalError("no such table: scans")
+
+    monkeypatch.setattr(scanner_liveness, "_snapshot_connection", lambda: _Con())
+    snap = scanner_liveness.scanner_liveness()
+    assert snap["frescura"]["estado"] == "muerto"
+
+
 def test_scanner_main_deferred_imports_resolve():
     # main() difiere sus imports; el test del módulo no los ejercita, así que
     # un import roto (p.ej. init_db de db.connection en vez de db.schema)

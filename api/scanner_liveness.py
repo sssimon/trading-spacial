@@ -12,8 +12,12 @@ Schema verificado en db/schema.py líneas 126-142 y db/signals.py líneas 39-44:
 """
 from __future__ import annotations
 
+import sqlite3
+
 from db.transaction import snapshot_connection as _snapshot_connection
 from freshness import LiveSnapshot
+
+_EMPTY_FACTS = {"last_scan_ts": None, "scans_total": 0, "signals_total": 0}
 
 
 def _query_scanner_facts() -> dict:
@@ -22,13 +26,20 @@ def _query_scanner_facts() -> dict:
     Usa snapshot_connection (WAL-concurrent, sin writer lock) porque
     esta lectura es terminal — se serializa a la respuesta HTTP, no
     alimenta ninguna mutación posterior.
+
+    Tolerante a la tabla ausente: una API web-only podría consultar antes
+    de que el scanner-service haya creado el schema → degradar a 'muerto'
+    (LiveSnapshot con generated_at=None), nunca un 500.
     """
-    with _snapshot_connection() as con:
-        last_scan_ts = con.execute("SELECT MAX(ts) FROM scans").fetchone()[0]
-        scans_total = con.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
-        signals_total = con.execute(
-            'SELECT COUNT(*) FROM scans WHERE "señal" = 1'
-        ).fetchone()[0]
+    try:
+        with _snapshot_connection() as con:
+            last_scan_ts = con.execute("SELECT MAX(ts) FROM scans").fetchone()[0]
+            scans_total = con.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+            signals_total = con.execute(
+                'SELECT COUNT(*) FROM scans WHERE "señal" = 1'
+            ).fetchone()[0]
+    except sqlite3.OperationalError:
+        return dict(_EMPTY_FACTS)
     return {
         "last_scan_ts": last_scan_ts,
         "scans_total": scans_total,
