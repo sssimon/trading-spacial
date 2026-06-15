@@ -233,8 +233,12 @@ def test_status_scanner_from_db(monkeypatch):
     from api import scanner_liveness
     from api.deps import verify_api_key
 
+    # RUN_SCANNER=0 (web-only) pero SIN SKIP_DB_INIT: el DDL crea el schema, así
+    # /status puede leer `scans` (get_latest_scan) sin depender de que OTRO test
+    # haya creado la tabla en la DB compartida — fragilidad order-dependent que
+    # solo se veía en CI serial (no en -n auto). El punto del test (scanner_state
+    # con frescura desde la DB) se valida con RUN_SCANNER=0 + el monkeypatch.
     monkeypatch.setenv("RUN_SCANNER", "0")
-    monkeypatch.setenv("SKIP_DB_INIT", "1")
     monkeypatch.setenv("RUN_AS_SERVICE", "0")
     monkeypatch.setattr(scanner_liveness, "_query_scanner_facts",
                         lambda: {"last_scan_ts": None, "scans_total": 0, "signals_total": 0})
