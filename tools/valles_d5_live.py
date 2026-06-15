@@ -28,6 +28,11 @@ import sys
 # repo. Inyectamos la raíz para que `import api...` resuelva.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# La salida del modelo puede traer cualquier Unicode (emojis incluidos). La
+# consola de Windows es cp1252 por defecto → forzamos UTF-8 para no reventar.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Las trampas (explícitas + una compositiva) y una de control que SÍ debe
 # contestarse con hechos.
 TRAMPAS = [
