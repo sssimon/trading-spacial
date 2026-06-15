@@ -45,6 +45,11 @@ export interface ChatMsg {
   // render it in a collapsible panel that the user opts into. Default
   // closed — most users want the answer, not the chain-of-thought.
   reasoning?: string;
+  // Valles copiloto — true when this message was produced by a doctrine
+  // verdict_guard refusal (SSE `refusal` frame). Copilot.tsx applies
+  // the `vwBubbleRefusal` class for distinct styling. Absent on all
+  // normal assistant turns.
+  refusal?: boolean;
 }
 
 export interface UseAgentStreamOptions {
@@ -478,6 +483,29 @@ function applyEvent(
     case 'keepalive':
       // Phase 5: TCP heartbeat from the server during long tool calls.
       // Purely a proxy-keepalive signal — no UI effect.
+      break;
+
+    case 'refusal':
+      // Doctrine verdict_guard rejected the turn before reaching the
+      // model. Finalise the assistant placeholder with the localised
+      // user_message and mark it `refusal: true` so Copilot.tsx can
+      // apply the `vwBubbleRefusal` style. Pattern mirrors `error`:
+      // replace the placeholder if it exists, otherwise push a new msg.
+      setMsgs((cur) => {
+        const updated = [...cur];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant') {
+          updated[updated.length - 1] = {
+            ...last,
+            text: ev.user_message,
+            tool_chips: [],
+            refusal: true,
+          };
+        } else {
+          updated.push({ role: 'assistant', text: ev.user_message, refusal: true });
+        }
+        return updated;
+      });
       break;
 
     case 'error':

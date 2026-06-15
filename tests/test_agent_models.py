@@ -38,6 +38,10 @@ EXPECTED_SURFACE_MODELS: dict[str, str] = {
     "kill_switch":   "deepseek-reasoner",
     "autotune":      "deepseek-reasoner",
     "historial":     "deepseek-chat",
+    # Valles copiloto (plan 2026-06-15): deepseek-chat a propósito. NUNCA un
+    # reasoner — su canal reasoning_delta no pasa por el verdict_guard y
+    # filtraría un veredicto crudo. Ver assert_model_allowed_for_surface.
+    "valles":        "deepseek-chat",
 }
 
 
@@ -154,6 +158,13 @@ EXPECTED_SURFACE_TOOLS: dict[str, FrozenSet[str]] = {
     }),
     "historial": frozenset({
         "get_closed_trades",
+    }),
+    # Valles copiloto (plan 2026-06-15): SOLO las 3 lentes de lectura. Cero
+    # propose_* — el candado de acción es estructural. Cero score/ranking.
+    "valles": frozenset({
+        "get_valley_eval",
+        "get_levels",
+        "get_dossier",
     }),
 }
 

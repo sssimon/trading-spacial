@@ -27,6 +27,7 @@ export const SURFACE_SYMBOL_DETAIL: AgentSurface = 'symbol_detail';
 export const SURFACE_KILL_SWITCH:   AgentSurface = 'kill_switch';
 export const SURFACE_AUTOTUNE:      AgentSurface = 'autotune';
 export const SURFACE_HISTORIAL:     AgentSurface = 'historial';
+export const SURFACE_VALLES:        AgentSurface = 'valles';
 
 /**
  * Frozen enumeration of every surface. Use this when you need to iterate
@@ -40,6 +41,7 @@ export const ALL_SURFACES: readonly AgentSurface[] = Object.freeze([
   SURFACE_KILL_SWITCH,
   SURFACE_AUTOTUNE,
   SURFACE_HISTORIAL,
+  SURFACE_VALLES,
 ]);
 
 // ── Per-surface UI metadata ────────────────────────────────────────
@@ -55,6 +57,7 @@ export const SURFACE_LABELS: Readonly<Record<AgentSurface, string>> = Object.fre
   kill_switch:   'Copiloto del kill-switch',
   autotune:      'Copiloto del auto-tune',
   historial:     'Copiloto del historial',
+  valles:        'Copiloto de Valles',
 });
 
 /**
@@ -74,4 +77,5 @@ export const SURFACE_MOUNTS: Readonly<Record<AgentSurface, string | null>> = Obj
   kill_switch:   null,
   autotune:      null,
   historial:     null,
+  valles:        'components/valles/Copilot',
 });

@@ -136,6 +136,19 @@ export interface AgentKeepaliveEvent {
 }
 
 /**
+ * Valles copiloto — emitted by the backend doctrine verdict_guard when
+ * a turn is rejected before the model is called. The `user_message` is
+ * already localised by the backend (Venezuelan Spanish). The hook
+ * surfaces it as a finalised assistant message with `refusal: true` so
+ * Copilot.tsx can render the `vwBubbleRefusal` style without any
+ * additional routing logic.
+ */
+export interface AgentRefusalEvent {
+  type:         'refusal';
+  user_message: string;
+}
+
+/**
  * Phase 3 of epic #400 — emitted when a propose_* tool ran and the
  * server signed a side-effect envelope. The frontend echoes
  * `signed_payload` back verbatim to POST /agent/proposals/{id}/confirm
@@ -163,7 +176,8 @@ export type AgentStreamEvent =
   | AgentProposalEvent
   | AgentMessageEnd
   | AgentErrorEvent
-  | AgentKeepaliveEvent;
+  | AgentKeepaliveEvent
+  | AgentRefusalEvent;
 
 /**
  * UI-side state of a proposal attached to an assistant message.
@@ -204,7 +218,8 @@ export type AgentSurface =
   | 'symbol_detail'
   | 'kill_switch'
   | 'autotune'
-  | 'historial';
+  | 'historial'
+  | 'valles';
 
 export interface AgentContextHints {
   symbol?:      string;

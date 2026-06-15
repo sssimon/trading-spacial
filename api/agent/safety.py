@@ -261,3 +261,42 @@ def assert_text_grounded(*, text: str, messages: list[dict]) -> None:
             f"assistant text references identifiers not grounded in any "
             f"prior tool_result: {leaked}"
         )
+
+
+# ── Capa 2: verdict guard (denylist de veredicto EXPLÍCITO) ─────────────
+#
+# Backstop determinista del veredicto explícito (comprar/vender/rankear/
+# dimensionar/predecir). El veredicto COMPOSITIVO (síntesis implícita de
+# hechos) NO lo caza esto — para eso está la Capa 3 (juez LLM). De alta
+# precisión a propósito: preferimos un falso negativo (que la Capa 1 ya
+# cubrió y la Capa 3 atrapará) a un falso positivo que rechace una lectura
+# legítima de hechos. Ver valles spec §6.3.
+
+REFUSAL_MESSAGE = (
+    "No te digo si comprar ni cuál es mejor — te leo los hechos de las "
+    "tres lentes y la decisión es tuya."
+)
+
+_VERDICT_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r"\bdeber[ií]as\s+(comprar|vender|entrar|salir)",
+        r"\byo\s+(comprar[ií]a|vender[ií]a|entrar[ií]a)",
+        r"\bte\s+conviene\b",
+        r"\bvale\s+la\s+pena\b",
+        r"\bes\s+momento\s+de\s+(comprar|entrar|vender)",
+        r"\bla\s+mejor\s+(opci[oó]n|moneda|elecci[oó]n)\b",
+        r"\bes\s+la\s+mejor\b",
+        r"\bpon(?:e|é)?\s+(el\s+)?\d+\s*%",
+        r"\binvierte\s+\$?\d",
+        r"\bel\s+tama[ñn]o\s+(deber[ií]a|tiene\s+que)\b",
+        r"\bva\s+a\s+(subir|bajar)\b",
+        r"\bse\s+espera\s+que\s+(suba|baje)\b",
+    )
+]
+
+
+def contains_explicit_verdict(text: str) -> bool:
+    """True si `text` contiene un patrón de veredicto explícito."""
+    if not text:
+        return False
+    return any(p.search(text) for p in _VERDICT_PATTERNS)

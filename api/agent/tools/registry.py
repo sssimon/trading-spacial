@@ -25,7 +25,9 @@ from pydantic import BaseModel
 from api.agent.tools.schemas import (
     TOOL_INPUT_SCHEMAS,
     GetClosedTradesIn,
+    GetDossierIn,
     GetKillSwitchStateIn,
+    GetLevelsIn,
     GetPortfolioOverviewIn,
     GetPositionDetailIn,
     GetPositionsIn,
@@ -33,6 +35,7 @@ from api.agent.tools.schemas import (
     GetSymbolSetupIn,
     GetSymbolsWithSignalsIn,
     GetTuneProposalIn,
+    GetValleyEvalIn,
     ProposeApplyTuneIn,
     ProposeClosePositionIn,
     ProposeReactivateSymbolIn,
@@ -45,7 +48,7 @@ from api.agent.tools.schemas import (
 Surface = str  # 'dock' | 'symbol_detail' | 'kill_switch' | 'autotune' | 'historial'
 
 ALL_SURFACES: frozenset[Surface] = frozenset({
-    "dock", "symbol_detail", "kill_switch", "autotune", "historial",
+    "dock", "symbol_detail", "kill_switch", "autotune", "historial", "valles",
 })
 
 
@@ -184,6 +187,38 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
         ),
         schema=ProposeApplyTuneIn,
         surfaces=frozenset({"dock", "autotune"}),
+    ),
+    # ── Lentes de Valles (read-only). SOLO surface 'valles'. NUNCA un
+    # propose_* las acompaña — el candado de acción es estructural.
+    ToolSpec(
+        name="get_valley_eval",
+        description=(
+            "Lente Vida: evalúa si una moneda está viva y en rango (en valle). "
+            "Devuelve % de rango, semanas consolidando, percentil de volatilidad, "
+            "y la frescura del dato. Describe hechos del gráfico, no un juicio."
+        ),
+        schema=GetValleyEvalIn,
+        surfaces=frozenset({"valles"}),
+    ),
+    ToolSpec(
+        name="get_levels",
+        description=(
+            "Lente Niveles: zonas de soporte/resistencia (paredes donde el precio "
+            "ya giró) y ubicación del precio vivo respecto a ellas, con frescura. "
+            "Son hechos del gráfico, no señal de comprar ni vender."
+        ),
+        schema=GetLevelsIn,
+        surfaces=frozenset({"valles"}),
+    ),
+    ToolSpec(
+        name="get_dossier",
+        description=(
+            "Lente Dossier: quién está detrás del proyecto — equipo y presencia "
+            "pública, cada dato con su fuente verificable, y la frescura. Reporta "
+            "lo que se encontró (o que no se encontró nada); no opina si es bueno."
+        ),
+        schema=GetDossierIn,
+        surfaces=frozenset({"valles"}),
     ),
 )
 

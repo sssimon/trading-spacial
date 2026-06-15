@@ -32,7 +32,7 @@ from api.agent.audit import TurnAuditWrapper
 from api.agent.clients import get_anthropic_client
 from api.agent.config import get_agent_status
 from api.agent.loop import run_turn
-from api.agent.models import ALLOWED_MODELS, default_model_for_surface
+from api.agent.models import ALLOWED_MODELS, assert_model_allowed_for_surface, default_model_for_surface
 from api.agent.providers.registry import (
     UnknownProviderError,
     get_provider_for_model,
@@ -113,7 +113,7 @@ class _AgentContextHints(BaseModel):
 
 
 class _AgentTurnRequest(BaseModel):
-    surface:        Literal["dock", "symbol_detail", "kill_switch", "autotune", "historial"]
+    surface:        Literal["dock", "symbol_detail", "kill_switch", "autotune", "historial", "valles"]
     messages:       list[_AgentMessage] = Field(..., min_length=1)
     context_hints:  Optional[_AgentContextHints] = None
     # Optional model override (e.g. when the user clicks "análisis profundo"
@@ -163,6 +163,11 @@ async def post_agent_turn(
     model = body.model or default_model_for_surface(body.surface)
     if model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail="model_not_allowed")
+
+    try:
+        assert_model_allowed_for_surface(body.surface, model)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="model_not_allowed_for_surface")
 
     # Resolve provider per-request based on the active model. The
     # override path (body.model="claude-opus-4-7" when default is

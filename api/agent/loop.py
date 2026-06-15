@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, AsyncIterator, Optional
 
+from api.agent.judge import JUDGE_MODEL, judge_doctrine
 from api.agent.prompts import build_system_blocks
 from api.agent.providers.base import (
     LLMReasoningDelta,
@@ -49,6 +50,7 @@ from api.agent.providers.base import (
     LLMTextDelta,
     LLMToolUseStart,
 )
+from api.agent.safety import REFUSAL_MESSAGE, contains_explicit_verdict
 from api.agent.tools.handlers import dispatch_tool
 from api.agent.tools.registry import tools_for_surface
 
@@ -121,9 +123,17 @@ class ErrorEvent:
     user_message: str
 
 
+@dataclass(frozen=True)
+class Refusal:
+    """Rechazo doctrinal de Valles: el verdict_guard descartó el contenido
+    del turno. Lleva el mensaje fijo que ve el usuario. El MessageEnd que
+    sigue carga el usage/cost reales (el turno se pagó). Ver spec §6.3/§6.7."""
+    user_message: str
+
+
 LoopEvent = (
     TextDelta | ReasoningDelta | ToolUseStart | ToolUseResult
-    | ProposalEvent | MessageEnd | ErrorEvent
+    | ProposalEvent | MessageEnd | ErrorEvent | Refusal
 )
 
 
@@ -241,6 +251,12 @@ async def run_turn(
     tools = list(_cached_formatted_tools(surface, provider.name))
     hops = 0
 
+    is_valles = (surface == "valles")
+    # Acumulador de texto del turno (TODOS los hops) para el verdict_guard de
+    # Valles. Variable LOCAL del frame de la corrutina → aislada entre requests
+    # concurrentes. NO mover a estado de módulo. Ver spec §6.3 corrección 2.
+    valles_buffer: list[str] = []
+
     # PR #408 review fix: accumulate usage + cost across all hops of the
     # turn. The model bills per API call — a multi-hop turn fires N+1
     # calls (N tool_use intermediate + 1 final text). The original
@@ -276,7 +292,9 @@ async def run_turn(
                 max_tokens=max_tokens,
             ):
                 if isinstance(ev, LLMTextDelta):
-                    yield TextDelta(text=ev.text)
+                    if not is_valles:
+                        yield TextDelta(text=ev.text)
+                    # valles: se suprime; el texto se lee de final_content abajo
                 elif isinstance(ev, LLMReasoningDelta):
                     yield ReasoningDelta(text=ev.text)
                 elif isinstance(ev, LLMToolUseStart):
@@ -289,6 +307,8 @@ async def run_turn(
                 # tool_use blocks off LLMStreamEnd.content rather than
                 # per-event (Phase 1 design decision; preserved).
         except Exception as e:  # noqa: BLE001
+            # NO hagas flush de valles_buffer aquí: un párrafo a medias sin
+            # pasar por el guard NO se muestra. El buffer muere con el frame. (Halberg FM-2)
             log.warning("agent loop upstream error: %s", e, exc_info=True)
             yield ErrorEvent(
                 reason="upstream",
@@ -305,7 +325,35 @@ async def run_turn(
             total_usage[k] += int(hop_usage.get(k, 0) or 0)
         total_cost_usd += provider.estimate_cost(model, hop_usage)
 
+        # Acumula el texto de ESTE hop (incluyendo hops intermedios de
+        # tool_use) para el verdict_guard, que corre sobre el turno completo.
+        # El texto se lee de final_content, NO del buffer de TextDelta. Ver
+        # spec §6.3 corrección 2 + 3.
+        if is_valles:
+            valles_buffer.append("".join(
+                getattr(b, "text", "") for b in final_content
+                if getattr(b, "type", None) == "text"
+            ))
+
         if final_stop_reason != "tool_use":
+            if is_valles:
+                full_text = "".join(valles_buffer)
+                refuse = contains_explicit_verdict(full_text)   # Capa 2
+                if not refuse and full_text.strip():
+                    is_verdict, judge_usage = await judge_doctrine(  # Capa 3
+                        provider, candidate_text=full_text)
+                    for k in total_usage:
+                        total_usage[k] += int(judge_usage.get(k, 0) or 0)
+                    total_cost_usd += provider.estimate_cost(JUDGE_MODEL, judge_usage)
+                    refuse = refuse or is_verdict
+                if refuse:
+                    yield Refusal(user_message=REFUSAL_MESSAGE)
+                elif full_text:
+                    yield TextDelta(text=full_text)
+                yield MessageEnd(usage=total_usage,
+                                 stop_reason=final_stop_reason,
+                                 cost_usd=total_cost_usd)
+                return
             yield MessageEnd(
                 usage=total_usage,
                 stop_reason=final_stop_reason,
