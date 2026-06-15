@@ -281,6 +281,35 @@ def get_closed_trades(*, tenant_id: int, window: str = "30d") -> dict:
     return {"trades": [_position_to_summary(r) for r in rows]}
 
 
+def get_valley_eval_lens(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
+    """Lente Vida: vive + rango de una moneda, con frescura. Datos globales
+    de mercado; tenant_id no se usa. Fallo externo ya viene como
+    'no_disponible' desde el endpoint — nunca lanza."""
+    from api.valleys import get_valley_eval
+    norm = _normalize_symbol(symbol)
+    if not norm:
+        return {"error": "not_found"}
+    return get_valley_eval(norm)
+
+
+def get_levels_lens(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
+    """Lente Niveles: S/R + ubicación del precio vivo, con frescura."""
+    from api.levels import get_levels
+    norm = _normalize_symbol(symbol)
+    if not norm:
+        return {"error": "not_found"}
+    return get_levels(norm)
+
+
+def get_dossier_lens(*, tenant_id: int, symbol: str) -> dict:  # noqa: ARG001
+    """Lente Dossier: quién está detrás, con fuentes y frescura."""
+    from api.dossier import get_dossier
+    norm = _normalize_symbol(symbol)
+    if not norm:
+        return {"error": "not_found"}
+    return get_dossier(norm)
+
+
 def get_tune_proposal(*, tenant_id: int) -> dict:  # noqa: ARG001
     """Latest pending auto-tune proposal. System-wide read (auto-tune
     proposes parameters for the global symbol_overrides; tenant_id is
@@ -325,6 +354,9 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_position_detail":      get_position_detail,
     "get_symbols_with_signals": get_symbols_with_signals,
     "get_symbol_setup":         get_symbol_setup,
+    "get_valley_eval":          get_valley_eval_lens,
+    "get_levels":               get_levels_lens,
+    "get_dossier":              get_dossier_lens,
     "get_kill_switch_state":    get_kill_switch_state,
     "get_recent_signals":       get_recent_signals,
     "get_closed_trades":        get_closed_trades,
