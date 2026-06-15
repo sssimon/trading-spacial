@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import requests
 from fastapi import APIRouter
@@ -27,6 +28,7 @@ _OUTPUT = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                        "data", "valley_candidates.json")
 
 FRESCURA_VALLES_SEG = 43200   # 12 horas
+FRESCURA_VALLEY_EVAL_SEG = 60   # evaluación viva, computada fresca cada request
 
 _EMPTY = {"generated_at": None,
           "coverage": {"universe": 0, "evaluated": 0, "complete": False},
@@ -40,17 +42,23 @@ def get_valley_eval(symbol: str) -> dict:
     (razones de liveness — hechos, no juicio de atractivo). no_disponible si la
     red falla. Read-only, red fuera de tx, sin caché. Spec §2."""
     symbol = symbol.upper()[:20]
+    now = datetime.now(timezone.utc).isoformat()
     try:
         bars = _fetch_daily_bars(symbol)
     except (requests.RequestException, BinanceUnavailable) as e:
         log.warning("VALLEY_EVAL_NO_DISPONIBLE symbol=%s causa=%s", symbol, e)
-        return {"symbol": symbol, "estado": "no_disponible"}
+        return LiveSnapshot(payload={"symbol": symbol, "estado": "no_disponible"},
+                            generated_at=None, umbral_seg=FRESCURA_VALLEY_EVAL_SEG).to_response()
     cand = evaluate_symbol(symbol, bars)
     if cand is None:
         vivo, razones = classify_liveness(bars)
-        return {"symbol": symbol, "estado": "ok", "candidata": False,
-                "vivo": vivo, "razones_muerte": razones}
-    return {"symbol": symbol, "estado": "ok", "candidata": True, **cand}
+        payload = {"symbol": symbol, "estado": "ok", "candidata": False,
+                   "vivo": vivo, "razones_muerte": razones, "generated_at": now}
+    else:
+        payload = {"symbol": symbol, "estado": "ok", "candidata": True,
+                   "generated_at": now, **cand}
+    return LiveSnapshot(payload=payload, generated_at=now,
+                        umbral_seg=FRESCURA_VALLEY_EVAL_SEG).to_response()
 
 
 @router.get("/valley-candidates", summary="Candidatas del screener de valles (vivas + en rango)")

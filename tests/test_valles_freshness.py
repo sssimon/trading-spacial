@@ -25,3 +25,26 @@ def test_levels_no_disponible_carries_frescura():
     assert out["frescura"]["estado"] == "muerto"
     assert out["zonas"] == []
     assert out.get("generated_at") is None   # campo top-level previo intacto (aditivo)
+
+
+import api.valleys as valleys_mod
+
+
+def test_valley_eval_candidate_carries_frescura():
+    bars = [{"open_time": 0, "open": 1.0, "high": 1.0, "low": 1.0,
+             "close": 1.0, "volume": 1.0, "quote_volume": 1.0}]
+    cand = {"pct_rango": 0.05, "semanas_consolidando": 8, "vol_percentil": 0.2}
+    with patch.object(valleys_mod, "_fetch_daily_bars", return_value=bars), \
+         patch.object(valleys_mod, "evaluate_symbol", return_value=cand):
+        out = valleys_mod.get_valley_eval("ADAUSDT")
+    assert out["candidata"] is True
+    assert out["frescura"]["estado"] == "fresco"
+    assert out["semanas_consolidando"] == 8
+
+
+def test_valley_eval_no_disponible_carries_frescura():
+    with patch.object(valleys_mod, "_fetch_daily_bars",
+                      side_effect=valleys_mod.BinanceUnavailable("down")):
+        out = valleys_mod.get_valley_eval("ADAUSDT")
+    assert out["estado"] == "no_disponible"
+    assert out["frescura"]["estado"] == "muerto"
