@@ -37,6 +37,12 @@ export const Copilot: React.FC<{ onClose: () => void; symbol?: string }> = ({ on
   // Greeting inicial estático — el agente real responde cuando el usuario pregunta.
   const showGreeting = msgs.length === 0;
 
+  // "Pensando": Valles buffea la respuesta (no streamea token a token), así que
+  // el placeholder assistant queda vacío hasta el final. No lo pintamos como
+  // burbuja vacía; en su lugar mostramos UN loader de tres puntos.
+  const last = msgs[msgs.length - 1];
+  const thinking = loading && (!last || last.role !== 'assistant' || last.text === '');
+
   return (
     <>
       <div className={styles.vwScrim} onClick={onClose} />
@@ -53,21 +59,31 @@ export const Copilot: React.FC<{ onClose: () => void; symbol?: string }> = ({ on
               <div className={styles.vwBubble}>Te leo hechos: si está viva, dónde está el precio respecto a sus paredes, y quién está detrás con su fuente. Pregúntame por cualquiera.</div>
             </div>
           )}
-          {msgs.map((m: ChatMsg, i: number) => (
-            <div className={`${styles.vwMsg} ${m.role === 'user' ? styles.vwMsgUser : ''}`} key={i}>
-              {m.role === 'assistant' && (
-                <span className={`${styles.vwTag} ${m.refusal ? '' : styles.vwTagFact}`}>
-                  {m.refusal ? 'no decide' : 'fact'}
-                </span>
-              )}
-              <div className={`${styles.vwBubble} ${m.refusal ? styles.vwBubbleRefusal : ''}`}>
-                {m.text}
+          {msgs.map((m: ChatMsg, i: number) => {
+            // Placeholder vacío mientras piensa → no se pinta (el loader lo cubre).
+            if (m.role === 'assistant' && !m.text) return null;
+            return (
+              <div className={`${styles.vwMsg} ${m.role === 'user' ? styles.vwMsgUser : ''}`} key={i}>
+                {m.role === 'assistant' && (
+                  <span className={`${styles.vwTag} ${m.refusal ? '' : styles.vwTagFact}`}>
+                    {m.refusal ? 'no decide' : 'fact'}
+                  </span>
+                )}
+                <div className={`${styles.vwBubble} ${m.refusal ? styles.vwBubbleRefusal : ''}`}>
+                  {m.text}
+                </div>
               </div>
-            </div>
-          ))}
-          {loading && (
+            );
+          })}
+          {thinking && (
             <div className={styles.vwMsg}>
-              <div className={styles.vwBubble}>…</div>
+              <div className={styles.vwBubble}>
+                <span className={styles.vwTyping} role="status" aria-label="Pensando">
+                  <span className={styles.vwTypingDot} />
+                  <span className={styles.vwTypingDot} />
+                  <span className={styles.vwTypingDot} />
+                </span>
+              </div>
             </div>
           )}
         </div>
