@@ -264,6 +264,20 @@ def test_scanner_main_importable_and_sd_notify_noop(monkeypatch):
     scanner_main._sd_notify("READY=1")
 
 
+def test_scanner_main_deferred_imports_resolve():
+    # main() difiere sus imports; el test del módulo no los ejercita, así que
+    # un import roto (p.ej. init_db de db.connection en vez de db.schema)
+    # pasaba desapercibido y crasheaba el scanner-service en prod. Este test
+    # importa exactamente los nombres que main() necesita.
+    from db.schema import init_db          # noqa: F401
+    from db.transaction import transaction  # noqa: F401
+    from db.auth_schema import init_auth_db, init_system_state  # noqa: F401
+    from btc_api import _bootstrap_first_user  # noqa: F401
+    from scanner.runtime import (  # noqa: F401
+        start_scanner_thread, stop_managed_threads, _thread_stop_event,
+    )
+
+
 def test_scanner_main_sd_notify_writes_to_socket(tmp_path, monkeypatch):
     import sys
     import importlib

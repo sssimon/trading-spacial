@@ -35,7 +35,7 @@ def _sd_notify(state: str) -> None:
 
 def main() -> int:
     # Imports diferidos: el módulo debe importar sin tocar la DB.
-    from db.connection import init_db
+    from db.schema import init_db          # btc_api.py:99 — NO db.connection
     from db.transaction import transaction
     # Rutas verificadas en btc_api.py líneas 39-43:
     #   from db.auth_schema import (has_any_user, init_auth_db, init_system_state, ...)
