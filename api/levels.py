@@ -12,11 +12,14 @@ from datetime import datetime, timezone
 import requests
 from fastapi import APIRouter
 
+from freshness import LiveSnapshot
 from screener.sr_levels import LOOKBACK_DAYS, detect_levels, locate_price
 
 log = logging.getLogger("api.levels")
 
 router = APIRouter(tags=["levels"])
+
+FRESCURA_LEVELS_SEG = 60  # precio es vivo/fresco cada request
 
 _KLINES_URL = "https://api.binance.com/api/v3/klines"
 _PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
@@ -62,9 +65,11 @@ def _fetch_live_price(symbol: str) -> float:
 
 
 def _no_disponible(symbol: str) -> dict:
-    return {"symbol": symbol, "estado": "no_disponible", "generated_at": None,
-            "price_live": None, "zonas": [],
-            "ubicacion": {"dentro_de": None, "techo": None, "piso": None}}
+    payload = {"symbol": symbol, "estado": "no_disponible",
+               "price_live": None, "zonas": [],
+               "ubicacion": {"dentro_de": None, "techo": None, "piso": None}}
+    return LiveSnapshot(payload=payload, generated_at=None,
+                        umbral_seg=FRESCURA_LEVELS_SEG).to_response()
 
 
 @router.get("/levels/{symbol}", summary="Niveles S/R neutrales + ubicación del precio vivo")
@@ -80,7 +85,10 @@ def get_levels(symbol: str) -> dict:
         return _no_disponible(symbol)
 
     zonas = detect_levels(bars)
-    return {"symbol": symbol, "estado": "ok",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "price_live": price, "zonas": zonas,
-            "ubicacion": locate_price(price, zonas)}
+    generated_at = datetime.now(timezone.utc).isoformat()
+    payload = {"symbol": symbol, "estado": "ok",
+               "generated_at": generated_at,
+               "price_live": price, "zonas": zonas,
+               "ubicacion": locate_price(price, zonas)}
+    return LiveSnapshot(payload=payload, generated_at=generated_at,
+                        umbral_seg=FRESCURA_LEVELS_SEG).to_response()
