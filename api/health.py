@@ -139,12 +139,11 @@ def health_check():
     except Exception as e:
         checks["database"] = f"error: {e}"
 
-    snap = scanner_liveness()
+    snap = scanner_liveness()              # barato: último scan ts (id-indexed)
     fr = snap["frescura"]["estado"]
     checks["scanner"] = fr
     checks["scan_freshness"] = fr
-    checks["scans_total"] = snap.get("scans_total", 0)
-    checks["signals_total"] = snap.get("signals_total", 0)
+    checks["last_scan_ts"] = snap.get("last_scan_ts")
 
     healthy = checks["database"] == "ok" and fr == "fresco"
     return JSONResponse(
