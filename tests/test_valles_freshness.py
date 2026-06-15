@@ -24,3 +24,4 @@ def test_levels_no_disponible_carries_frescura():
     assert out["estado"] == "no_disponible"
     assert out["frescura"]["estado"] == "muerto"
     assert out["zonas"] == []
+    assert out.get("generated_at") is None   # campo top-level previo intacto (aditivo)

@@ -65,7 +65,7 @@ def _fetch_live_price(symbol: str) -> float:
 
 
 def _no_disponible(symbol: str) -> dict:
-    payload = {"symbol": symbol, "estado": "no_disponible",
+    payload = {"symbol": symbol, "estado": "no_disponible", "generated_at": None,
                "price_live": None, "zonas": [],
                "ubicacion": {"dentro_de": None, "techo": None, "piso": None}}
     return LiveSnapshot(payload=payload, generated_at=None,
