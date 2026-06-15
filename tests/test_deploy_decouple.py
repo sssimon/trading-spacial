@@ -20,6 +20,41 @@ def test_scanner_liveness_muerto_sin_scans(monkeypatch):
     assert snap["frescura"]["estado"] == "muerto"
 
 
+def test_normalize_scan_ts_handles_utc_suffix():
+    from api.scanner_liveness import _normalize_scan_ts
+    from datetime import datetime
+    # formato real de prod: 'YYYY-MM-DD HH:MM:SS UTC'
+    norm = _normalize_scan_ts("2026-06-15 15:06:38 UTC")
+    assert datetime.fromisoformat(norm)  # ahora parsea
+    assert _normalize_scan_ts(None) is None
+    # idempotente para ISO
+    assert _normalize_scan_ts("2026-06-15T15:06:38+00:00") == "2026-06-15T15:06:38+00:00"
+
+
+def test_scanner_liveness_prod_ts_format_is_fresco(monkeypatch):
+    # El bug que tumbó el deploy: el ts de scans viene como ' UTC' (no ISO),
+    # LiveSnapshot no lo parseaba → 'muerto' permanente aunque el scan fuera
+    # reciente. Reproduce el formato exacto de prod.
+    import sqlite3
+    from contextlib import contextmanager
+    from datetime import datetime, timezone, timedelta
+    from api import scanner_liveness
+
+    mem = sqlite3.connect(":memory:")
+    mem.execute("CREATE TABLE scans (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL)")
+    reciente = (datetime.now(timezone.utc) - timedelta(seconds=120)).strftime("%Y-%m-%d %H:%M:%S UTC")
+    mem.execute("INSERT INTO scans (ts) VALUES (?)", (reciente,))
+    mem.commit()
+
+    @contextmanager
+    def fake_snapshot():
+        yield mem
+
+    monkeypatch.setattr(scanner_liveness, "_snapshot_connection", fake_snapshot)
+    snap = scanner_liveness.scanner_liveness(umbral_seg=900)
+    assert snap["frescura"]["estado"] == "fresco", snap["frescura"]
+
+
 def test_scanner_liveness_query_is_cheap_no_full_scan():
     # Regresión PR1: /health corría COUNT(*)+MAX(ts) (~8s c/u) sobre la tabla
     # scans grande de prod → timeout del health probe. El query DEBE ser barato
