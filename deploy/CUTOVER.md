@@ -91,11 +91,23 @@ curl -k -s -o /dev/null -w "%{http_code}\n" --resolve trading.sdar.dev:443:127.0
 
 ## 6. Mergear el PR2 (deploy.yml blue-green)
 Solo DESPUÉS de que el cutover quedó verde. El primer deploy nuevo corre la
-rutina blue-green contra el server ya migrado. Deploy de prueba (commit no-op)
-con un monitor en paralelo:
+rutina blue-green contra el server ya migrado.
+
+⚠️ OJO con el monitor: `location /api/` tiene `limit_req zone=trading_general
+rate=60r/m burst=20` (1 req/s por IP). Polear `/api/health/live` a >1/s
+(p.ej. `sleep 0.5` = 2/s) DISPARA 503 de nginx (`limiting requests` en
+`/var/log/nginx/trading.sdar.dev.error.log`) — son un ARTEFACTO del monitor,
+NO una caída. El swap blue-green es seamless (nginx reload drena conexiones),
+así que no hay blip sub-segundo que cazar; polear lento alcanza:
 ```bash
-while true; do curl -k -s -o /dev/null -w '%{http_code}\n' --resolve trading.sdar.dev:443:127.0.0.1 https://trading.sdar.dev/api/health/live; sleep 0.5; done
-# Confirmá CERO 502/503 en la ventana del swap.
+# Opción A — público, BAJO el rate-limit (0.5/s = 30/min, seguro):
+while true; do curl -k -s -o /dev/null -w '%{http_code}\n' --resolve trading.sdar.dev:443:127.0.0.1 https://trading.sdar.dev/api/health/live; sleep 2; done
+
+# Opción B — desde la caja, backend directo (sin nginx, sin rate-limit): caza
+# cualquier ventana en que AMBOS colores estén caídos a la vez.
+while true; do for p in 8100 8101; do printf '%s:%s ' "$p" "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$p/health/live)"; done; echo; sleep 0.3; done
+# Confirma CERO 502/503 en la ventana del swap (Opción A) o que SIEMPRE al menos
+# un color responde 200 (Opción B).
 ```
 
 ## Rollback (en cualquier punto)
