@@ -18,6 +18,12 @@ import './styles/tokens.css';
 //     Defined AFTER App.css so the new visual language wins for shared
 //     selectors like `.btn`.
 import './styles/base.css';
+// (4) Tema CÁLIDO global (rediseño Mercado, 2026-06-16). Remapea los
+//     tokens --nbc-* a la paleta cálida (papel/arcilla). Importado DESPUÉS
+//     de tokens.css para que el remap gane por orden de fuente.
+import './styles/warm-tokens.css';
+// (5) Estilos de componentes del Mercado cálido (.mw-*), hoja global.
+import './styles/mercado-warm.css';
 
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';

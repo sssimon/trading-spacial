@@ -16,7 +16,7 @@
 }
 .focus {
   border-color: var(--bull);
-  background: #0c100e;
+  background: var(--nbc-surface-solid);
 }
 .prompt { color: var(--bull); font-weight: 600; }
 .input {

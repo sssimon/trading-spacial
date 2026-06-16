@@ -48,8 +48,9 @@ import type {
   Capital,
   DashboardResponse,
   DashboardSymbolState,
+  Frescura,
 } from './types';
-import type { MainTab, SymbolsFilter } from './types-ui';
+import type { MainTab } from './types-ui';
 
 import { useAuth } from './auth/useAuth';
 import { useScanCountdown } from './hooks/useScanCountdown';
@@ -63,9 +64,7 @@ import AgentBrief from './components/AgentBrief';
 import AgentDock from './components/AgentDock';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
-import StatusBar from './components/StatusBar';
-import SymbolsGrid from './components/SymbolsGrid';
-import SignalsTable from './components/SignalsTable';
+import MercadoView, { type MercadoWallet } from './components/MercadoView';
 import ConfigPanel from './components/ConfigPanel';
 import ConnectionsPanel from './components/ConnectionsPanel';
 import PositionsView, { type PortfolioSummary } from './components/PositionsView';
@@ -85,7 +84,6 @@ import type { ValleySnapshot } from './types';
 import LeftRail from './components/LeftRail';
 import BottomNav from './components/BottomNav';
 import Ticker from './components/Ticker';
-import FocusPanel from './components/FocusPanel';
 import NotificationBell from './components/NotificationBell';
 import UserMenu from './components/UserMenu';
 import { useAgentEnabled } from './hooks/useAgentEnabled';
@@ -119,9 +117,9 @@ const App: React.FC = () => {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [error,       setError]       = useState<string | null>(null);
   const [tuneResult,  setTuneResult]  = useState<TuneResult | null>(null);
+  const [symbolsFrescura, setSymbolsFrescura] = useState<Frescura | null>(null);
 
   // ── ui ─────────────────────────────────────────────────
-  const [filter,         setFilter]         = useState<SymbolsFilter>('all');
   const [mainTab,        setMainTab]        = useState<MainTab>('mercado');
   const [selectedSymbol, setSelectedSymbol] = useState<SymbolStatus | null>(null);
   const [openOverlay,    setOpenOverlay]    = useState<OverlayKind>(null);
@@ -187,6 +185,7 @@ const App: React.FC = () => {
         getHealthDashboard().catch(() => null),
       ]);
       setSymbols(symbolsRes.symbols);
+      setSymbolsFrescura(symbolsRes.frescura ?? null);
       setStatus(statusRes);
       setSignals(signalsRes.signals);
       setTuneResult(tuneRes);
@@ -385,6 +384,34 @@ const App: React.FC = () => {
     pnlToday,
     drawdown: capital?.max_drawdown_pct ?? 0,
   }), [capital, pnlToday, dashboard]);
+
+  // Cartera para el hero del Mercado cálido. peak ← capital; capitalLocked
+  // ← Σ size_usd de posiciones abiertas; el resto reusa `portfolio`.
+  const mercadoWallet: MercadoWallet = useMemo(() => ({
+    equity:        portfolio.equity,
+    peak:          capital?.peak_balance ?? portfolio.equity,
+    drawdown:      portfolio.drawdown,
+    pnlToday:      portfolio.pnlToday,
+    openCount:     positions.length,
+    capitalLocked: positions.reduce((acc, p) => acc + (p.size_usd ?? 0), 0),
+  }), [portfolio, capital, positions]);
+
+  // Tweaks del Mercado cálido (Fase 1: defaults de doctrina, sin panel UI).
+  // Persisten en localStorage + <html> data-attrs; un panel futuro los edita.
+  const [mercadoLang] = useState<'claro' | 'tecnico'>(() => {
+    try { return (localStorage.getItem('mw-lenguaje') as 'claro' | 'tecnico') || 'claro'; }
+    catch { return 'claro'; }
+  });
+  useEffect(() => {
+    const r = document.documentElement;
+    let density = 'comodo', score = 'on';
+    try {
+      density = localStorage.getItem('mw-density') || 'comodo';
+      score   = localStorage.getItem('mw-score') || 'on';
+    } catch { /* localStorage no disponible */ }
+    r.setAttribute('data-density', ({ comodo: '', compacto: 'compact', denso: 'dense' } as Record<string, string>)[density] ?? '');
+    r.setAttribute('data-score', score === 'off' ? 'off' : 'on');
+  }, []);
 
   // Highest-score symbol with señal=true — used as the empty-state
   // suggestion in PositionsView.
@@ -647,55 +674,34 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* ── Mercado ────────────────────────────────── */}
+          {/* ── Mercado (rediseño cálido) ──────────────── */}
           {mainTab === 'mercado' && (
-            <>
-              <ErrorBoundary fallbackLabel="Error en el grid de símbolos">
-                <SymbolsGrid
-                  symbols={symbols}
-                  loading={loading}
-                  filter={filter}
-                  onFilterChange={setFilter}
-                  onSymbolClick={setSelectedSymbol}
-                  belowPageBar={
-                    <>
-                      <StatusBar status={status} macro={macro} killSwitchActive={killSwitchActiveCount} />
-                      {AGENT_ENABLED ? (
-                        <AgentBrief
-                          symbols={symbols}
-                          positions={positions}
-                          macro={macroState}
-                          onOpenDock={openDock}
-                          onOpenSymbol={openSymbolByPair}
-                        />
-                      ) : (
-                        <FocusPanel
-                          items={focus}
-                          onAction={(it) => {
-                            if (it.pair) {
-                              const sym = symbols.find((s) => s.symbol === it.pair);
-                              if (sym) setSelectedSymbol(sym);
-                            }
-                            if (it.kind === 'risk-position' || it.kind === 'near-tp') {
-                              setMainTab('posiciones');
-                            }
-                          }}
-                        />
-                      )}
-                    </>
-                  }
-                />
-              </ErrorBoundary>
-
-              <ErrorBoundary fallbackLabel="Error en la tabla de señales">
-                <SignalsTable
-                  signals={signals}
-                  loading={loading}
-                  onOpenPosition={handleOpenFromSignal}
-                  mobile={mobile}
-                />
-              </ErrorBoundary>
-            </>
+            <ErrorBoundary fallbackLabel="Error en el mercado">
+              <MercadoView
+                symbols={symbols}
+                loading={loading}
+                macro={macro}
+                wallet={mercadoWallet}
+                signals={signals}
+                status={status}
+                frescura={symbolsFrescura}
+                focus={focus}
+                onSymbolClick={setSelectedSymbol}
+                onOpenSignal={handleOpenFromSignal}
+                onRescan={handleScan}
+                mobile={mobile}
+                lenguaje={mercadoLang}
+                agentSlot={AGENT_ENABLED ? (
+                  <AgentBrief
+                    symbols={symbols}
+                    positions={positions}
+                    macro={macroState}
+                    onOpenDock={openDock}
+                    onOpenSymbol={openSymbolByPair}
+                  />
+                ) : undefined}
+              />
+            </ErrorBoundary>
           )}
 
           {/* ── Posiciones ─────────────────────────────── */}

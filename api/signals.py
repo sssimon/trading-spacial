@@ -210,6 +210,72 @@ def _payload_dict(row: dict) -> dict:
         return {}
 
 
+# C-ordinal → (display key, scalar formatter). We key by the C-ORDINAL PREFIX
+# ("C1_".."C7_"), NEVER the full confirmation string: prod emits `C8_DXY` but
+# the baseline fixture uses `C8_DXY_Bajando`, and LONG/SHORT flip the suffixes
+# (C1_RSI_Sobreventa vs _Sobrecompra, C3_Soporte_Cercano vs _Resistencia_Cercana,
+# etc.). C8 is excluded on purpose: its `pass` is the string "MANUAL" (a manual
+# DXY placeholder, not auto-evaluated) — surfacing it as a condition would be
+# dishonest. See btc_scanner.py:443-492 for the source-of-truth dict build.
+_SCORE_COMPONENT_ORDER = ("C1", "C2", "C3", "C4", "C5", "C6", "C7")
+_SCORE_COMPONENT_KEYS = {
+    "C1": "RSI", "C2": "DIV", "C3": "SR", "C4": "BB",
+    "C5": "VOL", "C6": "CVD", "C7": "SMA",
+}
+
+
+def _score_component_value(ordinal: str, entry: dict):
+    """Project a clean scalar string for the conditions that have one.
+
+    C2 (DIV), C4 (BB) and C7 (SMA) intentionally return None — no single
+    clean scalar represents them. Tolerant of missing scalar fields.
+    """
+    if ordinal == "C1":
+        v = entry.get("rsi_1h")
+        return f"RSI {v:.0f}" if v is not None else None
+    if ordinal == "C3":
+        v = entry.get("dist_soporte_pct")
+        if v is None:
+            v = entry.get("dist_resistencia_pct")
+        return f"{v:.2f}%" if v is not None else None
+    if ordinal == "C5":
+        v = entry.get("vol_ratio")
+        return f"x{v:.2f}" if v is not None else None
+    if ordinal == "C6":
+        v = entry.get("cvd_delta")
+        return f"{v:+.0f}" if v is not None else None
+    return None  # C2, C4, C7 — no clean scalar
+
+
+def _build_score_components(conf: dict) -> list[dict]:
+    """The 7 REAL auto-scored scanner conditions C1–C7 as ordered objects.
+
+    Returns a length-7 list (C1..C7 order) of `{"key", "pass", "value"}`.
+    Negatives are KEPT (unlike /signals/latest which filters pass-only) so the
+    dashboard can show which conditions failed. `pass` is always a strict bool
+    (coerced — never the string "MANUAL"/"?"). C8 is excluded (manual DXY
+    placeholder). A Cn key absent from `conf` (legacy/empty payload) yields
+    `{"key", "pass": False, "value": None}` so the array is always length 7.
+    """
+    conf = conf or {}
+    # Index the (possibly suffixed) confirmation entries by their C-ordinal
+    # prefix so LONG/SHORT suffix flips and prod-vs-fixture naming both resolve.
+    by_ordinal: dict = {}
+    for k, v in conf.items():
+        ordinal = k.split("_", 1)[0]
+        if ordinal in _SCORE_COMPONENT_KEYS:
+            by_ordinal[ordinal] = v if isinstance(v, dict) else {}
+    out = []
+    for ordinal in _SCORE_COMPONENT_ORDER:
+        entry = by_ordinal.get(ordinal, {})
+        out.append({
+            "key":   _SCORE_COMPONENT_KEYS[ordinal],
+            "pass":  bool(entry.get("pass")) if isinstance(entry.get("pass"), bool) else False,
+            "value": _score_component_value(ordinal, entry),
+        })
+    return out
+
+
 @router.get("", summary="Historial de escaneos / señales")
 def list_signals(
     limit:        int             = Query(50,    ge=1, le=500),

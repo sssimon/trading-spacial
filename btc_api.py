@@ -73,7 +73,7 @@ from api.positions import router as positions_router
 #   latest_message, latest_signal, list_signals, signal_by_id: lines 310–313
 #   SIGNALS_LOG_FILE: monkeypatched at line 1345
 from api.signals import (  # noqa: F401
-    _is_duplicate_signal, _mark_notified,
+    _is_duplicate_signal, _mark_notified, _build_score_components, _payload_dict,
     get_signals_performance, latest_message, latest_signal, list_signals, signal_by_id,
     SIGNALS_LOG_FILE,
 )
@@ -461,6 +461,13 @@ def list_symbols():
                 live_price = _json.loads(row["payload"]).get("live_price")
             except (ValueError, TypeError):
                 live_price = None
+        # Additive projection (feat/mercado-warm): direction + SL/TP + the 7
+        # auto-scored conditions C1–C7 live in the payload JSON, not in
+        # dedicated scans columns. No N+1: get_signals_summary already returned
+        # the payload column in memory. `.get(...) or {}` is defensive so
+        # pre-#211 / "Sin datos" rows don't KeyError (mirrors api/signals.py).
+        payload = _payload_dict(row) if row else {}
+        sizing  = payload.get("sizing_1h") or {}
         result.append({
             "symbol":     sym,
             "estado":     row["estado"]        if row else "Sin datos aun",
@@ -472,8 +479,19 @@ def list_symbols():
             "setup":      bool(row["setup"])   if row else False,
             "gatillo":    bool(row["gatillo"]) if row else False,
             "ts":         row["ts"]            if row else None,
+            # ── additive (the 10 keys above stay byte-identical) ──
+            "direction":        payload.get("direction"),
+            "sl_precio":        sizing.get("sl_precio"),
+            "tp_precio":        sizing.get("tp_precio"),
+            "score_components": _build_score_components(payload.get("confirmations") or {})
+                                if row else [],
         })
-    return {"total": len(result), "symbols": result}
+    # Top-level snapshot frescura (Non-Negotiable #8): reuse the already-migrated,
+    # ' UTC'-normalizing scanner_liveness() path. Freshness owner = the
+    # `scanner_loop` lifespan thread (scanner/runtime.py:318, in _managed_threads)
+    # — no new owner or inventario row needed. We surface the inner Frescura dict.
+    frescura = scanner_liveness().get("frescura")
+    return {"total": len(result), "symbols": result, "frescura": frescura}
 
 
 @app.get("/status", summary="Estado detallado del scanner",

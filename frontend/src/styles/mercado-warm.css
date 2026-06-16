@@ -1,0 +1,385 @@
+/* ============================================================
+   mercado-warm.css - componentes del rediseno CALIDO de Mercado
+   ============================================================
+   Portado del handoff del equipo de diseno (mercado-warm.css).
+   Hoja GLOBAL (prefijo .mw-* ya namespaced). Los tokens calidos
+   (--paper, --clay, --ink, --serif, etc.) NO viven aqui: estan en
+   warm-tokens.css (:root global, valores WCAG corregidos). Esta
+   hoja solo trae las reglas de componentes .mw-* + los overrides
+   :root[data-score] / :root[data-density] del handoff.
+   ============================================================ */
+
+/* ============================================================
+   SHELL
+   ============================================================ */
+.mw, .mw * { box-sizing: border-box; }
+.mw {
+  min-height: 100%;
+  background:
+    radial-gradient(120% 70% at 50% -8%, rgba(184,84,46,0.05), transparent 55%),
+    radial-gradient(90% 60% at 100% 108%, rgba(94,112,72,0.05), transparent 60%),
+    var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  display: flex;
+  flex-direction: column;
+}
+.mw ::selection { background: var(--clay-soft); color: var(--clay-deep); }
+
+/* barra superior: marca + foto/frescura + escaneo */
+.mw-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(20px * var(--sp)) clamp(20px, 5vw, 56px);
+  border-bottom: 1px solid var(--card-edge);
+  background: rgba(251,249,244,0.7);
+  backdrop-filter: blur(6px);
+}
+.mw-brand { display: flex; align-items: center; gap: 11px; }
+.mw-brand__mark {
+  width: 27px; height: 27px; flex: none;
+  display: grid; place-items: center;
+  border: 1.5px solid var(--clay); border-radius: 8px;
+  color: var(--clay); font-family: var(--serif); font-size: 15px; font-weight: 600;
+}
+.mw-brand__name { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: 0.01em; }
+.mw-brand__tag {
+  font-size: 12.5px; color: var(--ink-3);
+  border-left: 1px solid var(--card-edge-2); padding-left: 11px; margin-left: 3px;
+}
+.mw-top__right { display: flex; align-items: center; gap: 18px; }
+.mw-scan { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.mw-scan__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sage); position: relative; }
+.mw-scan__dot::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1px solid var(--sage); opacity: 0.5; animation: mwPulse 2.4s var(--ease) infinite;
+}
+@keyframes mwPulse { 0% { transform: scale(0.6); opacity: 0.6; } 100% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mw-scan__dot::after { animation: none; } }
+
+/* ============================================================
+   TICKER — marquesina cálida y discreta
+   ============================================================ */
+.mw-ticker {
+  border-bottom: 1px solid var(--card-edge);
+  background: var(--card-2);
+  overflow: hidden; white-space: nowrap;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+}
+.mw-ticker__track { display: inline-flex; align-items: center; will-change: transform; animation: mwMarquee 46s linear infinite; }
+.mw-ticker--still .mw-ticker__track { animation: none; }
+@keyframes mwMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .mw-ticker__track { animation: none; } }
+.mw-tick {
+  display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 11px 22px; border-right: 1px solid var(--card-edge);
+  font-size: 13.5px;
+}
+.mw-tick__sym { font-weight: 600; color: var(--ink); letter-spacing: 0.02em; }
+.mw-tick__px { font-family: var(--serif); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.mw-tick__ch { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mw-tick__ch--up { color: var(--sage); }
+.mw-tick__ch--down { color: var(--down); }
+
+/* ============================================================
+   COLUMNA central — todo se apila acá
+   ============================================================ */
+.mw-wrap {
+  width: 100%; max-width: 1320px; margin: 0 auto;
+  padding: clamp(20px, 3vh, 36px) clamp(20px, 4vw, 48px) 72px;
+  display: flex; flex-direction: column; gap: calc(34px * var(--sp));
+}
+
+/* encabezado de sección editorial */
+.mw-sec__head {
+  display: flex; align-items: baseline; gap: 14px;
+  margin-bottom: calc(18px * var(--sp));
+}
+.mw-sec__label {
+  font-family: var(--serif); font-size: 21px; font-weight: 600; color: var(--ink);
+  letter-spacing: -0.01em; white-space: nowrap;
+}
+.mw-sec__count {
+  font-size: 12px; font-weight: 600; color: var(--clay);
+  background: var(--clay-tint); border-radius: 999px; padding: 2px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.mw-sec__rule { flex: 1; height: 1px; background: var(--card-edge); }
+.mw-sec__hint { font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+
+/* ============================================================
+   ESTADO DEL MERCADO — banda de contexto
+   ============================================================ */
+.mw-market {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 1px;
+  background: var(--card-edge); border: 1px solid var(--card-edge);
+  border-radius: 16px; overflow: hidden;
+}
+.mw-mkt { background: var(--card); padding: calc(20px * var(--sp)) calc(22px * var(--sp)); }
+.mw-mkt__k { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.mw-mkt__v { font-family: var(--serif); font-size: 27px; font-weight: 600; margin-top: 6px; line-height: 1; }
+.mw-mkt__note { font-size: 13px; color: var(--ink-2); margin-top: 7px; line-height: 1.45; }
+.mw-mkt__note b { color: var(--ink); font-weight: 600; }
+.mw-regime { display: inline-flex; align-items: center; gap: 9px; }
+.mw-regime__dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.mw-regime--bull .mw-regime__dot { background: var(--sage); }
+.mw-regime--bear .mw-regime__dot { background: var(--down); }
+.mw-regime--neutral .mw-regime__dot { background: var(--slate); }
+.mw-regime--bull .mw-mkt__v { color: var(--sage); }
+.mw-regime--bear .mw-mkt__v { color: var(--down); }
+/* barra de miedo/codicia */
+.mw-fng { margin-top: 11px; height: 6px; border-radius: 999px; background: var(--paper-2); position: relative; overflow: hidden; }
+.mw-fng__fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: linear-gradient(90deg, var(--down), var(--ochre) 50%, var(--sage)); }
+.mw-fng__pin { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--ink); border-radius: 2px; transform: translateX(-50%); }
+
+/* ============================================================
+   CARTERA — resumen calmo
+   ============================================================ */
+.mw-wallet {
+  display: flex; align-items: stretch; gap: calc(28px * var(--sp));
+  background: var(--card); border: 1px solid var(--card-edge); border-radius: 16px;
+  padding: calc(22px * var(--sp)) calc(26px * var(--sp));
+  flex-wrap: wrap;
+}
+.mw-wallet__hero { flex: 1; min-width: 180px; }
+.mw-wallet__k { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.mw-wallet__equity { font-family: var(--serif); font-size: 40px; font-weight: 600; line-height: 1; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.mw-wallet__sub { font-size: 13.5px; color: var(--ink-2); margin-top: 9px; }
+.mw-wallet__sub b { font-weight: 600; }
+.mw-wallet__stats { display: flex; gap: calc(26px * var(--sp)); align-items: center; border-left: 1px solid var(--card-edge); padding-left: calc(26px * var(--sp)); }
+.mw-stat__k { font-size: 12px; color: var(--ink-3); }
+.mw-stat__v { font-family: var(--serif); font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.mw-up { color: var(--sage); }
+.mw-down { color: var(--down); }
+
+/* ============================================================
+   PANEL DE ATENCIÓN — qué mirar ahora
+   ============================================================ */
+.mw-focus { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: calc(12px * var(--sp)); }
+.mw-att {
+  display: flex; align-items: flex-start; gap: 16px; text-align: left; width: 100%; cursor: pointer;
+  background: var(--card); border: 1px solid var(--card-edge); border-left-width: 3px;
+  border-radius: 14px; padding: calc(16px * var(--sp)) calc(20px * var(--sp));
+  transition: all 160ms var(--ease); font-family: var(--sans);
+}
+.mw-att:hover { transform: translateX(3px); box-shadow: 0 12px 26px -20px rgba(42,39,34,0.5); }
+.mw-att--risk { border-left-color: var(--down); }
+.mw-att--fresh { border-left-color: var(--sage); }
+.mw-att--tp { border-left-color: var(--sage); }
+.mw-att--sys { border-left-color: var(--ochre); }
+.mw-att__icon { width: 42px; height: 42px; flex: none; border-radius: 11px; display: grid; place-items: center; font-size: 20px; }
+.mw-att--risk .mw-att__icon { background: var(--down-tint); color: var(--down); }
+.mw-att--fresh .mw-att__icon, .mw-att--tp .mw-att__icon { background: var(--sage-tint); color: var(--sage); }
+.mw-att--sys .mw-att__icon { background: var(--ochre-tint); color: var(--ochre); }
+.mw-att__body { flex: 1; min-width: 0; }
+.mw-att__title { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+.mw-att__say { font-size: 14.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.5; }
+.mw-att__say b { color: var(--ink); font-weight: 600; }
+.mw-att__go { align-self: center; color: var(--clay); font-size: 13.5px; font-weight: 500; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.mw-att__go span { transition: transform 160ms var(--ease); }
+.mw-att:hover .mw-att__go span { transform: translateX(3px); }
+
+/* ============================================================
+   LISTA DE PARES — el corazón
+   ============================================================ */
+/* grilla de tarjetas — aprovecha el ancho */
+.mw-grid { display: grid; gap: calc(14px * var(--sp)); }
+.mw-grid--featured { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+.mw-grid--watching { grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.mw-grid--quiet    { grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); }
+
+/* TARJETA de par */
+.mw-card {
+  position: relative; text-align: left; cursor: pointer; font-family: var(--sans);
+  background: var(--card); border: 1px solid var(--card-edge); border-radius: 16px;
+  padding: calc(20px * var(--sp)) calc(22px * var(--sp));
+  display: flex; flex-direction: column; gap: calc(13px * var(--sp));
+  transition: all 170ms var(--ease);
+}
+.mw-card:hover { border-color: var(--clay); transform: translateY(-3px); box-shadow: 0 18px 36px -24px rgba(42,39,34,0.5); }
+.mw-card--featured { border-top: 3px solid var(--sage); }
+.mw-card--watching { border-top: 3px solid var(--ochre); gap: calc(11px * var(--sp)); }
+.mw-card--quiet { gap: calc(9px * var(--sp)); padding: calc(15px * var(--sp)) calc(18px * var(--sp)); }
+
+.mw-card__flag {
+  position: absolute; top: 0; right: 20px; transform: translateY(-50%);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #fff; background: var(--sage); padding: 3px 10px; border-radius: 999px;
+}
+.mw-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mw-card__name { font-family: var(--serif); font-size: 22px; font-weight: 600; color: var(--ink); line-height: 1.05; }
+.mw-card__sym { font-size: 11.5px; color: var(--ink-3); letter-spacing: 0.05em; margin-top: 3px; }
+.mw-card--watching .mw-card__name { font-size: 19px; }
+.mw-card--quiet .mw-card__name { font-size: 17px; }
+
+.mw-side { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 6px; flex: none; }
+.mw-side--L { color: var(--sage); background: var(--sage-tint); }
+.mw-side--S { color: var(--down); background: var(--down-tint); }
+
+.mw-card__pricerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mw-card__pxgroup { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.mw-card__price { font-family: var(--serif); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mw-card--watching .mw-card__price, .mw-card--quiet .mw-card__price { font-size: 19px; }
+.mw-card__chg { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.mw-card__status { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 13.5px; color: var(--ink-2); }
+.mw-card__status b { color: var(--ink); font-weight: 600; }
+.mw-card .mw-cond { margin-top: 0; }
+.mw-card--quiet .mw-cond__tick { width: 16px; }
+
+/* barra del canal (LRC) — zona dulce neutral, sin flechas */
+.mw-lrc { display: flex; align-items: center; gap: 10px; }
+.mw-lrc__k { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.mw-lrc__k b { color: var(--ink); font-weight: 600; }
+.mw-lrc__bar { position: relative; flex: 1; min-width: 56px; height: 6px; border-radius: 999px; background: var(--paper-2); border: 1px solid var(--card-edge); }
+.mw-lrc__zone { position: absolute; top: 0; bottom: 0; left: 25%; width: 50%; background: var(--sage-soft); border-radius: 999px; }
+.mw-lrc__pin { position: absolute; top: -3px; width: 3px; height: 12px; border-radius: 2px; background: var(--clay); transform: translateX(-50%); }
+
+/* pie de tarjeta */
+.mw-card__foot { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+.mw-trig { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--sage); }
+.mw-trig i { width: 7px; height: 7px; border-radius: 50%; background: var(--sage); box-shadow: 0 0 0 3px var(--sage-tint); flex: none; }
+.mw-trig--off { color: var(--ink-4); }
+.mw-trig--off i { background: var(--ink-4); box-shadow: none; }
+.mw-card__last { font-size: 12px; color: var(--ink-3); }
+.mw-card__cta { margin-left: auto; font-size: 13px; font-weight: 500; color: var(--clay); white-space: nowrap; display: inline-flex; gap: 5px; }
+.mw-card__cta span { transition: transform 160ms var(--ease); }
+.mw-card:hover .mw-card__cta span { transform: translateX(3px); }
+
+/* etiqueta de estado (en lugar del score crudo) */
+.mw-tagpill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700;
+  border-radius: 999px; padding: 3px 11px; white-space: nowrap;
+}
+.mw-tagpill--ready { color: var(--sage); background: var(--sage-tint); border: 1px solid #C9D2B2; }
+.mw-tagpill--near  { color: var(--ochre); background: var(--ochre-tint); border: 1px solid #E4CF9E; }
+.mw-tagpill--quiet { color: var(--ink-3); background: var(--paper-2); border: 1px solid var(--card-edge-2); }
+.mw-tagpill__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* franja de condiciones (6 ticks) — el "score" como hecho visual */
+.mw-cond { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.mw-cond__ticks { display: flex; gap: 4px; }
+.mw-cond__tick { width: 26px; height: 6px; border-radius: 3px; background: var(--paper-2); border: 1px solid var(--card-edge-2); }
+.mw-cond__tick--on { background: var(--sage); border-color: #C9D2B2; }
+.mw-cond__lbl { font-size: 12.5px; color: var(--ink-3); }
+.mw-cond__lbl b { color: var(--ink); font-weight: 600; }
+:root[data-score="off"] .mw-cond,
+:root[data-score="off"] .mw-scorefact { display: none; }
+
+/* sparkline mini */
+.mw-spark { display: block; }
+.mw-spark path { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ============================================================
+   VER LOS NÚMEROS — divulgación progresiva
+   ============================================================ */
+.mw-more { grid-column: 1 / -1; margin-top: 6px; }
+.mw-more__toggle {
+  display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer;
+  font-family: var(--sans); font-size: 12.5px; font-weight: 500; letter-spacing: 0.03em; color: var(--ink-3);
+  padding: 6px 0; transition: color 140ms var(--ease);
+}
+.mw-more__toggle:hover { color: var(--clay); }
+.mw-more__caret { display: inline-block; transition: transform 200ms var(--ease); }
+.mw-more__caret--open { transform: rotate(90deg); }
+.mw-more__panel {
+  margin-top: 8px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--card-edge); border: 1px solid var(--card-edge); border-radius: 11px; overflow: hidden;
+}
+.mw-num { background: var(--card); padding: 12px 15px; }
+.mw-num__k { font-size: 11.5px; color: var(--ink-3); letter-spacing: 0.02em; }
+.mw-num__v { font-family: var(--serif); font-size: 18px; color: var(--ink); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.mw-num__note { font-size: 11.5px; color: var(--ink-4); margin-top: 2px; }
+.mw-num--on .mw-num__v { color: var(--sage); }
+.mw-num--off .mw-num__v { color: var(--ink-4); }
+
+/* ============================================================
+   FRESCURA — semáforo corto
+   ============================================================ */
+.mw-fresh { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.mw-fresh__dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.mw-fresh--fresco { color: var(--sage); }
+.mw-fresh--fresco .mw-fresh__dot { background: var(--sage); }
+.mw-fresh--rancio { color: var(--ochre); }
+.mw-fresh--rancio .mw-fresh__dot { background: var(--ochre); box-shadow: 0 0 0 4px var(--ochre-tint); }
+.mw-fresh--muerto { color: var(--ink-4); }
+.mw-fresh--muerto .mw-fresh__dot { background: transparent; border: 1.5px solid var(--ink-4); }
+
+/* ============================================================
+   SEÑALES RECIENTES — tabla editorial
+   ============================================================ */
+.mw-signals { background: var(--card); border: 1px solid var(--card-edge); border-radius: 16px; overflow: hidden; }
+.mw-sig {
+  display: grid; grid-template-columns: 64px 1.1fr 1fr 1.4fr auto; gap: 16px; align-items: center;
+  padding: calc(13px * var(--sp)) calc(22px * var(--sp));
+  border-bottom: 1px solid var(--card-edge); font-size: 14px;
+  cursor: pointer; transition: background 130ms var(--ease);
+}
+.mw-sig:last-child { border-bottom: none; }
+.mw-sig:hover { background: var(--card-2); }
+.mw-sig--head { background: var(--card-2); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); cursor: default; }
+.mw-sig--head:hover { background: var(--card-2); }
+.mw-sig__time { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.mw-sig__pair { font-family: var(--serif); font-weight: 600; color: var(--ink); }
+.mw-sig__price { font-family: var(--serif); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.mw-sig__state { font-size: 13px; color: var(--ink-2); }
+.mw-sig__fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sage); }
+.mw-sig__fresh i { width: 6px; height: 6px; border-radius: 50%; background: var(--sage); }
+.mw-sig__muted { color: var(--ink-4); }
+
+/* ============================================================
+   ESTADOS VACÍOS / VIEJOS
+   ============================================================ */
+.mw-callout {
+  display: flex; gap: 16px; align-items: flex-start;
+  padding: 20px 22px; border-radius: 16px;
+}
+.mw-callout--ochre { background: var(--ochre-tint); border: 1px solid #E4CF9E; }
+.mw-callout--mute { background: var(--card); border: 1px dashed var(--card-edge-2); }
+.mw-callout__icon { font-size: 24px; flex: none; line-height: 1; }
+.mw-callout--ochre .mw-callout__icon { color: var(--ochre); }
+.mw-callout--mute .mw-callout__icon { color: var(--ink-3); }
+.mw-callout__title { font-family: var(--serif); font-size: 19px; font-weight: 600; color: var(--ink); }
+.mw-callout__sub { font-size: 15px; line-height: 1.55; color: var(--ink-2); margin-top: 5px; }
+.mw-callout__sub b { color: var(--ink); font-weight: 600; }
+.mw-callout__retry {
+  margin-top: 13px; font-family: var(--sans); font-size: 14px; font-weight: 500;
+  color: var(--clay); background: none; border: 1px solid var(--clay-soft);
+  padding: 8px 15px; border-radius: 999px; cursor: pointer;
+}
+.mw-callout__retry:hover { background: var(--clay-soft); }
+
+.mw-empty { text-align: center; padding: 60px 24px; }
+.mw-empty__mark {
+  width: 56px; height: 56px; margin: 0 auto 20px; border-radius: 50%;
+  display: grid; place-items: center; border: 1.5px dashed var(--card-edge-2); color: var(--ink-4); font-size: 24px;
+}
+.mw-empty__title { font-family: var(--serif); font-size: 24px; font-weight: 600; color: var(--ink); }
+.mw-empty__body { font-size: 16px; color: var(--ink-2); margin-top: 12px; line-height: 1.6; max-width: 38em; margin-inline: auto; }
+
+/* nota neutral al pie de la lista */
+.mw-note {
+  font-size: 13.5px; color: var(--ink-3); line-height: 1.55; text-align: center;
+  border-top: 1px solid var(--card-edge); padding-top: 22px;
+}
+.mw-note b { color: var(--ink-2); font-weight: 600; }
+
+/* ============================================================
+   MÓVIL
+   ============================================================ */
+.mw--mobile .mw-wrap { padding-left: 18px; padding-right: 18px; gap: calc(28px * var(--sp)); }
+.mw--mobile .mw-brand__tag { display: none; }
+.mw--mobile .mw-market { grid-template-columns: 1fr; }
+.mw--mobile .mw-wallet { flex-direction: column; gap: 18px; }
+.mw--mobile .mw-wallet__stats { border-left: none; border-top: 1px solid var(--card-edge); padding-left: 0; padding-top: 18px; justify-content: space-between; width: 100%; }
+.mw--mobile .mw-focus { grid-template-columns: 1fr; }
+.mw--mobile .mw-grid--featured, .mw--mobile .mw-grid--watching, .mw--mobile .mw-grid--quiet { grid-template-columns: 1fr; }
+.mw--mobile .mw-more__panel { grid-template-columns: repeat(2, 1fr); }
+.mw--mobile .mw-sig { grid-template-columns: 52px 1fr auto; gap: 12px; }
+.mw--mobile .mw-sig__price, .mw--mobile .mw-sig__fresh { display: none; }
+.mw--mobile .mw-att { flex-wrap: wrap; }
+.mw--mobile .mw-att__go { width: 100%; padding-left: 58px; }

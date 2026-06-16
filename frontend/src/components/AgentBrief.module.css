@@ -7,7 +7,7 @@
   flex-direction: column;
   border: 1px solid var(--nbc-border-dim);
   background:
-    linear-gradient(180deg, rgba(106, 215, 255, 0.04), rgba(14, 18, 19, 0.65)),
+    linear-gradient(180deg, var(--clay-tint), transparent 70%),
     var(--nbc-surface-solid);
   position: relative;
   overflow: hidden;
