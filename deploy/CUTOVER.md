@@ -62,9 +62,10 @@ ss -ltnp | grep 8101 || echo "8101 libre"
 sudo systemctl start trading-api@8101
 for i in $(seq 1 15); do curl -fsS http://localhost:8101/health/live && break; sleep 1; done   # 200 ~2s
 
-# 4c — swap atómico del include → :8101 + reload (cliente pasa a la API sin scanner)
-printf 'upstream trading_api {\n    server 127.0.0.1:8101;\n}\n' > /tmp/tu.conf
-mv -f /tmp/tu.conf /etc/nginx/conf.d/trading-upstream.conf
+# 4c — swap del include → :8101 + reload (cliente pasa a la API sin scanner).
+# IN-PLACE (> archivo), NO `mv`: ubuntu es dueño del archivo pero NO del dir
+# /etc/nginx/conf.d (root) → un mv-replace ahí falla con Permission denied.
+printf 'upstream trading_api {\n    server 127.0.0.1:8101;\n}\n' > /etc/nginx/conf.d/trading-upstream.conf
 sudo nginx -t && sudo nginx -s reload
 
 # 4d — INMEDIATO: parar el viejo (mata el 2º scanner in-process, libera :8100)
@@ -99,9 +100,8 @@ while true; do curl -k -s -o /dev/null -w '%{http_code}\n' --resolve trading.sda
 
 ## Rollback (en cualquier punto)
 ```bash
-# Reapuntar nginx al color sano + reload:
-printf 'upstream trading_api {\n    server 127.0.0.1:<color-sano>;\n}\n' > /tmp/tu.conf
-mv -f /tmp/tu.conf /etc/nginx/conf.d/trading-upstream.conf && sudo nginx -s reload
+# Reapuntar nginx al color sano + reload (in-place, ver 4c — NO mv):
+printf 'upstream trading_api {\n    server 127.0.0.1:<color-sano>;\n}\n' > /etc/nginx/conf.d/trading-upstream.conf && sudo nginx -s reload
 # O volver al modelo viejo entero:
 sudo systemctl stop trading-api@8100 trading-api@8101 trading-scanner
 sudo systemctl enable --now trading-spacial          # el unit viejo sigue en disco
