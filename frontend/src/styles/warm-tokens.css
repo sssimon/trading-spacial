@@ -1,0 +1,136 @@
+/* ============================================================
+   warm-tokens.css — tema CÁLIDO global (papel / editorial)
+   ============================================================
+   Promueve la paleta cálida de Valles (.vwRoot) a un layer GLOBAL
+   en :root, y remapea los tokens --nbc-* del tema oscuro original
+   a sus equivalentes cálidos. Importado DESPUÉS de tokens.css, así
+   que el remap gana por orden de fuente.
+
+   Decisión de producto (2026-06-16): el equipo de diseño entregó el
+   rediseño cálido de la pestaña Mercado; Samuel decidió llevar el
+   cálido a TODA la app (Fase 1: Mercado editorial + chrome + backend
+   honesto; el resto queda cálido-tinted vía este remap hasta Fase 2).
+
+   Contraste: se usan los hex CORREGIDOS de Valles §7 (no los del
+   handoff, que reprueban WCAG AA): --ink-3 #6E6757, --ink-4 #6F6856,
+   --ochre #8A5E1C. Las fuentes (Source Serif 4 + Instrument Sans) ya
+   se cargan vía <link> en index.html.
+   ============================================================ */
+
+:root {
+  /* ---- superficie (papel cálido) ---- */
+  --paper:       #F4F0E8;
+  --paper-2:     #EFE9DD;
+  --card:        #FBF9F4;
+  --card-2:      #F6F1E7;
+  --card-edge:   #E4DCCC;
+  --card-edge-2: #D8CDB8;
+
+  /* ---- tinta (rampa cálida, contraste corregido) ---- */
+  --ink:   #2A2722;
+  --ink-2: #5C564A;
+  --ink-3: #6E6757;   /* corregido de #8A8270 (3.35:1) → ~4.6:1 */
+  --ink-4: #6F6856;   /* corregido de #ABA08A (2.27:1) → ~4.6:1 */
+
+  /* ---- acento de marca (arcilla) + semánticos ---- */
+  --clay:      #B8542E;
+  --clay-deep: #9A4424;
+  --clay-soft: #EDD9CC;
+  --clay-tint: #F3E6DC;
+
+  --sage:      #5E7048;   /* sube / vivo / al día */
+  --sage-soft: #E2E6D4;
+  --sage-tint: #ECEFE2;
+
+  --down:      #AE4334;   /* baja / riesgo */
+  --down-soft: #EFD6CF;
+  --down-tint: #F3E3DD;
+
+  --ochre:      #8A5E1C;   /* viejo / atención (corregido de #A9772A) */
+  --ochre-soft: #EFE0C4;
+  --ochre-tint: #F2E8D4;
+
+  --slate: #4C5A66;        /* dato neutro frío */
+
+  /* ---- tipografía ---- */
+  --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --sans:  'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- densidad (escala de espacios del handoff) ---- */
+  --sp: 1;
+
+  /* ════════════════════════════════════════════════════════
+     REMAP — los tokens --nbc-* del tema oscuro apuntan al cálido.
+     Todo componente que use var(--nbc-*) se vuelve cálido solo.
+     ════════════════════════════════════════════════════════ */
+
+  /* fondo + superficies */
+  --nbc-bg:            var(--paper);
+  --nbc-surface:       var(--card);
+  --nbc-surface-solid: var(--card);
+  --nbc-surface-alt:   var(--card-2);
+  --nbc-surface-elev:  var(--card-2);
+
+  /* texto */
+  --nbc-fg:       var(--ink);
+  --nbc-fg-muted: var(--ink-3);
+  --nbc-fg-dim:   var(--ink-4);
+
+  /* primario = arcilla */
+  --nbc-primary:     var(--clay);
+  --nbc-primary-dim: var(--clay-soft);
+  --nbc-primary-fg:  var(--paper);
+
+  /* secundario = arcilla profunda (era magenta) */
+  --nbc-secondary:    var(--clay-deep);
+  --nbc-secondary-fg: var(--paper);
+
+  /* peligro / advertencia */
+  --nbc-danger:     var(--down);
+  --nbc-danger-dim: var(--down-tint);
+  --nbc-danger-fg:  var(--paper);
+  --nbc-warn:       var(--ochre);
+  --nbc-warn-dim:   var(--ochre-tint);
+  --nbc-info:       var(--slate);
+
+  /* bordes + foco */
+  --nbc-border-color:  var(--card-edge-2);
+  --nbc-border-dim:    var(--card-edge);
+  --nbc-border-dimmer: var(--card-edge);
+  --nbc-focus:         var(--clay);
+
+  /* forma — esquinas suaves (era 0, terminal) */
+  --nbc-radius:        10px;
+  --nbc-button-radius: 999px;
+  --nbc-input-radius:  10px;
+
+  /* efectos — sombras suaves cálidas (se va el glow neón) */
+  --nbc-shadow:    0 1px 2px rgba(42, 39, 34, 0.05);
+  --nbc-shadow-lg: 0 18px 36px -24px rgba(42, 39, 34, 0.5);
+  --nbc-button-shadow-hover: 0 8px 18px -12px rgba(42, 39, 34, 0.45);
+  --nbc-hairline: 1px solid var(--card-edge);
+  --nbc-grid-overlay: none;
+
+  /* fuentes — UI en sans cálida; números siguen mono neutral en las
+     pestañas sin migrar (Mercado usa --serif directo). */
+  --nbc-font-sans:  var(--sans);
+  --nbc-font-prose: var(--sans);
+  /* --nbc-font-mono se deja como mono real (JetBrains Mono) para no
+     romper alineación tabular en tablas densas no migradas. */
+
+  /* semánticos de trading */
+  --bull:     var(--sage);
+  --bull-dim: var(--sage-tint);
+  --bear:     var(--down);
+  --bear-dim: var(--down-tint);
+  --warn:     var(--ochre);
+  --warn-dim: var(--ochre-tint);
+  --info:     var(--slate);
+  --info-dim: var(--sage-tint);
+}
+
+/* densidad del handoff (escala --sp); coexiste con los --d-* de tokens.css */
+:root[data-density="compact"] { --sp: 0.78; }
+:root[data-density="dense"]   { --sp: 0.6; }

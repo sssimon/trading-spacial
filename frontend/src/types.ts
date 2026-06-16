@@ -16,6 +16,16 @@ export interface Sizing1h {
   pct_capital?: number;
 }
 
+/** One scanner condition (C1–C7) projected honestly by GET /symbols.
+ *  `pass` includes the failing ones; `value` is a short human string
+ *  (e.g. "RSI 36", "x0.59") or null. The manual C8 (DXY) is excluded.
+ *  This is the real per-condition breakdown behind "X de N coinciden". */
+export interface ScoreComponent {
+  key:   string;          // RSI | DIV | SR | BB | VOL | CVD | SMA
+  pass:  boolean;
+  value: string | null;
+}
+
 export interface SymbolStatus {
   symbol: string;
   estado: string;
@@ -36,11 +46,19 @@ export interface SymbolStatus {
   ts: string | null;
   sizing_1h?: Sizing1h;
   direction?: 'LONG' | 'SHORT' | null;
+  /** Per-condition breakdown (C1–C7) projected from scans.payload. Drives the
+   *  warm Mercado "X de N condiciones coinciden" + the conditions list. Absent
+   *  on older backends / "Sin datos" rows. */
+  score_components?: ScoreComponent[];
 }
 
 export interface SymbolsResponse {
   total: number;
   symbols: SymbolStatus[];
+  /** Snapshot freshness of the latest scan (fresco/rancio/muerto), emitted by
+   *  GET /symbols per Non-Negotiable #8. Owner: the scanner_loop lifespan
+   *  thread. Absent on older backends. */
+  frescura?: Frescura;
 }
 
 export interface ScannerState {

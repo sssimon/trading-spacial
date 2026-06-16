@@ -157,7 +157,7 @@ body {
 }
 .btn--danger:hover {
   background: var(--bear);
-  color: #fff;
+  color: var(--nbc-primary-fg);
   box-shadow: 3px 3px 0 var(--bear-dim);
   transform: translate(-1px, -1px);
 }

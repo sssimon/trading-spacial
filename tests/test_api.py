@@ -543,6 +543,82 @@ class TestAPIEndpoints:
             writer.execute("ROLLBACK")
             writer.close()
 
+    # ── /symbols additive projection (feat/mercado-warm) ──────────────────
+    def _btc_row(self, client):
+        r = client.get("/symbols")
+        assert r.status_code == 200
+        data = r.json()
+        row = next(s for s in data["symbols"] if s["symbol"] == "BTCUSDT")
+        return data, row
+
+    def test_symbols_projects_score_components_with_negatives(
+        self, client, sample_report
+    ):
+        import btc_api
+        btc_api.save_scan(sample_report)
+        _, row = self._btc_row(client)
+        comps = row["score_components"]
+        assert len(comps) == 7
+        for c in comps:
+            assert set(c.keys()) == {"key", "pass", "value"}
+            # `pass` must be a strict bool, never the string "MANUAL"/"?".
+            assert isinstance(c["pass"], bool)
+        # Negatives are KEPT (unlike /signals/latest which filters pass-only).
+        assert any(c["pass"] is False for c in comps)
+        assert any(c["pass"] is True for c in comps)
+        # Exact C1..C7 order, C8 excluded.
+        assert [c["key"] for c in comps] == [
+            "RSI", "DIV", "SR", "BB", "VOL", "CVD", "SMA"
+        ]
+
+    def test_symbols_projects_direction_sl_tp_from_payload(
+        self, client, sample_report
+    ):
+        import btc_api
+        btc_api.save_scan(sample_report)
+        _, row = self._btc_row(client)
+        assert row["direction"] == "LONG"
+        assert row["sl_precio"] == sample_report["sizing_1h"]["sl_precio"]
+        assert row["tp_precio"] == sample_report["sizing_1h"]["tp_precio"]
+
+    def test_symbols_tolerates_missing_payload_fields(self, client, sample_report):
+        import btc_api
+        # Legacy/pre-#211 report: no direction, no sizing_1h, no confirmations.
+        legacy = dict(sample_report)
+        legacy.pop("direction", None)
+        legacy.pop("sizing_1h", None)
+        legacy.pop("confirmations", None)
+        btc_api.save_scan(legacy)
+        _, row = self._btc_row(client)
+        assert row["direction"] is None
+        assert row["sl_precio"] is None
+        assert row["tp_precio"] is None
+        comps = row["score_components"]
+        assert len(comps) == 7
+        assert all(c["pass"] is False for c in comps)
+        assert all(c["value"] is None for c in comps)
+
+    def test_symbols_emits_snapshot_frescura(self, client, sample_report):
+        import btc_api
+        btc_api.save_scan(sample_report)
+        data, _ = self._btc_row(client)
+        assert "frescura" in data
+        fr = data["frescura"]
+        assert fr["estado"] in ("fresco", "rancio", "muerto")
+        assert "umbral_seg" in fr
+        assert "generated_at" in fr
+
+    def test_symbols_backward_compatible_keys(self, client, sample_report):
+        import btc_api
+        btc_api.save_scan(sample_report)
+        _, row = self._btc_row(client)
+        original_keys = {
+            "symbol", "estado", "price", "live_price", "lrc_pct",
+            "score", "señal", "setup", "gatillo", "ts",
+        }
+        assert original_keys <= set(row.keys())
+        assert row["symbol"] == "BTCUSDT"
+
     def test_signals_filtro_symbol(self, client, sample_report):
         import btc_api
         btc_api.save_scan(sample_report)
@@ -2226,3 +2302,77 @@ class TestKillSwitchCurrentStateEndpoint:
         assert r.status_code == 200
         body = r.json()
         assert body["symbols"]["BTCUSDT"]["per_symbol_tier"] == "ALERT"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  _build_score_components — pure helper unit tests (feat/mercado-warm)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBuildScoreComponents:
+    def _baseline_confirmations(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "tests", "_baselines", "scan_btcusdt.json",
+        )
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["confirmations"]
+
+    def test_excludes_c8_and_maps_c1_through_c7_in_order(self):
+        from api.signals import _build_score_components
+        comps = _build_score_components(self._baseline_confirmations())
+        assert [c["key"] for c in comps] == [
+            "RSI", "DIV", "SR", "BB", "VOL", "CVD", "SMA"
+        ]
+        assert len(comps) == 7  # C8 excluded
+
+    def test_pass_is_strict_bool_never_manual_string(self):
+        from api.signals import _build_score_components
+        comps = _build_score_components(self._baseline_confirmations())
+        for c in comps:
+            assert isinstance(c["pass"], bool)
+            assert c["pass"] != "MANUAL"
+
+    def test_values_projected_from_scalar_fields(self):
+        from api.signals import _build_score_components
+        by_key = {c["key"]: c for c in _build_score_components(
+            self._baseline_confirmations())}
+        # C1 → RSI 36 (rsi_1h 36.25), C3 → 0.29% (dist_soporte_pct),
+        # C5 → x0.59 (vol_ratio), C6 → +1655 (cvd_delta 1654.78).
+        assert by_key["RSI"]["value"] == "RSI 36"
+        assert by_key["SR"]["value"] == "0.29%"
+        assert by_key["VOL"]["value"] == "x0.59"
+        assert by_key["CVD"]["value"] == "+1655"
+        # C2/C4/C7 have no clean scalar.
+        assert by_key["DIV"]["value"] is None
+        assert by_key["BB"]["value"] is None
+        assert by_key["SMA"]["value"] is None
+
+    def test_keys_by_c_ordinal_prefix_not_full_string(self):
+        # SHORT direction flips suffixes (C1_RSI_Sobrecompra) and prod emits
+        # C8_DXY while the fixture uses C8_DXY_Bajando — keying by the C-ordinal
+        # prefix must handle all of these.
+        from api.signals import _build_score_components
+        conf = {
+            "C1_RSI_Sobrecompra":     {"pass": False, "rsi_1h": 71.0},
+            "C2_Divergencia_Bajista": {"pass": True},
+            "C3_Resistencia_Cercana": {"pass": True, "dist_resistencia_pct": 1.2},
+            "C4_BB_Superior":         {"pass": False},
+            "C5_Volumen":             {"pass": True, "vol_ratio": 1.4},
+            "C6_CVD_Delta_Negativo":  {"pass": True, "cvd_delta": -800.5},
+            "C7_SMA10_menor_SMA20":   {"pass": True},
+            "C8_DXY_Bajando":         {"pass": "MANUAL"},
+        }
+        by_key = {c["key"]: c for c in _build_score_components(conf)}
+        assert by_key["RSI"]["value"] == "RSI 71"
+        assert by_key["SR"]["value"] == "1.20%"
+        assert by_key["VOL"]["value"] == "x1.40"
+        assert by_key["CVD"]["value"] == "-800"
+        assert by_key["DIV"]["pass"] is True
+        assert "DXY" not in by_key  # C8 never surfaces
+
+    def test_empty_confirmations_yields_length_7_all_false(self):
+        from api.signals import _build_score_components
+        comps = _build_score_components({})
+        assert len(comps) == 7
+        assert all(c["pass"] is False for c in comps)
+        assert all(c["value"] is None for c in comps)

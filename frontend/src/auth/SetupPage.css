@@ -3,21 +3,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0d1117;
+  background: var(--nbc-bg);
   padding: 24px;
 }
 
 .setup-card {
   width: 100%;
   max-width: 460px;
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
+  background: var(--nbc-surface);
+  border: 1px solid var(--nbc-border-color);
+  border-radius: var(--nbc-radius);
   padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  color: #e6edf3;
+  color: var(--nbc-fg);
 }
 
 .setup-card h1 {
@@ -28,7 +28,7 @@
 
 .setup-subtitle {
   margin: 0 0 8px 0;
-  color: #8b949e;
+  color: var(--nbc-fg-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -38,63 +38,65 @@
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
-  color: #8b949e;
+  color: var(--nbc-fg-muted);
 }
 
 .setup-card input {
   padding: 8px 12px;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  background: #0d1117;
-  color: #e6edf3;
+  border: 1px solid var(--nbc-border-color);
+  border-radius: var(--nbc-input-radius);
+  background: var(--nbc-surface-alt);
+  color: var(--nbc-fg);
   font-size: 14px;
 }
 
 .setup-card input:focus {
   outline: none;
-  border-color: #58a6ff;
+  border-color: var(--nbc-focus);
 }
 
 .setup-card button {
   padding: 10px;
   border: none;
-  border-radius: 6px;
-  background: #238636;
-  color: white;
+  border-radius: var(--nbc-button-radius);
+  background: var(--nbc-primary);
+  color: var(--nbc-primary-fg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .setup-card button:disabled {
-  background: #30363d;
+  background: var(--nbc-surface-alt);
+  color: var(--nbc-fg-dim);
   cursor: not-allowed;
 }
 
 .setup-card button:hover:not(:disabled) {
-  background: #2ea043;
+  background: var(--nbc-secondary);
 }
 
 .setup-rules {
   font-size: 12px;
-  color: #8b949e;
+  color: var(--nbc-fg-muted);
   margin: 0;
   line-height: 1.5;
 }
 
 .setup-error {
-  background: #491b1f;
-  border: 1px solid #c0392b;
-  color: #f99393;
+  background: var(--down-tint);
+  border: 1px solid var(--down);
+  color: var(--down);
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--nbc-input-radius);
   font-size: 13px;
 }
 
 .setup-card code {
-  background: #0d1117;
+  background: var(--nbc-surface-alt);
+  color: var(--nbc-fg);
   padding: 1px 6px;
   border-radius: 3px;
-  border: 1px solid #30363d;
+  border: 1px solid var(--nbc-border-color);
   font-size: 12px;
 }

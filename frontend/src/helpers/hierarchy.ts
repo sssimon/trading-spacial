@@ -8,6 +8,12 @@
 
 import type { SymbolStatus, Position, StatusResponse } from '../types';
 
+// Scanner timestamps carry a ' UTC' suffix ('YYYY-MM-DD HH:MM:SS UTC') that
+// `new Date()` can't parse. Normalize to a Z-suffixed string so recency math
+// (freshness window, bucket tiebreak) doesn't silently NaN — which would mark
+// every signal "fresh". Mirrors MercadoView's minsSince parse.
+const tsMs = (ts: string): number => new Date(ts.replace(' UTC', 'Z')).getTime();
+
 // ────────────────────────────────────────────────────────────
 // Focus items — surfaced at the top of Mercado as cards.
 // ────────────────────────────────────────────────────────────
@@ -82,7 +88,7 @@ export function computeFocus(
     const score = s.score ?? 0;
     if (score < 5) continue;
     if (!s.ts) continue;
-    const ageMin = (now - new Date(s.ts).getTime()) / 60_000;
+    const ageMin = (now - tsMs(s.ts)) / 60_000;
     if (ageMin > freshWithinMin) continue;
     items.push({
       kind: 'fresh-signal',
@@ -150,8 +156,8 @@ export function bucketSymbols(symbols: SymbolStatus[]): SymbolBuckets {
     const sa = a.score ?? 0;
     const sb = b.score ?? 0;
     if (sa !== sb) return sb - sa;
-    const ta = a.ts ? new Date(a.ts).getTime() : 0;
-    const tb = b.ts ? new Date(b.ts).getTime() : 0;
+    const ta = a.ts ? tsMs(a.ts) : 0;
+    const tb = b.ts ? tsMs(b.ts) : 0;
     return tb - ta;
   };
 
