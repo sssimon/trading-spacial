@@ -4,11 +4,13 @@
 # el dueño del schema). Blue-green detrás de nginx. Fuente de verdad en deploy/.
 [Unit]
 Description=Trading Spacial — API web-only (puerto %i)
-# After= con el scanner en Type=notify ESPERA su READY=1 (post-DDL) → en reboot
-# el schema existe cuando esta API (SKIP_DB_INIT=1) arranca. Wants= (no Requires)
-# = dependencia suave: si el scanner cae luego, la API sigue sirviendo.
+# After= (sin Wants=): en reboot ambos units están enabled → entran en la misma
+# transacción de boot, y con el scanner en Type=notify el After= ESPERA su
+# READY=1 (post-DDL) → el schema existe cuando esta API (SKIP_DB_INIT=1) arranca.
+# SIN Wants=: un `systemctl start trading-api@<port>` manual NO arrastra al
+# scanner — clave para el cutover (arrancar la API sola, sin solape de 2 scanners
+# contendiendo el DDL). Si el scanner cae en runtime, la API sigue sirviendo.
 After=network.target trading-scanner.service
-Wants=trading-scanner.service
 
 [Service]
 Type=simple

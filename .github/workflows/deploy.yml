@@ -21,7 +21,10 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: true
+  # false (NO true): el deploy blue-green muta estado de infra (units + include
+  # de nginx) en pasos no-atómicos. Cancelar a media-secuencia dejaría el include
+  # apuntando a un color muerto → 502 persistente. Mejor serializar/encolar.
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -94,38 +97,69 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key" \
             frontend/dist/ ubuntu@${HOST}:/var/www/trading/dist/
 
-      - name: pip install + restart service
+      - name: Blue-green deploy (zero-downtime)
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "
-            cd /var/www/trading &&
-            .venv/bin/pip install --upgrade -r requirements.txt &&
-            sudo systemctl restart trading-spacial
-          "
+          # Server ya migrado a blue-green (deploy/CUTOVER.md): trading-scanner +
+          # trading-api@8100/8101, include /etc/nginx/conf.d/trading-upstream.conf
+          # (chown ubuntu) y sudoers. El include se reescribe IN-PLACE (> archivo)
+          # porque ubuntu es dueño del archivo pero NO del dir /etc/nginx/conf.d
+          # (root) — un `mv` ahí falla con Permission denied. La escritura es de
+          # 3 líneas en un printf y va seguida de nginx -t; el riesgo de lectura
+          # parcial es despreciable.
+          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /var/www/trading
+          .venv/bin/pip install --upgrade -r requirements.txt
 
-      - name: Health check
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          # Poll up to ~60s: the service can take well over 15s to answer
-          # /health after restart on the large prod DB. The prior single-shot
-          # "sleep 15 + one curl" failed 5 of 6 recent deploys even when the
-          # rsync + restart had already succeeded — a false-red. Retry instead.
-          # /health/live = readiness (proceso + schema), el gate correcto para
-          # un deploy. /health es frescura del scanner (503 en la ventana de
-          # ~minutos tras restart hasta el primer ciclo) → NO sirve de readiness.
-          for i in $(seq 1 12); do
-            if ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "curl -fsS http://localhost:8100/health/live" >/dev/null 2>&1; then
-              echo "Health check passed (attempt ${i}/12)."
-              exit 0
-            fi
-            echo "Health check attempt ${i}/12 not ready; retrying in 5s..."
-            sleep 5
+          INCLUDE=/etc/nginx/conf.d/trading-upstream.conf
+          CURRENT=$(grep -oE '127\.0\.0\.1:(8100|8101)' "$INCLUDE" | grep -oE '8100|8101' | head -1)
+          [ -n "${CURRENT:-}" ] || { echo "::error::no pude leer el color activo del include"; exit 1; }
+
+          # Self-heal: si el color del include no está vivo, levantarlo antes de empezar.
+          if ! sudo systemctl is-active "trading-api@${CURRENT}" >/dev/null 2>&1; then
+            echo "self-heal: trading-api@${CURRENT} caído; arrancando…"
+            sudo systemctl start "trading-api@${CURRENT}"
+            for i in $(seq 1 15); do curl -fsS "http://localhost:${CURRENT}/health/live" >/dev/null 2>&1 && break; sleep 1; done
+          fi
+
+          if [ "$CURRENT" = "8100" ]; then INACTIVE=8101; else INACTIVE=8100; fi
+          echo "activo=$CURRENT  ->  desplegando a inactivo=$INACTIVE"
+
+          # Arrancar el inactivo con el código nuevo (venv compartido ya actualizado).
+          sudo systemctl restart "trading-api@${INACTIVE}"
+          READY=0
+          for i in $(seq 1 20); do
+            if curl -fsS "http://localhost:${INACTIVE}/health/live" >/dev/null 2>&1; then READY=1; break; fi
+            sleep 2
           done
-          echo "::error::Health check failed after 12 attempts (~60s). Service logs:"
-          ssh -i ~/.ssh/deploy_key ubuntu@${HOST} "sudo journalctl -u trading-spacial -n 80 --no-pager"
-          exit 1
+          if [ "$READY" != 1 ]; then
+            echo "::error::trading-api@${INACTIVE} no quedó ready"; sudo journalctl -u "trading-api@${INACTIVE}" -n 50 --no-pager; exit 1
+          fi
+
+          # Swap del include IN-PLACE → inactivo + reload (no corta conexiones).
+          printf 'upstream trading_api {\n    server 127.0.0.1:%s;\n}\n' "$INACTIVE" > "$INCLUDE"
+          sudo nginx -t && sudo nginx -s reload
+
+          # Parar el viejo (drena via --timeout-graceful-shutdown 30).
+          sudo systemctl stop "trading-api@${CURRENT}"
+
+          # Reiniciar el scanner con el código nuevo (cero impacto de cliente).
+          sudo systemctl restart trading-scanner
+
+          # Verificación final.
+          curl -fsS "http://localhost:${INACTIVE}/health/live" >/dev/null
+
+          # Reconciliación de unit drift (warn-only — los units de /etc son
+          # world-readable, diff no necesita sudo; el reinstall es manual).
+          for u in trading-scanner.service "trading-api@.service"; do
+            if ! diff -q "/etc/systemd/system/$u" "deploy/$u" >/dev/null 2>&1; then
+              echo "::warning::unit drift en $u — reinstalar a mano: sudo cp deploy/$u /etc/systemd/system/$u && sudo systemctl daemon-reload"
+            fi
+          done
+          echo "blue-green OK: activo ahora :${INACTIVE}"
+          REMOTE
 
       - name: Cleanup
         if: always()
