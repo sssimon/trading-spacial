@@ -248,9 +248,9 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
           <div className={styles['idea-jugada-encurso']}>
             <p className={styles['idea-jugada-estado']}>
               Jugada <b>en curso</b>
-              {live.data?.frescura?.estado && (
+              {live.data?.frescura && (
                 <span className={styles['idea-jugada-frescura']}>
-                  {' '}· {live.data.frescura.estado}
+                  {' '}· <FreshnessTag frescura={live.data.frescura} />
                 </span>
               )}
             </p>
@@ -289,7 +289,7 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
           </p>
         )}
 
-        {!enCurso && cerrado && conducta.data && (
+        {!enCurso && cerrado && !fijada && conducta.data && (
           <div className={styles['idea-jugada-cerrado']}>
             {conducta.data.titular && (
               <p className={styles['na-body']}>{conducta.data.titular}</p>
