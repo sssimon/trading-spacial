@@ -1,0 +1,437 @@
+/* ============================================================
+   idea.module.css — clases propias de IdeaChart.
+   TOKEN WIRING: hereda los tokens cálidos (--paper, --clay,
+   --sage, --ochre, etc.) de .vwRoot (valles.module.css).
+   Las clases de canvas y anotaciones jugada (ju-chart*,
+   ju-ann-*) se toman de jugada.module.css; aquí solo van las
+   clases nuevas: leyenda de capas, banda vida, muros S/R.
+   ============================================================ */
+
+/* ── LEYENDA DE CAPAS ─────────────────────────────────────── */
+.idea-legend {
+  position: absolute;
+  left: 14px;
+  /* Cede espacio al título de la marca (≈ 34px) */
+  top: 44px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  pointer-events: all;
+}
+
+.idea-legend__item {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 160ms, background 160ms, color 160ms, border-color 160ms;
+  line-height: 1.4;
+}
+
+/* Estado ACTIVO (aria-pressed="true") */
+.idea-legend__item--on {
+  opacity: 1;
+}
+/* Estado INACTIVO (aria-pressed="false") */
+.idea-legend__item--off {
+  opacity: 0.38;
+  background: var(--paper-2, #F0EBE1) !important;
+  color: var(--ink-3, #9A9080) !important;
+  border-color: var(--card-edge, #E4DCCC) !important;
+}
+
+/* Color propio por capa cuando activo */
+.idea-legend__item--vida.idea-legend__item--on {
+  color: var(--sage, #5E7048);
+  background: var(--sage-tint, rgba(94,112,72,0.12));
+  border-color: #C9D2B2;
+}
+.idea-legend__item--paredes.idea-legend__item--on {
+  color: var(--clay-deep, #7B3C1D);
+  background: var(--clay-tint, rgba(184,84,46,0.10));
+  border-color: var(--clay-soft, rgba(184,84,46,0.25));
+}
+.idea-legend__item--jugada.idea-legend__item--on {
+  color: var(--ink-2, #4A4540);
+  background: var(--paper-2, #F0EBE1);
+  border-color: var(--card-edge-2, #CFC7B8);
+}
+
+/* Botón deshabilitado (jugada sin plan) */
+.idea-legend__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.22;
+}
+
+/* ── BANDA VIDA ───────────────────────────────────────────── */
+.idea-vida-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Banda translúcida color salvia suave */
+  background: rgba(94, 112, 72, 0.07);
+  border-top: 1px dashed rgba(94, 112, 72, 0.35);
+  border-bottom: 1px dashed rgba(94, 112, 72, 0.35);
+  pointer-events: none;
+  transition: top 620ms var(--ease, ease), height 620ms var(--ease, ease);
+}
+
+.idea-vida-stamp {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sage, #5E7048);
+  background: rgba(251, 249, 244, 0.88);
+  border-radius: 6px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+/* ── MUROS S/R ────────────────────────────────────────────── */
+.idea-wall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  height: 0;
+  pointer-events: none;
+  transition: top 620ms var(--ease, ease);
+}
+
+.idea-wall__rule {
+  flex: 1;
+  border-top-width: 1.5px;
+  border-top-style: dashed;
+}
+
+.idea-wall__tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 6px;
+  transform: translateY(-50%);
+  margin-right: 8px;
+}
+
+/* Resistencia — arcilla (techo) */
+.idea-wall--res .idea-wall__rule {
+  border-color: var(--clay, #B8542E);
+  opacity: 0.55;
+}
+.idea-wall--res .idea-wall__tag {
+  color: var(--clay-deep, #7B3C1D);
+  background: var(--clay-tint, rgba(184,84,46,0.10));
+  border: 1px solid var(--clay-soft, rgba(184,84,46,0.25));
+}
+
+/* Soporte — neutro cálido (piso) */
+.idea-wall--sup .idea-wall__rule {
+  border-color: var(--card-edge-2, #CFC7B8);
+}
+.idea-wall--sup .idea-wall__tag {
+  color: var(--ink-3, #9A9080);
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+}
+
+/* ── IDEA VIEW — layout principal ────────────────────────── */
+
+/* Contenedor raíz de IdeaView — columna scrollable, cálida */
+.idea-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: clamp(16px, 4vw, 48px) clamp(16px, 5vw, 56px) 80px;
+  max-width: 780px;
+  margin: 0 auto;
+  font-size: 18px; /* ≥18px base como indica la spec */
+}
+
+/* ── STICKY NAV ───────────────────────────────────────────── */
+.idea-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: rgba(251, 249, 244, 0.92);
+  border-bottom: 1px solid var(--card-edge, #E4DCCC);
+  backdrop-filter: blur(6px);
+  margin-left: clamp(-16px, -5vw, -56px);
+  margin-right: clamp(-16px, -5vw, -56px);
+  /* compensar el padding del contenedor para llegar a los bordes */
+  width: calc(100% + clamp(32px, 10vw, 112px));
+}
+
+.idea-nav a {
+  font-family: var(--sans, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-3, #9A9080);
+  text-decoration: none;
+  transition: color 140ms;
+}
+.idea-nav a:hover {
+  color: var(--ink-1, #2A2520);
+}
+
+.idea-nav__sep {
+  font-size: 11px;
+  color: var(--card-edge-2, #CFC7B8);
+  user-select: none;
+}
+
+/* ── HEADER (eyebrow + título) ────────────────────────────── */
+.idea-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.idea-title {
+  font-family: var(--serif, serif);
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 500;
+  color: var(--ink, #1A1510);
+  margin: 0;
+  line-height: 1.15;
+}
+
+/* ── CHART PLACEHOLDER ────────────────────────────────────── */
+.idea-chart-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  border-radius: 10px;
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  color: var(--ink-3, #9A9080);
+}
+
+/* ── JUGADA COMPACTA ──────────────────────────────────────── */
+.idea-jugada-encurso {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.idea-jugada-estado {
+  font-family: var(--sans, sans-serif);
+  font-size: 18px;
+  color: var(--ink-1, #2A2520);
+  margin: 0;
+}
+
+.idea-jugada-frescura {
+  font-size: 12.5px;
+  color: var(--ink-3, #9A9080);
+  font-weight: 400;
+}
+
+.idea-jugada-cta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* CTA principal — "Fijar esta jugada" */
+.idea-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans, sans-serif);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--paper, #FBF9F4);
+  background: var(--ink-2, #4A4540);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: background 160ms, opacity 160ms;
+  align-self: flex-start;
+}
+.idea-cta:hover {
+  background: var(--ink-1, #2A2520);
+}
+.idea-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.idea-jugada-ok {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  color: var(--sage, #5E7048);
+  font-weight: 600;
+  margin: 0;
+}
+
+.idea-jugada-error {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  color: var(--clay, #B8542E);
+  margin: 0;
+}
+
+.idea-jugada-cerrado {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.idea-conducta-icon {
+  font-family: var(--sans, sans-serif);
+  font-size: 12px;
+  color: var(--ink-3, #9A9080);
+}
+
+/* ── SECCIÓN QUIÉN ────────────────────────────────────────── */
+.idea-quien-heading {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2, #4A4540);
+  margin: 0 0 4px 0;
+}
+
+/* ── FOOTER ───────────────────────────────────────────────── */
+.idea-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 8px;
+  border-top: 1px solid var(--card-edge, #E4DCCC);
+}
+
+.idea-restart {
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3, #9A9080);
+  background: none;
+  border: 1px solid var(--card-edge-2, #CFC7B8);
+  border-radius: 8px;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: color 140ms, border-color 140ms;
+}
+.idea-restart:hover {
+  color: var(--ink-1, #2A2520);
+  border-color: var(--ink-3, #9A9080);
+}
+
+/* ── NARRATIVA — bloques descriptivos ────────────────────── */
+
+/* Contenedor raíz de la narrativa — hereda tokens de .vwRoot */
+.na-root {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Bloque individual (vida / paredes / jugada / noticias) */
+.na-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  border-radius: 10px;
+}
+
+/* Heading de bloque */
+.na-heading {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2, #4A4540);
+  margin: 0;
+}
+
+/* Párrafo de cuerpo */
+.na-body {
+  font-family: var(--sans, sans-serif);
+  font-size: 18px;
+  line-height: 1.65;
+  color: var(--ink-1, #2A2520);
+  margin: 0;
+}
+
+.na-body p {
+  margin: 0 0 8px 0;
+}
+.na-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Empty-state tranquilo */
+.na-empty {
+  font-family: var(--sans, sans-serif);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-3, #9A9080);
+  margin: 0;
+}
+
+/* Lista de hechos dentro de un bloque */
+.na-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.na-list li {
+  font-family: var(--sans, sans-serif);
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--ink-1, #2A2520);
+  padding-left: 14px;
+  position: relative;
+}
+
+.na-list li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--ink-3, #9A9080);
+}
+
+/* Costura obligatoria — pie del bloque jugada */
+.na-costura {
+  font-family: var(--sans, sans-serif);
+  font-size: 16px;
+  color: var(--ink-3, #9A9080);
+  border-top: 1px solid var(--card-edge, #E4DCCC);
+  padding-top: 10px;
+  margin: 4px 0 0 0;
+  line-height: 1.5;
+}
