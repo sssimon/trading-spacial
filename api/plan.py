@@ -74,7 +74,7 @@ def construir_hechos(*, rungs_llenos: list, be_movido: bool, estado_vivo: str,
     Sin imperativos: el instrumento queda fuera del término que mide."""
     hechos: list[str] = []
     if estado_vivo == "incierto":
-        hechos.append("transición sin confirmar — revisá en Binance")
+        hechos.append("transición sin confirmar — revisa en Binance")
     for i in sorted(rungs_llenos):
         hechos.append(f"TP{i + 1} se llenó")
     if be_movido:

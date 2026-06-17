@@ -32,7 +32,7 @@ export const JugadaLens: React.FC<JugadaLensProps> = ({ symbol, livePrice }) => 
   }, [symbol]);
 
   // Estado de carga inicial: ambas peticiones en vuelo
-  if (derived.loading && live.loading) {
+  if (derived.loading || live.loading) {
     return (
       <div className={styles['ju-screen']}>
         <p>Derivando la jugada de tus niveles…</p>

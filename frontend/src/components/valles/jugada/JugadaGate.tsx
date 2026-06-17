@@ -5,22 +5,10 @@
 import React, { useState } from 'react';
 import type { PlanDerived } from '../../../types';
 import { confirmPlan } from '../../../api';
-import { Eyebrow } from '../atoms';
+import { Eyebrow, humanName } from '../atoms';
 import styles from './jugada.module.css';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-const JNAMES: Record<string, string> = {
-  ADAUSDT: 'Cardano',
-  JUPUSDT: 'Jupiter',
-  XLMUSDT: 'Stellar',
-  RUNEUSDT: 'THORChain',
-  ZBCUSDT: 'Zebec',
-};
-
-function jnm(sym: string): string {
-  return JNAMES[sym] ?? sym.replace('USDT', '');
-}
 
 function pr(n: number | null | undefined): string {
   if (n == null) return '—';
@@ -128,7 +116,7 @@ export const JugadaGate: React.FC<JugadaGateProps> = ({ symbol, plan, entry }) =
         <div className={styles['ju-gate__hd']}>
           <div className={styles['ju-gate__hd-k']}>La ley que vas a fijar</div>
           <div className={styles['ju-gate__hd-t']}>
-            {jnm(symbol)} · salida ordenada contra las paredes
+            {humanName(symbol)} · salida ordenada contra las paredes
           </div>
         </div>
 
