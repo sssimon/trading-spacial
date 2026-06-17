@@ -24,6 +24,7 @@ def plan_to_json(plan: Plan) -> str:
     return json.dumps({
         "entry_price": plan.entry_price, "entry_zone": plan.entry_zone,
         "sl_price": plan.sl_price, "runner_frac": plan.runner_frac,
+        "sl_zona": plan.sl_zona,
         "rungs": [{"tp_price": r.tp_price, "size_frac": r.size_frac,
                    "zona_origen": r.zona_origen} for r in plan.rungs],
     })
@@ -35,7 +36,8 @@ def plan_from_json(s: str) -> Plan:
         rungs = tuple(Rung(tp_price=r["tp_price"], size_frac=r["size_frac"],
                            zona_origen=r["zona_origen"]) for r in d["rungs"])
         return Plan(entry_price=d["entry_price"], entry_zone=d["entry_zone"],
-                    sl_price=d["sl_price"], rungs=rungs, runner_frac=d["runner_frac"])
+                    sl_price=d["sl_price"], rungs=rungs, runner_frac=d["runner_frac"],
+                    sl_zona=d.get("sl_zona"))
     except KeyError as e:
         raise ValueError(f"plan_from_json: campo faltante {e} en el plan almacenado") from e
 

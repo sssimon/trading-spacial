@@ -19,10 +19,14 @@ from screener.sr_levels import detect_levels
 from instrument.plan import derive_plan
 from instrument.lifecycle import LifecycleState
 from db.lifecycle_states import db_put_state, db_get_active_state, plan_from_json
+from db.conduct_episodes import db_get_latest_episode
 from db.transaction import snapshot_connection, transaction
+from freshness import LiveSnapshot
 
 log = logging.getLogger("api.plan")
 router = APIRouter(tags=["plan"])
+
+PLAN_FRESCURA_UMBRAL_SEG = 900.0
 
 
 class PlanConfirmRequest(BaseModel):
@@ -38,12 +42,30 @@ def _zonas_now(symbol: str) -> list[dict]:
     return detect_levels(_fetch_daily_bars(symbol))
 
 
+def _zona_meta(z: dict | None) -> dict | None:
+    """Extrae los campos visuales de una zona (paredes). Devuelve None si no hay zona."""
+    if z is None:
+        return None
+    return {
+        "centro": z["centro"],
+        "precio_bajo": z["precio_bajo"],
+        "precio_alto": z["precio_alto"],
+        "toques": z["toques"],
+    }
+
+
 def _plan_payload(plan) -> dict:
-    return {"entry": plan.entry_price,
-            "sl_plan": plan.sl_price,
-            "rungs": [{"tp_price": r.tp_price, "size_frac": r.size_frac} for r in plan.rungs],
-            "runner_frac": plan.runner_frac,
-            "entry_zone": plan.entry_zone}
+    return {
+        "entry": plan.entry_price,
+        "sl_plan": plan.sl_price,
+        "sl_piso": _zona_meta(plan.sl_zona),  # soporte inmediato que fija el SL (Task A1)
+        "rungs": [
+            {"tp_price": r.tp_price, "size_frac": r.size_frac, "zona": _zona_meta(r.zona_origen)}
+            for r in plan.rungs
+        ],
+        "runner_frac": plan.runner_frac,
+        "entry_zone": _zona_meta(plan.entry_zone),
+    }
 
 
 def construir_hechos(*, rungs_llenos: list, be_movido: bool, estado_vivo: str,
@@ -52,7 +74,7 @@ def construir_hechos(*, rungs_llenos: list, be_movido: bool, estado_vivo: str,
     Sin imperativos: el instrumento queda fuera del término que mide."""
     hechos: list[str] = []
     if estado_vivo == "incierto":
-        hechos.append("transición sin confirmar — revisá en Binance")
+        hechos.append("transición sin confirmar — revisa en Binance")
     for i in sorted(rungs_llenos):
         hechos.append(f"TP{i + 1} se llenó")
     if be_movido:
@@ -126,11 +148,67 @@ def vista(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
     hechos = construir_hechos(rungs_llenos=rungs_llenos, be_movido=bool(row["be_movido"]),
                               estado_vivo=row["estado_vivo"], sl_actual=row["sl_actual"],
                               sl_plan=plan.sl_price)
-    return {
+    payload = {
         "symbol": symbol, "estado_vivo": row["estado_vivo"],
         "plan": _plan_payload(plan),
         "realidad": {"fase": row["fase"], "rungs_llenos": rungs_llenos,
                      "sl_actual": row["sl_actual"], "be_movido": bool(row["be_movido"]),
                      "size_restante_frac": row["size_restante_frac"]},
         "hechos": hechos,
+    }
+    return LiveSnapshot(
+        payload=payload,
+        generated_at=row["updated_at"],
+        umbral_seg=PLAN_FRESCURA_UMBRAL_SEG,
+    ).to_response()
+
+
+# ── Task A3: conducta del último cierre (sin PnL) ────────────────────────────
+
+# Mapeo: campo real en conduct_episodes → etiqueta en tuteo venezolano.
+# rungs_honrados es int (conteo de peldaños llenados) — truthy cuando > 0.
+# adherencia_be puede ser None (inaplicable si TP1 no se llenó) — se trata como falsy.
+_CONDUCT_FIELDS: list[tuple[str, str]] = [
+    ("entry_en_zona",  "Entraste en la zona"),
+    ("sl_respetado",   "Respetaste el stop"),
+    ("adherencia_be",  "Moviste a break-even"),
+    ("rungs_honrados", "Honraste los peldaños"),
+    ("cierre_en_plan", "Cerraste según el plan"),
+]
+
+
+@router.get("/plan/{symbol}/conducta", summary="Conducta del último cierre (sin PnL)")
+def conducta(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
+    """Lee el EpisodioDeConducción del último cierre para tenant+symbol.
+    Hechos de conducta únicamente — NUNCA PnL. Sin episodio → estado_vivo None."""
+    symbol = symbol.upper()[:20]
+    with snapshot_connection() as con:
+        ep = db_get_latest_episode(con, tenant_id=tenant_id, symbol=symbol)
+    if ep is None:
+        return {"symbol": symbol, "estado_vivo": None}
+
+    campos: list[dict] = []
+    all_bool_ok = True
+    for field, label in _CONDUCT_FIELDS:
+        val = ep.get(field)
+        ok = "si" if val else "no"
+        if ok == "no":
+            all_bool_ok = False
+        campos.append({"k": label, "ok": ok})
+
+    hold_hours = ep.get("hold_hours")
+    if hold_hours is not None:
+        campos.append({"k": "Cuánto aguantaste", "ok": "dato", "v": f"{round(hold_hours)} h"})
+
+    titular = (
+        "Honraste el plan que aprobaste."
+        if all_bool_ok
+        else "Esta vez te saliste del plan. Sin reproche — solo el espejo."
+    )
+
+    return {
+        "symbol": symbol,
+        "estado_vivo": "cerrado",
+        "titular": titular,
+        "campos": campos,
     }

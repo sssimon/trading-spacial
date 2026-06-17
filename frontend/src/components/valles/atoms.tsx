@@ -7,7 +7,7 @@ import styles from './valles.module.css';
 const NAMES: Record<string, string> = {
   ADAUSDT: 'Cardano', XLMUSDT: 'Stellar', RUNEUSDT: 'THORChain', PENDLEUSDT: 'Pendle',
   JUPUSDT: 'Jupiter', UNIUSDT: 'Uniswap', INJUSDT: 'Injective', GMXUSDT: 'GMX',
-  BTCUSDT: 'Bitcoin', PYTHUSDT: 'Pyth',
+  BTCUSDT: 'Bitcoin', PYTHUSDT: 'Pyth', ZBCUSDT: 'Zebec',
 };
 export const humanName = (s: string): string => NAMES[s] ?? s.replace('USDT', '');
 

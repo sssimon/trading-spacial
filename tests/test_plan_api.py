@@ -5,9 +5,10 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.plan import router, construir_hechos
+from api.plan import router, construir_hechos, _plan_payload
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
+from instrument.plan import derive_plan
 
 
 def _app():
@@ -93,3 +94,116 @@ def test_vista_sin_plan_activo_devuelve_none(monkeypatch, tmp_path):
 def test_confirm_payload_incompleto_es_422():
     r = _app().post("/plan/confirm", json={"symbol": "BTCUSDT"})   # falta entry_price
     assert r.status_code == 422
+
+
+# ── Task A1: metadata de paredes (toques / piso) ──────────────────────────────
+
+
+def _zonas_paredes():
+    # soporte_piso (sl_zona): precio_alto < entry=0.419  → el más cercano abajo
+    # soporte_entry (entry_zone): precio_bajo ≤ 0.419 ≤ precio_alto  → contiene el entry
+    # Usamos entry_zone independiente del sl_zona para distinguir ambos campos.
+    # derive_plan toma sl_zona = max(soportes con precio_alto < entry, key=centro)
+    # Con entry=0.419 y soporte_piso.precio_alto=0.398 < 0.419  → sl_zona.centro=0.392
+    # Con soporte_entry.precio_bajo=0.410 ≤ 0.419 ≤ 0.425=precio_alto → entry_zone presente
+    return [
+        {"tipo": "soporte", "precio_bajo": 0.388, "precio_alto": 0.398, "centro": 0.392, "toques": 5, "confluencia_redondo": []},
+        {"tipo": "soporte", "precio_bajo": 0.410, "precio_alto": 0.425, "centro": 0.417, "toques": 3, "confluencia_redondo": []},
+        {"tipo": "resistencia", "precio_bajo": 0.445, "precio_alto": 0.451, "centro": 0.448, "toques": 2, "confluencia_redondo": []},
+        {"tipo": "resistencia", "precio_bajo": 0.470, "precio_alto": 0.478, "centro": 0.474, "toques": 4, "confluencia_redondo": []},
+    ]
+
+
+def test_plan_payload_incluye_metadata_de_paredes():
+    plan = derive_plan(_zonas_paredes(), 0.419)
+    p = _plan_payload(plan)
+    # rungs: cada rung expone su zona_origen
+    assert p["rungs"][0]["zona"]["toques"] == 2
+    assert p["rungs"][0]["zona"]["centro"] == 0.448
+    # sl_piso: el soporte más cercano por debajo del entry (precio_alto < entry)
+    # soporte_piso: precio_alto=0.398 < 0.419 → sl_zona.centro=0.392
+    assert p["sl_piso"]["centro"] == 0.392
+    assert p["sl_piso"]["precio_bajo"] == 0.388
+    # campos legacy intactos
+    assert p["sl_plan"] == plan.sl_price
+    assert p["entry"] == plan.entry_price
+    # entry_zone: la zona de soporte que abarca el entry (precio_bajo ≤ entry ≤ precio_alto)
+    assert p["entry_zone"]["toques"] == 3
+
+
+# ── Task A3: GET /plan/{symbol}/conducta — lectura de conducta sin PnL ───────
+
+
+def test_conducta_sin_episodio_devuelve_estado_none(monkeypatch):
+    import contextlib
+    import api.plan as plan_api
+    monkeypatch.setattr(plan_api, "db_get_latest_episode", lambda con, **kw: None)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+    out = plan_api.conducta("ADAUSDT", tenant_id=1)
+    assert out["estado_vivo"] is None
+    assert out["symbol"] == "ADAUSDT"
+
+
+def test_conducta_devuelve_campos_sin_pnl(monkeypatch):
+    import contextlib
+    import api.plan as plan_api
+
+    fake_episode = {
+        "entry_en_zona": 1,
+        "sl_respetado": 1,
+        "adherencia_be": 0,
+        "rungs_honrados": 2,
+        "cierre_en_plan": 0,   # falsy → ok="no"
+        "hold_hours": 5.75,
+    }
+    monkeypatch.setattr(plan_api, "db_get_latest_episode", lambda con, **kw: fake_episode)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+
+    out = plan_api.conducta("ADAUSDT", tenant_id=1)
+
+    # Estado vivo correcto
+    assert out["estado_vivo"] == "cerrado"
+
+    # Sin PnL en ningún lugar
+    assert "pnl" not in out
+    assert "pnl_usd" not in out
+
+    campos = out["campos"]
+    labels = [c["k"] for c in campos]
+
+    # Campo "Entraste en la zona" debe estar ok="si" (entry_en_zona=1)
+    zona_item = next(c for c in campos if c["k"] == "Entraste en la zona")
+    assert zona_item["ok"] == "si"
+
+    # Campo "Cerraste según el plan" debe estar ok="no" (cierre_en_plan=0)
+    cierre_item = next(c for c in campos if c["k"] == "Cerraste según el plan")
+    assert cierre_item["ok"] == "no"
+
+    # Hold hours presente como dato
+    hold_item = next(c for c in campos if c["k"] == "Cuánto aguantaste")
+    assert hold_item["ok"] == "dato"
+    assert "h" in hold_item["v"]
+
+    # titular presente
+    assert "titular" in out
+
+
+# ── Task A2: LiveSnapshot / frescura en el contrato ──────────────────────────
+
+
+def test_vista_emite_frescura_en_el_contrato(monkeypatch):
+    from datetime import datetime, timezone
+    import api.plan as plan_api
+    now = datetime.now(timezone.utc).isoformat()
+    fake_row = {
+        "plan_json": '{"entry_price":0.419,"entry_zone":null,"sl_price":0.385,"rungs":[],"runner_frac":0.05,"sl_zona":null}',
+        "rungs_llenos_json": "[]", "be_movido": 0, "estado_vivo": "activo",
+        "sl_actual": 0.385, "fase": "CONFIRMED", "size_restante_frac": 1.0, "updated_at": now,
+    }
+    import contextlib
+    monkeypatch.setattr(plan_api, "db_get_active_state", lambda con, **kw: fake_row)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+    out = plan_api.vista("ADAUSDT", tenant_id=1)
+    assert out["frescura"]["estado"] == "fresco"
+    assert out["frescura"]["generated_at"] == now
+    assert out["estado_vivo"] == "activo"

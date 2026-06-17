@@ -5,6 +5,7 @@ import { FreshnessTag } from '../FreshnessTag';
 import { humanName } from './atoms';
 import { formatPrice } from '../../utils';
 import styles from './valles.module.css';
+import juStyles from './jugada/jugada.module.css';
 
 export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: string) => void }> = ({ snapshot, onPick }) => {
   const [q, setQ] = useState('');
@@ -40,6 +41,11 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
               <span className={styles.vwCandTag} aria-hidden="true">● en valle</span>
               se mueve un <b>{(c.pct_rango * 100).toFixed(1)}%</b> · <b>{c.semanas_consolidando} semanas</b> quieta
             </div>
+            {/* TODO: gatear por señal real por-candidata cuando el screener la exponga */}
+            <span className={juStyles['ju-pickmark']}>
+              <span className={juStyles['ju-pickmark__g']} aria-hidden="true"><i /><i /><i /></span>
+              tiene jugada
+            </span>
             <div className={styles.vwCandPrice}>${formatPrice(c.price)}</div>
             <div className={styles.vwCandGo} aria-hidden="true">→</div>
           </button>
@@ -50,6 +56,8 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
         <span>Se miraron <b>{coverage.evaluated}</b> de {coverage.universe} monedas del universo.</span>
         <span className={styles.vwEntrySep} />
         <span>Ordenadas por volumen — no por preferencia.</span>
+        <span className={styles.vwEntrySep} />
+        <span>La marca no ordena la lista ni la puntúa.</span>
       </div>
 
       <div className={styles.vwEntrySearch}>

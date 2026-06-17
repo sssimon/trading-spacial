@@ -29,5 +29,5 @@ it('al elegir una moneda avanza a Vida y el stepper dice "Paso 1 de 3"', async (
   render(<ValleysFlow snapshot={snap} loading={false} />);
   await userEvent.click(screen.getByText('Cardano'));
   expect(await screen.findByText('¿Está viva la moneda?')).toBeInTheDocument();
-  expect(screen.getByText(/paso 1 de 3/i)).toBeInTheDocument();
+  expect(screen.getByText(/paso 1 de 4/i)).toBeInTheDocument();
 });

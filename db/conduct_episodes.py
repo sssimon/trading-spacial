@@ -46,3 +46,15 @@ def db_get_episodes(con: sqlite3.Connection, *, tenant_id: int) -> list[dict]:
     )
     cols = [c[0] for c in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def db_get_latest_episode(con: sqlite3.Connection, *, tenant_id: int, symbol: str) -> dict | None:
+    """Devuelve el episodio de conducta más reciente (por exit_ts) para tenant+symbol, o None."""
+    cur = con.execute(
+        f"SELECT {_COLS} FROM conduct_episodes "
+        "WHERE tenant_id = ? AND symbol = ? ORDER BY exit_ts DESC LIMIT 1",
+        (tenant_id, symbol),
+    )
+    cols = [c[0] for c in cur.description]
+    row = cur.fetchone()
+    return dict(zip(cols, row)) if row is not None else None

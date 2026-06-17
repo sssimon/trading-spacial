@@ -31,6 +31,9 @@ import type {
   PreferencesPutPayload,
   AgentStatus,
   TestDeliveryResponse,
+  PlanDerived,
+  PlanLive,
+  PlanConducta,
 } from './types';
 
 const BASE_URL = '/api';
@@ -431,4 +434,30 @@ export function getLevels(symbol: string) {
 // ---- F3b A on-demand — GET /valley-eval/:symbol ----
 export function getValleyEval(symbol: string) {
   return request<import('./types').ValleyEval>(`/valley-eval/${symbol}`);
+}
+
+// ---- La Jugada / Instrumento — contrato /plan ----------------------------
+
+// GET /plan/derive/:symbol?entry_price=X
+export function getPlanDerive(symbol: string, entryPrice: number) {
+  return request<PlanDerived>(`/plan/derive/${symbol}?entry_price=${entryPrice}`);
+}
+
+// GET /plan/:symbol
+export function getPlanLive(symbol: string) {
+  return request<PlanLive>(`/plan/${symbol}`);
+}
+
+// GET /plan/:symbol/conducta
+export function getPlanConducta(symbol: string) {
+  return request<PlanConducta>(`/plan/${symbol}/conducta`);
+}
+
+// POST /plan/confirm — auth via JWT cookie (credentials:'include') + CSRF token
+// injected automatically by rawRequest for non-GET methods. No extra header needed.
+export function confirmPlan(symbol: string, entryPrice: number, positionId?: number) {
+  return request<{ symbol: string; estado_vivo: string; plan: PlanDerived }>('/plan/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ symbol, entry_price: entryPrice, position_id: positionId ?? null }),
+  });
 }
