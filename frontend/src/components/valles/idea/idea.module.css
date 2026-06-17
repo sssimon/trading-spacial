@@ -145,3 +145,96 @@
   background: var(--paper-2, #F0EBE1);
   border: 1px solid var(--card-edge, #E4DCCC);
 }
+
+/* ── NARRATIVA — bloques descriptivos ────────────────────── */
+
+/* Contenedor raíz de la narrativa — hereda tokens de .vwRoot */
+.na-root {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Bloque individual (vida / paredes / jugada / noticias) */
+.na-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  border-radius: 10px;
+}
+
+/* Heading de bloque */
+.na-heading {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2, #4A4540);
+  margin: 0;
+}
+
+/* Párrafo de cuerpo */
+.na-body {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-1, #2A2520);
+  margin: 0;
+}
+
+.na-body p {
+  margin: 0 0 8px 0;
+}
+.na-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Empty-state tranquilo */
+.na-empty {
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-3, #9A9080);
+  margin: 0;
+}
+
+/* Lista de hechos dentro de un bloque */
+.na-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.na-list li {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-1, #2A2520);
+  padding-left: 14px;
+  position: relative;
+}
+
+.na-list li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--ink-3, #9A9080);
+}
+
+/* Costura obligatoria — pie del bloque jugada */
+.na-costura {
+  font-family: var(--sans, sans-serif);
+  font-size: 12.5px;
+  color: var(--ink-3, #9A9080);
+  border-top: 1px solid var(--card-edge, #E4DCCC);
+  padding-top: 10px;
+  margin: 4px 0 0 0;
+  line-height: 1.5;
+}
