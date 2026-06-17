@@ -164,7 +164,7 @@ export interface IdeaViewProps {
 // ── componente principal ──────────────────────────────────────
 export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
   const bundle    = useValleyBundle(symbol);
-  const livePrice = bundle.niveles.data?.price_live ?? bundle.vida.data?.price ?? null;
+  const livePrice = bundle.niveles.data?.price_live ?? null;
   const { derived, live, conducta } = useJugada(symbol, livePrice);
 
   // Estado local del CTA "Fijar jugada"
@@ -174,10 +174,12 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
 
   const handleFijar = async () => {
     if (enviando || fijada) return;
+    const entry = livePrice ?? derived.data?.entry;
+    if (entry == null) return;
     setEnviando(true);
     setCtaError(null);
     try {
-      await confirmPlan(symbol, livePrice ?? derived.data!.entry);
+      await confirmPlan(symbol, entry);
       setFijada(true);
     } catch {
       setCtaError('No se pudo fijar la jugada. Intenta de nuevo en un momento.');
@@ -247,13 +249,18 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
         {enCurso && (
           <div className={styles['idea-jugada-encurso']}>
             <p className={styles['idea-jugada-estado']}>
-              Jugada <b>en curso</b>
+              Jugada <b>{estadoVivo === 'incierto' ? 'incierta' : 'en curso'}</b>
               {live.data?.frescura && (
                 <span className={styles['idea-jugada-frescura']}>
                   {' '}· <FreshnessTag frescura={live.data.frescura} />
                 </span>
               )}
             </p>
+            {estadoVivo === 'incierto' && (
+              <p className={styles['na-body']}>
+                El sistema no está seguro de dónde está la jugada — revisa en Binance.
+              </p>
+            )}
             {live.data?.hechos && live.data.hechos.length > 0 && (
               <ul className={styles['na-list']}>
                 {live.data.hechos.map((h, i) => (

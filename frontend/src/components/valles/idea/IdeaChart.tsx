@@ -19,12 +19,6 @@ import { formatPrice } from '../../../utils';
 import juStyles from '../jugada/jugada.module.css';
 import styles from './idea.module.css';
 
-// Formatea precio dentro del componente para las anotaciones del gráfico
-function fmt(p: number): string {
-  if (p >= 1000) return p.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  if (p >= 1)    return p.toFixed(4).replace(/\.?0+$/, '');
-  return p.toPrecision(4);
-}
 
 export interface IdeaChartProps {
   symbol: string;
@@ -259,7 +253,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
               >
                 <span className={juStyles['ju-ann-zone__lbl']}>
                   ZONA DE ENTRADA
-                  <b className="num">${fmt(ov.zone.priceLow)}–${fmt(ov.zone.priceHigh)}</b>
+                  <b className="num">${formatPrice(ov.zone.priceLow)}–${formatPrice(ov.zone.priceHigh)}</b>
                 </span>
               </div>
             )}
@@ -284,7 +278,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                     <span className={juStyles['ju-ann-line__pct']}>
                       {r.filled ? 'llena' : `salida ${i + 1}`}
                     </span>
-                    <span className="num">${fmt(r.price)}</span>
+                    <span className="num">${formatPrice(r.price)}</span>
                     <span className={juStyles['ju-ann-line__pct']}>
                       {Math.round(r.sizeFrac * 100)}%
                       {r.toques != null ? ` · ${r.toques} toques` : ''}
@@ -295,7 +289,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             })}
 
             {/* stop / break-even */}
-            {Y(ov.stop.price) != null && (
+            {ov.stop.price > 0 && Y(ov.stop.price) != null && (
               <div
                 className={[
                   juStyles['ju-ann'],
@@ -309,7 +303,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                   <span className={juStyles['ju-ann-line__pct']}>
                     {ov.stop.be ? 'break-even' : 'stop'}
                   </span>
-                  <span className="num">${fmt(ov.stop.price)}</span>
+                  <span className="num">${formatPrice(ov.stop.price)}</span>
                 </span>
               </div>
             )}
@@ -326,7 +320,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
               >
                 <span className={juStyles['ju-ann-live__tag']}>
                   {ov.live.fuera ? 'precio de ahora ' : 'ahora '}
-                  <span className="num">${fmt(ov.live.price)}</span>
+                  <span className="num">${formatPrice(ov.live.price)}</span>
                 </span>
               </div>
             )}

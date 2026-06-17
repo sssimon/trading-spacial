@@ -18,7 +18,7 @@ describe('NoticiasSection — empty-state honesto (track 2)', () => {
   it('muestra el texto de empty-state honesto', () => {
     render(<NoticiasSection symbol="ADAUSDT" />);
     expect(
-      screen.getByText(/Todavía no traemos las noticias de esta moneda/i),
+      screen.getByText(/Las noticias de esta moneda aún no están conectadas/i),
     ).toBeTruthy();
   });
 

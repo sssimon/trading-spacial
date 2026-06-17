@@ -29,9 +29,12 @@ export function buildLayers(args: {
 }): LayersModel {
   const { vida, levels, plan, live, state } = args;
 
-  // vida layer: consolidation band centred on the live price using pct_rango
+  // vida layer: consolidation band centred on the live price using pct_rango.
+  // Only shown when the coin is actually alive (vivo===true or candidata===true);
+  // a dead coin must NOT get a life-affirming salvia band.
+  const isAlive = vida?.vivo === true || vida?.candidata === true;
   const band =
-    vida?.pct_rango != null && live
+    isAlive && vida?.pct_rango != null && live
       ? { low: live * (1 - vida.pct_rango / 2), high: live * (1 + vida.pct_rango / 2) }
       : null;
 

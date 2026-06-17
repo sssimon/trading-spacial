@@ -23,11 +23,11 @@
 
 .idea-legend__item {
   font-family: var(--sans, sans-serif);
-  font-size: 10.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.03em;
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 10px 14px;
   cursor: pointer;
   border: 1px solid transparent;
   transition: opacity 160ms, background 160ms, color 160ms, border-color 160ms;
@@ -237,7 +237,7 @@
 
 .idea-jugada-estado {
   font-family: var(--sans, sans-serif);
-  font-size: 14px;
+  font-size: 18px;
   color: var(--ink-1, #2A2520);
   margin: 0;
 }
@@ -260,7 +260,7 @@
   align-items: center;
   justify-content: center;
   font-family: var(--sans, sans-serif);
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--paper, #FBF9F4);
@@ -377,7 +377,7 @@
 /* Párrafo de cuerpo */
 .na-body {
   font-family: var(--sans, sans-serif);
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.65;
   color: var(--ink-1, #2A2520);
   margin: 0;
@@ -393,7 +393,7 @@
 /* Empty-state tranquilo */
 .na-empty {
   font-family: var(--sans, sans-serif);
-  font-size: 13.5px;
+  font-size: 16px;
   line-height: 1.6;
   color: var(--ink-3, #9A9080);
   margin: 0;
@@ -411,7 +411,7 @@
 
 .na-list li {
   font-family: var(--sans, sans-serif);
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.6;
   color: var(--ink-1, #2A2520);
   padding-left: 14px;
@@ -428,7 +428,7 @@
 /* Costura obligatoria — pie del bloque jugada */
 .na-costura {
   font-family: var(--sans, sans-serif);
-  font-size: 12.5px;
+  font-size: 16px;
   color: var(--ink-3, #9A9080);
   border-top: 1px solid var(--card-edge, #E4DCCC);
   padding-top: 10px;

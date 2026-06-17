@@ -3,6 +3,7 @@ import { render, act } from '@testing-library/react';
 import { it, expect, vi, beforeEach } from 'vitest';
 import { ValleysFlow } from './ValleysFlow';
 import { Copilot } from './Copilot';
+import { IdeaView } from './idea/IdeaView';
 import * as api from '../../api';
 import type { ValleySnapshot } from '../../types';
 import type { ChatMsg } from '../../agent/useAgentStream';
@@ -20,10 +21,60 @@ beforeEach(() => {
   vi.mocked(api.getDossier).mockResolvedValue({ symbol: 'ADAUSDT', equipo: [], equipo_identificado: false, presencia: {}, actividad: {}, financiacion: [], hitos: [], estado_general: 'opaco', no_encontrado_en: [], generated_at: null } as never);
 });
 
+// ── Mocks para IdeaView ──────────────────────────────────────────────────────
+// IdeaChart usa lightweight-charts (no disponible en jsdom); lo reemplazamos
+// con un stub div para aislar el test de doctrina del rendering del canvas.
+vi.mock('./idea/IdeaChart', () => ({
+  IdeaChart: () => <div data-testid="idea-chart-stub" />,
+}));
+
+// useValleyBundle provee los datos de vida/niveles/dossier.
+vi.mock('./useValleyBundle', () => ({
+  useValleyBundle: () => ({
+    vida: { data: { symbol: 'ADAUSDT', estado: 'ok', candidata: true, vivo: true, pct_rango: 0.1, semanas_consolidando: 4, vol_percentil: 0.2, volumen_usd_dia: 5e6 }, loading: false, error: false },
+    niveles: { data: { symbol: 'ADAUSDT', estado: 'ok', generated_at: null, price_live: 0.45, zonas: [], ubicacion: { dentro_de: null, techo: null, piso: null } }, loading: false, error: false },
+    dossier: { data: null, loading: false, error: true },
+    refreshDossier: vi.fn(),
+  }),
+}));
+
+// useJugada provee el plan derivado y el estado vivo.
+vi.mock('./jugada/useJugada', () => ({
+  useJugada: () => ({
+    derived: {
+      data: {
+        symbol: 'ADAUSDT', entry: 0.44, rungs: [{ price: 0.50, sizeFrac: 0.5, toques: 2 }],
+        sl_plan: 0.40, be_trigger: null, runner_frac: null,
+      },
+      loading: false, error: null,
+    },
+    live: { data: null, loading: false, error: null },
+    conducta: { data: null, loading: false, error: null },
+  }),
+}));
+
 it('el chrome del flujo (pick) no emite veredicto', () => {
   const { container } = render(<ValleysFlow snapshot={snap} loading={false} />);
   // las SUGG del copiloto incluyen "comprar" a propósito (son preguntas que se RECHAZAN),
   // así que este gate corre sobre el chrome del flujo, no sobre el dock abierto.
+  expect(container.textContent ?? '').not.toMatch(FORBIDDEN);
+});
+
+// ── Doctrine: IdeaView completa no emite veredicto ──────────────────────────
+//
+// IdeaView es la superficie donde ahora vive el riesgo real: muestra la
+// narrativa descriptiva, el plan derivado y el CTA "Fijar jugada". El gate
+// anti-veredicto debe cubrirla explícitamente.
+//
+// Mocks: useValleyBundle + useJugada retornan datos representativos con plan
+// derivado; IdeaChart sustituido por stub div para evitar lightweight-charts
+// en jsdom; confirmPlan mockeado (declarado en vi.mock('../../api') arriba).
+
+it('IdeaView no emite veredicto ni copia prohibida', async () => {
+  let container!: HTMLElement;
+  await act(async () => {
+    ({ container } = render(<IdeaView symbol="ADAUSDT" />));
+  });
   expect(container.textContent ?? '').not.toMatch(FORBIDDEN);
 });
 
