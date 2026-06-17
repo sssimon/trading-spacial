@@ -129,3 +129,24 @@ def test_plan_payload_incluye_metadata_de_paredes():
     assert p["entry"] == plan.entry_price
     # entry_zone: la zona de soporte que abarca el entry (precio_bajo ≤ entry ≤ precio_alto)
     assert p["entry_zone"]["toques"] == 3
+
+
+# ── Task A2: LiveSnapshot / frescura en el contrato ──────────────────────────
+
+
+def test_vista_emite_frescura_en_el_contrato(monkeypatch):
+    from datetime import datetime, timezone
+    import api.plan as plan_api
+    now = datetime.now(timezone.utc).isoformat()
+    fake_row = {
+        "plan_json": '{"entry_price":0.419,"entry_zone":null,"sl_price":0.385,"rungs":[],"runner_frac":0.05,"sl_zona":null}',
+        "rungs_llenos_json": "[]", "be_movido": 0, "estado_vivo": "activo",
+        "sl_actual": 0.385, "fase": "CONFIRMED", "size_restante_frac": 1.0, "updated_at": now,
+    }
+    import contextlib
+    monkeypatch.setattr(plan_api, "db_get_active_state", lambda con, **kw: fake_row)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+    out = plan_api.vista("ADAUSDT", tenant_id=1)
+    assert out["frescura"]["estado"] == "fresco"
+    assert out["frescura"]["generated_at"] == now
+    assert out["estado_vivo"] == "activo"

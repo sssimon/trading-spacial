@@ -20,9 +20,12 @@ from instrument.plan import derive_plan
 from instrument.lifecycle import LifecycleState
 from db.lifecycle_states import db_put_state, db_get_active_state, plan_from_json
 from db.transaction import snapshot_connection, transaction
+from freshness import LiveSnapshot
 
 log = logging.getLogger("api.plan")
 router = APIRouter(tags=["plan"])
+
+PLAN_FRESCURA_UMBRAL_SEG = 900.0
 
 
 class PlanConfirmRequest(BaseModel):
@@ -144,7 +147,7 @@ def vista(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
     hechos = construir_hechos(rungs_llenos=rungs_llenos, be_movido=bool(row["be_movido"]),
                               estado_vivo=row["estado_vivo"], sl_actual=row["sl_actual"],
                               sl_plan=plan.sl_price)
-    return {
+    payload = {
         "symbol": symbol, "estado_vivo": row["estado_vivo"],
         "plan": _plan_payload(plan),
         "realidad": {"fase": row["fase"], "rungs_llenos": rungs_llenos,
@@ -152,3 +155,8 @@ def vista(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
                      "size_restante_frac": row["size_restante_frac"]},
         "hechos": hechos,
     }
+    return LiveSnapshot(
+        payload=payload,
+        generated_at=row["updated_at"],
+        umbral_seg=PLAN_FRESCURA_UMBRAL_SEG,
+    ).to_response()
