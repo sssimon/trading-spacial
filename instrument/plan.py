@@ -30,6 +30,7 @@ class Plan:
     sl_price: float
     rungs: tuple   # tuple[Rung, ...], ascendente por tp_price — inmutable (BNC)
     runner_frac: float
+    sl_zona: dict | None = None   # soporte inmediato que fija el SL (Task A1)
 
 
 def derive_plan(zonas: list[dict], entry_price: float, *,
@@ -59,7 +60,7 @@ def derive_plan(zonas: list[dict], entry_price: float, *,
     n = len(resistencias)
     if n == 0:
         return Plan(entry_price=entry_price, entry_zone=entry_zone, sl_price=sl_price,
-                    rungs=(), runner_frac=(1.0 if runner_on else 0.0))
+                    rungs=(), runner_frac=(1.0 if runner_on else 0.0), sl_zona=soporte)
 
     fracs = SIZE_SCHEDULE[:n]
     total = sum(fracs)
@@ -78,4 +79,4 @@ def derive_plan(zonas: list[dict], entry_price: float, *,
     rungs = tuple(Rung(tp_price=z["centro"], size_frac=s, zona_origen=z)
                   for z, s in zip(resistencias, scaled))
     return Plan(entry_price=entry_price, entry_zone=entry_zone, sl_price=sl_price,
-                rungs=rungs, runner_frac=runner)
+                rungs=rungs, runner_frac=runner, sl_zona=soporte)

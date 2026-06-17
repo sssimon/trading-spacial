@@ -93,3 +93,40 @@ def test_vista_sin_plan_activo_devuelve_none(monkeypatch, tmp_path):
 def test_confirm_payload_incompleto_es_422():
     r = _app().post("/plan/confirm", json={"symbol": "BTCUSDT"})   # falta entry_price
     assert r.status_code == 422
+
+
+# ── Task A1: metadata de paredes (toques / piso) ──────────────────────────────
+from instrument.plan import derive_plan
+from api.plan import _plan_payload
+
+
+def _zonas_paredes():
+    # soporte_piso (sl_zona): precio_alto < entry=0.419  → el más cercano abajo
+    # soporte_entry (entry_zone): precio_bajo ≤ 0.419 ≤ precio_alto  → contiene el entry
+    # Usamos entry_zone independiente del sl_zona para distinguir ambos campos.
+    # derive_plan toma sl_zona = max(soportes con precio_alto < entry, key=centro)
+    # Con entry=0.419 y soporte_piso.precio_alto=0.398 < 0.419  → sl_zona.centro=0.392
+    # Con soporte_entry.precio_bajo=0.410 ≤ 0.419 ≤ 0.425=precio_alto → entry_zone presente
+    return [
+        {"tipo": "soporte", "precio_bajo": 0.388, "precio_alto": 0.398, "centro": 0.392, "toques": 5},
+        {"tipo": "soporte", "precio_bajo": 0.410, "precio_alto": 0.425, "centro": 0.417, "toques": 3},
+        {"tipo": "resistencia", "precio_bajo": 0.445, "precio_alto": 0.451, "centro": 0.448, "toques": 2},
+        {"tipo": "resistencia", "precio_bajo": 0.470, "precio_alto": 0.478, "centro": 0.474, "toques": 4},
+    ]
+
+
+def test_plan_payload_incluye_metadata_de_paredes():
+    plan = derive_plan(_zonas_paredes(), 0.419)
+    p = _plan_payload(plan)
+    # rungs: cada rung expone su zona_origen
+    assert p["rungs"][0]["zona"]["toques"] == 2
+    assert p["rungs"][0]["zona"]["centro"] == 0.448
+    # sl_piso: el soporte más cercano por debajo del entry (precio_alto < entry)
+    # soporte_piso: precio_alto=0.398 < 0.419 → sl_zona.centro=0.392
+    assert p["sl_piso"]["centro"] == 0.392
+    assert p["sl_piso"]["precio_bajo"] == 0.388
+    # campos legacy intactos
+    assert p["sl_plan"] == plan.sl_price
+    assert p["entry"] == plan.entry_price
+    # entry_zone: la zona de soporte que abarca el entry (precio_bajo ≤ entry ≤ precio_alto)
+    assert p["entry_zone"]["toques"] == 3

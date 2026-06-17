@@ -38,12 +38,30 @@ def _zonas_now(symbol: str) -> list[dict]:
     return detect_levels(_fetch_daily_bars(symbol))
 
 
+def _zona_meta(z: dict | None) -> dict | None:
+    """Extrae los campos visuales de una zona (paredes). Devuelve None si no hay zona."""
+    if z is None:
+        return None
+    return {
+        "centro": z["centro"],
+        "precio_bajo": z["precio_bajo"],
+        "precio_alto": z["precio_alto"],
+        "toques": z["toques"],
+    }
+
+
 def _plan_payload(plan) -> dict:
-    return {"entry": plan.entry_price,
-            "sl_plan": plan.sl_price,
-            "rungs": [{"tp_price": r.tp_price, "size_frac": r.size_frac} for r in plan.rungs],
-            "runner_frac": plan.runner_frac,
-            "entry_zone": plan.entry_zone}
+    return {
+        "entry": plan.entry_price,
+        "sl_plan": plan.sl_price,
+        "sl_piso": _zona_meta(plan.sl_zona),  # soporte inmediato que fija el SL (Task A1)
+        "rungs": [
+            {"tp_price": r.tp_price, "size_frac": r.size_frac, "zona": _zona_meta(r.zona_origen)}
+            for r in plan.rungs
+        ],
+        "runner_frac": plan.runner_frac,
+        "entry_zone": plan.entry_zone,
+    }
 
 
 def construir_hechos(*, rungs_llenos: list, be_movido: bool, estado_vivo: str,
