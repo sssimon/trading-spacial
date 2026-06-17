@@ -5,9 +5,10 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.plan import router, construir_hechos
+from api.plan import router, construir_hechos, _plan_payload
 from api.deps import verify_api_key
 from auth.dependencies import get_current_tenant_id
+from instrument.plan import derive_plan
 
 
 def _app():
@@ -96,8 +97,6 @@ def test_confirm_payload_incompleto_es_422():
 
 
 # ── Task A1: metadata de paredes (toques / piso) ──────────────────────────────
-from instrument.plan import derive_plan
-from api.plan import _plan_payload
 
 
 def _zonas_paredes():
@@ -108,10 +107,10 @@ def _zonas_paredes():
     # Con entry=0.419 y soporte_piso.precio_alto=0.398 < 0.419  → sl_zona.centro=0.392
     # Con soporte_entry.precio_bajo=0.410 ≤ 0.419 ≤ 0.425=precio_alto → entry_zone presente
     return [
-        {"tipo": "soporte", "precio_bajo": 0.388, "precio_alto": 0.398, "centro": 0.392, "toques": 5},
-        {"tipo": "soporte", "precio_bajo": 0.410, "precio_alto": 0.425, "centro": 0.417, "toques": 3},
-        {"tipo": "resistencia", "precio_bajo": 0.445, "precio_alto": 0.451, "centro": 0.448, "toques": 2},
-        {"tipo": "resistencia", "precio_bajo": 0.470, "precio_alto": 0.478, "centro": 0.474, "toques": 4},
+        {"tipo": "soporte", "precio_bajo": 0.388, "precio_alto": 0.398, "centro": 0.392, "toques": 5, "confluencia_redondo": []},
+        {"tipo": "soporte", "precio_bajo": 0.410, "precio_alto": 0.425, "centro": 0.417, "toques": 3, "confluencia_redondo": []},
+        {"tipo": "resistencia", "precio_bajo": 0.445, "precio_alto": 0.451, "centro": 0.448, "toques": 2, "confluencia_redondo": []},
+        {"tipo": "resistencia", "precio_bajo": 0.470, "precio_alto": 0.478, "centro": 0.474, "toques": 4, "confluencia_redondo": []},
     ]
 
 

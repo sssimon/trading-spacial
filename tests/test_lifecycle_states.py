@@ -27,6 +27,24 @@ def test_plan_json_roundtrip():
     assert p2.sl_price == p.sl_price and p2.runner_frac == p.runner_frac
 
 
+def test_plan_json_roundtrip_preserva_sl_zona():
+    """sl_zona (soporte dict) debe sobrevivir el roundtrip JSON sin truncarse a None."""
+    zona_soporte = _z("soporte", 94, 96, 95)
+    from instrument.plan import Plan, Rung
+    p = Plan(
+        entry_price=100.0,
+        entry_zone=_z("soporte", 97, 100, 98),
+        sl_price=93.06,
+        rungs=(Rung(tp_price=105.0, size_frac=1.0, zona_origen=_z("resistencia", 104, 106, 105)),),
+        runner_frac=0.0,
+        sl_zona=zona_soporte,
+    )
+    p2 = plan_from_json(plan_to_json(p))
+    assert p2.sl_zona == p.sl_zona, (
+        f"sl_zona se perdió en el roundtrip: esperado {p.sl_zona!r}, obtenido {p2.sl_zona!r}"
+    )
+
+
 def test_state_row_roundtrip_preserva_frozensets():
     s = LifecycleState(plan_id=0, fase="RUNNING",
                        rungs_llenos=frozenset({0}), consumed_order_ids=frozenset({"11"}),
