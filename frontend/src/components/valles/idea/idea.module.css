@@ -1,0 +1,147 @@
+/* ============================================================
+   idea.module.css — clases propias de IdeaChart.
+   TOKEN WIRING: hereda los tokens cálidos (--paper, --clay,
+   --sage, --ochre, etc.) de .vwRoot (valles.module.css).
+   Las clases de canvas y anotaciones jugada (ju-chart*,
+   ju-ann-*) se toman de jugada.module.css; aquí solo van las
+   clases nuevas: leyenda de capas, banda vida, muros S/R.
+   ============================================================ */
+
+/* ── LEYENDA DE CAPAS ─────────────────────────────────────── */
+.idea-legend {
+  position: absolute;
+  left: 14px;
+  /* Cede espacio al título de la marca (≈ 34px) */
+  top: 44px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  pointer-events: all;
+}
+
+.idea-legend__item {
+  font-family: var(--sans, sans-serif);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 160ms, background 160ms, color 160ms, border-color 160ms;
+  line-height: 1.4;
+}
+
+/* Estado ACTIVO (aria-pressed="true") */
+.idea-legend__item--on {
+  opacity: 1;
+}
+/* Estado INACTIVO (aria-pressed="false") */
+.idea-legend__item--off {
+  opacity: 0.38;
+  background: var(--paper-2, #F0EBE1) !important;
+  color: var(--ink-3, #9A9080) !important;
+  border-color: var(--card-edge, #E4DCCC) !important;
+}
+
+/* Color propio por capa cuando activo */
+.idea-legend__item--vida.idea-legend__item--on {
+  color: var(--sage, #5E7048);
+  background: var(--sage-tint, rgba(94,112,72,0.12));
+  border-color: #C9D2B2;
+}
+.idea-legend__item--paredes.idea-legend__item--on {
+  color: var(--clay-deep, #7B3C1D);
+  background: var(--clay-tint, rgba(184,84,46,0.10));
+  border-color: var(--clay-soft, rgba(184,84,46,0.25));
+}
+.idea-legend__item--jugada.idea-legend__item--on {
+  color: var(--ink-2, #4A4540);
+  background: var(--paper-2, #F0EBE1);
+  border-color: var(--card-edge-2, #CFC7B8);
+}
+
+/* Botón deshabilitado (jugada sin plan) */
+.idea-legend__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.22;
+}
+
+/* ── BANDA VIDA ───────────────────────────────────────────── */
+.idea-vida-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Banda translúcida color salvia suave */
+  background: rgba(94, 112, 72, 0.07);
+  border-top: 1px dashed rgba(94, 112, 72, 0.35);
+  border-bottom: 1px dashed rgba(94, 112, 72, 0.35);
+  pointer-events: none;
+  transition: top 620ms var(--ease, ease), height 620ms var(--ease, ease);
+}
+
+.idea-vida-stamp {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sage, #5E7048);
+  background: rgba(251, 249, 244, 0.88);
+  border-radius: 6px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+/* ── MUROS S/R ────────────────────────────────────────────── */
+.idea-wall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  height: 0;
+  pointer-events: none;
+  transition: top 620ms var(--ease, ease);
+}
+
+.idea-wall__rule {
+  flex: 1;
+  border-top-width: 1.5px;
+  border-top-style: dashed;
+}
+
+.idea-wall__tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 6px;
+  transform: translateY(-50%);
+  margin-right: 8px;
+}
+
+/* Resistencia — arcilla (techo) */
+.idea-wall--res .idea-wall__rule {
+  border-color: var(--clay, #B8542E);
+  opacity: 0.55;
+}
+.idea-wall--res .idea-wall__tag {
+  color: var(--clay-deep, #7B3C1D);
+  background: var(--clay-tint, rgba(184,84,46,0.10));
+  border: 1px solid var(--clay-soft, rgba(184,84,46,0.25));
+}
+
+/* Soporte — neutro cálido (piso) */
+.idea-wall--sup .idea-wall__rule {
+  border-color: var(--card-edge-2, #CFC7B8);
+}
+.idea-wall--sup .idea-wall__tag {
+  color: var(--ink-3, #9A9080);
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+}
