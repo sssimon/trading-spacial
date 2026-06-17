@@ -8,12 +8,14 @@ import { NivelesScreen } from './NivelesScreen';
 import { FundScreen } from './FundScreen';
 import { ClosingScreen } from './ClosingScreen';
 import { Copilot } from './Copilot';
+import { JugadaLens } from './jugada/JugadaLens';
 import styles from './valles.module.css';
 
-const STEPS = ['pick', 'vida', 'niveles', 'fund', 'cierre'] as const;
+const STEPS = ['pick', 'vida', 'niveles', 'jugada', 'fund', 'cierre'] as const;
 type Step = typeof STEPS[number];
 const LENS: { key: Step; label: string }[] = [
-  { key: 'vida', label: 'Vida' }, { key: 'niveles', label: 'Niveles' }, { key: 'fund', label: 'Quién' },
+  { key: 'vida', label: 'Vida' }, { key: 'niveles', label: 'Niveles' },
+  { key: 'jugada', label: 'La jugada' }, { key: 'fund', label: 'Quién' },
 ];
 
 export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({ snapshot, loading }) => {
@@ -47,10 +49,11 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
   if (cur === 'pick' || !sym) screen = <PickScreen snapshot={snapshot} onPick={pick} />;
   else if (cur === 'vida') screen = <VidaScreen symbol={sym} state={bundle.vida} frescura={snapshot.frescura} />;
   else if (cur === 'niveles') screen = <NivelesScreen symbol={sym} state={bundle.niveles} />;
+  else if (cur === 'jugada') screen = <JugadaLens symbol={sym} livePrice={bundle.niveles.data?.price_live ?? null} />;
   else if (cur === 'fund') screen = <FundScreen symbol={sym} state={bundle.dossier} onRefresh={bundle.refreshDossier} />;
   else screen = <ClosingScreen symbol={sym} bundle={bundle} onAsk={() => setDock(true)} onRestart={restart} />;
 
-  const lensIdx = cur === 'cierre' ? 3 : ({ vida: 0, niveles: 1, fund: 2 } as Record<string, number>)[cur];
+  const lensIdx = cur === 'cierre' ? 4 : ({ vida: 0, niveles: 1, jugada: 2, fund: 3 } as Record<string, number>)[cur];
 
   return (
     <div className={styles.vwRoot}>
