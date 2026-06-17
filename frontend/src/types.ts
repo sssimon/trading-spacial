@@ -587,6 +587,30 @@ export interface ValleyEval {
   razones_vida?:         string[];
 }
 
+// La Jugada / Instrumento — contrato /plan
+export interface PlanZonaMeta { centro: number; precio_bajo: number; precio_alto: number; toques: number; }
+export interface PlanRung { tp_price: number; size_frac: number; zona: PlanZonaMeta | null; }
+export interface PlanDerived {
+  symbol?: string;
+  entry: number;
+  sl_plan: number;
+  sl_piso: PlanZonaMeta | null;
+  rungs: PlanRung[];
+  runner_frac: number;
+  entry_zone: PlanZonaMeta | null;
+}
+export interface PlanFrescura { estado: 'fresco' | 'rancio' | 'muerto'; edad_seg: number | null; generated_at: string | null; umbral_seg: number; }
+export interface PlanLive {
+  symbol: string;
+  estado_vivo: 'activo' | 'incierto' | 'cerrado' | null;
+  plan?: PlanDerived;
+  realidad?: { fase: string; rungs_llenos: number[]; sl_actual: number | null; be_movido: boolean; size_restante_frac: number | null; };
+  hechos?: string[];
+  frescura?: PlanFrescura;
+}
+export interface PlanConductaField { k: string; ok: 'si' | 'no' | 'dato'; v?: string; }
+export interface PlanConducta { symbol: string; estado_vivo: 'cerrado' | null; titular?: string; campos?: PlanConductaField[]; }
+
 // Dossier C — hechos citados de un proyecto (sin veredicto). Spec §2.
 export interface DossierMiembro { nombre: string; rol: string | null; enlaces: string[]; fuente: string; }
 export interface DossierCanal { url: string | null; activo: 'si' | 'no' | 'desconocido'; fuente: string | null; }
