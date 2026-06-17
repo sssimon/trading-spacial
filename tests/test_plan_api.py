@@ -131,6 +131,63 @@ def test_plan_payload_incluye_metadata_de_paredes():
     assert p["entry_zone"]["toques"] == 3
 
 
+# ── Task A3: GET /plan/{symbol}/conducta — lectura de conducta sin PnL ───────
+
+
+def test_conducta_sin_episodio_devuelve_estado_none(monkeypatch):
+    import contextlib
+    import api.plan as plan_api
+    monkeypatch.setattr(plan_api, "db_get_latest_episode", lambda con, **kw: None)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+    out = plan_api.conducta("ADAUSDT", tenant_id=1)
+    assert out["estado_vivo"] is None
+    assert out["symbol"] == "ADAUSDT"
+
+
+def test_conducta_devuelve_campos_sin_pnl(monkeypatch):
+    import contextlib
+    import api.plan as plan_api
+
+    fake_episode = {
+        "entry_en_zona": 1,
+        "sl_respetado": 1,
+        "adherencia_be": 0,
+        "rungs_honrados": 2,
+        "cierre_en_plan": 0,   # falsy → ok="no"
+        "hold_hours": 5.75,
+    }
+    monkeypatch.setattr(plan_api, "db_get_latest_episode", lambda con, **kw: fake_episode)
+    monkeypatch.setattr(plan_api, "snapshot_connection", lambda: contextlib.nullcontext(None))
+
+    out = plan_api.conducta("ADAUSDT", tenant_id=1)
+
+    # Estado vivo correcto
+    assert out["estado_vivo"] == "cerrado"
+
+    # Sin PnL en ningún lugar
+    assert "pnl" not in out
+    assert "pnl_usd" not in out
+
+    campos = out["campos"]
+    labels = [c["k"] for c in campos]
+
+    # Campo "Entraste en la zona" debe estar ok="si" (entry_en_zona=1)
+    zona_item = next(c for c in campos if c["k"] == "Entraste en la zona")
+    assert zona_item["ok"] == "si"
+
+    # Campo "Cerraste según el plan" debe estar ok="no" (cierre_en_plan=0)
+    cierre_item = next(c for c in campos if c["k"] == "Cerraste según el plan")
+    assert cierre_item["ok"] == "no"
+
+    # Hold hours presente como dato
+    hold_item = next(c for c in campos if c["k"] == "Cuánto aguantaste")
+    assert hold_item["ok"] == "dato"
+    assert "h" in hold_item["v"]
+
+    # titular presente
+    assert "titular" in out
+
+
 # ── Task A2: LiveSnapshot / frescura en el contrato ──────────────────────────
 
 

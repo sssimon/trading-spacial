@@ -19,6 +19,7 @@ from screener.sr_levels import detect_levels
 from instrument.plan import derive_plan
 from instrument.lifecycle import LifecycleState
 from db.lifecycle_states import db_put_state, db_get_active_state, plan_from_json
+from db.conduct_episodes import db_get_latest_episode
 from db.transaction import snapshot_connection, transaction
 from freshness import LiveSnapshot
 
@@ -160,3 +161,54 @@ def vista(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
         generated_at=row["updated_at"],
         umbral_seg=PLAN_FRESCURA_UMBRAL_SEG,
     ).to_response()
+
+
+# ── Task A3: conducta del último cierre (sin PnL) ────────────────────────────
+
+# Mapeo: campo real en conduct_episodes → etiqueta en tuteo venezolano.
+# rungs_honrados es int (conteo de peldaños llenados) — truthy cuando > 0.
+# adherencia_be puede ser None (inaplicable si TP1 no se llenó) — se trata como falsy.
+_CONDUCT_FIELDS: list[tuple[str, str]] = [
+    ("entry_en_zona",  "Entraste en la zona"),
+    ("sl_respetado",   "Respetaste el stop"),
+    ("adherencia_be",  "Moviste a break-even"),
+    ("rungs_honrados", "Honraste los peldaños"),
+    ("cierre_en_plan", "Cerraste según el plan"),
+]
+
+
+@router.get("/plan/{symbol}/conducta", summary="Conducta del último cierre (sin PnL)")
+def conducta(symbol: str, tenant_id: int = Depends(get_current_tenant_id)) -> dict:
+    """Lee el EpisodioDeConducción del último cierre para tenant+symbol.
+    Hechos de conducta únicamente — NUNCA PnL. Sin episodio → estado_vivo None."""
+    symbol = symbol.upper()[:20]
+    with snapshot_connection() as con:
+        ep = db_get_latest_episode(con, tenant_id=tenant_id, symbol=symbol)
+    if ep is None:
+        return {"symbol": symbol, "estado_vivo": None}
+
+    campos: list[dict] = []
+    all_bool_ok = True
+    for field, label in _CONDUCT_FIELDS:
+        val = ep.get(field)
+        ok = "si" if val else "no"
+        if ok == "no":
+            all_bool_ok = False
+        campos.append({"k": label, "ok": ok})
+
+    hold_hours = ep.get("hold_hours")
+    if hold_hours is not None:
+        campos.append({"k": "Cuánto aguantaste", "ok": "dato", "v": f"{round(hold_hours)} h"})
+
+    titular = (
+        "Honraste el plan que aprobaste."
+        if all_bool_ok
+        else "Esta vez te saliste del plan. Sin reproche — solo el espejo."
+    )
+
+    return {
+        "symbol": symbol,
+        "estado_vivo": "cerrado",
+        "titular": titular,
+        "campos": campos,
+    }
