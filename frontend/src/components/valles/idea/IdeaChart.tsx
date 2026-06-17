@@ -11,7 +11,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, type IChartApi, type ISeriesApi } from 'lightweight-charts';
-import { getOhlcv } from '../../../api';
 import type { ValleyEval, SrLevels, PlanDerived } from '../../../types';
 import { type LiveState } from '../jugada/overlays';
 import { buildLayers, LAYER_KEYS, type LayerVisibility, DEFAULT_LAYERS } from './chartLayers';
@@ -104,26 +103,6 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     chartRef.current  = chart;
     seriesRef.current = series;
 
-    getOhlcv(symbol, '1d', 180).then((res) => {
-      if (chartRef.current !== chart) return;
-      series.setData(
-        res.candles.map((c) => ({
-          time:  c.time as never,
-          open:  c.open,
-          high:  c.high,
-          low:   c.low,
-          close: c.close,
-        })),
-      );
-      chart.timeScale().fitContent();
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          applySize(chart);
-          force((n) => n + 1);
-        }),
-      );
-    }).catch(() => { /* sin datos: gráfico vacío pero montado */ });
-
     const ro = new ResizeObserver(() => {
       if (!chartRef.current) return;
       applySize(chart);
@@ -143,6 +122,39 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, height]);
+
+  // ── DATOS DEL GRÁFICO (desde levels.candles) ──────────
+  useEffect(() => {
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    if (!series || !chart) return;
+    const candles = levels?.candles;
+    if (!candles?.length) return;
+    series.setData(
+      candles.map((c) => ({
+        time:  c.time as never,
+        open:  c.open,
+        high:  c.high,
+        low:   c.low,
+        close: c.close,
+      })),
+    );
+    chart.timeScale().fitContent();
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!chartRef.current) return;
+        const container = wrapRef.current;
+        if (!container) return;
+        const W = Math.round(container.clientWidth);
+        const H = Math.round(container.clientHeight);
+        if (W < 1 || H < 1) return;
+        chartRef.current.resize(W - 1, H - 1, true);
+        chartRef.current.resize(W, H, true);
+        force((n) => n + 1);
+      }),
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels?.candles]);
 
   // ── GEOMETRÍA ─────────────────────────────────────────────
   const s = seriesRef.current;
@@ -165,6 +177,18 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     <div className={juStyles['ju-chart']} style={{ height }}>
       {/* Canvas de Lightweight Charts */}
       <div ref={wrapRef} className={juStyles['ju-chart__canvas']} />
+
+      {/* ── ESTADO DEL GRÁFICO ── */}
+      {levels == null && (
+        <div className={styles['idea-chart-state']}>
+          Cargando las velas…
+        </div>
+      )}
+      {levels != null && (levels.estado === 'no_disponible' || !levels.candles?.length) && (
+        <div className={styles['idea-chart-state']}>
+          No se pudieron cargar las velas de esta moneda.
+        </div>
+      )}
 
       {/* Leyenda clicable de capas — top-left, debajo del área de marca */}
       <div className={styles['idea-legend']} role="group" aria-label="capas del gráfico">
@@ -210,25 +234,42 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
         })()}
 
         {/* ── PAREDES (S/R horizontales) ── */}
-        {layers.paredes && m.paredes.walls.map((w, i) => {
-          const wy = Y(w.centro);
-          const esRes = w.tipo === 'resistencia';
-          return (
-            <div
-              key={i}
-              className={[
-                styles['idea-wall'],
-                esRes ? styles['idea-wall--res'] : styles['idea-wall--sup'],
-              ].join(' ')}
-              style={{ top: wy ?? undefined }}
-            >
-              <span className={styles['idea-wall__rule']} />
-              <span className={styles['idea-wall__tag']}>
-                {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
-              </span>
-            </div>
-          );
-        })}
+        {layers.paredes && (() => {
+          // Colisión: renderizamos TODAS las líneas pero suprimimos la etiqueta
+          // cuando su Y cae a <18px de la etiqueta anterior ya dibujada.
+          const sorted = [...m.paredes.walls].sort((a, b) => {
+            const ya = Y(a.centro) ?? Infinity;
+            const yb = Y(b.centro) ?? Infinity;
+            return ya - yb;
+          });
+          let lastLabelY: number | null = null;
+          return sorted.map((w, i) => {
+            const wy = Y(w.centro);
+            const esRes = w.tipo === 'resistencia';
+            // Si Y es null (série sin datos aún), siempre mostramos la etiqueta
+            const showLabel =
+              wy == null ||
+              (lastLabelY == null || Math.abs(wy - lastLabelY) >= 18);
+            if (wy != null && showLabel) lastLabelY = wy;
+            return (
+              <div
+                key={i}
+                className={[
+                  styles['idea-wall'],
+                  esRes ? styles['idea-wall--res'] : styles['idea-wall--sup'],
+                ].join(' ')}
+                style={{ top: wy ?? undefined }}
+              >
+                <span className={styles['idea-wall__rule']} />
+                {showLabel && (
+                  <span className={styles['idea-wall__tag']}>
+                    {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
+                  </span>
+                )}
+              </div>
+            );
+          });
+        })()}
 
         {/* ── JUGADA (delegada al modelo de overlays) ── */}
         {layers.jugada && plan && (

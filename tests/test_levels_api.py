@@ -67,6 +67,30 @@ def test_endpoint_no_toca_db():
     assert "snapshot_connection" not in src
 
 
+def test_payload_includes_candles():
+    """El payload ok debe incluir 'candles' con la forma lightweight-charts
+    (time en segundos = open_time // 1000, open/high/low/close float)."""
+    bars = _bars()
+    with patch("api.levels._fetch_daily_bars", return_value=bars), \
+         patch("api.levels._fetch_live_price", return_value=100.0):
+        r = _app().get("/levels/BTCUSDT")
+    assert r.status_code == 200
+    body = r.json()
+    assert "candles" in body, "falta el campo 'candles' en el payload ok"
+    assert len(body["candles"]) == len(bars)
+    first = body["candles"][0]
+    for key in ("time", "open", "high", "low", "close"):
+        assert key in first, f"falta key '{key}' en candle[0]"
+    # time debe ser segundos (open_time // 1000); _bars() usa open_time=0
+    assert first["time"] == 0
+    # no_disponible no debe tener candles (o si los tiene, son [])
+    with patch("api.levels._fetch_daily_bars",
+               side_effect=BinanceUnavailable("klines HTTP 503")):
+        r2 = _app().get("/levels/BTCUSDT")
+    body2 = r2.json()
+    assert body2.get("candles", []) == []
+
+
 def test_router_registrado_en_la_app():
     # Guarda la regresión "alguien borró el include_router(levels_router)" de
     # forma determinista, vía inspección de fuente (mismo idioma que
