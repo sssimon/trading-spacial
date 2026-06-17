@@ -64,7 +64,7 @@ def _plan_payload(plan) -> dict:
             for r in plan.rungs
         ],
         "runner_frac": plan.runner_frac,
-        "entry_zone": plan.entry_zone,
+        "entry_zone": _zona_meta(plan.entry_zone),
     }
 
 
