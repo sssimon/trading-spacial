@@ -146,6 +146,203 @@
   border: 1px solid var(--card-edge, #E4DCCC);
 }
 
+/* ── IDEA VIEW — layout principal ────────────────────────── */
+
+/* Contenedor raíz de IdeaView — columna scrollable, cálida */
+.idea-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: clamp(16px, 4vw, 48px) clamp(16px, 5vw, 56px) 80px;
+  max-width: 780px;
+  margin: 0 auto;
+  font-size: 18px; /* ≥18px base como indica la spec */
+}
+
+/* ── STICKY NAV ───────────────────────────────────────────── */
+.idea-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: rgba(251, 249, 244, 0.92);
+  border-bottom: 1px solid var(--card-edge, #E4DCCC);
+  backdrop-filter: blur(6px);
+  margin-left: clamp(-16px, -5vw, -56px);
+  margin-right: clamp(-16px, -5vw, -56px);
+  /* compensar el padding del contenedor para llegar a los bordes */
+  width: calc(100% + clamp(32px, 10vw, 112px));
+}
+
+.idea-nav a {
+  font-family: var(--sans, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-3, #9A9080);
+  text-decoration: none;
+  transition: color 140ms;
+}
+.idea-nav a:hover {
+  color: var(--ink-1, #2A2520);
+}
+
+.idea-nav__sep {
+  font-size: 11px;
+  color: var(--card-edge-2, #CFC7B8);
+  user-select: none;
+}
+
+/* ── HEADER (eyebrow + título) ────────────────────────────── */
+.idea-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.idea-title {
+  font-family: var(--serif, serif);
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 500;
+  color: var(--ink, #1A1510);
+  margin: 0;
+  line-height: 1.15;
+}
+
+/* ── CHART PLACEHOLDER ────────────────────────────────────── */
+.idea-chart-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  border-radius: 10px;
+  background: var(--paper-2, #F0EBE1);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  color: var(--ink-3, #9A9080);
+}
+
+/* ── JUGADA COMPACTA ──────────────────────────────────────── */
+.idea-jugada-encurso {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.idea-jugada-estado {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  color: var(--ink-1, #2A2520);
+  margin: 0;
+}
+
+.idea-jugada-frescura {
+  font-size: 12.5px;
+  color: var(--ink-3, #9A9080);
+  font-weight: 400;
+}
+
+.idea-jugada-cta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* CTA principal — "Fijar esta jugada" */
+.idea-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--paper, #FBF9F4);
+  background: var(--ink-2, #4A4540);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: background 160ms, opacity 160ms;
+  align-self: flex-start;
+}
+.idea-cta:hover {
+  background: var(--ink-1, #2A2520);
+}
+.idea-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.idea-jugada-ok {
+  font-family: var(--sans, sans-serif);
+  font-size: 14px;
+  color: var(--sage, #5E7048);
+  font-weight: 600;
+  margin: 0;
+}
+
+.idea-jugada-error {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  color: var(--clay, #B8542E);
+  margin: 0;
+}
+
+.idea-jugada-cerrado {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.idea-conducta-icon {
+  font-family: var(--sans, sans-serif);
+  font-size: 12px;
+  color: var(--ink-3, #9A9080);
+}
+
+/* ── SECCIÓN QUIÉN ────────────────────────────────────────── */
+.idea-quien-heading {
+  font-family: var(--sans, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2, #4A4540);
+  margin: 0 0 4px 0;
+}
+
+/* ── FOOTER ───────────────────────────────────────────────── */
+.idea-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 8px;
+  border-top: 1px solid var(--card-edge, #E4DCCC);
+}
+
+.idea-restart {
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3, #9A9080);
+  background: none;
+  border: 1px solid var(--card-edge-2, #CFC7B8);
+  border-radius: 8px;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: color 140ms, border-color 140ms;
+}
+.idea-restart:hover {
+  color: var(--ink-1, #2A2520);
+  border-color: var(--ink-3, #9A9080);
+}
+
 /* ── NARRATIVA — bloques descriptivos ────────────────────── */
 
 /* Contenedor raíz de la narrativa — hereda tokens de .vwRoot */
