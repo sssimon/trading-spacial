@@ -214,36 +214,41 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
       </nav>
 
       {/* ── 2. Eyebrow + título ───────────────────────────────── */}
-      <div className={styles['idea-header']}>
+      <div className={`${styles['idea-header']} ${styles['idea-text-measure']}`}>
         <Eyebrow symbol={symbol} />
         <h1 className={styles['idea-title']}>{humanName(symbol)}</h1>
       </div>
 
-      {/* ── 3. Gráfico ────────────────────────────────────────── */}
-      {initialLoading ? (
-        <div className={styles['idea-chart-placeholder']} aria-busy="true">
-          Cargando el gráfico…
-        </div>
-      ) : (
-        <IdeaChart
-          symbol={symbol}
+      {/* ── 3. Gráfico — ancho completo del contenedor ───────── */}
+      <div className={styles['idea-chart-wrap']}>
+        {initialLoading ? (
+          <div className={styles['idea-chart-placeholder']} aria-busy="true">
+            Cargando el gráfico…
+          </div>
+        ) : (
+          <IdeaChart
+            symbol={symbol}
+            vida={bundle.vida.data}
+            levels={bundle.niveles.data}
+            plan={derived.data}
+            live={livePrice ?? 0}
+            state={liveStateFrom(live.data)}
+            height={520}
+          />
+        )}
+      </div>
+
+      {/* ── 4. Narrativa descriptiva ──────────────────────────── */}
+      <div className={styles['idea-text-measure']}>
+        <Narrativa
           vida={bundle.vida.data}
           levels={bundle.niveles.data}
           plan={derived.data}
-          live={livePrice ?? 0}
-          state={liveStateFrom(live.data)}
         />
-      )}
-
-      {/* ── 4. Narrativa descriptiva ──────────────────────────── */}
-      <Narrativa
-        vida={bundle.vida.data}
-        levels={bundle.niveles.data}
-        plan={derived.data}
-      />
+      </div>
 
       {/* ── 5. Jugada lifecycle compacto ─────────────────────── */}
-      <section id="idea-jugada-cta" className={styles['na-block']}>
+      <section id="idea-jugada-cta" className={`${styles['na-block']} ${styles['idea-text-measure']}`}>
         <h3 className={styles['na-heading']}>Tu jugada ahora</h3>
 
         {enCurso && (
@@ -324,16 +329,18 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
       </section>
 
       {/* ── 6. Quién está detrás (dossier inlineado) ─────────── */}
-      <section id="idea-quien" className={styles['na-block']}>
+      <section id="idea-quien" className={`${styles['na-block']} ${styles['idea-text-measure']}`}>
         <h2 className={styles['idea-quien-heading']}>Quién está detrás</h2>
         <DossierBody state={bundle.dossier} onRefresh={bundle.refreshDossier} />
       </section>
 
       {/* ── 7. Noticias ───────────────────────────────────────── */}
-      <NoticiasSection symbol={symbol} />
+      <div className={styles['idea-text-measure']}>
+        <NoticiasSection symbol={symbol} />
+      </div>
 
       {/* ── 8. Footer ─────────────────────────────────────────── */}
-      <footer className={styles['idea-footer']}>
+      <footer className={`${styles['idea-footer']} ${styles['idea-text-measure']}`}>
         <button
           className={styles['idea-restart']}
           onClick={() => onRestart?.()}

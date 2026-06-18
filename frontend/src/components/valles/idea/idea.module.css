@@ -146,6 +146,21 @@
   border: 1px solid var(--card-edge, #E4DCCC);
 }
 
+/* ── ESTADO DEL GRÁFICO (cargando / sin datos) ─────────── */
+.idea-chart-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans, sans-serif);
+  font-size: 13.5px;
+  color: var(--ink-3, #9A9080);
+  pointer-events: none;
+  text-align: center;
+  padding: 16px;
+}
+
 /* ── IDEA VIEW — layout principal ────────────────────────── */
 
 /* Contenedor raíz de IdeaView — columna scrollable, cálida */
@@ -153,10 +168,23 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  padding: clamp(16px, 4vw, 48px) clamp(16px, 5vw, 56px) 80px;
-  max-width: 780px;
+  padding: clamp(16px, 4vw, 48px) clamp(16px, 3vw, 36px) 80px;
+  width: 100%;               /* llena el flex container (.vwStage) */
+  max-width: min(1240px, 100%);
   margin: 0 auto;
   font-size: 18px; /* ≥18px base como indica la spec */
+}
+
+/* Bloque de texto — medida de lectura (~760px) */
+.idea-text-measure {
+  max-width: 760px;
+  width: 100%;
+  margin-inline: auto;       /* centra la columna de texto bajo el gráfico ancho */
+}
+
+/* Bloque del gráfico — ocupa todo el ancho del contenedor */
+.idea-chart-wrap {
+  width: 100%;
 }
 
 /* ── STICKY NAV ───────────────────────────────────────────── */
@@ -172,10 +200,10 @@
   background: rgba(251, 249, 244, 0.92);
   border-bottom: 1px solid var(--card-edge, #E4DCCC);
   backdrop-filter: blur(6px);
-  margin-left: clamp(-16px, -5vw, -56px);
-  margin-right: clamp(-16px, -5vw, -56px);
+  margin-left: clamp(-16px, -3vw, -36px);
+  margin-right: clamp(-16px, -3vw, -36px);
   /* compensar el padding del contenedor para llegar a los bordes */
-  width: calc(100% + clamp(32px, 10vw, 112px));
+  width: calc(100% + clamp(32px, 6vw, 72px));
 }
 
 .idea-nav a {

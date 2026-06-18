@@ -11,7 +11,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, type IChartApi, type ISeriesApi } from 'lightweight-charts';
-import { getOhlcv } from '../../../api';
 import type { ValleyEval, SrLevels, PlanDerived } from '../../../types';
 import { type LiveState } from '../jugada/overlays';
 import { buildLayers, LAYER_KEYS, type LayerVisibility, DEFAULT_LAYERS } from './chartLayers';
@@ -43,7 +42,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   plan,
   live,
   state = null,
-  height = 420,
+  height = 520,
 }) => {
   const wrapRef   = useRef<HTMLDivElement>(null);
   const chartRef  = useRef<IChartApi | null>(null);
@@ -104,26 +103,6 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     chartRef.current  = chart;
     seriesRef.current = series;
 
-    getOhlcv(symbol, '1d', 180).then((res) => {
-      if (chartRef.current !== chart) return;
-      series.setData(
-        res.candles.map((c) => ({
-          time:  c.time as never,
-          open:  c.open,
-          high:  c.high,
-          low:   c.low,
-          close: c.close,
-        })),
-      );
-      chart.timeScale().fitContent();
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          applySize(chart);
-          force((n) => n + 1);
-        }),
-      );
-    }).catch(() => { /* sin datos: gráfico vacío pero montado */ });
-
     const ro = new ResizeObserver(() => {
       if (!chartRef.current) return;
       applySize(chart);
@@ -144,6 +123,39 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, height]);
 
+  // ── DATOS DEL GRÁFICO (desde levels.candles) ──────────
+  useEffect(() => {
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    if (!series || !chart) return;
+    const candles = levels?.candles;
+    if (!candles?.length) return;
+    series.setData(
+      candles.map((c) => ({
+        time:  c.time as never,
+        open:  c.open,
+        high:  c.high,
+        low:   c.low,
+        close: c.close,
+      })),
+    );
+    chart.timeScale().fitContent();
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!chartRef.current) return;
+        const container = wrapRef.current;
+        if (!container) return;
+        const W = Math.round(container.clientWidth);
+        const H = Math.round(container.clientHeight);
+        if (W < 1 || H < 1) return;
+        chartRef.current.resize(W - 1, H - 1, true);
+        chartRef.current.resize(W, H, true);
+        force((n) => n + 1);
+      }),
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels?.candles]);
+
   // ── GEOMETRÍA ─────────────────────────────────────────────
   const s = seriesRef.current;
   const Y = (p: number): number | null =>
@@ -161,10 +173,74 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   const zTop = ov.zone ? Y(ov.zone.priceHigh) : null;
   const zBot = ov.zone ? Y(ov.zone.priceLow)  : null;
 
+  // ── ANTI-COLISIÓN GLOBAL ───────────────────────────────────
+  // Recoge todos los candidatos a etiqueta en el borde derecho,
+  // los ordena por Y (top → bottom) y marca cuáles se renderizan.
+  // La LÍNEA siempre se dibuja; solo la ETIQUETA se suprime.
+  const LABEL_GAP = 16; // px mínimos entre etiquetas
+
+  type LabelCandidate = { key: string; y: number };
+
+  const buildCandidates = (): LabelCandidate[] => {
+    const candidates: LabelCandidate[] = [];
+
+    // Paredes S/R
+    if (layers.paredes) {
+      for (const w of m.paredes.walls) {
+        const wy = Y(w.centro);
+        if (wy != null) candidates.push({ key: `wall-${w.centro}`, y: wy });
+      }
+    }
+
+    // Peldaños de jugada
+    if (layers.jugada && plan) {
+      for (let i = 0; i < ov.rungs.length; i++) {
+        const ry = Y(ov.rungs[i].price);
+        if (ry != null) candidates.push({ key: `rung-${i}`, y: ry });
+      }
+      // Stop / BE
+      if (ov.stop.price > 0) {
+        const sy = Y(ov.stop.price);
+        if (sy != null) candidates.push({ key: 'stop', y: sy });
+      }
+      // Precio vivo
+      const ly = Y(ov.live.price);
+      if (ly != null) candidates.push({ key: 'live', y: ly });
+    }
+
+    return candidates.sort((a, b) => a.y - b.y);
+  };
+
+  const allCandidates = buildCandidates();
+  const visibleLabels = new Set<string>();
+  {
+    let lastY: number | null = null;
+    for (const c of allCandidates) {
+      if (lastY == null || c.y - lastY >= LABEL_GAP) {
+        visibleLabels.add(c.key);
+        lastY = c.y;
+      }
+    }
+  }
+
+  const showLabel = (key: string): boolean => visibleLabels.has(key);
+
   return (
     <div className={juStyles['ju-chart']} style={{ height }}>
       {/* Canvas de Lightweight Charts */}
       <div ref={wrapRef} className={juStyles['ju-chart__canvas']} />
+
+      {/* ── ESTADO DEL GRÁFICO ── */}
+      {levels == null && (
+        <div className={styles['idea-chart-state']}>
+          Cargando las velas…
+        </div>
+      )}
+      {levels != null && (levels.estado === 'no_disponible' || !levels.candles?.length) && (
+        <div className={styles['idea-chart-state']}>
+          No se pudieron cargar las velas de esta moneda.
+        </div>
+      )}
 
       {/* Leyenda clicable de capas — top-left, debajo del área de marca */}
       <div className={styles['idea-legend']} role="group" aria-label="capas del gráfico">
@@ -213,6 +289,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
         {layers.paredes && m.paredes.walls.map((w, i) => {
           const wy = Y(w.centro);
           const esRes = w.tipo === 'resistencia';
+          const show = wy == null || showLabel(`wall-${w.centro}`);
           return (
             <div
               key={i}
@@ -223,9 +300,11 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
               style={{ top: wy ?? undefined }}
             >
               <span className={styles['idea-wall__rule']} />
-              <span className={styles['idea-wall__tag']}>
-                {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
-              </span>
+              {show && (
+                <span className={styles['idea-wall__tag']}>
+                  {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
+                </span>
+              )}
             </div>
           );
         })}
@@ -262,6 +341,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             {ov.rungs.map((r, i) => {
               const ry = Y(r.price);
               if (ry == null) return null;
+              const show = showLabel(`rung-${i}`);
               return (
                 <div
                   key={i}
@@ -274,16 +354,18 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                   style={{ top: ry }}
                 >
                   <span className={juStyles['ju-ann-line__rule']} />
-                  <span className={juStyles['ju-ann-line__tag']}>
-                    <span className={juStyles['ju-ann-line__pct']}>
-                      {r.filled ? 'llena' : `salida ${i + 1}`}
+                  {show && (
+                    <span className={juStyles['ju-ann-line__tag']}>
+                      <span className={juStyles['ju-ann-line__pct']}>
+                        {r.filled ? 'llena' : `salida ${i + 1}`}
+                      </span>
+                      <span className="num">${formatPrice(r.price)}</span>
+                      <span className={juStyles['ju-ann-line__pct']}>
+                        {Math.round(r.sizeFrac * 100)}%
+                        {r.toques != null ? ` · ${r.toques} toques` : ''}
+                      </span>
                     </span>
-                    <span className="num">${formatPrice(r.price)}</span>
-                    <span className={juStyles['ju-ann-line__pct']}>
-                      {Math.round(r.sizeFrac * 100)}%
-                      {r.toques != null ? ` · ${r.toques} toques` : ''}
-                    </span>
-                  </span>
+                  )}
                 </div>
               );
             })}
@@ -299,12 +381,14 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                 style={{ top: Y(ov.stop.price)! }}
               >
                 <span className={juStyles['ju-ann-line__rule']} />
-                <span className={juStyles['ju-ann-line__tag']}>
-                  <span className={juStyles['ju-ann-line__pct']}>
-                    {ov.stop.be ? 'break-even' : 'stop'}
+                {showLabel('stop') && (
+                  <span className={juStyles['ju-ann-line__tag']}>
+                    <span className={juStyles['ju-ann-line__pct']}>
+                      {ov.stop.be ? 'break-even' : 'stop'}
+                    </span>
+                    <span className="num">${formatPrice(ov.stop.price)}</span>
                   </span>
-                  <span className="num">${formatPrice(ov.stop.price)}</span>
-                </span>
+                )}
               </div>
             )}
 
@@ -318,10 +402,12 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                 ].join(' ')}
                 style={{ top: Y(ov.live.price)! }}
               >
-                <span className={juStyles['ju-ann-live__tag']}>
-                  {ov.live.fuera ? 'precio de ahora ' : 'ahora '}
-                  <span className="num">${formatPrice(ov.live.price)}</span>
-                </span>
+                {showLabel('live') && (
+                  <span className={juStyles['ju-ann-live__tag']}>
+                    {ov.live.fuera ? 'precio de ahora ' : 'ahora '}
+                    <span className="num">${formatPrice(ov.live.price)}</span>
+                  </span>
+                )}
               </div>
             )}
 

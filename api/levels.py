@@ -86,9 +86,15 @@ def get_levels(symbol: str) -> dict:
 
     zonas = detect_levels(bars)
     generated_at = datetime.now(timezone.utc).isoformat()
+    candles_lc = [
+        {"time": b["open_time"] // 1000, "open": b["open"],
+         "high": b["high"], "low": b["low"], "close": b["close"]}
+        for b in bars
+    ]
     payload = {"symbol": symbol, "estado": "ok",
                "generated_at": generated_at,
                "price_live": price, "zonas": zonas,
-               "ubicacion": locate_price(price, zonas)}
+               "ubicacion": locate_price(price, zonas),
+               "candles": candles_lc}
     return LiveSnapshot(payload=payload, generated_at=generated_at,
                         umbral_seg=FRESCURA_LEVELS_SEG).to_response()

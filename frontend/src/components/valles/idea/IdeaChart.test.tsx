@@ -1,9 +1,10 @@
 // IdeaChart.test.tsx — smoke tests del gráfico unificado idea.
-// Mockea lightweight-charts (sin canvas real) y getOhlcv (sin red).
-// Verifica leyenda clicable (3 entradas) y toggle de capas.
+// Mockea lightweight-charts (sin canvas real).
+// Verifica leyenda clicable (3 entradas), toggle de capas,
+// que setData se llame con levels.candles, y estados de carga/error.
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 
 // jsdom no implementa ResizeObserver — mock global mínimo
 beforeAll(() => {
@@ -16,11 +17,14 @@ beforeAll(() => {
   }
 });
 
+// Referencia al mock de setData para assertar llamadas
+const mockSetData = vi.fn();
+
 // Mock de lightweight-charts: serie con priceToCoordinate trivial
 vi.mock('lightweight-charts', () => ({
   createChart: () => ({
     addCandlestickSeries: () => ({
-      setData:              vi.fn(),
+      setData:              mockSetData,
       applyOptions:         vi.fn(),
       priceToCoordinate:    (p: number) => p * 1000,
     }),
@@ -33,11 +37,6 @@ vi.mock('lightweight-charts', () => ({
     resize:       vi.fn(),
     remove:       vi.fn(),
   }),
-}));
-
-// Mock de api: sin red
-vi.mock('../../../api', () => ({
-  getOhlcv: async () => ({ candles: [], volumes: [] }),
 }));
 
 import { IdeaChart } from './IdeaChart';
@@ -77,6 +76,11 @@ const levels: SrLevels = {
     },
   ],
   ubicacion: { dentro_de: null, techo: null, piso: null },
+  candles: [
+    { time: 1700000000, open: 0.40, high: 0.42, low: 0.39, close: 0.41 },
+    { time: 1700086400, open: 0.41, high: 0.43, low: 0.40, close: 0.42 },
+    { time: 1700172800, open: 0.42, high: 0.45, low: 0.41, close: 0.44 },
+  ],
 };
 
 const plan: PlanDerived = {
@@ -167,5 +171,59 @@ describe('IdeaChart', () => {
     expect(
       screen.queryByText((c) => c.includes('techo') && c.includes('0.4480')),
     ).toBeNull();
+  });
+
+  it('llama setData con las velas de levels.candles cuando están presentes', async () => {
+    mockSetData.mockClear();
+    render(
+      <IdeaChart
+        symbol="ADAUSDT"
+        vida={vida}
+        levels={levels}
+        plan={plan}
+        live={0.4205}
+      />,
+    );
+    await waitFor(() => {
+      expect(mockSetData).toHaveBeenCalled();
+    });
+    const callArg = mockSetData.mock.calls[mockSetData.mock.calls.length - 1][0];
+    expect(Array.isArray(callArg)).toBe(true);
+    expect(callArg).toHaveLength(3);
+    expect(callArg[0]).toMatchObject({ open: 0.40, high: 0.42, low: 0.39, close: 0.41 });
+  });
+
+  it('muestra el estado "No se pudieron cargar" cuando levels no tiene candles', () => {
+    const levelsVacias: SrLevels = {
+      ...levels,
+      candles: [],
+    };
+    render(
+      <IdeaChart
+        symbol="ADAUSDT"
+        vida={vida}
+        levels={levelsVacias}
+        plan={null}
+        live={0.4205}
+      />,
+    );
+    expect(
+      screen.getByText(/No se pudieron cargar las velas de esta moneda/i),
+    ).toBeTruthy();
+  });
+
+  it('muestra "Cargando las velas" cuando levels es null', () => {
+    render(
+      <IdeaChart
+        symbol="ADAUSDT"
+        vida={vida}
+        levels={null}
+        plan={null}
+        live={0.4205}
+      />,
+    );
+    expect(
+      screen.getByText(/Cargando las velas/i),
+    ).toBeTruthy();
   });
 });

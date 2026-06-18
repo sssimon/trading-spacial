@@ -569,6 +569,7 @@ export interface SrLevels {
   price_live:   number | null;
   zonas:        SrZona[];
   ubicacion:    SrUbicacion;
+  candles?: { time: number; open: number; high: number; low: number; close: number }[];
 }
 
 // ---- F3b: A on-demand (vida + rango de una moneda). Spec §2 ----
