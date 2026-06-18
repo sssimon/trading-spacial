@@ -169,6 +169,7 @@
   flex-direction: column;
   gap: 24px;
   padding: clamp(16px, 4vw, 48px) clamp(16px, 3vw, 36px) 80px;
+  width: 100%;               /* llena el flex container (.vwStage) */
   max-width: min(1240px, 100%);
   margin: 0 auto;
   font-size: 18px; /* ≥18px base como indica la spec */
@@ -178,6 +179,7 @@
 .idea-text-measure {
   max-width: 760px;
   width: 100%;
+  margin-inline: auto;       /* centra la columna de texto bajo el gráfico ancho */
 }
 
 /* Bloque del gráfico — ocupa todo el ancho del contenedor */
