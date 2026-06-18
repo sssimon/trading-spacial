@@ -19,7 +19,13 @@ def _snap(generated_at, estado="alts"):
     return {"generated_at": generated_at,
             "coverage": {"universe": 3, "evaluated": 3, "complete": True},
             "dominancia_fetch": {"ok": True, "fetched_at": generated_at, "source": "coingecko/global"},
-            "regime": {"estado": estado, "componentes": {}, "n_alts_evaluadas": 2,
+            "regime": {"estado": estado,
+                       "componentes": {
+                           "breadth50":      {"valor": 0.62, "lean": "alts", "estado": "fresco", "n": 418},
+                           "outperf_30d":    {"valor": 0.07, "lean": "alts", "estado": "fresco"},
+                           "dominancia_btc": {"valor": 0.539, "lean": "alts", "estado": "fresco"},
+                       },
+                       "n_alts_evaluadas": 2,
                        "votos": {"alts": 3, "neutral": 0, "btc": 0, "vivos": 3}}}
 
 

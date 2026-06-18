@@ -1,4 +1,4 @@
-.header { padding: clamp(16px, 3vw, 28px); border-radius: 14px; font-size: 18px; }
+.header { padding: clamp(16px, 3vw, 28px); border-radius: 14px; font-size: 18px; background: #faf6f2; width: 100%; box-sizing: border-box; }
 .estado { font-size: 22px; font-weight: 600; }
 .componentes { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 8px; }
 .comp { font-size: 18px; }

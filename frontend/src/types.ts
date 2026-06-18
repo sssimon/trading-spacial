@@ -553,7 +553,7 @@ export interface RegimeComponent {
   lean:   'alts' | 'neutral' | 'btc' | null;
   estado: 'fresco' | 'muerto';
   n?:     number;
-  razon?: string;
+  razon?: 'cobertura_baja' | 'sin_datos';
 }
 export interface RegimePayload {
   estado:            'alts' | 'mixto' | 'btc';

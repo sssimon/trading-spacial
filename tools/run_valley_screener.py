@@ -136,13 +136,14 @@ def build_snapshot(*, pause_s: float = 0.0,
                  "candidates": order_neutral(candidatas)}
 
     dominance = _fetch_dominance()
+    dom_ts = datetime.now(timezone.utc).isoformat() if dominance is not None else None
     coverage_ratio = (evaluadas / len(universo)) if universo else 0.0
     regime = compose_regime(alt_contribs, btc_ret_30d, dominance, coverage_ratio)
     alt_season_snap = {
         "generated_at": ts,
         "coverage": coverage,
         "dominancia_fetch": {"ok": dominance is not None,
-                             "fetched_at": ts if dominance is not None else None,
+                             "fetched_at": dom_ts,
                              "source": "coingecko/global"},
         "regime": regime,
     }

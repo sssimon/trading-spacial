@@ -57,11 +57,11 @@ SMA_FAST = 50
 RET_WINDOW_DAYS = 30
 MIN_HISTORY_DAYS = 50         # cuello de botella = SMA50 (50 cierres). ret_30d sólo necesita 31.
 # Umbrales de lean por componente (provisionales, sin calibrar):
-BREADTH_ALT = 0.60           # breadth ≥ → alts ; < BREADTH_BEAR → btc ; entremedio → neutral
+BREADTH_ALT = 0.60           # breadth ≥ 0.60 → alts ; ≤ BREADTH_BEAR → btc ; entremedio → neutral
 BREADTH_BEAR = 0.40
-OUTPERF_ALT = 0.05           # +5% mediana alt sobre BTC → alts ; < -5% → btc
+OUTPERF_ALT = 0.05           # +5% mediana alt sobre BTC ≥ 0.05 → alts ; ≤ -0.05 → btc
 OUTPERF_BEAR = -0.05
-DOM_ALT = 0.50               # dominancia < 0.50 → alts ; > DOM_BTC → btc
+DOM_ALT = 0.50               # dominancia ≤ 0.50 → alts ; ≥ DOM_BTC → btc
 DOM_BTC = 0.58
 # Gobierno de evidencia:
 COVERAGE_MIN = 0.70          # breadth vota sólo si evaluated/universe ≥ esto
@@ -209,9 +209,12 @@ Fila a añadir en `docs/superpowers/inventario-estado-vivo.md`:
   mayor: ≥18px, contraste AA.
 - **Qué muestra:** el estado como **descripción sin valencia** (`Inclinación del mercado: hacia
   alts / mixta / hacia BTC` — copy calibrable, sin verbo de mando) + los 3 componentes como hechos
-  (breadth % con su `n`, outperf %, dominancia %) cada uno con su lean + la frescura
+  (breadth % con su `n`, outperf %, dominancia %) + la frescura
   (`fresco/rancio/muerto`, y la frescura interna de la dominancia si está `muerta`). Exhibir el `n`
-  de breadth (no es un porcentaje comparable a otros ejes).
+  de breadth (no es un porcentaje comparable a otros ejes). **El frontend muestra el VALOR (y `n`)
+  de cada componente pero NO su lean por etiqueta** — simplificación intencional a favor de la
+  doctrina: el estado compuesto (`alts`/`mixto`/`btc`) ya resume la inclinación; pintar además
+  el lean per-componente añadiría valencia redundante en pantalla.
 - **La frase honesta**, dicha una vez, sin regañar (p.ej. *"Lo que más mueve el resultado es el
   régimen del mercado, no la moneda que elijas."*). Su **presencia es requerida** (AC); la
   redacción exacta es calibrable vía `solace-wren`.

@@ -40,7 +40,6 @@ describe('AltSeasonHeader', () => {
   it('muestra la dominancia degradada cuando está muerta', async () => {
     const s = snap();
     s.regime.componentes.dominancia_btc = { valor: null, lean: null, estado: 'muerto' };
-    s.dominancia_fetch.ok = false;
     (getAltSeason as any).mockResolvedValue(s);
     render(<AltSeasonHeader />);
     await waitFor(() => expect(screen.getByTestId('dominancia-muerta')).toBeInTheDocument());

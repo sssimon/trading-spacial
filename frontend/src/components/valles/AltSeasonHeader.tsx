@@ -29,6 +29,8 @@ export const AltSeasonHeader: React.FC = () => {
   const { regime, frescura } = snap;
   const c = regime.componentes;
   const dom = c.dominancia_btc;
+  const breadth = c.breadth50;
+  const outperf = c.outperf_30d;
 
   return (
     <div className={styles.header}>
@@ -36,9 +38,15 @@ export const AltSeasonHeader: React.FC = () => {
         {ESTADO_LABEL[regime.estado] ?? regime.estado}
       </div>
       <div className={styles.componentes}>
-        <span className={styles.comp}>breadth: {pct(c.breadth50?.valor ?? null)}
-          {c.breadth50?.n != null ? ` (n=${c.breadth50.n})` : ''}</span>
-        <span className={styles.comp}>outperf 30d: {pct(c.outperf_30d?.valor ?? null)}</span>
+        {breadth?.estado === 'muerto'
+          ? <span className={`${styles.comp} ${styles.muerta}`} data-testid="breadth-muerta">
+              breadth: sin dato ({breadth.razon ?? 'cobertura baja'})</span>
+          : <span className={styles.comp}>breadth: {pct(breadth?.valor ?? null)}
+              {breadth?.n != null ? ` (n=${breadth.n})` : ''}</span>}
+        {outperf?.estado === 'muerto'
+          ? <span className={`${styles.comp} ${styles.muerta}`} data-testid="outperf-muerta">
+              outperf 30d: sin dato</span>
+          : <span className={styles.comp}>outperf 30d: {pct(outperf?.valor ?? null)}</span>}
         {dom?.estado === 'muerto'
           ? <span className={`${styles.comp} ${styles.muerta}`} data-testid="dominancia-muerta">
               dominancia: sin dato (fuente caída)</span>

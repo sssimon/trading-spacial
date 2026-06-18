@@ -1,5 +1,5 @@
 // doctrine.test.tsx — el textContent de cada pantalla NO emite veredicto.
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import { it, expect, vi, beforeEach } from 'vitest';
 import { ValleysFlow } from './ValleysFlow';
 import { Copilot } from './Copilot';
@@ -58,8 +58,13 @@ vi.mock('./jugada/useJugada', () => ({
   }),
 }));
 
-it('el chrome del flujo (pick) no emite veredicto', () => {
-  const { container } = render(<ValleysFlow snapshot={snap} loading={false} />);
+it('el chrome del flujo (pick) no emite veredicto', async () => {
+  let container!: HTMLElement;
+  await act(async () => {
+    ({ container } = render(<ValleysFlow snapshot={snap} loading={false} />));
+  });
+  // Esperar a que el header resuelva (elimina el warning de act() del useEffect interno)
+  await screen.findByTestId('regime-estado');
   // las SUGG del copiloto incluyen "comprar" a propósito (son preguntas que se RECHAZAN),
   // así que este gate corre sobre el chrome del flujo, no sobre el dock abierto.
   expect(container.textContent ?? '').not.toMatch(FORBIDDEN);

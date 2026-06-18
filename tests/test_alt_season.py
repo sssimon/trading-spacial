@@ -90,3 +90,59 @@ def test_compose_frontera_breadth_060_es_alts():
     contribs = [_contrib(True, 0.0)] * 6 + [_contrib(False, 0.0)] * 4
     out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.55, coverage_ratio=1.0)
     assert out["componentes"]["breadth50"]["lean"] == "alts"
+
+
+def test_compose_frontera_breadth_040_es_btc():
+    # 4 de 10 sobre sma50 → breadth=0.40 → btc (<=).
+    contribs = [_contrib(True, 0.0)] * 4 + [_contrib(False, 0.0)] * 6
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.55, coverage_ratio=1.0)
+    assert out["componentes"]["breadth50"]["lean"] == "btc"
+    assert abs(out["componentes"]["breadth50"]["valor"] - 0.40) < 1e-9
+
+
+def test_compose_frontera_outperf_005_es_alts():
+    # median(ret_alt - btc_ret) = 0.05 - 0.0 = 0.05 → alts (>=).
+    contribs = [_contrib(True, 0.05)] * 5
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.55, coverage_ratio=1.0)
+    assert out["componentes"]["outperf_30d"]["lean"] == "alts"
+    assert abs(out["componentes"]["outperf_30d"]["valor"] - 0.05) < 1e-9
+
+
+def test_compose_frontera_outperf_neg005_es_btc():
+    # median(ret_alt - btc_ret) = -0.05 - 0.0 = -0.05 → btc (<=).
+    contribs = [_contrib(False, -0.05)] * 5
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.55, coverage_ratio=1.0)
+    assert out["componentes"]["outperf_30d"]["lean"] == "btc"
+    assert abs(out["componentes"]["outperf_30d"]["valor"] - (-0.05)) < 1e-9
+
+
+def test_compose_frontera_dominancia_050_es_alts():
+    # dominancia=0.50 → alts (<=).
+    contribs = [_contrib(True, 0.30)] * 5
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.50, coverage_ratio=1.0)
+    assert out["componentes"]["dominancia_btc"]["lean"] == "alts"
+
+
+def test_compose_frontera_dominancia_058_es_btc():
+    # dominancia=0.58 → btc (>=).
+    contribs = [_contrib(True, 0.30)] * 5
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.58, coverage_ratio=1.0)
+    assert out["componentes"]["dominancia_btc"]["lean"] == "btc"
+
+
+def test_compose_dos_neutral_un_alts_es_mixto():
+    # breadth=0.50 (neutral), outperf=0.0 (neutral), dominancia=0.45 (alts)
+    # → leans: [neutral, neutral, alts] → neutral domina → mixto.
+    contribs = [_contrib(True, 0.0)] * 5 + [_contrib(False, 0.0)] * 5   # breadth=0.50 neutral
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.45, coverage_ratio=1.0)
+    assert out["componentes"]["breadth50"]["lean"] == "neutral"
+    assert out["componentes"]["outperf_30d"]["lean"] == "neutral"
+    assert out["componentes"]["dominancia_btc"]["lean"] == "alts"
+    assert out["estado"] == "mixto"
+
+
+def test_compose_cero_votantes_vivos_es_mixto():
+    # alt_contribs=[], btc_ret_30d=None, btc_dominance=None → 0 votantes vivos → mixto.
+    out = compose_regime([], btc_ret_30d=None, btc_dominance=None, coverage_ratio=1.0)
+    assert out["estado"] == "mixto"
+    assert out["votos"]["vivos"] == 0
