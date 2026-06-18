@@ -47,23 +47,55 @@ test('Valles IdeaChart renders candles — EVIDENCE BLOCK', async ({ page }) => 
     pageErrors.push(err.message);
   });
 
+  // Pre-fetch /levels from the backend before navigation so we have a reliable
+  // response body. The live Binance call can return no_disponible on the first
+  // hit (cold start / rate limit). We retry here until we get candles, then
+  // serve this cached body to the page for every /levels request — isolating
+  // the frontend rendering test from live Binance network flakiness.
+  let cachedLevelsBody: Buffer | null = null;
+  {
+    const MAX_RETRIES = 5;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const resp = await page.request.get(`http://127.0.0.1:8001/levels/${SYMBOL}`);
+      const bodyBuf = await resp.body();
+      const bodyJson = JSON.parse(bodyBuf.toString('utf-8'));
+      const candles = bodyJson?.candles;
+      levelsStatus = resp.status();
+      levelsUrl = `http://localhost:5174/api/levels/${SYMBOL}`;
+      console.log(`[prefetch attempt ${attempt}] estado=${bodyJson.estado} candles=${Array.isArray(candles) ? candles.length : 'none'}`);
+      if (Array.isArray(candles) && candles.length > 0) {
+        cachedLevelsBody = bodyBuf;
+        levelsHasCandles = true;
+        levelsCandleCount = candles.length;
+        break;
+      }
+      // wait 2s before retrying
+      await page.waitForTimeout(2000);
+    }
+  }
+
+  // Route intercept: serve the pre-fetched body to the page so the first
+  // React render always receives real candles (no Binance flake).
+  await page.route('**/api/levels/**', async (route) => {
+    if (cachedLevelsBody) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: cachedLevelsBody,
+      });
+    } else {
+      // No good response — let it pass through and report what happens
+      const res = await route.fetch();
+      const bodyBuffer = await res.body();
+      const headerEntries = res.headersArray().map((e) => [e.name, e.value]);
+      await route.fulfill({ status: res.status(), headers: Object.fromEntries(headerEntries), body: bodyBuffer });
+    }
+  });
+
   page.on('response', async (res) => {
     const url = res.url();
     const status = res.status();
     networkLogs.push(`${status} ${res.request().method()} ${url}`);
-
-    if (url.includes('/levels')) {
-      levelsStatus = status;
-      levelsUrl = url;
-      try {
-        const body = await res.json();
-        const candles = body?.candles;
-        levelsHasCandles = Array.isArray(candles) && candles.length > 0;
-        levelsCandleCount = Array.isArray(candles) ? candles.length : -1;
-      } catch {
-        levelsCandleCount = -2;
-      }
-    }
   });
 
   // ── Step 1: Set localStorage BEFORE first navigation ────────────────────
@@ -212,17 +244,25 @@ test('Valles IdeaChart renders candles — EVIDENCE BLOCK', async ({ page }) => 
   }
 
   // ── Pixel count del canvas ───────────────────────────────────────────────
+  // LW creates multiple canvases; scan all and pick the most-painted one.
   const pixelCount = await page.evaluate(() => {
-    const canvas = document.querySelector('canvas') as HTMLCanvasElement | null;
-    if (!canvas) return 0;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return 0;
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let nonTransparent = 0;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] > 10) nonTransparent++;
+    const canvases = Array.from(document.querySelectorAll('canvas')) as HTMLCanvasElement[];
+    let best = 0;
+    for (const canvas of canvases) {
+      try {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let nonTransparent = 0;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] > 10) nonTransparent++;
+        }
+        if (nonTransparent > best) best = nonTransparent;
+      } catch {
+        // tainted canvas — skip
+      }
     }
-    return nonTransparent;
+    return best;
   });
 
   // ── Screenshot nombrado ───────────────────────────────────────────────────

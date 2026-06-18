@@ -42,7 +42,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   plan,
   live,
   state = null,
-  height = 420,
+  height = 520,
 }) => {
   const wrapRef   = useRef<HTMLDivElement>(null);
   const chartRef  = useRef<IChartApi | null>(null);
@@ -173,6 +173,58 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   const zTop = ov.zone ? Y(ov.zone.priceHigh) : null;
   const zBot = ov.zone ? Y(ov.zone.priceLow)  : null;
 
+  // ── ANTI-COLISIÓN GLOBAL ───────────────────────────────────
+  // Recoge todos los candidatos a etiqueta en el borde derecho,
+  // los ordena por Y (top → bottom) y marca cuáles se renderizan.
+  // La LÍNEA siempre se dibuja; solo la ETIQUETA se suprime.
+  const LABEL_GAP = 16; // px mínimos entre etiquetas
+
+  type LabelCandidate = { key: string; y: number };
+
+  const buildCandidates = (): LabelCandidate[] => {
+    const candidates: LabelCandidate[] = [];
+
+    // Paredes S/R
+    if (layers.paredes) {
+      for (const w of m.paredes.walls) {
+        const wy = Y(w.centro);
+        if (wy != null) candidates.push({ key: `wall-${w.centro}`, y: wy });
+      }
+    }
+
+    // Peldaños de jugada
+    if (layers.jugada && plan) {
+      for (let i = 0; i < ov.rungs.length; i++) {
+        const ry = Y(ov.rungs[i].price);
+        if (ry != null) candidates.push({ key: `rung-${i}`, y: ry });
+      }
+      // Stop / BE
+      if (ov.stop.price > 0) {
+        const sy = Y(ov.stop.price);
+        if (sy != null) candidates.push({ key: 'stop', y: sy });
+      }
+      // Precio vivo
+      const ly = Y(ov.live.price);
+      if (ly != null) candidates.push({ key: 'live', y: ly });
+    }
+
+    return candidates.sort((a, b) => a.y - b.y);
+  };
+
+  const allCandidates = buildCandidates();
+  const visibleLabels = new Set<string>();
+  {
+    let lastY: number | null = null;
+    for (const c of allCandidates) {
+      if (lastY == null || c.y - lastY >= LABEL_GAP) {
+        visibleLabels.add(c.key);
+        lastY = c.y;
+      }
+    }
+  }
+
+  const showLabel = (key: string): boolean => visibleLabels.has(key);
+
   return (
     <div className={juStyles['ju-chart']} style={{ height }}>
       {/* Canvas de Lightweight Charts */}
@@ -234,42 +286,28 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
         })()}
 
         {/* ── PAREDES (S/R horizontales) ── */}
-        {layers.paredes && (() => {
-          // Colisión: renderizamos TODAS las líneas pero suprimimos la etiqueta
-          // cuando su Y cae a <18px de la etiqueta anterior ya dibujada.
-          const sorted = [...m.paredes.walls].sort((a, b) => {
-            const ya = Y(a.centro) ?? Infinity;
-            const yb = Y(b.centro) ?? Infinity;
-            return ya - yb;
-          });
-          let lastLabelY: number | null = null;
-          return sorted.map((w, i) => {
-            const wy = Y(w.centro);
-            const esRes = w.tipo === 'resistencia';
-            // Si Y es null (série sin datos aún), siempre mostramos la etiqueta
-            const showLabel =
-              wy == null ||
-              (lastLabelY == null || Math.abs(wy - lastLabelY) >= 18);
-            if (wy != null && showLabel) lastLabelY = wy;
-            return (
-              <div
-                key={i}
-                className={[
-                  styles['idea-wall'],
-                  esRes ? styles['idea-wall--res'] : styles['idea-wall--sup'],
-                ].join(' ')}
-                style={{ top: wy ?? undefined }}
-              >
-                <span className={styles['idea-wall__rule']} />
-                {showLabel && (
-                  <span className={styles['idea-wall__tag']}>
-                    {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
-                  </span>
-                )}
-              </div>
-            );
-          });
-        })()}
+        {layers.paredes && m.paredes.walls.map((w, i) => {
+          const wy = Y(w.centro);
+          const esRes = w.tipo === 'resistencia';
+          const show = wy == null || showLabel(`wall-${w.centro}`);
+          return (
+            <div
+              key={i}
+              className={[
+                styles['idea-wall'],
+                esRes ? styles['idea-wall--res'] : styles['idea-wall--sup'],
+              ].join(' ')}
+              style={{ top: wy ?? undefined }}
+            >
+              <span className={styles['idea-wall__rule']} />
+              {show && (
+                <span className={styles['idea-wall__tag']}>
+                  {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         {/* ── JUGADA (delegada al modelo de overlays) ── */}
         {layers.jugada && plan && (
@@ -303,6 +341,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             {ov.rungs.map((r, i) => {
               const ry = Y(r.price);
               if (ry == null) return null;
+              const show = showLabel(`rung-${i}`);
               return (
                 <div
                   key={i}
@@ -315,16 +354,18 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                   style={{ top: ry }}
                 >
                   <span className={juStyles['ju-ann-line__rule']} />
-                  <span className={juStyles['ju-ann-line__tag']}>
-                    <span className={juStyles['ju-ann-line__pct']}>
-                      {r.filled ? 'llena' : `salida ${i + 1}`}
+                  {show && (
+                    <span className={juStyles['ju-ann-line__tag']}>
+                      <span className={juStyles['ju-ann-line__pct']}>
+                        {r.filled ? 'llena' : `salida ${i + 1}`}
+                      </span>
+                      <span className="num">${formatPrice(r.price)}</span>
+                      <span className={juStyles['ju-ann-line__pct']}>
+                        {Math.round(r.sizeFrac * 100)}%
+                        {r.toques != null ? ` · ${r.toques} toques` : ''}
+                      </span>
                     </span>
-                    <span className="num">${formatPrice(r.price)}</span>
-                    <span className={juStyles['ju-ann-line__pct']}>
-                      {Math.round(r.sizeFrac * 100)}%
-                      {r.toques != null ? ` · ${r.toques} toques` : ''}
-                    </span>
-                  </span>
+                  )}
                 </div>
               );
             })}
@@ -340,12 +381,14 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                 style={{ top: Y(ov.stop.price)! }}
               >
                 <span className={juStyles['ju-ann-line__rule']} />
-                <span className={juStyles['ju-ann-line__tag']}>
-                  <span className={juStyles['ju-ann-line__pct']}>
-                    {ov.stop.be ? 'break-even' : 'stop'}
+                {showLabel('stop') && (
+                  <span className={juStyles['ju-ann-line__tag']}>
+                    <span className={juStyles['ju-ann-line__pct']}>
+                      {ov.stop.be ? 'break-even' : 'stop'}
+                    </span>
+                    <span className="num">${formatPrice(ov.stop.price)}</span>
                   </span>
-                  <span className="num">${formatPrice(ov.stop.price)}</span>
-                </span>
+                )}
               </div>
             )}
 
@@ -359,10 +402,12 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
                 ].join(' ')}
                 style={{ top: Y(ov.live.price)! }}
               >
-                <span className={juStyles['ju-ann-live__tag']}>
-                  {ov.live.fuera ? 'precio de ahora ' : 'ahora '}
-                  <span className="num">${formatPrice(ov.live.price)}</span>
-                </span>
+                {showLabel('live') && (
+                  <span className={juStyles['ju-ann-live__tag']}>
+                    {ov.live.fuera ? 'precio de ahora ' : 'ahora '}
+                    <span className="num">${formatPrice(ov.live.price)}</span>
+                  </span>
+                )}
               </div>
             )}
 

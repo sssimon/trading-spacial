@@ -168,10 +168,21 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  padding: clamp(16px, 4vw, 48px) clamp(16px, 5vw, 56px) 80px;
-  max-width: 780px;
+  padding: clamp(16px, 4vw, 48px) clamp(16px, 3vw, 36px) 80px;
+  max-width: min(1240px, 100%);
   margin: 0 auto;
   font-size: 18px; /* ≥18px base como indica la spec */
+}
+
+/* Bloque de texto — medida de lectura (~760px) */
+.idea-text-measure {
+  max-width: 760px;
+  width: 100%;
+}
+
+/* Bloque del gráfico — ocupa todo el ancho del contenedor */
+.idea-chart-wrap {
+  width: 100%;
 }
 
 /* ── STICKY NAV ───────────────────────────────────────────── */
@@ -187,10 +198,10 @@
   background: rgba(251, 249, 244, 0.92);
   border-bottom: 1px solid var(--card-edge, #E4DCCC);
   backdrop-filter: blur(6px);
-  margin-left: clamp(-16px, -5vw, -56px);
-  margin-right: clamp(-16px, -5vw, -56px);
+  margin-left: clamp(-16px, -3vw, -36px);
+  margin-right: clamp(-16px, -3vw, -36px);
   /* compensar el padding del contenedor para llegar a los bordes */
-  width: calc(100% + clamp(32px, 10vw, 112px));
+  width: calc(100% + clamp(32px, 6vw, 72px));
 }
 
 .idea-nav a {
