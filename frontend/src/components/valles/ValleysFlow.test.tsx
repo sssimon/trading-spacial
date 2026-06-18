@@ -25,6 +25,10 @@ vi.mock('./Copilot', () => ({
   Copilot: () => <div data-testid="copilot" />,
 }));
 
+vi.mock('./AltSeasonHeader', () => ({
+  AltSeasonHeader: () => <div data-testid="alt-season-header-stub" />,
+}));
+
 beforeEach(() => {
   localStorage.clear();
 });

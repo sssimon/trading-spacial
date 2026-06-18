@@ -19,6 +19,11 @@ beforeEach(() => {
   vi.mocked(api.getValleyEval).mockResolvedValue({ symbol: 'ADAUSDT', estado: 'ok', candidata: true, pct_rango: 0.1, semanas_consolidando: 5, vol_percentil: 0.2 } as never);
   vi.mocked(api.getLevels).mockResolvedValue({ symbol: 'ADAUSDT', estado: 'ok', generated_at: null, price_live: 1, zonas: [], ubicacion: { dentro_de: null, techo: null, piso: null } } as never);
   vi.mocked(api.getDossier).mockResolvedValue({ symbol: 'ADAUSDT', equipo: [], equipo_identificado: false, presencia: {}, actividad: {}, financiacion: [], hitos: [], estado_general: 'opaco', no_encontrado_en: [], generated_at: null } as never);
+  vi.mocked(api.getAltSeason).mockResolvedValue({
+    generated_at: null, coverage: { universe: 0, evaluated: 0, complete: false },
+    dominancia_fetch: { ok: false, fetched_at: null, source: 'coingecko/global' },
+    regime: { estado: 'mixto', componentes: {}, votos: { alts: 0, neutral: 0, btc: 0, vivos: 0 }, n_alts_evaluadas: 0 },
+  } as never);
 });
 
 // ── Mocks para IdeaView ──────────────────────────────────────────────────────
