@@ -547,6 +547,28 @@ export interface ValleySnapshot {
   frescura?:    Frescura;
 }
 
+// ---- Régimen de mercado "¿es alt-season?" (hecho de mercado, no veredicto) ----
+export interface RegimeComponent {
+  valor:  number | null;
+  lean:   'alts' | 'neutral' | 'btc' | null;
+  estado: 'fresco' | 'muerto';
+  n?:     number;
+  razon?: string;
+}
+export interface RegimePayload {
+  estado:            'alts' | 'mixto' | 'btc';
+  componentes:       Record<string, RegimeComponent>;
+  votos:             { alts: number; neutral: number; btc: number; vivos: number };
+  n_alts_evaluadas:  number;
+}
+export interface RegimeSnapshot {
+  generated_at:     string | null;
+  coverage:         { universe: number; evaluated: number; complete: boolean };
+  dominancia_fetch: { ok: boolean; fetched_at: string | null; source: string };
+  regime:           RegimePayload;
+  frescura?:        Frescura;
+}
+
 // ---- D.1 Detector neutral de S/R (zonas, sin veredicto). Spec §4 ----
 export interface SrZona {
   tipo:                'resistencia' | 'soporte';

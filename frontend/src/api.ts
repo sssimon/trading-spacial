@@ -418,6 +418,11 @@ export function getValleyCandidates() {
   return request<import('./types').ValleySnapshot>('/valley-candidates');
 }
 
+// ---- Régimen de mercado — GET /alt-season -------------------------------
+export function getAltSeason() {
+  return request<import('./types').RegimeSnapshot>('/alt-season');
+}
+
 // ---- Dossier C — GET /dossier/:symbol ------------------------------------
 
 export function getDossier(symbol: string, refresh = false) {
