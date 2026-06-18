@@ -105,6 +105,9 @@ Valles debe **exhibir el setup + ser honesto de que el edge depende del régimen
 *refuerza* la doctrina anti-veredicto en vez de contradecirla? ¿Hace falta una pieza de
 **contexto de régimen/ciclo** (¿es alt-season?) que hoy no existe?
 
+> **Resolución de P2 (2026-06-18):** el subproyecto 1 (pieza de régimen "¿es alt-season?")
+> implementa el eje de régimen. Ver `docs/superpowers/specs/es/2026-06-18-alt-season-regimen-design.md`.
+
 ## 4. Doctrina (no negociable, recordatorio)
 
 Valles **exhibe hechos, nunca firma un veredicto** (5 candados server-side). Cualquier

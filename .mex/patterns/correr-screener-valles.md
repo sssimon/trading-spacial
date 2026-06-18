@@ -38,6 +38,7 @@ El script:
 2. Aplica filtro de vida (`min_volume_usdt`, `min_price_usdt`).
 3. Aplica filtro de consolidación geométrica (rango % en ventana de N barras).
 4. Escribe el resultado en `data/valley_candidates.json`.
+- La misma pasada también escribe `data/alt_season.json` (régimen de mercado) y hace 1 llamada a CoinGecko `/global` para la dominancia (degradación elegante si falla). Lector: `GET /alt-season`.
 
 ### Paso 2 — Verificar la salida
 
