@@ -1,0 +1,3 @@
+# Cache de klines y logs de corrida — artefactos pesados/transitorios, no versionar.
+raw_klines/
+*.log
