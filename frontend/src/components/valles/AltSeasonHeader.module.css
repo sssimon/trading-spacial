@@ -1,0 +1,7 @@
+.header { padding: clamp(16px, 3vw, 28px); border-radius: 14px; font-size: 18px; }
+.estado { font-size: 22px; font-weight: 600; }
+.componentes { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 8px; }
+.comp { font-size: 18px; }
+.muerta { opacity: 0.6; font-style: italic; }
+.frase { margin-top: 12px; font-size: 18px; opacity: 0.85; }
+.frescura { font-size: 15px; opacity: 0.7; margin-top: 6px; }
