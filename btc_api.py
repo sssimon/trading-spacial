@@ -89,6 +89,7 @@ from api.tune import router as tune_router
 from api.agent.router import router as agent_router
 from api.agent.history import router as agent_history_router
 from api.valleys import router as valleys_router
+from api.alt_season import router as alt_season_router
 from api.dossier import router as dossier_router
 from api.levels import router as levels_router
 from api.plan import router as plan_router
@@ -315,6 +316,7 @@ app.include_router(user_preferences_router)
 app.include_router(agent_router)
 app.include_router(agent_history_router)
 app.include_router(valleys_router)
+app.include_router(alt_season_router)
 app.include_router(dossier_router)
 app.include_router(levels_router)
 app.include_router(plan_router)
