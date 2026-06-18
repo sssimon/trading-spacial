@@ -13,20 +13,26 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
 
 import requests
 
+from regime.alt_season import compose_regime, symbol_contribution
 from screener.universe import list_live_usdt_spot
 from screener.valley_filter import evaluate_symbol, order_neutral
 
 log = logging.getLogger("tools.run_valley_screener")
 
 _KLINES_URL = "https://api.binance.com/api/v3/klines"
+_DOMINANCE_URL = "https://api.coingecko.com/api/v3/global"
 _HISTORY_DAYS = 400   # cubre la ventana de percentil (365) + margen
 _OUTPUT = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                        "data", "valley_candidates.json")
+_ALT_SEASON_OUTPUT = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                  "data", "alt_season.json")
+_BTC_SYMBOL = "BTCUSDT"
 
 
 def _http_get(url, params=None, timeout=15):
@@ -44,6 +50,24 @@ def _fetch_daily_klines(symbol: str, *, limit: int = _HISTORY_DAYS) -> list[list
     return r.json()
 
 
+def _fetch_dominance() -> float | None:
+    """Dominancia de BTC (market-cap) de CoinGecko, fracción 0-1. None ante CUALQUIER
+    fallo o valor fuera de rango — degradación elegante; NO tumba la pasada."""
+    try:
+        r = requests.get(_DOMINANCE_URL, timeout=(3.05, 10))
+        if r.status_code != 200:
+            log.warning("DOMINANCE_FETCH_HTTP status=%s", r.status_code)
+            return None
+        dom = float(r.json()["data"]["market_cap_percentage"]["btc"]) / 100.0
+    except (requests.RequestException, KeyError, TypeError, ValueError) as e:
+        log.warning("DOMINANCE_FETCH_FAILED causa=%s", e)
+        return None
+    if not (0.0 < dom < 1.0):
+        log.warning("DOMINANCE_OUT_OF_RANGE value=%s", dom)
+        return None
+    return dom
+
+
 def _rows_to_bars(rows: list[list]) -> list[dict]:
     """Filas crudas de Binance → barras del contrato puro (índices 0,1,2,3,4,5,7)."""
     return [
@@ -54,11 +78,33 @@ def _rows_to_bars(rows: list[list]) -> list[dict]:
     ]
 
 
-def build_snapshot(*, pause_s: float = 0.0) -> dict:
-    """Construye la foto del screener. Devuelve el dict serializable (no
-    escribe a disco — eso lo hace main, para que los tests no toquen el FS)."""
+def _atomic_write_json(path: str, obj: dict) -> None:
+    """Escribe JSON atómicamente: tempfile en el MISMO dir + os.replace. Un lector
+    concurrente nunca ve un archivo truncado (no falso 'muerto')."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def build_snapshot(*, pause_s: float = 0.0,
+                   generated_at: str | None = None) -> tuple[dict, dict]:
+    """Construye AMBAS fotos (candidatas + régimen) en UNA pasada del universo.
+    Devuelve (candidates_snap, alt_season_snap). No escribe a disco."""
     universo = list_live_usdt_spot()
+    ts = generated_at or datetime.now(timezone.utc).isoformat()
     candidatas: list[dict] = []
+    alt_contribs: list[dict] = []
+    btc_ret_30d: float | None = None
+    btc_seen = False
     evaluadas = 0
     for sym in universo:
         try:
@@ -67,38 +113,62 @@ def build_snapshot(*, pause_s: float = 0.0) -> dict:
             log.warning("SCREENER_SYMBOL_SKIPPED symbol=%s causa=%s", sym, e)
             continue
         evaluadas += 1
-        cand = evaluate_symbol(sym, _rows_to_bars(rows))
+        bars = _rows_to_bars(rows)
+        cand = evaluate_symbol(sym, bars)
         if cand is not None:
             candidatas.append(cand)
+        contrib = symbol_contribution(sym, bars)
+        if contrib is not None:
+            if sym == _BTC_SYMBOL:
+                btc_ret_30d = contrib["ret_30d"]
+                btc_seen = True
+            else:
+                alt_contribs.append(contrib)
         if pause_s:
             time.sleep(pause_s)
-    return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "coverage": {
-            "universe": len(universo),
-            "evaluated": evaluadas,
-            "complete": evaluadas == len(universo),
-        },
-        "candidates": order_neutral(candidatas),
+
+    if not btc_seen:
+        log.warning("REGIME_BTC_AUSENTE: BTCUSDT no evaluable en esta pasada")
+
+    coverage = {"universe": len(universo), "evaluated": evaluadas,
+                "complete": evaluadas == len(universo)}
+    cand_snap = {"generated_at": ts, "coverage": coverage,
+                 "candidates": order_neutral(candidatas)}
+
+    dominance = _fetch_dominance()
+    dom_ts = datetime.now(timezone.utc).isoformat() if dominance is not None else None
+    coverage_ratio = (evaluadas / len(universo)) if universo else 0.0
+    regime = compose_regime(alt_contribs, btc_ret_30d, dominance, coverage_ratio)
+    alt_season_snap = {
+        "generated_at": ts,
+        "coverage": coverage,
+        "dominancia_fetch": {"ok": dominance is not None,
+                             "fetched_at": dom_ts,
+                             "source": "coingecko/global"},
+        "regime": regime,
     }
+    return cand_snap, alt_season_snap
 
 
-def regenerate(*, pause_s: float = 0.05) -> dict:
-    """build_snapshot + escribe el JSON. Usado por main() y por screener_loop."""
-    snap = build_snapshot(pause_s=pause_s)
+def regenerate(*, pause_s: float = 0.05) -> tuple[dict, dict]:
+    """build_snapshot + escribe ambos JSON. Usado por main() y por _regenerate_screener."""
+    cand_snap, alt_season_snap = build_snapshot(pause_s=pause_s)
     os.makedirs(os.path.dirname(_OUTPUT), exist_ok=True)
     with open(_OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(snap, f, indent=2, ensure_ascii=False)
-    return snap
+        json.dump(cand_snap, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(_ALT_SEASON_OUTPUT, alt_season_snap)   # atómico (BLOCKER del review)
+    return cand_snap, alt_season_snap
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
-    snap = regenerate()
-    cov = snap["coverage"]
-    print(f"valley_candidates.json: {len(snap['candidates'])} candidatas; "
+    cand_snap, alt_season_snap = regenerate()
+    cov = cand_snap["coverage"]
+    print(f"valley_candidates.json: {len(cand_snap['candidates'])} candidatas; "
           f"cobertura {cov['evaluated']}/{cov['universe']} "
           f"({'completa' if cov['complete'] else 'INCOMPLETA'})")
+    reg = alt_season_snap["regime"]
+    print(f"alt_season.json: régimen={reg['estado']} votos={reg['votos']}")
     return 0
 
 

@@ -4,6 +4,7 @@ import type { ValleySnapshot } from '../../types';
 import { PickScreen } from './PickScreen';
 import { IdeaView } from './idea/IdeaView';
 import { Copilot } from './Copilot';
+import { AltSeasonHeader } from './AltSeasonHeader';
 import styles from './valles.module.css';
 
 export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean }> = ({ snapshot, loading }) => {
@@ -31,6 +32,8 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
             <span className={styles.vwBrandTag}>los hechos, lente por lente — la decisión es tuya</span>
           </div>
         </div>
+
+        <AltSeasonHeader />
 
         <div className={styles.vwStage}>
           {!sym

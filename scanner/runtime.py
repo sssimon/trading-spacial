@@ -407,8 +407,10 @@ def scanner_loop(stop_event: threading.Event | None = None):
 
 def _regenerate_screener() -> None:
     from tools.run_valley_screener import regenerate  # noqa: PLC0415
-    snap = regenerate()
-    log.info("screener_loop: %d candidatas", len(snap.get("candidates", [])))
+    cand_snap, alt_season_snap = regenerate()
+    log.info("screener_loop: %d candidatas, régimen=%s",
+             len(cand_snap.get("candidates", [])),
+             alt_season_snap.get("regime", {}).get("estado"))
 
 
 def _screener_cycle() -> None:
