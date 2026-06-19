@@ -315,19 +315,6 @@
 }
 .ju-mirror b { color: var(--ink); font-weight: 600; }
 
-/* ── MARCA "tiene jugada" en el Pick ── */
-.ju-pickmark {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em;
-  color: var(--ink-3); background: var(--paper-2); border: 1px solid var(--card-edge-2);
-  border-radius: 999px; padding: 3px 9px 3px 7px; white-space: nowrap;
-}
-.ju-pickmark__g { display: inline-flex; gap: 2px; align-items: flex-end; }
-.ju-pickmark__g i { width: 3px; border-radius: 1px; background: var(--ink-4); display: block; }
-.ju-pickmark__g i:nth-child(1) { height: 5px; }
-.ju-pickmark__g i:nth-child(2) { height: 8px; }
-.ju-pickmark__g i:nth-child(3) { height: 11px; }
-
 /* ── NOTA DE LENGUAJE ── */
 .ju-lex { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
 .ju-lexcol { background: var(--card); border: 1px solid var(--card-edge); border-radius: 14px; padding: 20px 22px; }

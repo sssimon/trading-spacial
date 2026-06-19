@@ -81,9 +81,9 @@ hi90  = max(high,90) or 1e-9*close ; drawdown_from_90h = (close - hi90)/hi90 * 1
 ```
 Todos los denominadores **clampeados** (espejando la protección `or 1.0` de `measure_consolidation`)
 — un libro muerto o datos corruptos NUNCA producen `nan`/`inf`. `_wilder_rsi` es una implementación
-pura en el módulo (sin pandas) que debe **igualar numéricamente** a `edge_study.wilder_rsi` (mismo
-suavizado de Wilder, RSI=100 cuando `roll_down==0`) — la firma §1.1 (RSI≈38.7) se midió con esa
-definición; un test ancla la equivalencia. Pura, determinista, espejo de `measure_consolidation`.
+pura en el módulo (sin pandas) que **converge** a `edge_study.wilder_rsi` en el régimen de
+producción (≥120 barras, |diff|<0.01); diverge solo en historia corta, que el gate de liveness
+(120) ya excluye del candidato. Un test ancla la convergencia. Pura, determinista, espejo de `measure_consolidation`.
 
 **Los 6 hechos no-gate (`rsi14`, `pct_vs_sma20/50`, `consol_30d`, `vol_ratio`, `drawdown_from_90h`)
 son HECHOS EXHIBIDOS, NUNCA gates.** Solo `pos_in_30d_range` admite/rechaza.
@@ -232,7 +232,7 @@ posición + ausencia de "valle" + presencia de la costura con los números medid
 
 ## Acceptance criteria
 
-1. `measure_setup` puro y testeado (incl. equivalencia RSI y clamps denom-cero); `evaluate_symbol`
+1. `measure_setup` puro y testeado (incl. convergencia RSI en régimen de producción ≥120 barras y clamps denom-cero); `evaluate_symbol`
    gatea por `pos_in_30d_range ≤ SETUP_POS_MAX` y emite el set de hechos exacto.
 2. Test de aceptación piso/techo en verde (techo NO pasa con amplitud idéntica).
 3. `measure_consolidation` + probe + sus tests intactos.

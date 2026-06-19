@@ -95,6 +95,7 @@ describe('Narrativa — con datos', () => {
     render(<Narrativa vida={vida} levels={levels} plan={plan} />);
     expect(screen.getByText(/parte baja de su rango/i)).toBeTruthy();
     expect(screen.getByText(/no le ganó al azar/i)).toBeTruthy();
+    expect(screen.getByText(/no le ganó al azar/i).textContent).toMatch(/9\.92%.*12\.54%/);
   });
 
   it('doctrina: sin "en valle" ni "franja angosta" en el bloque vida', () => {
