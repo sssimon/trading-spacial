@@ -30,7 +30,7 @@ export interface IdeaChartProps {
 }
 
 const LAYER_LABELS: Record<typeof LAYER_KEYS[number], string> = {
-  vida:    'Vida (el valle)',
+  vida:    'Vida (¿viva? · posición)',
   paredes: 'Paredes',
   jugada:  'La jugada',
 };
@@ -265,25 +265,12 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
       {/* ── CAPA DE ANOTACIONES HTML ── */}
       <div className={juStyles['ju-chart__ann']}>
 
-        {/* ── VIDA (banda de consolidación) ── */}
-        {layers.vida && m.vida.band && (() => {
-          const bTop = Y(m.vida.band.high);
-          const bBot = Y(m.vida.band.low);
-          if (bTop == null || bBot == null) return null;
-          return (
-            <div
-              className={styles['idea-vida-band']}
-              style={{ top: bTop, height: Math.max(2, bBot - bTop) }}
-            >
-              {m.vida.vivoStamp && (
-                <span className={styles['idea-vida-stamp']}>
-                  {m.vida.vivoStamp}
-                  {m.vida.semanas > 0 && ` · ${m.vida.semanas} sem en rango`}
-                </span>
-              )}
-            </div>
-          );
-        })()}
+        {/* ── VIDA (sello de posición — banda dibujada es SP3) ── */}
+        {layers.vida && m.vida.vivoStamp && (
+          <div className={styles['idea-vida-band']}>
+            <span className={styles['idea-vida-stamp']}>{m.vida.vivoStamp}</span>
+          </div>
+        )}
 
         {/* ── PAREDES (S/R horizontales) ── */}
         {layers.paredes && m.paredes.walls.map((w, i) => {

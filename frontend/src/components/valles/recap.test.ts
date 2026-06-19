@@ -3,8 +3,8 @@ import { it, expect } from 'vitest';
 import { vidaRecap, dossierRecap } from './recap';
 
 it('vidaRecap distingue viva / muy quieta / sin dato', () => {
-  expect(vidaRecap({ symbol: 'X', estado: 'ok', candidata: true } as never)).toBe('Viva y tranquila');
-  expect(vidaRecap({ symbol: 'X', estado: 'ok', candidata: false } as never)).toBe('Muy quieta');
+  expect(vidaRecap({ symbol: 'X', estado: 'ok', candidata: true } as never)).toBe('En la parte baja de su rango');
+  expect(vidaRecap({ symbol: 'X', estado: 'ok', candidata: false } as never)).toBe('No en la parte baja');
   expect(vidaRecap(null)).toBe('—');
 });
 

@@ -5,7 +5,6 @@ import { FreshnessTag } from '../FreshnessTag';
 import { humanName } from './atoms';
 import { formatPrice } from '../../utils';
 import styles from './valles.module.css';
-import juStyles from './jugada/jugada.module.css';
 
 export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: string) => void }> = ({ snapshot, onPick }) => {
   const [q, setQ] = useState('');
@@ -16,17 +15,17 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
       {/* Titular POR ENCIMA del semáforo de frescura (§5.1) */}
       <h1 className={styles.vwPickQ}>
         {candidates.length > 0
-          ? `Hoy hay ${candidates.length} ${candidates.length === 1 ? 'moneda' : 'monedas'} en valle.`
+          ? `Hoy hay ${candidates.length} ${candidates.length === 1 ? 'moneda' : 'monedas'} en la parte baja de su rango.`
           : coverage.complete
-            ? 'Hoy ninguna moneda en valle.'
+            ? 'Hoy ninguna en la parte baja de su rango.'
             : 'El screener todavía no corrió.'}
       </h1>
       <div className={styles.vwEyebrow}>{frescura && <FreshnessTag frescura={frescura} />}</div>
 
       {candidates.length > 0 && (
         <p className={styles.vwPickLead}>
-          Son las que ahora mismo se mueven poco y siguen vivas: el filtro que hace Valles,
-          mecánico, no un consejo. Elige una para mirarla de cerca con las tres lentes.
+          En el cuartil inferior de su rango de 30d — la réplica del filtro que usaba el
+          canal de 2019, mecánico, no un consejo. Elige una para mirarla de cerca.
         </p>
       )}
 
@@ -38,14 +37,9 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
               <div className={styles.vwCandSym}>{c.symbol}</div>
             </div>
             <div className={styles.vwCandFact}>
-              <span className={styles.vwCandTag} aria-hidden="true">● en valle</span>
-              se mueve un <b>{(c.pct_rango * 100).toFixed(1)}%</b> · <b>{c.semanas_consolidando} semanas</b> quieta
+              <span className={styles.vwCandTag} aria-hidden="true">● parte baja del rango</span>
+              cuartil inferior (pos <b>{(c.pos_in_30d_range * 100).toFixed(0)}%</b>) · RSI <b>{c.rsi14.toFixed(0)}</b>
             </div>
-            {/* TODO: gatear por señal real por-candidata cuando el screener la exponga */}
-            <span className={juStyles['ju-pickmark']}>
-              <span className={juStyles['ju-pickmark__g']} aria-hidden="true"><i /><i /><i /></span>
-              tiene jugada
-            </span>
             <div className={styles.vwCandPrice}>${formatPrice(c.price)}</div>
             <div className={styles.vwCandGo} aria-hidden="true">→</div>
           </button>

@@ -532,9 +532,13 @@ export interface Frescura {
 export interface ValleyCandidate {
   symbol:               string;
   price:                number;
-  pct_rango:            number;
-  semanas_consolidando: number;
-  vol_percentil:        number;
+  pos_in_30d_range:     number;
+  rsi14:                number;
+  pct_vs_sma20:         number;
+  pct_vs_sma50:         number;
+  consol_30d:           number;
+  vol_ratio:            number;
+  drawdown_from_90h:    number;
   volumen_usd_dia:      number;
   distancia_ath_pct:    number;
   razones_vida:         string[];
@@ -602,9 +606,13 @@ export interface ValleyEval {
   vivo?:                 boolean;
   razones_muerte?:       string[];
   price?:                number;
-  pct_rango?:            number;
-  semanas_consolidando?: number;
-  vol_percentil?:        number;
+  pos_in_30d_range?:     number;
+  rsi14?:                number;
+  pct_vs_sma20?:         number;
+  pct_vs_sma50?:         number;
+  consol_30d?:           number;
+  vol_ratio?:            number;
+  drawdown_from_90h?:    number;
   volumen_usd_dia?:      number;
   distancia_ath_pct?:    number;
   razones_vida?:         string[];

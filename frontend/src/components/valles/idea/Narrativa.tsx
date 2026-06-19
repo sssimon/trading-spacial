@@ -41,30 +41,28 @@ const BloqueVida: React.FC<{ vida: ValleyEval | null }> = ({ vida }) => {
   if (vida.candidata === false) {
     return (
       <p className={styles['na-empty']}>
-        Esta moneda está muy quieta ahora mismo y no entra en el análisis de valle.
-        Casi no se mueve, así que no hay franja que seguir.
+        No está en la parte baja de su rango ahora.
       </p>
     );
   }
 
-  // Candidata = true → viva y en valle
-  const semanas = vida.semanas_consolidando ?? '—';
-  const volDia  = vida.volumen_usd_dia != null
-    ? `$${(vida.volumen_usd_dia / 1_000_000).toFixed(1)}M`
-    : '—';
-  const franja  = vida.pct_rango != null
-    ? `${((vida.pct_rango) * 100).toFixed(1)}%`
-    : null;
+  // Candidata = true → viva y en la parte baja de su rango
+  const pos = vida.pos_in_30d_range != null ? `${Math.round(vida.pos_in_30d_range * 100)}%` : '—';
+  const vsSma = vida.pct_vs_sma20 != null ? `${vida.pct_vs_sma20.toFixed(1)}%` : '—';
+  const rsi = vida.rsi14 != null ? vida.rsi14.toFixed(0) : '—';
 
   return (
-    <p className={styles['na-body']}>
-      Está viva y consolidando — lleva{' '}
-      <b>{semanas} semanas</b> en una franja angosta
-      {franja ? <> ({franja} de su precio)</> : null}
-      , sin pegar saltos. Eso es lo que se le dice estar <b>"en valle"</b>.
-      El volumen del día ronda <b>{volDia}</b>: suficiente para que la
-      moneda tenga liquidez real.
-    </p>
+    <>
+      <p className={styles['na-body']}>
+        Está viva y en la <b>parte baja de su rango de 30d</b> (posición <b>{pos}</b>),
+        por debajo de su SMA20 (<b>{vsSma}</b>), RSI <b>{rsi}</b>.
+      </p>
+      <p className={styles['na-costura']}>
+        Esto es la réplica del filtro que usaba el canal de 2019. Medido, no le ganó al
+        azar de alts ni en su mejor régimen (alt-bull 2019: 14d 9.92% vs 12.54%). Lo que
+        movió el retorno fue el régimen, no esta selección. La decisión es tuya.
+      </p>
+    </>
   );
 };
 
@@ -181,7 +179,7 @@ const BloqueJugada: React.FC<{ plan: PlanDerived | null }> = ({ plan }) => {
           <b>Zona de entrada</b>:{' '}
           {zona != null ? (
             <>
-              franja{' '}
+              zona{' '}
               <b>${pr(zona.precio_bajo)}–${pr(zona.precio_alto)}</b>,
               donde el precio ya rebotó <b>{zona.toques} veces</b>.
             </>
