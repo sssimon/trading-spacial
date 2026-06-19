@@ -213,7 +213,7 @@ describe('api client', () => {
   describe('getValleyEval', () => {
     afterEach(() => vi.restoreAllMocks());
     it('pide GET /valley-eval/:symbol', async () => {
-      const payload = { symbol: 'ADAUSDT', estado: 'ok', candidata: true, pct_rango: 0.18 };
+      const payload = { symbol: 'ADAUSDT', estado: 'ok', candidata: true, pos_in_30d_range: 0.18 };
       const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
       );
