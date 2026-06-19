@@ -114,3 +114,61 @@ class TestEvaluateYorden:
     def test_liquidity_value_es_mediana_volumen(self):
         bars = _serie(60, quote_vol=1_500_000.0)
         assert liquidity_value(bars) == 1_500_000.0
+
+
+from screener.valley_filter import measure_setup, _wilder_rsi, SETUP_POS_MAX
+
+
+def _serie_rango(n, lo, hi, last_close, vol=2_000_000.0):
+    """n barras vivas; las últimas 30 barran [lo, hi] y la última cierra en last_close.
+    Las primeras n-30 quedan planas en el extremo opuesto para fijar amplitud."""
+    bars = []
+    anchor = hi if last_close <= (lo + hi) / 2 else lo
+    for i in range(n):
+        if i < n - 30:
+            c = anchor
+        else:
+            frac = (i - (n - 30)) / 29.0
+            c = anchor + (last_close - anchor) * frac
+        bars.append(_bar(i * 86_400_000, c, vol, high=c * 1.005, low=c * 0.995))
+    return bars
+
+
+class TestMeasureSetup:
+    def test_pos_in_30d_range_piso(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93)
+        out = measure_setup(bars)
+        assert out["pos_in_30d_range"] < 0.25       # cuartil inferior
+
+    def test_pos_in_30d_range_techo(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=1.19)
+        out = measure_setup(bars)
+        assert out["pos_in_30d_range"] > 0.75       # cuartil superior
+
+    def test_claves_exactas(self):
+        out = measure_setup(_serie(150))
+        assert set(out.keys()) == {
+            "pos_in_30d_range", "rsi14", "pct_vs_sma20", "pct_vs_sma50",
+            "consol_30d", "vol_ratio", "drawdown_from_90h"}
+
+    def test_denominador_cero_no_revienta(self):
+        # libro plano (high==low==close) → sin nan/inf en ningún hecho
+        planas = [_bar(i * 86_400_000, 1.0, 2_000_000.0, high=1.0, low=1.0) for i in range(150)]
+        out = measure_setup(planas)
+        for k, v in out.items():
+            assert v == v and abs(v) != float("inf"), f"{k} es nan/inf"
+
+    def test_drawdown_no_positivo(self):
+        out = measure_setup(_serie_rango(150, lo=0.92, hi=1.20, last_close=0.95))
+        assert out["drawdown_from_90h"] <= 0.0
+
+    def test_rsi_subida_pura_alto(self):
+        closes = [1.0 + i * 0.01 for i in range(40)]
+        assert _wilder_rsi(closes, 14) > 90.0
+
+    def test_rsi_bajada_pura_bajo(self):
+        closes = [2.0 - i * 0.01 for i in range(40)]
+        assert _wilder_rsi(closes, 14) < 10.0
+
+    def test_rsi_pocos_datos_neutral(self):
+        assert _wilder_rsi([1.0, 1.1], 14) == 50.0
