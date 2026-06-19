@@ -229,26 +229,23 @@ def _distancia_ath_pct(bars: list[dict]) -> float:
 
 
 def evaluate_symbol(symbol: str, bars: list[dict]) -> dict | None:
-    """Evalúa un símbolo. Devuelve la candidata (dict de HECHOS) si está VIVA
-    y EN RANGO; None en cualquier otro caso. Cero ranking, cero claim.
-
-    El dict resultante NO incluye ningún score de 'atractivo' — sólo hechos
-    descriptivos que el humano interpreta (spec §0, §1)."""
+    """Candidata si está VIVA y en la PARTE BAJA de su rango de 30d
+    (pos_in_30d_range ≤ SETUP_POS_MAX) — réplica del filtro de un canal de 2019, NO un
+    claim de selección (el estudio multi-régimen probó que no tiene edge). Devuelve
+    hechos descriptivos; cero ranking, cero veredicto (spec SP2). None si no aplica."""
     vivo, razones = classify_liveness(bars)
     if not vivo:
         return None
-    cons = measure_consolidation(bars)
-    if not cons["en_rango"]:
+    setup = measure_setup(bars)
+    if setup["pos_in_30d_range"] > SETUP_POS_MAX:
         return None
     return {
         "symbol": symbol,
         "price": float(bars[-1]["close"]),
-        "pct_rango": cons["pct_rango"],
-        "semanas_consolidando": cons["semanas"],
-        "vol_percentil": cons["vol_percentil"],
+        **setup,
         "volumen_usd_dia": liquidity_value(bars),
         "distancia_ath_pct": _distancia_ath_pct(bars),
-        "razones_vida": razones,  # [] cuando viva; presente por simetría
+        "razones_vida": razones,
     }
 
 

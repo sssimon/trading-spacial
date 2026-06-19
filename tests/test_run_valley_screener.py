@@ -33,7 +33,14 @@ def test_snapshot_incluye_candidata_viva_y_omite_muerta():
 
     def fake_klines(symbol, **kw):
         if symbol == "LIVEUSDT":
-            return _kline_rows(150, 1.0, 2_000_000.0)
+            # viva + en la PARTE BAJA de su rango: alto y estable, cae al piso al final.
+            rows = []
+            for i in range(150):
+                c = 1.20 if i < 120 else 1.20 - 0.28 * ((i - 120) / 29.0)
+                rows.append([i * 86_400_000, str(c), str(c * 1.005), str(c * 0.995),
+                             str(c), str(2_000_000.0 / c), 0, str(2_000_000.0),
+                             0, "0", "0", "0"])
+            return rows
         return _kline_rows(150, 1.0, 50_000.0)
 
     with patch("tools.run_valley_screener.list_live_usdt_spot", return_value=universo), \

@@ -81,28 +81,36 @@ class TestMeasureConsolidation:
 
 
 class TestEvaluateYorden:
-    def test_evaluate_viva_en_rango_es_candidata(self):
-        bars = []
-        for i in range(150):
-            c = 1.0 + (0.03 if i % 2 else -0.03)
-            bars.append(_bar(i * 86_400_000, c, 2_000_000.0,
-                             high=c * 1.005, low=c * 0.995))
+    def test_evaluate_viva_en_parte_baja_es_candidata(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93)
         cand = evaluate_symbol("XYZUSDT", bars)
         assert cand is not None
         assert cand["symbol"] == "XYZUSDT"
-        assert set(cand.keys()) >= {
-            "symbol", "price", "pct_rango", "semanas_consolidando",
+        assert set(cand.keys()) == {
+            "symbol", "price", "pos_in_30d_range", "rsi14", "pct_vs_sma20",
+            "pct_vs_sma50", "consol_30d", "vol_ratio", "drawdown_from_90h",
             "volumen_usd_dia", "distancia_ath_pct", "razones_vida"}
         assert cand["razones_vida"] == []
+        assert "pct_rango" not in cand and "semanas_consolidando" not in cand
+
+    def test_aceptacion_techo_no_pasa_con_amplitud_identica(self):
+        # MISMA amplitud (0.92–1.20) que la candidata, pero el precio está en el TECHO.
+        piso = _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93)
+        techo = _serie_rango(150, lo=0.92, hi=1.20, last_close=1.19)
+        assert evaluate_symbol("PISOUSDT", piso) is not None      # piso PASA
+        assert evaluate_symbol("TECHOUSDT", techo) is None        # techo NO pasa
+
+    def test_payload_sin_lenguaje_de_veredicto(self):
+        import json
+        cand = evaluate_symbol("XYZUSDT", _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93))
+        blob = json.dumps(cand, ensure_ascii=False).lower()
+        for prohibido in ("valle", "va a subir", "señal", "fuertes", "débil",
+                          "cazaba", "tiene jugada", "setup de corrección"):
+            assert prohibido not in blob, f"lenguaje prohibido: {prohibido}"
 
     def test_evaluate_muerta_devuelve_none(self):
         cand = evaluate_symbol("DEADUSDT", _serie(200, quote_vol=50_000.0))
         assert cand is None  # volumen bajo piso ⟹ no candidata
-
-    def test_evaluate_viva_pero_no_en_rango_devuelve_none(self):
-        bars = [_bar(i * 86_400_000, 1.0 + i / 100.0, 2_000_000.0) for i in range(150)]
-        cand = evaluate_symbol("TRENDUSDT", bars)
-        assert cand is None  # viva pero en tendencia, no es valle
 
     def test_orden_neutral_por_liquidez_desc(self):
         a = {"symbol": "AUSDT", "volumen_usd_dia": 1_000_000.0}
