@@ -74,6 +74,12 @@ No se necesita reiniciar el backend — el endpoint lee el archivo en cada reque
 
 - **El screener es stateless entre corridas:** cada `python -m tools.run_valley_screener` sobrescribe `data/valley_candidates.json` completamente. No hay historial de corridas previas. Si querés comparar fotos en el tiempo, guardá manualmente una copia con timestamp antes de re-correr.
 
+> **SP2 / deploy:** el contrato del candidato cambió (de `pct_rango`/`semanas_consolidando` a
+> `pos_in_30d_range`/`rsi14`/…). El snapshot persistido `data/valley_candidates.json` queda
+> incompatible hasta que el `screener_loop` lo regenere. El deploy DEBE forzar una regeneración
+> (correr `python -m tools.run_valley_screener` o esperar un ciclo del loop) al activar el front
+> nuevo; si no, `/valley-candidates` sirve campos viejos y el front lee `undefined` → "NaN%".
+
 ## Verify Checklist
 
 Antes de dar la foto por válida:

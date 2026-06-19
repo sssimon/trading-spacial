@@ -38,8 +38,9 @@ const snap: ValleySnapshot = {
   coverage: { universe: 10, evaluated: 10, complete: true },
   candidates: [
     {
-      symbol: 'ADAUSDT', price: 0.45, pct_rango: 0.12, semanas_consolidando: 6,
-      vol_percentil: 0.2, volumen_usd_dia: 1e7, distancia_ath_pct: 0.7, razones_vida: [],
+      symbol: 'ADAUSDT', price: 0.45, pos_in_30d_range: 0.12, rsi14: 38,
+      pct_vs_sma20: -6, pct_vs_sma50: -9, consol_30d: 40, vol_ratio: 0.7,
+      drawdown_from_90h: -35, volumen_usd_dia: 1e7, distancia_ath_pct: 0.7, razones_vida: [],
     },
   ],
   frescura: { estado: 'fresco', edad_seg: 1800, generated_at: '2026-06-14T10:00:00Z', umbral_seg: 43200 },

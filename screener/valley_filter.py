@@ -25,6 +25,17 @@ CONSOLIDATION_WINDOW_DAYS = 84     # 12 semanas
 RANGE_BAND_MAX = 0.25              # (max-min)/mediana ≤ esto ⟹ en rango
 VOL_PERCENTILE_WINDOW_DAYS = 365   # historia para el percentil de volatilidad
 
+# ── Setup "parte baja del rango" — réplica del filtro histórico de musikito (SP2) ──
+# Provisionales, sin calibrar (POST-SHIP). Mediana de musikito 2019 = 0.165; corte 0.25
+# = el que midió el estudio multi-régimen. SOLO pos_in_30d_range gatea; el resto son hechos.
+SETUP_POS_MAX = 0.25
+RANGE_WINDOW_DAYS = 30
+SMA_FAST = 20
+SMA_SLOW = 50
+DRAWDOWN_WINDOW_DAYS = 90
+VOL_FAST_DAYS = 3
+VOL_SLOW_DAYS = 30
+
 
 def _quote_vols(bars: list[dict]) -> list[float]:
     return [float(b["quote_volume"]) for b in bars]
@@ -139,6 +150,67 @@ def measure_consolidation(bars: list[dict]) -> dict:
             "semanas": semanas, "vol_percentil": vol_percentil}
 
 
+def _wilder_rsi(closes: list[float], period: int = 14) -> float:
+    """RSI de Wilder sobre la última barra (semilla = promedio simple de los primeros
+    `period` cambios, luego suavizado de Wilder). Hecho EXHIBIDO, no gate. 50.0 si no
+    hay datos suficientes; 100.0 si no hubo bajadas en la ventana suavizada."""
+    if len(closes) < period + 1:
+        return 50.0
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        d = closes[i] - closes[i - 1]
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0.0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - 100.0 / (1.0 + rs)
+
+
+def measure_setup(bars: list[dict]) -> dict:
+    """Hechos del setup "parte baja del rango" (reframe SP2). PURA. SIEMPRE 7 claves.
+    Solo pos_in_30d_range es gate (en evaluate_symbol); el resto son hechos EXHIBIDOS.
+    Todo denominador clampeado — datos ralos/muertos producen un hecho degradado, NUNCA
+    nan/inf (espejando la protección `or 1.0` de measure_consolidation)."""
+    closes = [float(b["close"]) for b in bars]
+    qvols = [float(b["quote_volume"]) for b in bars]
+    close = closes[-1]
+    eps = 1e-9 * close if close else 1e-9
+
+    rango = bars[-RANGE_WINDOW_DAYS:]
+    lo30 = min(float(b["low"]) for b in rango)
+    hi30 = max(float(b["high"]) for b in rango)
+    pos = (close - lo30) / max(hi30 - lo30, eps)
+
+    sma20 = (sum(closes[-SMA_FAST:]) / min(len(closes), SMA_FAST)) or eps
+    sma50 = (sum(closes[-SMA_SLOW:]) / min(len(closes), SMA_SLOW)) or eps
+    med30 = median([float(b["close"]) for b in rango]) or eps
+    consol30 = (hi30 - lo30) / med30 * 100.0
+
+    qv30 = median(qvols[-VOL_SLOW_DAYS:]) if qvols else 0.0
+    qv3 = median(qvols[-VOL_FAST_DAYS:]) if qvols else 0.0
+    vol_ratio = (qv3 / qv30) if qv30 else 0.0
+
+    hist = bars[-DRAWDOWN_WINDOW_DAYS:]
+    hi90 = max(float(b["high"]) for b in hist) or eps
+    drawdown = (close - hi90) / hi90 * 100.0
+
+    return {
+        "pos_in_30d_range": pos,
+        "rsi14": _wilder_rsi(closes, 14),
+        "pct_vs_sma20": (close - sma20) / sma20 * 100.0,
+        "pct_vs_sma50": (close - sma50) / sma50 * 100.0,
+        "consol_30d": consol30,
+        "vol_ratio": vol_ratio,
+        "drawdown_from_90h": drawdown,
+    }
+
+
 def liquidity_value(bars: list[dict]) -> float:
     """Liquidez como HECHO: mediana del volumen USDT de los últimos 30 días.
     Es el criterio de ORDEN NEUTRAL — un hecho, no una medida de 'calidad'."""
@@ -157,26 +229,23 @@ def _distancia_ath_pct(bars: list[dict]) -> float:
 
 
 def evaluate_symbol(symbol: str, bars: list[dict]) -> dict | None:
-    """Evalúa un símbolo. Devuelve la candidata (dict de HECHOS) si está VIVA
-    y EN RANGO; None en cualquier otro caso. Cero ranking, cero claim.
-
-    El dict resultante NO incluye ningún score de 'atractivo' — sólo hechos
-    descriptivos que el humano interpreta (spec §0, §1)."""
+    """Candidata si está VIVA y en la PARTE BAJA de su rango de 30d
+    (pos_in_30d_range ≤ SETUP_POS_MAX) — réplica del filtro de un canal de 2019, NO un
+    claim de selección (el estudio multi-régimen probó que no tiene edge). Devuelve
+    hechos descriptivos; cero ranking, cero veredicto (spec SP2). None si no aplica."""
     vivo, razones = classify_liveness(bars)
     if not vivo:
         return None
-    cons = measure_consolidation(bars)
-    if not cons["en_rango"]:
+    setup = measure_setup(bars)
+    if setup["pos_in_30d_range"] > SETUP_POS_MAX:
         return None
     return {
         "symbol": symbol,
         "price": float(bars[-1]["close"]),
-        "pct_rango": cons["pct_rango"],
-        "semanas_consolidando": cons["semanas"],
-        "vol_percentil": cons["vol_percentil"],
+        **setup,
         "volumen_usd_dia": liquidity_value(bars),
         "distancia_ath_pct": _distancia_ath_pct(bars),
-        "razones_vida": razones,  # [] cuando viva; presente por simetría
+        "razones_vida": razones,
     }
 
 

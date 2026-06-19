@@ -14,7 +14,7 @@ import { useAgentStream } from '../../agent/useAgentStream';
 import { SURFACE_VALLES } from '../../agent/surfaces';
 import type { ChatMsg } from '../../agent/useAgentStream';
 
-const SUGG = ['¿Qué quiere decir "en valle"?', '¿Está vieja la información?', '¿Cuál conviene comprar?', '¿Cuánto pongo?'];
+const SUGG = ['¿Qué quiere decir "parte baja del rango"?', '¿Está vieja la información?', '¿Cuál conviene comprar?', '¿Cuánto pongo?'];
 
 export const Copilot: React.FC<{ onClose: () => void; symbol?: string }> = ({ onClose, symbol }) => {
   const [input, setInput] = useState('');

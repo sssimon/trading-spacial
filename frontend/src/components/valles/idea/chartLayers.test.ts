@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildLayers, LAYER_KEYS } from './chartLayers';
 import type { ValleyEval, SrLevels, PlanDerived } from '../../../types';
 
-const vida = { pct_rango: 0.18, semanas_consolidando: 12, volumen_usd_dia: 4_000_000, vivo: true } as ValleyEval;
+const vida = { pos_in_30d_range: 0.18, rsi14: 38, pct_vs_sma20: -6, pct_vs_sma50: -9, consol_30d: 40, vol_ratio: 0.7, drawdown_from_90h: -35, volumen_usd_dia: 4_000_000, vivo: true } as ValleyEval;
 const levels = { estado: 'ok', price_live: 0.42, ubicacion: {}, zonas: [
   { tipo: 'soporte', precio_bajo: 0.388, precio_alto: 0.398, centro: 0.392, toques: 5 },
   { tipo: 'resistencia', precio_bajo: 0.445, precio_alto: 0.451, centro: 0.448, toques: 2 },
@@ -18,20 +18,19 @@ describe('buildLayers', () => {
     expect(m.paredes.walls).toHaveLength(2);
     expect(m.paredes.walls.find(w => w.tipo === 'resistencia')!.toques).toBe(2);
   });
-  it('vida expone la banda de consolidacion como rango', () => {
+  it('vida expone el sello de posición en rango', () => {
     const m = buildLayers({ vida, levels, plan, live: 0.42, state: null });
-    expect(m.vida.band).not.toBeNull();
-    expect(m.vida.band!.low).toBeLessThan(m.vida.band!.high);
-    expect(m.vida.semanas).toBe(12);
+    expect(m.vida.pos).toBeCloseTo(0.18);
+    expect(m.vida.vivoStamp).toMatch(/pos/i);
   });
   it('jugada reusa buildOverlays', () => {
     const m = buildLayers({ vida, levels, plan, live: 0.42, state: null });
     expect(m.jugada.zone).not.toBeNull();
     expect(m.jugada.rungs).toHaveLength(1);
   });
-  it('tolera data nula (band null, walls vacio)', () => {
+  it('tolera data nula (pos null, walls vacio)', () => {
     const m = buildLayers({ vida: {} as ValleyEval, levels: { zonas: [] } as unknown as SrLevels, plan, live: 0, state: null });
-    expect(m.vida.band).toBeNull();
+    expect(m.vida.pos).toBeNull();
     expect(m.paredes.walls).toEqual([]);
   });
 });

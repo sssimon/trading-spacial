@@ -81,28 +81,41 @@ class TestMeasureConsolidation:
 
 
 class TestEvaluateYorden:
-    def test_evaluate_viva_en_rango_es_candidata(self):
-        bars = []
-        for i in range(150):
-            c = 1.0 + (0.03 if i % 2 else -0.03)
-            bars.append(_bar(i * 86_400_000, c, 2_000_000.0,
-                             high=c * 1.005, low=c * 0.995))
+    def test_evaluate_viva_en_parte_baja_es_candidata(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93)
         cand = evaluate_symbol("XYZUSDT", bars)
         assert cand is not None
         assert cand["symbol"] == "XYZUSDT"
-        assert set(cand.keys()) >= {
-            "symbol", "price", "pct_rango", "semanas_consolidando",
+        assert set(cand.keys()) == {
+            "symbol", "price", "pos_in_30d_range", "rsi14", "pct_vs_sma20",
+            "pct_vs_sma50", "consol_30d", "vol_ratio", "drawdown_from_90h",
             "volumen_usd_dia", "distancia_ath_pct", "razones_vida"}
         assert cand["razones_vida"] == []
+        assert "pct_rango" not in cand and "semanas_consolidando" not in cand
+
+    def test_aceptacion_techo_no_pasa_con_amplitud_identica(self):
+        from screener.valley_filter import measure_setup
+        piso = _serie_amplitud_fija(150, last_close=0.92)
+        techo = _serie_amplitud_fija(150, last_close=1.20)
+        # El teorema: MISMA amplitud (consol_30d idéntico) ...
+        assert measure_setup(piso)["consol_30d"] == measure_setup(techo)["consol_30d"]
+        # ... pero distinta posición → distinto veredicto del gate.
+        assert measure_setup(piso)["pos_in_30d_range"] <= 0.25
+        assert measure_setup(techo)["pos_in_30d_range"] >= 0.75
+        assert evaluate_symbol("PISOUSDT", piso) is not None
+        assert evaluate_symbol("TECHOUSDT", techo) is None
+
+    def test_payload_sin_lenguaje_de_veredicto(self):
+        import json
+        cand = evaluate_symbol("XYZUSDT", _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93))
+        blob = json.dumps(cand, ensure_ascii=False).lower()
+        for prohibido in ("valle", "va a subir", "señal", "fuertes", "débil",
+                          "cazaba", "tiene jugada", "setup de corrección"):
+            assert prohibido not in blob, f"lenguaje prohibido: {prohibido}"
 
     def test_evaluate_muerta_devuelve_none(self):
         cand = evaluate_symbol("DEADUSDT", _serie(200, quote_vol=50_000.0))
         assert cand is None  # volumen bajo piso ⟹ no candidata
-
-    def test_evaluate_viva_pero_no_en_rango_devuelve_none(self):
-        bars = [_bar(i * 86_400_000, 1.0 + i / 100.0, 2_000_000.0) for i in range(150)]
-        cand = evaluate_symbol("TRENDUSDT", bars)
-        assert cand is None  # viva pero en tendencia, no es valle
 
     def test_orden_neutral_por_liquidez_desc(self):
         a = {"symbol": "AUSDT", "volumen_usd_dia": 1_000_000.0}
@@ -114,3 +127,86 @@ class TestEvaluateYorden:
     def test_liquidity_value_es_mediana_volumen(self):
         bars = _serie(60, quote_vol=1_500_000.0)
         assert liquidity_value(bars) == 1_500_000.0
+
+
+from screener.valley_filter import measure_setup, _wilder_rsi, SETUP_POS_MAX
+
+
+def _serie_amplitud_fija(n, last_close, vol=2_000_000.0):
+    """30d window con amplitud FIJA [0.92, 1.20]; difiere SOLO en el último cierre.
+    Garantiza misma consol_30d para piso (0.92) y techo (1.20)."""
+    bars = [_bar(i * 86_400_000, 1.06, vol) for i in range(n - 30)]
+    window = [1.20, 0.92] + [1.06] * 27 + [last_close]
+    base = n - 30
+    for k, c in enumerate(window):
+        bars.append(_bar((base + k) * 86_400_000, c, vol, high=c * 1.005, low=c * 0.995))
+    return bars
+
+
+def _serie_rango(n, lo, hi, last_close, vol=2_000_000.0):
+    """n barras vivas; las últimas 30 barran [lo, hi] y la última cierra en last_close.
+    Las primeras n-30 quedan planas en el extremo opuesto para fijar amplitud."""
+    bars = []
+    anchor = hi if last_close <= (lo + hi) / 2 else lo
+    for i in range(n):
+        if i < n - 30:
+            c = anchor
+        else:
+            frac = (i - (n - 30)) / 29.0
+            c = anchor + (last_close - anchor) * frac
+        bars.append(_bar(i * 86_400_000, c, vol, high=c * 1.005, low=c * 0.995))
+    return bars
+
+
+class TestMeasureSetup:
+    def test_pos_in_30d_range_piso(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=0.93)
+        out = measure_setup(bars)
+        assert out["pos_in_30d_range"] < 0.25       # cuartil inferior
+
+    def test_pos_in_30d_range_techo(self):
+        bars = _serie_rango(150, lo=0.92, hi=1.20, last_close=1.19)
+        out = measure_setup(bars)
+        assert out["pos_in_30d_range"] > 0.75       # cuartil superior
+
+    def test_claves_exactas(self):
+        out = measure_setup(_serie(150))
+        assert set(out.keys()) == {
+            "pos_in_30d_range", "rsi14", "pct_vs_sma20", "pct_vs_sma50",
+            "consol_30d", "vol_ratio", "drawdown_from_90h"}
+
+    def test_denominador_cero_no_revienta(self):
+        # libro plano (high==low==close) → sin nan/inf en ningún hecho
+        planas = [_bar(i * 86_400_000, 1.0, 2_000_000.0, high=1.0, low=1.0) for i in range(150)]
+        out = measure_setup(planas)
+        for k, v in out.items():
+            assert v == v and abs(v) != float("inf"), f"{k} es nan/inf"
+
+    def test_drawdown_no_positivo(self):
+        out = measure_setup(_serie_rango(150, lo=0.92, hi=1.20, last_close=0.95))
+        assert out["drawdown_from_90h"] <= 0.0
+
+    def test_rsi_subida_pura_alto(self):
+        closes = [1.0 + i * 0.01 for i in range(40)]
+        assert _wilder_rsi(closes, 14) > 90.0
+
+    def test_rsi_bajada_pura_bajo(self):
+        closes = [2.0 - i * 0.01 for i in range(40)]
+        assert _wilder_rsi(closes, 14) < 10.0
+
+    def test_rsi_pocos_datos_neutral(self):
+        assert _wilder_rsi([1.0, 1.1], 14) == 50.0
+
+    def test_rsi_converge_con_edge_study_en_regimen_produccion(self):
+        import pandas as pd
+        closes = [1.0]
+        for i in range(149):
+            closes.append(closes[-1] * (1.0 + 0.02 * ((i % 7) - 3) / 3.0))
+        s = pd.Series(closes)
+        delta = s.diff()
+        up = delta.clip(lower=0.0); down = (-delta).clip(lower=0.0)
+        ru = up.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        rd = down.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        rs = ru / rd.replace(0.0, float('nan'))
+        ref = (100.0 - 100.0 / (1.0 + rs)).where(rd != 0.0, 100.0).iloc[-1]
+        assert abs(_wilder_rsi(closes, 14) - float(ref)) < 0.01

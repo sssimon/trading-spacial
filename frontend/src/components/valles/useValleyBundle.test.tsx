@@ -5,7 +5,7 @@ import * as api from '../../api';
 
 vi.mock('../../api');
 
-const VIDA = { symbol: 'ADAUSDT', estado: 'ok', candidata: true, pct_rango: 0.12, semanas_consolidando: 6, vol_percentil: 0.2, price: 0.45, volumen_usd_dia: 1e7, razones_vida: [] };
+const VIDA = { symbol: 'ADAUSDT', estado: 'ok', candidata: true, pos_in_30d_range: 0.12, rsi14: 38, vol_ratio: 0.7, price: 0.45, volumen_usd_dia: 1e7, razones_vida: [] };
 const LVL  = { symbol: 'ADAUSDT', estado: 'ok', generated_at: null, price_live: 0.45, zonas: [], ubicacion: { dentro_de: null, techo: null, piso: null } };
 const DOS  = { symbol: 'ADAUSDT', equipo: [], equipo_identificado: false, presencia: {}, actividad: {}, financiacion: [], hitos: [], estado_general: 'opaco', no_encontrado_en: [], generated_at: null };
 

@@ -10,14 +10,18 @@ import type { ValleyEval, SrLevels, PlanDerived } from '../../../types';
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
 const vida: ValleyEval = {
-  symbol:               'ADAUSDT',
-  estado:               'ok',
-  candidata:            true,
-  vivo:                 true,
-  pct_rango:            0.08,
-  semanas_consolidando: 6,
-  volumen_usd_dia:      820000,
-  vol_percentil:        0.15,
+  symbol:            'ADAUSDT',
+  estado:            'ok',
+  candidata:         true,
+  vivo:              true,
+  pos_in_30d_range:  0.12,
+  rsi14:             38,
+  pct_vs_sma20:      -6,
+  pct_vs_sma50:      -9,
+  consol_30d:        40,
+  vol_ratio:         0.7,
+  drawdown_from_90h: -35,
+  volumen_usd_dia:   820000,
 };
 
 const levels: SrLevels = {
@@ -74,9 +78,9 @@ describe('Narrativa — con datos', () => {
 
   it('aparece la costura obligatoria "la decisión es tuya"', () => {
     render(<Narrativa vida={vida} levels={levels} plan={plan} />);
-    // La costura completa: "Esto sale de tus niveles · la decisión es tuya."
-    const costura = screen.getByText(/la decisión es tuya/i);
-    expect(costura).toBeTruthy();
+    // La costura aparece en el bloque vida (AC7) y en el bloque jugada.
+    const costuras = screen.getAllByText(/la decisión es tuya/i);
+    expect(costuras.length).toBeGreaterThan(0);
   });
 
   it('usa tuteo venezolano — "decides" y NO "decidís"', () => {
@@ -87,10 +91,16 @@ describe('Narrativa — con datos', () => {
     expect(screen.queryByText(/decidís/i)).toBeNull();
   });
 
-  it('muestra semanas_consolidando del campo vida', () => {
+  it('muestra la posición en rango y la costura AC7', () => {
     render(<Narrativa vida={vida} levels={levels} plan={plan} />);
-    // "6 semanas" o "6 sem" debe estar en el DOM
-    expect(screen.getByText(/6\s+semanas?/i)).toBeTruthy();
+    expect(screen.getByText(/parte baja de su rango/i)).toBeTruthy();
+    expect(screen.getByText(/no le ganó al azar/i)).toBeTruthy();
+    expect(screen.getByText(/no le ganó al azar/i).textContent).toMatch(/9\.92%.*12\.54%/);
+  });
+
+  it('doctrina: sin "en valle" ni "franja angosta" en el bloque vida', () => {
+    render(<Narrativa vida={vida} levels={levels} plan={plan} />);
+    expect(screen.queryByText(/en valle|franja angosta/i)).toBeNull();
   });
 
   it('muestra el techo del precio', () => {

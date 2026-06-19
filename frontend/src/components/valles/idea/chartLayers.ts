@@ -15,7 +15,7 @@ export interface Wall {
 }
 
 export interface LayersModel {
-  vida: { band: { low: number; high: number } | null; semanas: number; vivoStamp: string };
+  vida: { pos: number | null; vivoStamp: string };
   paredes: { walls: Wall[]; price: number | null };
   jugada: OverlayModel;
 }
@@ -29,14 +29,7 @@ export function buildLayers(args: {
 }): LayersModel {
   const { vida, levels, plan, live, state } = args;
 
-  // vida layer: consolidation band centred on the live price using pct_rango.
-  // Only shown when the coin is actually alive (vivo===true or candidata===true);
-  // a dead coin must NOT get a life-affirming salvia band.
-  const isAlive = vida?.vivo === true || vida?.candidata === true;
-  const band =
-    isAlive && vida?.pct_rango != null && live
-      ? { low: live * (1 - vida.pct_rango / 2), high: live * (1 + vida.pct_rango / 2) }
-      : null;
+  // vida layer: posición en rango 30d (SP2 — sin banda, solo hecho descriptivo).
 
   // paredes layer: all S/R zones mapped to a flat Wall shape
   const walls: Wall[] = (levels?.zonas ?? []).map((z) => ({
@@ -62,11 +55,10 @@ export function buildLayers(args: {
 
   return {
     vida: {
-      band,
-      semanas: vida?.semanas_consolidando ?? 0,
+      pos: vida?.pos_in_30d_range ?? null,
       vivoStamp:
-        vida?.vivo
-          ? `viva · vol $${Math.round((vida.volumen_usd_dia ?? 0) / 1000)}k/día`
+        vida?.vivo || vida?.candidata
+          ? `viva · pos ${vida?.pos_in_30d_range != null ? Math.round(vida.pos_in_30d_range * 100) : '—'}% del rango 30d`
           : 'sin actividad',
     },
     paredes: { walls, price: levels?.price_live ?? null },

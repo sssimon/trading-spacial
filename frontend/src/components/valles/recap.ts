@@ -2,7 +2,7 @@
 import type { ValleyEval, SrLevels, Dossier } from '../../types';
 
 export const vidaRecap = (v: ValleyEval | null): string =>
-  !v ? '—' : v.candidata === false ? 'Muy quieta' : v.estado === 'no_disponible' ? '—' : 'Viva y tranquila';
+  !v ? '—' : v.estado === 'no_disponible' ? '—' : v.candidata === false ? 'No en la parte baja' : 'En la parte baja de su rango';
 
 export const nivelesRecap = (n: SrLevels | null): string => {
   if (!n || n.estado === 'no_disponible') return '—';

@@ -43,13 +43,18 @@ import { IdeaChart } from './IdeaChart';
 import type { ValleyEval, SrLevels, PlanDerived } from '../../../types';
 
 const vida: ValleyEval = {
-  symbol:               'ADAUSDT',
-  estado:               'ok',
-  candidata:            true,
-  vivo:                 true,
-  pct_rango:            0.08,
-  semanas_consolidando: 6,
-  volumen_usd_dia:      820000,
+  symbol:            'ADAUSDT',
+  estado:            'ok',
+  candidata:         true,
+  vivo:              true,
+  pos_in_30d_range:  0.12,
+  rsi14:             38,
+  pct_vs_sma20:      -6,
+  pct_vs_sma50:      -9,
+  consol_30d:        40,
+  vol_ratio:         0.7,
+  drawdown_from_90h: -35,
+  volumen_usd_dia:   820000,
 };
 
 const levels: SrLevels = {

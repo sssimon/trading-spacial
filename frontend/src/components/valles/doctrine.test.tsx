@@ -12,11 +12,11 @@ vi.mock('../../api');
 const FORBIDDEN = /compra|c[oó]mpr|buena|score|recomend|veredicto|potencial|d[oó]nde operar/i;
 const snap: ValleySnapshot = {
   generated_at: '2026-06-14T10:00:00Z', coverage: { universe: 5, evaluated: 5, complete: true },
-  candidates: [{ symbol: 'ADAUSDT', price: 0.45, pct_rango: 0.12, semanas_consolidando: 6, vol_percentil: 0.2, volumen_usd_dia: 1e7, distancia_ath_pct: 0.7, razones_vida: [] }],
+  candidates: [{ symbol: 'ADAUSDT', price: 0.45, pos_in_30d_range: 0.12, rsi14: 38, pct_vs_sma20: -6, pct_vs_sma50: -9, consol_30d: 40, vol_ratio: 0.7, drawdown_from_90h: -35, volumen_usd_dia: 1e7, distancia_ath_pct: 0.7, razones_vida: [] }],
   frescura: { estado: 'fresco', edad_seg: 1800, generated_at: '2026-06-14T10:00:00Z', umbral_seg: 43200 },
 };
 beforeEach(() => {
-  vi.mocked(api.getValleyEval).mockResolvedValue({ symbol: 'ADAUSDT', estado: 'ok', candidata: true, pct_rango: 0.1, semanas_consolidando: 5, vol_percentil: 0.2 } as never);
+  vi.mocked(api.getValleyEval).mockResolvedValue({ symbol: 'ADAUSDT', estado: 'ok', candidata: true, pos_in_30d_range: 0.1, rsi14: 38, vol_ratio: 0.7 } as never);
   vi.mocked(api.getLevels).mockResolvedValue({ symbol: 'ADAUSDT', estado: 'ok', generated_at: null, price_live: 1, zonas: [], ubicacion: { dentro_de: null, techo: null, piso: null } } as never);
   vi.mocked(api.getDossier).mockResolvedValue({ symbol: 'ADAUSDT', equipo: [], equipo_identificado: false, presencia: {}, actividad: {}, financiacion: [], hitos: [], estado_general: 'opaco', no_encontrado_en: [], generated_at: null } as never);
   vi.mocked(api.getAltSeason).mockResolvedValue({
@@ -36,7 +36,7 @@ vi.mock('./idea/IdeaChart', () => ({
 // useValleyBundle provee los datos de vida/niveles/dossier.
 vi.mock('./useValleyBundle', () => ({
   useValleyBundle: () => ({
-    vida: { data: { symbol: 'ADAUSDT', estado: 'ok', candidata: true, vivo: true, pct_rango: 0.1, semanas_consolidando: 4, vol_percentil: 0.2, volumen_usd_dia: 5e6 }, loading: false, error: false },
+    vida: { data: { symbol: 'ADAUSDT', estado: 'ok', candidata: true, vivo: true, pos_in_30d_range: 0.1, rsi14: 38, pct_vs_sma20: -6, pct_vs_sma50: -9, consol_30d: 40, vol_ratio: 0.7, drawdown_from_90h: -35, volumen_usd_dia: 5e6 }, loading: false, error: false },
     niveles: { data: { symbol: 'ADAUSDT', estado: 'ok', generated_at: null, price_live: 0.45, zonas: [], ubicacion: { dentro_de: null, techo: null, piso: null } }, loading: false, error: false },
     dossier: { data: null, loading: false, error: true },
     refreshDossier: vi.fn(),
