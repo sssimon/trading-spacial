@@ -377,6 +377,7 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
               <div className={styles['iv-head__eyebrow']}>
                 <span className={styles['iv-head__coin']}>{humanName(symbol)}</span>
                 <span className={styles['iv-head__sym']}>{symbol}</span>
+                {vida?.frescura && <Fresh frescura={vida.frescura} noun="lectura" />}
               </div>
               <h1 className={styles['iv-head__title']}>{humanName(symbol)}</h1>
               {price != null && (

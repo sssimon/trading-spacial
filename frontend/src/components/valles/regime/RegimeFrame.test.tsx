@@ -32,7 +32,7 @@ describe('RegimeFrame', () => {
   it('régimen muerto → ausencia honesta, no datos viejos', () => {
     const dead = { ...snap(), regime: null, frescura: { estado: 'muerto', edad_seg: null, generated_at: null, umbral_seg: 43200 } } as never;
     render(<RegimeFrame regime={dead} />);
-    expect(screen.getByText(/no está disponible|caída/i)).toBeTruthy();
+    expect(screen.getByText(/no está disponible/i)).toBeTruthy();
   });
   it('componente caído → "sin dato", el resto vive', () => {
     render(<RegimeFrame regime={snap({ componentes: { breadth50: { valor: 0.61, lean: 'alts', estado: 'fresco', n: 209 }, outperf_30d: { valor: 0.07, lean: 'alts', estado: 'fresco' }, dominancia_btc: { valor: null, lean: null, estado: 'muerto' } } } as never)} />);

@@ -175,9 +175,13 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
 
   // ── VIDA · banda de rango 30d + marcador (Pieza 2) ─────────
   // range30 se computa en cliente (chartLayers); el marcador va al precio vivo.
+  // El rango de 30d es un HECHO (min/max de las últimas 30 velas): existe esté
+  // "viva" o no. NO se gatea por `vivo` — eso modularía un hecho por un juicio.
+  // Solo el texto del sello de vida (ch-life) varía con `vivo`. El mockup
+  // sp3-chart.jsx:153 gatea la banda en `layers.vida && range`.
   const vivo = Boolean(vida?.vivo || vida?.candidata);
   const range30 = m.vida.range30;
-  const showRange30 = layers.vida && range30 != null && vivo;
+  const showRange30 = layers.vida && range30 != null;
   const r30Top = range30 ? Y(range30.hi) : null;
   const r30Bot = range30 ? Y(range30.lo) : null;
   const markY  = Y(live);
@@ -206,8 +210,8 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   const buildCandidates = (): LabelCandidate[] => {
     const candidates: LabelCandidate[] = [];
 
-    // Marcador de posición (Vida · rango 30d)
-    if (showRange30 && markY != null) {
+    // Marcador de posición (Vida · rango 30d) — solo si hay precio vivo (>0)
+    if (showRange30 && markY != null && live > 0) {
       candidates.push({ key: 'mark', y: markY });
     }
 
@@ -284,6 +288,10 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))}
             type="button"
           >
+            <span
+              className={`${styles['idea-legend__sw']} ${styles[`idea-legend__sw--${k}`]}`}
+              aria-hidden="true"
+            />
             {LAYER_LABELS[k]}
           </button>
         ))}
@@ -291,6 +299,14 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
 
       {/* ── CAPA DE ANOTACIONES HTML ── */}
       <div className={juStyles['ju-chart__ann']}>
+
+        {/* ── SELLO DE VIDA (arriba-izq) — solo el texto varía con `vivo` ── */}
+        {layers.vida && (
+          <div className={`${styles['idea-life']} ${vivo ? '' : styles['idea-life--off']}`}>
+            <span className={styles['idea-life__dot']} />
+            {m.vida.vivoStamp}
+          </div>
+        )}
 
         {/* ── PAREDES (S/R — banda slate rellena) ── */}
         {layers.paredes && m.paredes.walls.map((w, i) => {
@@ -333,7 +349,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             </span>
           </div>
         )}
-        {showRange30 && markY != null && (
+        {showRange30 && markY != null && live > 0 && (
           <>
             <div
               className={styles['idea-mark']}

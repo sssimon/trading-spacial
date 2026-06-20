@@ -108,6 +108,7 @@ export function RegimeFrame({ regime }: { regime: RegimeSnapshot | null }) {
     return (
       <header className={styles.rf}>
         <div className={styles['rf__eyebrow']}>Clima del mercado</div>
+        <div className={styles['rf__lean']}>El régimen de mercado no está disponible ahora.</div>
         <div className={`${styles['fr-dead']}`} style={{ marginTop: 18 }}>
           <span className={styles['fr-dead__icon']}>⧖</span>
           <div>

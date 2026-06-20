@@ -22,6 +22,11 @@
 }
 
 .idea-legend__item {
+  /* Target táctil ≥48px (README §Accesibilidad — la leyenda nombrada). */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
   font-family: var(--sans, sans-serif);
   font-size: 14px;
   font-weight: 600;
@@ -67,6 +72,64 @@
 .idea-legend__item:disabled {
   cursor: not-allowed;
   opacity: 0.22;
+}
+
+/* ── SWATCHES DE LEYENDA (clave color ↔ overlay) ──────────────
+   Port de sp3-warm.css §.ch__leg-sw--*. Cada chip lleva el swatch
+   del overlay que controla: vida = rango punteado arcilla,
+   paredes = relleno slate, jugada = sólido arcilla. */
+.idea-legend__sw {
+  width: 16px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+.idea-legend__sw--vida {
+  background: transparent;
+  border: 1.5px dashed var(--clay, #B8542E);
+}
+.idea-legend__sw--paredes {
+  background: var(--card-2, #F6F1E7);
+  border: 1px solid var(--slate, #4C5A66);
+}
+.idea-legend__sw--jugada {
+  background: var(--clay, #B8542E);
+}
+
+/* ── VIDA · SELLO DE VIDA (arriba-izq) ────────────────────────
+   Port de sp3-warm.css §.ch-life. Muestra m.vida.vivoStamp
+   ("viva · pos N% del rango 30d" / "sin actividad"). Solo el
+   TEXTO varía con `vivo`; la banda/marcador son hechos. */
+.idea-life {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sans, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--sage, #5E7048);
+  background: var(--sage-tint, #ECEFE2);
+  border: 1px solid #C9D2B2;
+  border-radius: 6px;
+  padding: 5px 10px;
+  pointer-events: none;
+}
+.idea-life--off {
+  color: var(--ink-3, #6E6757);
+  background: var(--paper-2, #EFE9DD);
+  border-color: var(--card-edge-2, #D8CDB8);
+}
+.idea-life__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
 }
 
 /* ── VIDA · BANDA DE RANGO 30d (Pieza 2) ──────────────────────
@@ -175,88 +238,7 @@
   padding: 16px;
 }
 
-/* ── IDEA VIEW — layout principal ────────────────────────── */
-
-/* Contenedor raíz de IdeaView — columna scrollable, cálida */
-.idea-view {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: clamp(16px, 4vw, 48px) clamp(16px, 3vw, 36px) 80px;
-  width: 100%;               /* llena el flex container (.vwStage) */
-  max-width: min(1240px, 100%);
-  margin: 0 auto;
-  font-size: 18px; /* ≥18px base como indica la spec */
-}
-
-/* Bloque de texto — medida de lectura (~760px) */
-.idea-text-measure {
-  max-width: 760px;
-  width: 100%;
-  margin-inline: auto;       /* centra la columna de texto bajo el gráfico ancho */
-}
-
-/* Bloque del gráfico — ocupa todo el ancho del contenedor */
-.idea-chart-wrap {
-  width: 100%;
-}
-
-/* ── STICKY NAV ───────────────────────────────────────────── */
-.idea-nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px 14px;
-  background: rgba(251, 249, 244, 0.92);
-  border-bottom: 1px solid var(--card-edge, #E4DCCC);
-  backdrop-filter: blur(6px);
-  margin-left: clamp(-16px, -3vw, -36px);
-  margin-right: clamp(-16px, -3vw, -36px);
-  /* compensar el padding del contenedor para llegar a los bordes */
-  width: calc(100% + clamp(32px, 6vw, 72px));
-}
-
-.idea-nav a {
-  font-family: var(--sans, sans-serif);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--ink-3, #9A9080);
-  text-decoration: none;
-  transition: color 140ms;
-}
-.idea-nav a:hover {
-  color: var(--ink-1, #2A2520);
-}
-
-.idea-nav__sep {
-  font-size: 11px;
-  color: var(--card-edge-2, #CFC7B8);
-  user-select: none;
-}
-
-/* ── HEADER (eyebrow + título) ────────────────────────────── */
-.idea-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 8px;
-}
-
-.idea-title {
-  font-family: var(--serif, serif);
-  font-size: clamp(28px, 5vw, 42px);
-  font-weight: 500;
-  color: var(--ink, #1A1510);
-  margin: 0;
-  line-height: 1.15;
-}
-
-/* ── CHART PLACEHOLDER ────────────────────────────────────── */
+/* ── CHART PLACEHOLDER (estado de carga inicial, vivo en IdeaView) ── */
 .idea-chart-placeholder {
   display: flex;
   align-items: center;
@@ -268,214 +250,6 @@
   font-family: var(--sans, sans-serif);
   font-size: 13.5px;
   color: var(--ink-3, #9A9080);
-}
-
-/* ── JUGADA COMPACTA ──────────────────────────────────────── */
-.idea-jugada-encurso {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.idea-jugada-estado {
-  font-family: var(--sans, sans-serif);
-  font-size: 18px;
-  color: var(--ink-1, #2A2520);
-  margin: 0;
-}
-
-.idea-jugada-frescura {
-  font-size: 12.5px;
-  color: var(--ink-3, #9A9080);
-  font-weight: 400;
-}
-
-.idea-jugada-cta-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* CTA principal — "Fijar esta jugada" */
-.idea-cta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--sans, sans-serif);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--paper, #FBF9F4);
-  background: var(--ink-2, #4A4540);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 22px;
-  cursor: pointer;
-  transition: background 160ms, opacity 160ms;
-  align-self: flex-start;
-}
-.idea-cta:hover {
-  background: var(--ink-1, #2A2520);
-}
-.idea-cta:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.idea-jugada-ok {
-  font-family: var(--sans, sans-serif);
-  font-size: 14px;
-  color: var(--sage, #5E7048);
-  font-weight: 600;
-  margin: 0;
-}
-
-.idea-jugada-error {
-  font-family: var(--sans, sans-serif);
-  font-size: 13px;
-  color: var(--clay, #B8542E);
-  margin: 0;
-}
-
-.idea-jugada-cerrado {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.idea-conducta-icon {
-  font-family: var(--sans, sans-serif);
-  font-size: 12px;
-  color: var(--ink-3, #9A9080);
-}
-
-/* ── SECCIÓN QUIÉN ────────────────────────────────────────── */
-.idea-quien-heading {
-  font-family: var(--sans, sans-serif);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-2, #4A4540);
-  margin: 0 0 4px 0;
-}
-
-/* ── FOOTER ───────────────────────────────────────────────── */
-.idea-footer {
-  display: flex;
-  justify-content: flex-start;
-  padding-top: 8px;
-  border-top: 1px solid var(--card-edge, #E4DCCC);
-}
-
-.idea-restart {
-  font-family: var(--sans, sans-serif);
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--ink-3, #9A9080);
-  background: none;
-  border: 1px solid var(--card-edge-2, #CFC7B8);
-  border-radius: 8px;
-  padding: 8px 18px;
-  cursor: pointer;
-  transition: color 140ms, border-color 140ms;
-}
-.idea-restart:hover {
-  color: var(--ink-1, #2A2520);
-  border-color: var(--ink-3, #9A9080);
-}
-
-/* ── NARRATIVA — bloques descriptivos ────────────────────── */
-
-/* Contenedor raíz de la narrativa — hereda tokens de .vwRoot */
-.na-root {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-/* Bloque individual (vida / paredes / jugada / noticias) */
-.na-block {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 18px 20px;
-  background: var(--paper-2, #F0EBE1);
-  border: 1px solid var(--card-edge, #E4DCCC);
-  border-radius: 10px;
-}
-
-/* Heading de bloque */
-.na-heading {
-  font-family: var(--sans, sans-serif);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-2, #4A4540);
-  margin: 0;
-}
-
-/* Párrafo de cuerpo */
-.na-body {
-  font-family: var(--sans, sans-serif);
-  font-size: 18px;
-  line-height: 1.65;
-  color: var(--ink-1, #2A2520);
-  margin: 0;
-}
-
-.na-body p {
-  margin: 0 0 8px 0;
-}
-.na-body p:last-child {
-  margin-bottom: 0;
-}
-
-/* Empty-state tranquilo */
-.na-empty {
-  font-family: var(--sans, sans-serif);
-  font-size: 16px;
-  line-height: 1.6;
-  color: var(--ink-3, #9A9080);
-  margin: 0;
-}
-
-/* Lista de hechos dentro de un bloque */
-.na-list {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.na-list li {
-  font-family: var(--sans, sans-serif);
-  font-size: 18px;
-  line-height: 1.6;
-  color: var(--ink-1, #2A2520);
-  padding-left: 14px;
-  position: relative;
-}
-
-.na-list li::before {
-  content: "—";
-  position: absolute;
-  left: 0;
-  color: var(--ink-3, #9A9080);
-}
-
-/* Costura obligatoria — pie del bloque jugada */
-.na-costura {
-  font-family: var(--sans, sans-serif);
-  font-size: 16px;
-  color: var(--ink-3, #9A9080);
-  border-top: 1px solid var(--card-edge, #E4DCCC);
-  padding-top: 10px;
-  margin: 4px 0 0 0;
-  line-height: 1.5;
 }
 
 /* ============================================================

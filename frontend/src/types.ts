@@ -616,6 +616,9 @@ export interface ValleyEval {
   volumen_usd_dia?:      number;
   distancia_ath_pct?:    number;
   razones_vida?:         string[];
+  /** Frescura de la lectura on-demand, emitida por el backend vía LiveSnapshot
+   *  (Non-Negotiable #8). Ausente en backends viejos. */
+  frescura?:             Frescura;
 }
 
 // La Jugada / Instrumento — contrato /plan
