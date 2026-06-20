@@ -1,39 +1,46 @@
 // ============================================================
-// IdeaView.tsx — vista única "idea de moneda"
+// IdeaView.tsx — vista única "idea de moneda" (SP3)
 //
-// Orquesta para un símbolo dado:
-//   1. Sticky nav (5 anclas)
-//   2. Eyebrow + título
-//   3. IdeaChart (gráfico unificado)
-//   4. Narrativa (vida · paredes · jugada descriptiva)
-//   5. Jugada lifecycle compacto (interactivo)
-//   6. Quién está detrás (dossier inlineado — NO usa el wrapper vwScreen)
-//   7. NoticiasSection
-//   8. Footer "Mirar otra moneda"
+// Port 1:1 de docs/superpowers/handoffs/sp3/sp3-ideaview.jsx
+// (líneas 250-462: PlayNow, Dossier, NAV, IdeaView), conservando
+// la lógica real (useValleyBundle, useJugada, confirmPlan).
 //
-// Nota sobre Quién/FundScreen:
-//   FundScreen envuelve todo en `vwScreen` (animación fade) y renderiza
-//   un <Eyebrow> propio + <h2 className=vwQuestion>. Eso traería un eyebrow
-//   duplicado y un heading-grande que rompe la jerarquía de IdeaView.
-//   Decisión: se inlinea el cuerpo del dossier bajo <h2>Quién está detrás</h2>
-//   reutilizando las clases de valles.module.css y los mismos átomos
-//   (Loading, Callout, Retry) que FundScreen usa internamente.
+// Estructura:
+//   .iv > .iv__frame > (
+//     RegimeFrame,             ← marco de régimen dominante
+//     RegimeStrip (sticky),    ← franja persistente del clima
+//     .iv__body > (
+//       nav,                   ← Vida·Paredes·Jugada·Quién·Noticias
+//       head,                  ← eyebrow + título + precio
+//       chart-wide,            ← IdeaChart (callout honesto si no hay datos)
+//       narrativa,             ← Vida · Paredes · Jugada (descriptivo)
+//       PlayNow,               ← lifecycle de "Tu jugada ahora"
+//       Dossier,               ← "Quién está detrás"
+//       Noticias,              ← vacío honesto
+//       footer,                ← "← Mirar otra moneda"
+//     )
+//   )
+//
+// DOCTRINA: el régimen ENMARCA pero NO modula la moneda. Cero
+// color/orden/énfasis condicionado por el régimen. Texto VERBATIM
+// del mockup intacto. Tuteo venezolano. Sin lenguaje de veredicto.
 // ============================================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { IdeaChart } from './IdeaChart';
 import { Narrativa } from './Narrativa';
-import { NoticiasSection } from './NoticiasSection';
-import { Eyebrow, humanName, Loading, Callout, Retry } from '../atoms';
-import { FreshnessTag } from '../../FreshnessTag';
+import { Fresh, RegimeFrame, RegimeStrip } from '../regime/RegimeFrame';
+import { humanName } from '../atoms';
 import { useValleyBundle } from '../useValleyBundle';
 import { useJugada } from '../jugada/useJugada';
-import { confirmPlan } from '../../../api';
-import type { PlanLive, Dossier } from '../../../types';
-import type { AsyncState } from '../useValleyBundle';
+import { confirmPlan, getAltSeason } from '../../../api';
+import { formatPrice } from '../../../utils';
+import type {
+  PlanLive, PlanConducta, Dossier, RegimeSnapshot,
+} from '../../../types';
+import type { AsyncState as JugadaAsync } from '../jugada/useJugada';
 import type { LiveState } from '../jugada/overlays';
 import styles from './idea.module.css';
-import vwStyles from '../valles.module.css';
 
 // ── helper: extrae LiveState de PlanLive ─────────────────────
 function liveStateFrom(pl: PlanLive | null): LiveState | null {
@@ -45,7 +52,7 @@ function liveStateFrom(pl: PlanLive | null): LiveState | null {
   };
 }
 
-// ── CH_LABEL (igual que FundScreen) ──────────────────────────
+// ── CH_LABEL (port de sp3-data.jsx) ──────────────────────────
 const CH_LABEL: Record<string, string> = {
   sitio_web: 'Sitio web',
   github: 'GitHub',
@@ -54,106 +61,229 @@ const CH_LABEL: Record<string, string> = {
   whitepaper: 'Documento técnico',
 };
 
-const Fuente: React.FC<{ url: string | null }> = ({ url }) =>
-  url ? (
-    <a className={vwStyles.vwSrc} href={url} target="_blank" rel="noreferrer">
-      fuente
-    </a>
-  ) : null;
+// ════════════════════════════════════════════════════════════
+// ⑤ TU JUGADA AHORA — lifecycle (port de sp3-ideaview.jsx:253-302)
+//
+// El mockup recibe un `play` con forma:
+//   { estado_vivo, titular?, campos?, hechos?, frescura?, _fijada, _recienFijada }
+// Aquí se construye con DATOS REALES:
+//   - estado_vivo  ← live.data.estado_vivo
+//   - hechos       ← live.data.hechos
+//   - frescura     ← live.data.frescura
+//   - titular/campos (cerrado) ← conducta.data
+//   - _fijada / _recienFijada  ← estado LOCAL (confirmPlan)
+// ════════════════════════════════════════════════════════════
+interface PlayModel {
+  estado_vivo: 'activo' | 'incierto' | 'cerrado' | null;
+  titular?: string;
+  campos?: PlanConducta['campos'];
+  hechos?: string[];
+  frescura?: PlanLive['frescura'];
+  _fijada: boolean;
+  _recienFijada: boolean;
+}
 
-// ── bloque Quién inlineado ────────────────────────────────────
-const DossierBody: React.FC<{ state: AsyncState<Dossier>; onRefresh: () => void }> = ({
-  state,
-  onRefresh,
-}) => {
-  const { data, loading, error } = state;
-
-  if (loading) return <Loading label="Buscando quién está detrás…" />;
-
-  if (error || !data || data.estado_general === 'no_disponible') {
+const PlayNow: React.FC<{
+  play: PlayModel | null;
+  onFijar: () => void;
+  enviando: boolean;
+  ctaError: string | null;
+}> = ({ play, onFijar, enviando, ctaError }) => {
+  if (!play || play.estado_vivo == null) {
     return (
-      <Callout
-        tone="mute"
-        icon="×"
-        title="No se pudo averiguar ahora"
-        sub="Falló la búsqueda. Es un problema de la herramienta, no del proyecto."
-      >
-        <Retry onClick={onRefresh} />
-      </Callout>
+      <div className={`${styles.play} ${styles['play--empty']}`}>
+        <div className={styles['play__lead']}>
+          No hay plan calculado ahora mismo. Puedes revisar los bloques de arriba para ver el estado actual.
+        </div>
+      </div>
     );
   }
 
-  if (data.estado_general === 'opaco') {
+  if (play.estado_vivo === 'cerrado') {
+    const ICON: Record<string, string> = { si: '✓', no: '○', dato: '·' };
     return (
-      <Callout
-        tone="ochre"
-        icon="◍"
-        title="No se encontró quién está detrás"
-        sub={
-          <>
-            Se buscó equipo, presencia y actividad pública, y{' '}
-            <b>no apareció nada</b>. Eso es un dato sobre el proyecto, no una falla de la
-            herramienta.
-            {data.no_encontrado_en.length > 0 && (
-              <> No se halló en: {data.no_encontrado_en.join(', ')}.</>
-            )}
-          </>
-        }
-      />
+      <div className={styles.play}>
+        <div className={styles['play__lead']}><b>{play.titular}</b></div>
+        {play.campos && play.campos.length > 0 && (
+          <ul className={styles['play__close-fields']}>
+            {play.campos.map((c, i) => (
+              <li className={styles['play__cf']} key={i}>
+                <span className={`${styles['play__cf-i']} ${styles[`play__cf-i--${c.ok}`]}`}>{ICON[c.ok]}</span>
+                {c.k}{c.v && <span className={styles['play__cf-v']}>{c.v}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     );
   }
+
+  const incierto = play.estado_vivo === 'incierto';
+  const planListo = play.estado_vivo === 'activo' && play._fijada === false;
+  const recienFijada = play._recienFijada;
 
   return (
-    <div className={vwStyles.vwAnswer}>
-      <div className={vwStyles.vwAnswerRow}>
-        <div className={vwStyles.vwAnswerIcon} aria-hidden="true">☻</div>
-        <div>
-          <div className={vwStyles.vwAnswerLead}>Se sabe quién está detrás</div>
-          <div className={vwStyles.vwAnswerSay}>
-            Hay nombres y canales públicos, y cada dato se puede comprobar en su fuente.
-          </div>
+    <div className={`${styles.play} ${incierto ? styles['play--incierto'] : ''}`}>
+      {recienFijada ? (
+        <div className={styles['play__status']}>
+          <b>Jugada fijada</b> — se sigue en vivo. <Fresh frescura={play.frescura} noun="lectura" />
         </div>
-      </div>
-      {data.equipo.length > 0 && (
-        <div className={vwStyles.vwPeople}>
-          {data.equipo.map((m, i) => (
-            <div className={vwStyles.vwPerson} key={i}>
-              <div className={vwStyles.vwPersonFace} aria-hidden="true">☻</div>
-              <div>
-                <div className={vwStyles.vwPersonName}>
-                  {m.nombre}{m.rol ? ` · ${m.rol}` : ''}
-                </div>
-                <Fuente url={m.fuente} />
-              </div>
+      ) : planListo ? (
+        <>
+          <div className={styles['play__lead']}>
+            El plan está listo. Si decides entrar, fija la jugada y el sistema la sigue en vivo.
+          </div>
+          <button
+            className={styles['play__cta']}
+            onClick={onFijar}
+            disabled={enviando}
+            type="button"
+          >
+            {enviando ? 'Fijando…' : 'Fijar esta jugada'}
+          </button>
+          {ctaError && <div className={styles['play__error']}>{ctaError}</div>}
+        </>
+      ) : (
+        <>
+          <div className={styles['play__status']}>
+            <b>{incierto ? 'Jugada incierta' : 'Jugada en curso'}</b> · <Fresh frescura={play.frescura} noun="lectura" />
+          </div>
+          {incierto && (
+            <div className={styles['play__lead']} style={{ marginTop: 12 }}>
+              El sistema no está seguro de dónde está la jugada — revisa en Binance.
             </div>
-          ))}
-        </div>
-      )}
-      <div className={vwStyles.vwChannels}>
-        {Object.entries(data.presencia).map(([k, c]) => (
-          <div className={vwStyles.vwChannel} key={k}>
-            <span
-              className={`${vwStyles.vwChannelDot} ${vwStyles[`vwChannelDot_${c.activo}`]}`}
-              aria-hidden="true"
-            />
-            <span>
-              {CH_LABEL[k] ?? k.replace(/_/g, ' ')} ·{' '}
-              <span className={vwStyles.vwChannelState}>
-                {c.activo === 'si' ? 'activo' : c.activo === 'no' ? 'inactivo' : 'sin confirmar'}
-              </span>
-            </span>
-            <Fuente url={c.url ?? c.fuente} />
-          </div>
-        ))}
-      </div>
-      {data.frescura && (
-        <div className={vwStyles.vwFundFresh}>
-          <FreshnessTag frescura={data.frescura} />
-        </div>
+          )}
+          {play.hechos && play.hechos.length > 0 && (
+            <ul className={styles['play__facts']}>
+              {play.hechos.map((h, i) => (
+                <li className={styles['play__fact']} key={i}>
+                  <span className={`${styles['play__fact-i']} ${styles['play__fact-i--dato']}`}>·</span>{h}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );
 };
+
+// ════════════════════════════════════════════════════════════
+// ⑥ QUIÉN ESTÁ DETRÁS — dossier (port de sp3-ideaview.jsx:307-368)
+// ════════════════════════════════════════════════════════════
+const DossierBody: React.FC<{
+  state: { data: Dossier | null; loading: boolean; error: boolean };
+  onRefresh: () => void;
+}> = ({ state, onRefresh }) => {
+  const { data: dossier, loading, error } = state;
+
+  if (loading) {
+    return (
+      <div className={styles['iv-load']}>
+        <span className={styles['iv-load__spin']} />Buscando quién está detrás…
+      </div>
+    );
+  }
+
+  if (error || !dossier || dossier.estado_general === 'no_disponible') {
+    return (
+      <div className={`${styles['iv-callout']} ${styles['iv-callout--mute']}`}>
+        <span className={styles['iv-callout__icon']}>×</span>
+        <div>
+          <div className={styles['iv-callout__t']}>No se pudo averiguar ahora</div>
+          <div className={styles['iv-callout__s']}>
+            Falló la búsqueda. Es un problema de la herramienta, no del proyecto.
+          </div>
+          <button className={styles['dos__retry']} onClick={onRefresh} type="button">↻ Intentar de nuevo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (dossier.estado_general === 'opaco') {
+    return (
+      <div className={styles.dos}>
+        <div className={styles['dos__lead-row']}>
+          <div className={`${styles['dos__icon']} ${styles['dos__icon--opaco']}`}>◍</div>
+          <div>
+            <div className={styles['dos__lead']}>No se encontró quién está detrás</div>
+            <div className={styles['dos__say']}>
+              Se buscó equipo, presencia y actividad pública, y no apareció nada. Eso es un dato sobre el proyecto, no una falla de la herramienta.
+              {dossier.no_encontrado_en && dossier.no_encontrado_en.length > 0 && (
+                <> No se halló en: {dossier.no_encontrado_en.join(', ')}.</>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const channels = Object.keys(dossier.presencia || {});
+  return (
+    <div className={styles.dos}>
+      <div className={styles['dos__lead-row']}>
+        <div className={styles['dos__icon']}>☻</div>
+        <div>
+          <div className={styles['dos__lead']}>Se sabe quién está detrás</div>
+          <div className={styles['dos__say']}>
+            Hay nombres y canales públicos, y cada dato se puede comprobar en su fuente.
+          </div>
+        </div>
+      </div>
+      <div className={styles['dos__people']}>
+        {dossier.equipo.map((m, i) => (
+          <div className={styles['dos__person']} key={i}>
+            <div className={styles['dos__face']}>☻</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className={styles['dos__name']}>
+                {m.nombre}{m.rol && <span className={styles['dos__role']}> · {m.rol}</span>}
+              </div>
+            </div>
+            {m.fuente && (
+              <a className={styles['dos__src']} href={m.fuente} target="_blank" rel="noreferrer">fuente</a>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className={styles['dos__channels']}>
+        {channels.map((k) => {
+          const p = dossier.presencia[k];
+          const st = p.activo === 'si' ? 'activo' : p.activo === 'no' ? 'inactivo' : 'sin confirmar';
+          return (
+            <a className={styles['dos__ch']} key={k} href={p.url || '#'} target="_blank" rel="noreferrer">
+              <span className={`${styles['dos__ch-dot']} ${styles[`dos__ch-dot--${p.activo}`]}`} />
+              {CH_LABEL[k] || k} <span className={styles['dos__ch-state']}>· {st}</span>
+              {p.fuente && <span className={styles['dos__ch-src']}>· fuente</span>}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ── régimen hook local (fetch /alt-season) ───────────────────
+function useRegime(): RegimeSnapshot | null {
+  const [regime, setRegime] = useState<RegimeSnapshot | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getAltSeason()
+      .then((s) => { if (alive) setRegime(s); })
+      .catch(() => { if (alive) setRegime(null); });
+    return () => { alive = false; };
+  }, []);
+  return regime;
+}
+
+// ── nav (port de sp3-ideaview.jsx:373-379) ───────────────────
+const NAV = [
+  { id: 'idea-vida', label: 'Vida' },
+  { id: 'idea-paredes', label: 'Paredes' },
+  { id: 'idea-jugada', label: 'Jugada' },
+  { id: 'idea-quien', label: 'Quién' },
+  { id: 'idea-noticias', label: 'Noticias' },
+];
 
 // ── props ─────────────────────────────────────────────────────
 export interface IdeaViewProps {
@@ -163,6 +293,7 @@ export interface IdeaViewProps {
 
 // ── componente principal ──────────────────────────────────────
 export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
+  const regime    = useRegime();
   const bundle    = useValleyBundle(symbol);
   const livePrice = bundle.niveles.data?.price_live ?? null;
   const { derived, live, conducta } = useJugada(symbol, livePrice);
@@ -188,168 +319,212 @@ export const IdeaView: React.FC<IdeaViewProps> = ({ symbol, onRestart }) => {
     }
   };
 
+  // ── datos de cabecera ───────────────────────────────────────
+  const vida   = bundle.vida.data;
+  const levels = bundle.niveles.data;
+  const price  = levels?.price_live ?? vida?.price ?? null;
+
   // ¿Estado inicial de carga? (ningún dato disponible aún)
   const initialLoading = bundle.niveles.loading && !bundle.niveles.data;
 
-  // ── estado del lifecycle de jugada ───────────────────────────
+  // chart no-disponible: vida y niveles ambos caídos
+  const evalUnavailable = !vida || vida.estado === 'no_disponible';
+  const levelsUnavailable = !levels || levels.estado === 'no_disponible';
+  const chartUnavailable = evalUnavailable && levelsUnavailable;
+
+  // ── modelo de jugada (live real + estado local + conducta) ───
   const estadoVivo = live.data?.estado_vivo ?? null;
-  const enCurso    = estadoVivo === 'activo' || estadoVivo === 'incierto';
-  const cerrado    = estadoVivo === 'cerrado' || conducta.data?.estado_vivo === 'cerrado';
-  const hayPlan    = !!derived.data && derived.data.rungs.length > 0;
+  const cerradoConducta = conducta.data?.estado_vivo === 'cerrado';
+  const hayPlan = !!derived.data && derived.data.rungs.length > 0;
+
+  const play: PlayModel | null = buildPlay({
+    estadoVivo,
+    live: live.data,
+    conducta: conducta.data,
+    cerradoConducta,
+    hayPlan,
+    fijada,
+  });
 
   return (
-    <div className={styles['idea-view']}>
+    <div className={styles.iv}>
+      <div className={styles['iv__frame']}>
 
-      {/* ── 1. Sticky nav ─────────────────────────────────────── */}
-      <nav className={styles['idea-nav']} aria-label="Secciones de la moneda">
-        <a href="#idea-vida">Vida</a>
-        <span className={styles['idea-nav__sep']} aria-hidden="true">·</span>
-        <a href="#idea-paredes">Paredes</a>
-        <span className={styles['idea-nav__sep']} aria-hidden="true">·</span>
-        <a href="#idea-jugada">Jugada</a>
-        <span className={styles['idea-nav__sep']} aria-hidden="true">·</span>
-        <a href="#idea-quien">Quién</a>
-        <span className={styles['idea-nav__sep']} aria-hidden="true">·</span>
-        <a href="#idea-noticias">Noticias</a>
-      </nav>
+        {/* ── marco de régimen (dominante) + franja sticky ─────── */}
+        <RegimeFrame regime={regime} />
+        <RegimeStrip regime={regime} />
 
-      {/* ── 2. Eyebrow + título ───────────────────────────────── */}
-      <div className={`${styles['idea-header']} ${styles['idea-text-measure']}`}>
-        <Eyebrow symbol={symbol} />
-        <h1 className={styles['idea-title']}>{humanName(symbol)}</h1>
-      </div>
+        <div className={styles['iv__body']}>
 
-      {/* ── 3. Gráfico — ancho completo del contenedor ───────── */}
-      <div className={styles['idea-chart-wrap']}>
-        {initialLoading ? (
-          <div className={styles['idea-chart-placeholder']} aria-busy="true">
-            Cargando el gráfico…
-          </div>
-        ) : (
-          <IdeaChart
-            symbol={symbol}
-            vida={bundle.vida.data}
-            levels={bundle.niveles.data}
-            plan={derived.data}
-            live={livePrice ?? 0}
-            state={liveStateFrom(live.data)}
-            height={520}
-          />
-        )}
-      </div>
+          {/* ① nav de secciones (sticky bajo la franja) ────────── */}
+          <nav className={styles['iv-nav']} aria-label="Secciones de la moneda">
+            {NAV.map((n, i) => (
+              <React.Fragment key={n.id}>
+                {i > 0 && <span className={styles['iv-nav__sep']} aria-hidden="true" />}
+                <a
+                  className={`${styles['iv-nav__a']} ${i === 0 ? styles['iv-nav__a--on'] : ''}`}
+                  href={`#${n.id}`}
+                >
+                  {n.label}
+                </a>
+              </React.Fragment>
+            ))}
+          </nav>
 
-      {/* ── 4. Narrativa descriptiva ──────────────────────────── */}
-      <div className={styles['idea-text-measure']}>
-        <Narrativa
-          vida={bundle.vida.data}
-          levels={bundle.niveles.data}
-          plan={derived.data}
-        />
-      </div>
-
-      {/* ── 5. Jugada lifecycle compacto ─────────────────────── */}
-      <section id="idea-jugada-cta" className={`${styles['na-block']} ${styles['idea-text-measure']}`}>
-        <h3 className={styles['na-heading']}>Tu jugada ahora</h3>
-
-        {enCurso && (
-          <div className={styles['idea-jugada-encurso']}>
-            <p className={styles['idea-jugada-estado']}>
-              Jugada <b>{estadoVivo === 'incierto' ? 'incierta' : 'en curso'}</b>
-              {live.data?.frescura && (
-                <span className={styles['idea-jugada-frescura']}>
-                  {' '}· <FreshnessTag frescura={live.data.frescura} />
-                </span>
+          {/* ② cabecera de la moneda ───────────────────────────── */}
+          <div className={styles['iv-col']}>
+            <div className={styles['iv-head']}>
+              <div className={styles['iv-head__eyebrow']}>
+                <span className={styles['iv-head__coin']}>{humanName(symbol)}</span>
+                <span className={styles['iv-head__sym']}>{symbol}</span>
+              </div>
+              <h1 className={styles['iv-head__title']}>{humanName(symbol)}</h1>
+              {price != null && (
+                <div className={styles['iv-head__price']}>
+                  ${formatPrice(price)}<small>último cierre</small>
+                </div>
               )}
-            </p>
-            {estadoVivo === 'incierto' && (
-              <p className={styles['na-body']}>
-                El sistema no está seguro de dónde está la jugada — revisa en Binance.
-              </p>
-            )}
-            {live.data?.hechos && live.data.hechos.length > 0 && (
-              <ul className={styles['na-list']}>
-                {live.data.hechos.map((h, i) => (
-                  <li key={i}>{h}</li>
-                ))}
-              </ul>
+            </div>
+          </div>
+
+          {/* ③ gráfico — ancho ─────────────────────────────────── */}
+          <div className={styles['iv-wide']}>
+            {initialLoading ? (
+              <div className={styles['idea-chart-placeholder']} aria-busy="true">
+                Cargando el gráfico…
+              </div>
+            ) : chartUnavailable ? (
+              <div className={`${styles['iv-callout']} ${styles['iv-callout--mute']}`} style={{ marginTop: 0 }}>
+                <span className={styles['iv-callout__icon']}>⧖</span>
+                <div>
+                  <div className={styles['iv-callout__t']}>No se pudo revisar esta moneda ahora</div>
+                  <div className={styles['iv-callout__s']}>
+                    Binance no respondió. Es un problema de la herramienta, no de la moneda — sin campos en blanco fingiendo datos.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <IdeaChart
+                symbol={symbol}
+                vida={vida}
+                levels={levels}
+                plan={derived.data}
+                live={livePrice ?? 0}
+                state={liveStateFrom(live.data)}
+                height={520}
+              />
             )}
           </div>
-        )}
 
-        {!enCurso && !cerrado && hayPlan && !fijada && (
-          <div className={styles['idea-jugada-cta-wrap']}>
-            <p className={styles['na-body']}>
-              El plan está listo. Si decides entrar, fija la jugada y el sistema la sigue en vivo.
-            </p>
-            <button
-              className={styles['idea-cta']}
-              onClick={handleFijar}
-              disabled={enviando}
-              type="button"
-            >
-              {enviando ? 'Fijando…' : 'Fijar esta jugada'}
-            </button>
-            {ctaError && (
-              <p className={styles['idea-jugada-error']}>{ctaError}</p>
-            )}
+          {/* columna de lectura: narrativa + secciones ─────────── */}
+          <div className={styles['iv-col']}>
+
+            {/* ④ narrativa descriptiva */}
+            <Narrativa vida={vida} levels={levels} plan={derived.data} />
+
+            {/* ⑤ tu jugada ahora */}
+            <section className={styles['iv-sec']} id="idea-jugada-now">
+              <div className={styles['iv-sec__h']}>Tu jugada ahora</div>
+              <h2 className={styles['iv-sec__q']}>El estado vivo de tu plan</h2>
+              <PlayNow
+                play={play}
+                onFijar={handleFijar}
+                enviando={enviando}
+                ctaError={ctaError}
+              />
+            </section>
+
+            {/* ⑥ quién está detrás */}
+            <section className={styles['iv-sec']} id="idea-quien">
+              <div className={styles['iv-sec__h']}>Quién está detrás</div>
+              <h2 className={styles['iv-sec__q']}>¿Se sabe quién sostiene el proyecto?</h2>
+              <DossierBody state={bundle.dossier} onRefresh={bundle.refreshDossier} />
+            </section>
+
+            {/* ⑦ noticias — vacío honesto */}
+            <section className={styles['iv-sec']} id="idea-noticias">
+              <div className={styles['iv-sec__h']}>Lo último que se dijo</div>
+              <div className={styles['news__empty']}>
+                Las noticias de esta moneda aún no están conectadas.
+              </div>
+            </section>
+
+            {/* ⑧ footer */}
+            <div className={styles['iv-foot']}>
+              <button
+                className={styles['iv-foot__btn']}
+                onClick={() => onRestart?.()}
+                type="button"
+              >
+                ← Mirar otra moneda
+              </button>
+            </div>
+
           </div>
-        )}
-
-        {!enCurso && fijada && (
-          <p className={styles['idea-jugada-ok']}>
-            Jugada fijada — se sigue en vivo.
-          </p>
-        )}
-
-        {!enCurso && cerrado && !fijada && conducta.data && (
-          <div className={styles['idea-jugada-cerrado']}>
-            {conducta.data.titular && (
-              <p className={styles['na-body']}>{conducta.data.titular}</p>
-            )}
-            {conducta.data.campos && conducta.data.campos.length > 0 && (
-              <ul className={styles['na-list']}>
-                {conducta.data.campos.map((c, i) => (
-                  <li key={i}>
-                    <span className={styles['idea-conducta-icon']}>
-                      {c.ok === 'si' ? '✓' : c.ok === 'no' ? '○' : '·'}
-                    </span>{' '}
-                    {c.k}{c.v ? `: ${c.v}` : ''}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {!enCurso && !cerrado && !hayPlan && !fijada && (
-          <p className={styles['na-empty']}>
-            No hay plan calculado ahora mismo. Puedes revisar los bloques de arriba para ver el estado actual.
-          </p>
-        )}
-      </section>
-
-      {/* ── 6. Quién está detrás (dossier inlineado) ─────────── */}
-      <section id="idea-quien" className={`${styles['na-block']} ${styles['idea-text-measure']}`}>
-        <h2 className={styles['idea-quien-heading']}>Quién está detrás</h2>
-        <DossierBody state={bundle.dossier} onRefresh={bundle.refreshDossier} />
-      </section>
-
-      {/* ── 7. Noticias ───────────────────────────────────────── */}
-      <div className={styles['idea-text-measure']}>
-        <NoticiasSection symbol={symbol} />
+        </div>
       </div>
-
-      {/* ── 8. Footer ─────────────────────────────────────────── */}
-      <footer className={`${styles['idea-footer']} ${styles['idea-text-measure']}`}>
-        <button
-          className={styles['idea-restart']}
-          onClick={() => onRestart?.()}
-          type="button"
-        >
-          Mirar otra moneda
-        </button>
-      </footer>
-
     </div>
   );
 };
+
+// ── construye el PlayModel a partir de los datos reales ──────
+function buildPlay(args: {
+  estadoVivo: 'activo' | 'incierto' | 'cerrado' | null;
+  live: PlanLive | null;
+  conducta: PlanConducta | null;
+  cerradoConducta: boolean;
+  hayPlan: boolean;
+  fijada: boolean;
+}): PlayModel | null {
+  const { estadoVivo, live, conducta, cerradoConducta, hayPlan, fijada } = args;
+
+  // Cerrado: el titular/campos vienen de conducta
+  if (estadoVivo === 'cerrado' || cerradoConducta) {
+    return {
+      estado_vivo: 'cerrado',
+      titular: conducta?.titular,
+      campos: conducta?.campos,
+      _fijada: fijada,
+      _recienFijada: false,
+    };
+  }
+
+  // En curso / incierto: estado vivo REAL (posición ya ejecutada).
+  // _fijada = true ⇒ NO se muestra el CTA "Fijar"; se muestra el
+  // status "en curso" con los hechos. _recienFijada = false ⇒ no es
+  // la confirmación local recién hecha, sino el estado vivo del backend.
+  if (estadoVivo === 'activo' || estadoVivo === 'incierto') {
+    return {
+      estado_vivo: estadoVivo,
+      hechos: live?.hechos,
+      frescura: live?.frescura,
+      _fijada: true,
+      _recienFijada: false,
+    };
+  }
+
+  // Sin estado vivo pero con plan derivado: el CTA "Fijar" vive aquí.
+  // Tras fijar (estado local) mostramos "Jugada fijada".
+  if (hayPlan) {
+    if (fijada) {
+      return {
+        estado_vivo: 'activo',
+        frescura: live?.frescura,
+        _fijada: true,
+        _recienFijada: true,
+      };
+    }
+    return {
+      estado_vivo: 'activo',
+      frescura: live?.frescura,
+      _fijada: false,
+      _recienFijada: false,
+    };
+  }
+
+  // Sin plan: empty honesto
+  return null;
+}
+
+// Re-export del tipo del estado async de jugada (uso interno)
+export type { JugadaAsync };
