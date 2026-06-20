@@ -33,7 +33,8 @@ export const ValleysFlow: React.FC<{ snapshot: ValleySnapshot; loading: boolean 
           </div>
         </div>
 
-        <AltSeasonHeader />
+        {/* AltSeasonHeader solo para la lista — IdeaView ya trae su RegimeFrame adentro */}
+        {!sym && <AltSeasonHeader />}
 
         <div className={styles.vwStage}>
           {!sym
