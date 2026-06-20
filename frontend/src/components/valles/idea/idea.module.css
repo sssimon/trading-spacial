@@ -69,81 +69,95 @@
   opacity: 0.22;
 }
 
-/* ── BANDA VIDA ───────────────────────────────────────────── */
-.idea-vida-band {
+/* ── VIDA · BANDA DE RANGO 30d (Pieza 2) ──────────────────────
+   Rectángulo PUNTEADO arcilla, casi sin relleno. Port de
+   sp3-warm.css §.ch-range. */
+.idea-range {
   position: absolute;
-  left: 0;
-  right: 0;
-  /* Banda translúcida color salvia suave */
-  background: rgba(94, 112, 72, 0.07);
-  border-top: 1px dashed rgba(94, 112, 72, 0.35);
-  border-bottom: 1px dashed rgba(94, 112, 72, 0.35);
+  border: 1.5px dashed var(--clay, #B8542E);
+  border-radius: 4px;
+  background: rgba(184, 84, 46, 0.035);
   pointer-events: none;
   transition: top 620ms var(--ease, ease), height 620ms var(--ease, ease);
 }
 
-.idea-vida-stamp {
+.idea-range__cap {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 10.5px;
+  left: 8px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--sage, #5E7048);
-  background: rgba(251, 249, 244, 0.88);
-  border-radius: 6px;
-  padding: 2px 9px;
+  color: var(--clay-deep, #9A4424);
+  background: var(--card, #FBF9F4);
+  padding: 1px 7px;
+  border-radius: 4px;
   white-space: nowrap;
 }
+.idea-range__cap--hi { top: -9px; }
+.idea-range__cap--lo { bottom: -9px; }
 
-/* ── MUROS S/R ────────────────────────────────────────────── */
-.idea-wall {
+/* ── VIDA · MARCADOR DE POSICIÓN ─────────────────────────────
+   Punto + línea al precio vivo. Port de sp3-warm.css §.ch-mark. */
+.idea-mark {
   position: absolute;
-  left: 0;
-  right: 0;
   display: flex;
   align-items: center;
-  height: 0;
   pointer-events: none;
   transition: top 620ms var(--ease, ease);
 }
-
-.idea-wall__rule {
+.idea-mark__line {
   flex: 1;
-  border-top-width: 1.5px;
-  border-top-style: dashed;
+  border-top: 2px solid var(--clay, #B8542E);
+}
+.idea-mark__dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--clay, #B8542E);
+  box-shadow: 0 0 0 5px var(--clay-tint, rgba(184,84,46,0.10));
+  flex: none;
+  position: relative;
+  z-index: 2;
+}
+.idea-mark__tag {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--clay, #B8542E);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── PAREDES S/R — banda slate rellena ────────────────────────
+   Neutral (slate), banda con relleno. Port de sp3-warm.css
+   §.ch-wall__band + .ch-tag--wall. */
+.idea-wall__band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(76, 90, 102, 0.10);
+  border-top: 1px solid rgba(76, 90, 102, 0.5);
+  border-bottom: 1px solid rgba(76, 90, 102, 0.5);
+  pointer-events: none;
+  transition: top 620ms var(--ease, ease), height 620ms var(--ease, ease);
 }
 
 .idea-wall__tag {
-  flex: none;
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
-  padding: 3px 10px;
-  border-radius: 6px;
-  transform: translateY(-50%);
-  margin-right: 8px;
-}
-
-/* Resistencia — arcilla (techo) */
-.idea-wall--res .idea-wall__rule {
-  border-color: var(--clay, #B8542E);
-  opacity: 0.55;
-}
-.idea-wall--res .idea-wall__tag {
-  color: var(--clay-deep, #7B3C1D);
-  background: var(--clay-tint, rgba(184,84,46,0.10));
-  border: 1px solid var(--clay-soft, rgba(184,84,46,0.25));
-}
-
-/* Soporte — neutro cálido (piso) */
-.idea-wall--sup .idea-wall__rule {
-  border-color: var(--card-edge-2, #CFC7B8);
-}
-.idea-wall--sup .idea-wall__tag {
-  color: var(--ink-3, #9A9080);
-  background: var(--paper-2, #F0EBE1);
-  border: 1px solid var(--card-edge, #E4DCCC);
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: var(--slate, #4C5A66);
+  background: var(--card, #FBF9F4);
+  border: 1px solid rgba(76, 90, 102, 0.4);
+  pointer-events: none;
 }
 
 /* ── ESTADO DEL GRÁFICO (cargando / sin datos) ─────────── */
