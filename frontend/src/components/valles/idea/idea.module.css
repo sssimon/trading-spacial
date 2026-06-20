@@ -374,6 +374,11 @@
   font-size: 18px;            /* piso de cuerpo, lector mayor */
   line-height: 1.6;
   position: relative;
+  /* Llena el ancho disponible del stage (evita el colapso de flexbox a la
+     anchura del contenido); tope alto para no estirarse en monitores ultraanchos. */
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
 }
 .iv * { font-family: var(--sans); }
 
@@ -412,7 +417,7 @@
 
 /* columnas de lectura */
 .iv-col { max-width: var(--read); margin: 0 auto; }
-.iv-wide { max-width: 880px; margin: 0 auto; }
+.iv-wide { max-width: 1180px; margin: 0 auto; }
 
 /* ② cabecera de la moneda */
 .iv-head { margin-bottom: 26px; }
