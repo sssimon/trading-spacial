@@ -24,6 +24,10 @@ import './styles/base.css';
 import './styles/warm-tokens.css';
 // (5) Estilos de componentes del Mercado cálido (.mw-*), hoja global.
 import './styles/mercado-warm.css';
+// (6) SP3 — extensión de tokens del tema cálido para la vista per-coin de Valles.
+//     Añade --read (medida de lectura). Los tokens de color/tipo ya los provee
+//     warm-tokens.css; este import declara la intención y el scope del SP3.
+import './styles/sp3-warm.css';
 
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
