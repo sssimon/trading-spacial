@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "exit": {
+      "tps": [
+        0.15,
+        0.3,
+        0.5,
+        0.9
+      ],
+      "fracs": [
+        0.25,
+        0.25,
+        0.2,
+        0.15
+      ],
+      "disaster": -0.5,
+      "horizon": 30
+    },
+    "dedup_days": 14,
+    "b1_ratio": 3,
+    "n_setup": 3133,
+    "n_b1": 7097,
+    "survivorship_breakeven_p_mean": 0.014662394065367658,
+    "caveats": [
+      "realized_return = escalera de targets (fill intrabar optimista) + runner al cierre H + piso -50%.",
+      "Supervivencia: el cache solo tiene vivos hoy; el breakeven_p estima cu\u00e1ntas muertes ocultas igualar\u00edan la media a B1.",
+      "Retorno en USDT incluye beta de BTC."
+    ]
+  },
+  "setup": {
+    "global": {
+      "n": 3133,
+      "median": 0.06720727848101263,
+      "mean": 0.0632696325385862,
+      "win15": 0.4075965528247686
+    },
+    "alt-bull": {
+      "n": 2326,
+      "median": 0.09760118502059206,
+      "mean": 0.09165710098777165,
+      "win15": 0.44325021496130695
+    },
+    "neutral": {
+      "n": 282,
+      "median": 0.0019834320604982967,
+      "mean": 0.02321107964913516,
+      "win15": 0.3723404255319149
+    },
+    "bear": {
+      "n": 525,
+      "median": -0.07051736357193475,
+      "mean": -0.04098320498137597,
+      "win15": 0.26857142857142857
+    }
+  },
+  "B1": {
+    "global": {
+      "n": 7097,
+      "median": 0.03730079681274899,
+      "mean": 0.04767955418856678,
+      "win15": 0.35944765393828376
+    },
+    "alt-bull": {
+      "n": 4676,
+      "median": 0.07522618800680211,
+      "mean": 0.08162174342549036,
+      "win15": 0.40654405474764754
+    },
+    "neutral": {
+      "n": 846,
+      "median": -0.012314522911320003,
+      "mean": 0.008906927266119273,
+      "win15": 0.3392434988179669
+    },
+    "bear": {
+      "n": 1575,
+      "median": -0.0439845556047415,
+      "mean": -0.032264594697442146,
+      "win15": 0.23047619047619047
+    }
+  }
+}
