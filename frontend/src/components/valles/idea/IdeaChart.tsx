@@ -30,7 +30,7 @@ export interface IdeaChartProps {
 }
 
 const LAYER_LABELS: Record<typeof LAYER_KEYS[number], string> = {
-  vida:    'Vida (¿viva? · posición)',
+  vida:    'Vida · rango 30d',
   paredes: 'Paredes',
   jugada:  'La jugada',
 };
@@ -173,6 +173,32 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
   const zTop = ov.zone ? Y(ov.zone.priceHigh) : null;
   const zBot = ov.zone ? Y(ov.zone.priceLow)  : null;
 
+  // ── VIDA · banda de rango 30d + marcador (Pieza 2) ─────────
+  // range30 se computa en cliente (chartLayers); el marcador va al precio vivo.
+  // El rango de 30d es un HECHO (min/max de las últimas 30 velas): existe esté
+  // "viva" o no. NO se gatea por `vivo` — eso modularía un hecho por un juicio.
+  // Solo el texto del sello de vida (ch-life) varía con `vivo`. El mockup
+  // sp3-chart.jsx:153 gatea la banda en `layers.vida && range`.
+  const vivo = Boolean(vida?.vivo || vida?.candidata);
+  const range30 = m.vida.range30;
+  const showRange30 = layers.vida && range30 != null;
+  const r30Top = range30 ? Y(range30.hi) : null;
+  const r30Bot = range30 ? Y(range30.lo) : null;
+  const markY  = Y(live);
+
+  // Acotar la banda/marcador a la franja de las últimas 30 velas:
+  // left = x de la candle N-30 vía timeScale().timeToCoordinate (análogo
+  // horizontal de priceToCoordinate). Si es null → ancho completo del plot.
+  const candles = levels?.candles;
+  const rangeLeftPx: number | null = (() => {
+    const chart = chartRef.current;
+    if (!chart || !candles?.length || candles.length <= 30) return null;
+    const anchor = candles[candles.length - 30];
+    const x = chart.timeScale().timeToCoordinate(anchor.time as never);
+    return x == null ? null : Math.max(0, x);
+  })();
+  const rangeLeftStyle = rangeLeftPx == null ? 0 : rangeLeftPx;
+
   // ── ANTI-COLISIÓN GLOBAL ───────────────────────────────────
   // Recoge todos los candidatos a etiqueta en el borde derecho,
   // los ordena por Y (top → bottom) y marca cuáles se renderizan.
@@ -183,6 +209,11 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
 
   const buildCandidates = (): LabelCandidate[] => {
     const candidates: LabelCandidate[] = [];
+
+    // Marcador de posición (Vida · rango 30d) — solo si hay precio vivo (>0)
+    if (showRange30 && markY != null && live > 0) {
+      candidates.push({ key: 'mark', y: markY });
+    }
 
     // Paredes S/R
     if (layers.paredes) {
@@ -257,6 +288,10 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
             onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))}
             type="button"
           >
+            <span
+              className={`${styles['idea-legend__sw']} ${styles[`idea-legend__sw--${k}`]}`}
+              aria-hidden="true"
+            />
             {LAYER_LABELS[k]}
           </button>
         ))}
@@ -265,36 +300,78 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
       {/* ── CAPA DE ANOTACIONES HTML ── */}
       <div className={juStyles['ju-chart__ann']}>
 
-        {/* ── VIDA (sello de posición — banda dibujada es SP3) ── */}
-        {layers.vida && m.vida.vivoStamp && (
-          <div className={styles['idea-vida-band']}>
-            <span className={styles['idea-vida-stamp']}>{m.vida.vivoStamp}</span>
+        {/* ── SELLO DE VIDA (arriba-izq) — solo el texto varía con `vivo` ── */}
+        {layers.vida && (
+          <div className={`${styles['idea-life']} ${vivo ? '' : styles['idea-life--off']}`}>
+            <span className={styles['idea-life__dot']} />
+            {m.vida.vivoStamp}
           </div>
         )}
 
-        {/* ── PAREDES (S/R horizontales) ── */}
+        {/* ── PAREDES (S/R — banda slate rellena) ── */}
         {layers.paredes && m.paredes.walls.map((w, i) => {
-          const wy = Y(w.centro);
+          const top = Y(w.high);
+          const bot = Y(w.low);
+          const wy  = Y(w.centro);
           const esRes = w.tipo === 'resistencia';
           const show = wy == null || showLabel(`wall-${w.centro}`);
           return (
-            <div
-              key={i}
-              className={[
-                styles['idea-wall'],
-                esRes ? styles['idea-wall--res'] : styles['idea-wall--sup'],
-              ].join(' ')}
-              style={{ top: wy ?? undefined }}
-            >
-              <span className={styles['idea-wall__rule']} />
+            <React.Fragment key={i}>
+              {top != null && bot != null && (
+                <div
+                  className={styles['idea-wall__band']}
+                  style={{ top, height: Math.max(3, bot - top) }}
+                />
+              )}
               {show && (
-                <span className={styles['idea-wall__tag']}>
+                <span
+                  className={styles['idea-wall__tag']}
+                  style={{ top: wy ?? undefined }}
+                >
                   {esRes ? 'techo' : 'piso'} · ${formatPrice(w.centro)} · {w.toques} toques
                 </span>
               )}
-            </div>
+            </React.Fragment>
           );
         })}
+
+        {/* ── VIDA · banda de rango 30d + marcador (Pieza 2) ── */}
+        {showRange30 && r30Top != null && r30Bot != null && (
+          <div
+            className={styles['idea-range']}
+            style={{ top: r30Top, height: Math.max(2, r30Bot - r30Top), left: rangeLeftStyle, right: 6 }}
+          >
+            <span className={`${styles['idea-range__cap']} ${styles['idea-range__cap--hi']}`}>
+              techo del rango 30d · ${formatPrice(range30!.hi)}
+            </span>
+            <span className={`${styles['idea-range__cap']} ${styles['idea-range__cap--lo']}`}>
+              piso del rango 30d · ${formatPrice(range30!.lo)}
+            </span>
+          </div>
+        )}
+        {showRange30 && markY != null && live > 0 && (
+          <>
+            <div
+              className={styles['idea-mark']}
+              style={{ top: markY, left: rangeLeftStyle, right: 6 }}
+            >
+              <span className={styles['idea-mark__dot']} />
+              <span className={styles['idea-mark__line']} />
+            </div>
+            {showLabel('mark') && (
+              <div
+                className={styles['idea-mark__tag']}
+                style={{
+                  top: markY,
+                  left: rangeLeftPx == null ? 12 : rangeLeftPx - 12,
+                  transform: rangeLeftPx == null ? 'translateY(-50%)' : 'translate(-100%, -50%)',
+                }}
+              >
+                {m.vida.pos != null ? `pos ${Math.round(m.vida.pos * 100)}% · ` : ''}ahora ${formatPrice(live)}
+              </div>
+            )}
+          </>
+        )}
 
         {/* ── JUGADA (delegada al modelo de overlays) ── */}
         {layers.jugada && plan && (

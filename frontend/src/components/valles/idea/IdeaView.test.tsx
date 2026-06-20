@@ -1,16 +1,19 @@
-// IdeaView.test.tsx — TDD para el componente IdeaView
+// IdeaView.test.tsx — TDD para el componente IdeaView (SP3 — marco enmarcado)
 //
 // Mocks:
 //   - useValleyBundle   (su módulo)
 //   - useJugada         (su módulo)
-//   - ../../../api       (confirmPlan)
+//   - ../../../api       (confirmPlan + getAltSeason)
 //   - ./IdeaChart        (gráfico lightweight-charts → div simple)
 //
-// Cobertura:
-//   1. Con derived con rungs y live.estado_vivo=null → "Fijar esta jugada" visible
-//   2. Con live.estado_vivo='activo' → estado "en curso" visible, botón NO
-//   3. Índice de navegación tiene los 5 anclajes
-//   4. Placeholder de carga mientras niveles está cargando
+// Cobertura SP3:
+//   1. Marco de régimen visible (/inclinación del mercado/i)
+//   2. Cabecera de la moneda: nombre + símbolo + precio "último cierre"
+//   3. Nav con los 5 anclajes (Vida·Paredes·Jugada·Quién·Noticias)
+//   4. "Tu jugada ahora" + lifecycle (Fijar / en curso / cerrado)
+//   5. "Quién está detrás" (dossier inlineado)
+//   6. Vacío honesto de noticias
+//   7. Footer "Mirar otra moneda"
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -19,8 +22,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 // tanto en vi.mock factories (que se elevan al top del archivo) como
 // en los tests que vienen después.
 
-const { mockConfirmPlan, mockUseValleyBundle, mockUseJugada } = vi.hoisted(() => ({
+const { mockConfirmPlan, mockGetAltSeason, mockUseValleyBundle, mockUseJugada } = vi.hoisted(() => ({
   mockConfirmPlan:     vi.fn(),
+  mockGetAltSeason:    vi.fn(),
   mockUseValleyBundle: vi.fn(),
   mockUseJugada:       vi.fn(),
 }));
@@ -33,7 +37,7 @@ vi.mock('./IdeaChart', () => ({
 
 vi.mock('../../../api', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../api')>();
-  return { ...original, confirmPlan: mockConfirmPlan };
+  return { ...original, confirmPlan: mockConfirmPlan, getAltSeason: mockGetAltSeason };
 });
 
 vi.mock('../useValleyBundle', () => ({
@@ -46,7 +50,26 @@ vi.mock('../jugada/useJugada', () => ({
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
-import type { ValleyEval, SrLevels, PlanDerived, PlanLive, PlanConducta, Dossier } from '../../../types';
+import type {
+  ValleyEval, SrLevels, PlanDerived, PlanLive, PlanConducta, Dossier, RegimeSnapshot,
+} from '../../../types';
+
+const mockRegime: RegimeSnapshot = {
+  generated_at: '2026-06-19T08:30:00+00:00',
+  coverage: { universe: 218, evaluated: 214, complete: false },
+  dominancia_fetch: { ok: true, fetched_at: null, source: 'coingecko/global' },
+  regime: {
+    estado: 'alts',
+    componentes: {
+      breadth50:     { valor: 0.63,  lean: 'alts',    estado: 'fresco', n: 213 },
+      outperf_30d:   { valor: 0.082, lean: 'alts',    estado: 'fresco' },
+      dominancia_btc:{ valor: 0.555, lean: 'neutral', estado: 'fresco' },
+    },
+    votos: { alts: 2, neutral: 1, btc: 0, vivos: 3 },
+    n_alts_evaluadas: 213,
+  },
+  frescura: { estado: 'fresco', edad_seg: 1820, generated_at: null, umbral_seg: 43200 },
+};
 
 const mockVida: ValleyEval = {
   symbol:            'ADAUSDT',
@@ -150,12 +173,50 @@ import { IdeaView } from './IdeaView';
 beforeEach(() => {
   vi.clearAllMocks();
   mockConfirmPlan.mockResolvedValue({ symbol: 'ADAUSDT', estado_vivo: 'activo', plan: mockDerived });
+  mockGetAltSeason.mockResolvedValue(mockRegime);
 });
 
 // ── suites ────────────────────────────────────────────────────────────────────
 
+describe('IdeaView — marco de régimen', () => {
+  it('muestra el marco de régimen (inclinación del mercado) tras el fetch', async () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/inclinación del mercado/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('llama getAltSeason al montar', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+    expect(mockGetAltSeason).toHaveBeenCalled();
+  });
+});
+
+describe('IdeaView — cabecera de la moneda', () => {
+  it('muestra nombre, símbolo y precio "último cierre"', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+
+    // nombre humano en el título
+    expect(screen.getByRole('heading', { name: /Cardano/i })).toBeTruthy();
+    // símbolo crudo
+    expect(screen.getByText('ADAUSDT')).toBeTruthy();
+    // precio con etiqueta "último cierre"
+    expect(screen.getByText(/último cierre/i)).toBeTruthy();
+  });
+});
+
 describe('IdeaView — índice de navegación', () => {
-  it('tiene exactamente 5 anclajes sticky: vida, paredes, jugada, quien, noticias', () => {
+  it('tiene exactamente 5 anclajes: vida, paredes, jugada, quien, noticias', () => {
     mockUseValleyBundle.mockReturnValue(defaultBundle());
     mockUseJugada.mockReturnValue(defaultJugada());
 
@@ -164,7 +225,6 @@ describe('IdeaView — índice de navegación', () => {
     const nav = document.querySelector('nav[aria-label]') ?? document.querySelector('nav');
     expect(nav).not.toBeNull();
 
-    // Los 5 links a sus anclas
     const links = nav!.querySelectorAll('a[href]');
     const hrefs = Array.from(links).map((l) => l.getAttribute('href'));
     expect(hrefs).toContain('#idea-vida');
@@ -172,6 +232,16 @@ describe('IdeaView — índice de navegación', () => {
     expect(hrefs).toContain('#idea-jugada');
     expect(hrefs).toContain('#idea-quien');
     expect(hrefs).toContain('#idea-noticias');
+  });
+
+  it('muestra las etiquetas Vida·Paredes·Jugada·Quién·Noticias', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+    const nav = document.querySelector('nav[aria-label]')!;
+    const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
+    expect(labels).toEqual(['Vida', 'Paredes', 'Jugada', 'Quién', 'Noticias']);
   });
 });
 
@@ -194,12 +264,40 @@ describe('IdeaView — caso base (derived con rungs, live=null)', () => {
     expect(screen.getByRole('heading', { name: /Si decides entrar/i })).toBeTruthy();
   });
 
+  it('muestra la sección "Tu jugada ahora"', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+    expect(screen.getByText(/Tu jugada ahora/i)).toBeTruthy();
+  });
+
   it('muestra el botón "Fijar esta jugada" cuando derived tiene rungs y live.estado_vivo=null', () => {
     mockUseValleyBundle.mockReturnValue(defaultBundle());
     mockUseJugada.mockReturnValue(defaultJugada());
 
     render(<IdeaView symbol="ADAUSDT" />);
     expect(screen.getByRole('button', { name: /Fijar esta jugada/i })).toBeTruthy();
+  });
+
+  it('muestra la sección "Quién está detrás"', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+    // El eyebrow de la sección "Quién está detrás" (puede aparecer también
+    // dentro del cuerpo del dossier opaco "No se encontró quién está detrás").
+    const quien = document.getElementById('idea-quien');
+    expect(quien).not.toBeNull();
+    expect(quien!.textContent).toMatch(/Quién está detrás/i);
+  });
+
+  it('muestra el vacío honesto de noticias', () => {
+    mockUseValleyBundle.mockReturnValue(defaultBundle());
+    mockUseJugada.mockReturnValue(defaultJugada());
+
+    render(<IdeaView symbol="ADAUSDT" />);
+    expect(screen.getByText(/Las noticias de esta moneda aún no están conectadas/i)).toBeTruthy();
   });
 
   it('botón "Mirar otra moneda" llama onRestart', () => {
@@ -255,9 +353,7 @@ describe('IdeaView — live.estado_vivo="activo"', () => {
 
     render(<IdeaView symbol="ADAUSDT" />);
 
-    // Debe mostrar el estado en curso
     expect(screen.getByText(/en curso/i)).toBeTruthy();
-    // Debe mostrar los hechos
     expect(screen.getByText(/Entrada ejecutada/i)).toBeTruthy();
   });
 

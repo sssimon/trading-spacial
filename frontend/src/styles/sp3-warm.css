@@ -1,0 +1,19 @@
+/* ============================================================
+   SP3 — tokens del tema cálido papel/editorial (Valles per-coin).
+   Fuente de verdad visual: docs/superpowers/handoffs/sp3/sp3-warm.css
+
+   TODOS los tokens del bloque :root del handoff (colores, tipografía,
+   ease) ya los provee warm-tokens.css con valores idénticos (hex
+   corregidos AA). Este archivo los EXTIENDE sin duplicar:
+
+   · Añade --read (medida de lectura del handoff, ausente en warm-tokens)
+   · Fuentes Source Serif 4 + Instrument Sans ya cargadas en index.html
+
+   Las clases de componente (.iv*, .rf*, .nb*, etc.) se portan en los
+   CSS modules de cada task (Task 2-5), no aquí.
+   ============================================================ */
+
+:root {
+  /* medida de lectura principal (handoff §read) */
+  --read: 660px;
+}

@@ -14,10 +14,36 @@ export interface Wall {
   toques: number;
 }
 
+export interface Range30 {
+  lo: number;
+  hi: number;
+}
+
 export interface LayersModel {
-  vida: { pos: number | null; vivoStamp: string };
+  vida: { pos: number | null; range30: Range30 | null; vivoStamp: string };
   paredes: { walls: Wall[]; price: number | null };
   jugada: OverlayModel;
+}
+
+/**
+ * range30 — banda del rango de 30 días.
+ * Se computa EN EL CLIENTE del min(low) / max(high) de las últimas 30
+ * candles de `/levels` (el backend NO emite un campo `range30`). Si hay
+ * menos de 30, usa todas. Devuelve null cuando no hay candles.
+ */
+function computeRange30(
+  candles: { high: number; low: number }[] | undefined,
+): Range30 | null {
+  if (!candles?.length) return null;
+  const last30 = candles.slice(-30);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const c of last30) {
+    if (c.low < lo) lo = c.low;
+    if (c.high > hi) hi = c.high;
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return { lo, hi };
 }
 
 export function buildLayers(args: {
@@ -29,7 +55,9 @@ export function buildLayers(args: {
 }): LayersModel {
   const { vida, levels, plan, live, state } = args;
 
-  // vida layer: posición en rango 30d (SP2 — sin banda, solo hecho descriptivo).
+  // vida layer: banda del rango 30d (min low / max high de las últimas 30
+  // candles, computado en cliente) + posición (pos_in_30d_range del backend).
+  const range30 = computeRange30(levels?.candles);
 
   // paredes layer: all S/R zones mapped to a flat Wall shape
   const walls: Wall[] = (levels?.zonas ?? []).map((z) => ({
@@ -56,6 +84,7 @@ export function buildLayers(args: {
   return {
     vida: {
       pos: vida?.pos_in_30d_range ?? null,
+      range30,
       vivoStamp:
         vida?.vivo || vida?.candidata
           ? `viva · pos ${vida?.pos_in_30d_range != null ? Math.round(vida.pos_in_30d_range * 100) : '—'}% del rango 30d`

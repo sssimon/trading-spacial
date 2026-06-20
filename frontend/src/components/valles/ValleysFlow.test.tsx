@@ -52,10 +52,12 @@ describe('ValleysFlow', () => {
     expect(container.textContent ?? '').not.toMatch(/d[oó]nde operar/i);
   });
 
-  it('sin símbolo muestra PickScreen', () => {
+  it('sin símbolo muestra PickScreen y AltSeasonHeader', () => {
     render(<ValleysFlow snapshot={snap} loading={false} />);
     expect(screen.getByTestId('pick-screen')).toBeInTheDocument();
     expect(screen.queryByTestId('idea-view')).not.toBeInTheDocument();
+    // SP3: AltSeasonHeader solo en la lista (sin símbolo elegido)
+    expect(screen.getByTestId('alt-season-header-stub')).toBeInTheDocument();
   });
 
   it('sin símbolo y loading muestra placeholder de carga', () => {
@@ -71,5 +73,7 @@ describe('ValleysFlow', () => {
     expect(view).toBeInTheDocument();
     expect(view).toHaveAttribute('data-symbol', 'ADAUSDT');
     expect(screen.queryByTestId('pick-screen')).not.toBeInTheDocument();
+    // SP3: IdeaView ya trae su RegimeFrame — AltSeasonHeader no debe aparecer
+    expect(screen.queryByTestId('alt-season-header-stub')).not.toBeInTheDocument();
   });
 });
