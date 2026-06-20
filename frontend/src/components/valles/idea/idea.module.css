@@ -463,3 +463,109 @@
   margin: 4px 0 0 0;
   line-height: 1.5;
 }
+
+/* ============================================================
+   SP3 — NARRATIVA bloques (port de sp3-warm.css §④)
+   ============================================================ */
+
+/* bloque de narrativa individual */
+.nb { scroll-margin-top: 110px; }
+.nb__h {
+  font-family: var(--serif, Georgia, serif);
+  font-size: clamp(22px, 3vw, 27px);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink, #2A2722);
+  letter-spacing: -0.01em;
+  margin: 0 0 0 0;
+}
+.nb__p {
+  font-size: 18px;
+  line-height: 1.62;
+  color: var(--ink, #2A2722);
+  margin: 12px 0 0;
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+.nb__p b { font-weight: 600; }
+.nb__list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 60ch;
+}
+.nb__li {
+  position: relative;
+  padding-left: 26px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--ink, #2A2722);
+}
+.nb__li-b {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--clay, #B8542E);
+}
+.nb__li b { font-weight: 600; }
+
+/* contenedor iv-narr (lista de bloques) */
+.iv-narr {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  margin-top: 18px;
+}
+
+/* ── COSTURA HONESTA (seam) ───────────────────────────────── */
+.seam {
+  margin-top: 16px;
+  padding: 16px 20px;
+  max-width: 62ch;
+  background: var(--card-2, #F6F1E7);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  border-radius: 12px;
+  border-left: 3px solid var(--slate, #4C5A66);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2, #5C564A);
+  text-wrap: pretty;
+}
+.seam b { color: var(--ink, #2A2722); font-weight: 600; }
+.seam__txt { margin: 0; }
+
+/* costura AC7 — con filas de evidencia */
+.seam--ac7 .seam__evi {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 18px;
+  background: var(--card, #FBF9F4);
+  border: 1px solid var(--card-edge-2, #D8CDB8);
+  border-radius: 10px;
+}
+.seam__evi-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seam__evi-v {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--ink, #2A2722);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.seam__evi-v--azar { color: var(--clay-deep, #9A4424); }
+.seam__evi-k { font-size: 12.5px; color: var(--ink-3, #6E6757); }
+.seam__evi-vs {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 16px;
+  color: var(--ink-4, #6F6856);
+  font-style: italic;
+}
