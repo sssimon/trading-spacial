@@ -1,0 +1,246 @@
+/* ============================================================
+   RegimeFrame + RegimeStrip — Pieza 1: Marco de régimen per-coin.
+   Portado de docs/superpowers/handoffs/sp3/sp3-warm.css
+   Clases: .rf*, .rf-strip*, .fr*, .fr-dead*
+   Mapeo: clases planas del mockup → CSS module (styles['kebab-name'])
+   ============================================================ */
+
+/* ── cabecera de régimen ─────────────────────────────────── */
+.rf {
+  background: var(--card-2, #F6F1E7);
+  border-bottom: 1.5px solid var(--clay-soft, #EDD9CC);
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 4vw, 48px) clamp(18px, 2.4vw, 26px);
+  position: relative;
+}
+.rf::before {
+  /* spine de clima: el borde superior arcilla afirma "esto manda" */
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--clay, #B8542E);
+}
+.rf__eyebrow {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-deep, #9A4424);
+  margin-bottom: 10px;
+}
+.rf__lean {
+  font-family: var(--serif, Georgia, serif);
+  font-size: clamp(26px, 3.6vw, 38px);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.012em;
+  color: var(--ink, #2A2722);
+  text-wrap: balance;
+}
+.rf__lean b {
+  font-weight: 600;
+}
+
+/* los tres jueces */
+.rf__components {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.rf__comp {
+  flex: 1 1 200px;
+  min-width: 0;
+  background: var(--card, #FBF9F4);
+  border: 1px solid var(--card-edge, #E4DCCC);
+  border-radius: 12px;
+  padding: 13px 16px;
+}
+.rf__comp-k {
+  font-size: 13px;
+  color: var(--ink-3, #6E6757);
+  letter-spacing: 0.02em;
+}
+.rf__comp-v {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 23px;
+  font-weight: 600;
+  color: var(--ink, #2A2722);
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+.rf__comp-lean {
+  font-size: 12.5px;
+  color: var(--ink-4, #6F6856);
+  margin-top: 2px;
+}
+.rf__comp--muerto {
+  border-style: dashed;
+}
+.rf__comp--muerto .rf__comp-v {
+  color: var(--ink-4, #6F6856);
+  font-size: 18px;
+}
+
+/* frase doctrinal fija */
+.rf__doctrine {
+  margin-top: 20px;
+  max-width: 46em;
+  font-family: var(--serif, Georgia, serif);
+  font-size: 18.5px;
+  line-height: 1.5;
+  color: var(--ink-2, #5C564A);
+  border-left: 3px solid var(--slate, #4C5A66);
+  padding-left: 16px;
+}
+.rf__doctrine b {
+  color: var(--ink, #2A2722);
+  font-weight: 600;
+}
+.rf__foot {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* ── franja PERSISTENTE (sticky) ──────────────────────── */
+.rf-strip {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: rgba(246, 241, 231, 0.94);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--clay-soft, #EDD9CC);
+  border-top: 3px solid var(--clay, #B8542E);
+  padding: 11px clamp(20px, 4vw, 48px);
+  font-size: 14.5px;
+  color: var(--ink-2, #5C564A);
+}
+.rf-strip__lean {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink, #2A2722);
+  font-weight: 600;
+}
+.rf-strip__chip {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--clay-deep, #9A4424);
+  background: var(--clay-tint, #F3E6DC);
+  border: 1px solid var(--clay-soft, #EDD9CC);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+.rf-strip__note {
+  color: var(--ink-3, #6E6757);
+  border-left: 1px solid var(--card-edge-2, #D8CDB8);
+  padding-left: 14px;
+}
+.rf-strip__sep {
+  flex: 1;
+}
+
+/* ── frescura átomo ───────────────────────────────────── */
+.fr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.fr__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.fr--fresco {
+  color: var(--sage, #5E7048);
+}
+.fr--fresco .fr__dot {
+  background: var(--sage, #5E7048);
+}
+.fr--rancio {
+  color: var(--ochre, #8A5E1C);
+  font-weight: 500;
+}
+.fr--rancio .fr__dot {
+  background: var(--ochre, #8A5E1C);
+  box-shadow: 0 0 0 4px var(--ochre-tint, #F2E8D4);
+}
+.fr--muerto {
+  color: var(--ink-3, #6E6757);
+}
+.fr--muerto .fr__dot {
+  background: transparent;
+  border: 1.5px solid var(--ink-3, #6E6757);
+}
+
+/* ── callout de frescura muerta ─────────────────────── */
+.fr-dead {
+  margin: 18px 0;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--ochre-tint, #F2E8D4);
+  border: 1px solid #E4CF9E;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.fr-dead__icon {
+  font-size: 20px;
+  color: var(--ochre, #8A5E1C);
+  flex: none;
+  line-height: 1.4;
+}
+.fr-dead__t {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink, #2A2722);
+}
+.fr-dead__s {
+  font-size: 16px;
+  color: var(--ink-2, #5C564A);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+/* ── foco visible (accesibilidad) ───────────────────── */
+.rf a:focus-visible,
+.rf button:focus-visible,
+.rf-strip a:focus-visible,
+.rf-strip button:focus-visible {
+  outline: 3px solid var(--clay-deep, #9A4424);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (max-width: 720px) {
+  .rf__components {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf *,
+  .rf *::before,
+  .rf *::after,
+  .rf-strip *,
+  .rf-strip *::before,
+  .rf-strip *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
