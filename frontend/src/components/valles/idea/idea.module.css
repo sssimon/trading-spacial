@@ -272,7 +272,7 @@
   line-height: 1.62;
   color: var(--ink, #2A2722);
   margin: 12px 0 0;
-  max-width: 60ch;
+  max-width: none;
   text-wrap: pretty;
 }
 .nb__p b { font-weight: 600; }
@@ -283,7 +283,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 60ch;
+  max-width: none;
 }
 .nb__li {
   position: relative;
@@ -312,7 +312,7 @@
 .seam {
   margin-top: 16px;
   padding: 16px 20px;
-  max-width: 62ch;
+  max-width: none;
   background: var(--card-2, #F6F1E7);
   border: 1px solid var(--card-edge, #E4DCCC);
   border-radius: 12px;
@@ -416,8 +416,9 @@
 .iv-nav__sep { width: 1px; height: 16px; background: var(--card-edge-2); }
 
 /* columnas de lectura */
-.iv-col { max-width: var(--read); margin: 0 auto; }
-.iv-wide { max-width: 1180px; margin: 0 auto; }
+/* columna de contenido: a la izquierda, llena el ancho (no una columna centrada angosta) */
+.iv-col { margin: 0; }
+.iv-wide { max-width: 1180px; margin: 0; }
 
 /* ② cabecera de la moneda */
 .iv-head { margin-bottom: 26px; }
