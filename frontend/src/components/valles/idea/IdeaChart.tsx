@@ -82,8 +82,12 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
       },
       timeScale:    { visible: false, borderVisible: false },
       crosshair:    { mode: 0 as never },
-      handleScroll: false,
-      handleScale:  false,
+      // Interactivo: arrastrar para desplazar (horizontal), rueda/pinch para zoom
+      // de tiempo, doble-clic para resetear. Sin arrastre del eje de PRECIO para que
+      // los overlays (anotados por priceToCoordinate) no se desincronicen — el zoom de
+      // tiempo sí dispara subscribeVisibleLogicalRangeChange → re-render → overlays siguen.
+      handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale:  { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false }, axisDoubleClickReset: true },
       width:  Math.max(1, container.clientWidth),
       height: Math.max(1, height),
     });
@@ -142,7 +146,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
     // Abrir ENFOCADO en los últimos ~N días relevantes — no el histórico completo,
     // que deja velas/rangos/jugada ilegibles. El gráfico no es paneable, así que el
     // rango inicial ES la vista. fitContent solo si hay poca historia.
-    const INITIAL_VISIBLE_BARS = 90;
+    const INITIAL_VISIBLE_BARS = 60;
     const RIGHT_PAD_BARS = 5;   // aire a la derecha para el marcador y las etiquetas
     const total = candles.length;
     const applyView = () => {
