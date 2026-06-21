@@ -139,7 +139,19 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
         close: c.close,
       })),
     );
-    chart.timeScale().fitContent();
+    // Abrir ENFOCADO en los últimos ~N días relevantes — no el histórico completo,
+    // que deja velas/rangos/jugada ilegibles. El gráfico no es paneable, así que el
+    // rango inicial ES la vista. fitContent solo si hay poca historia.
+    const INITIAL_VISIBLE_BARS = 90;
+    const RIGHT_PAD_BARS = 5;   // aire a la derecha para el marcador y las etiquetas
+    const total = candles.length;
+    const applyView = () => {
+      const ts = chartRef.current?.timeScale();
+      if (!ts) return;
+      if (total <= INITIAL_VISIBLE_BARS) ts.fitContent();
+      else ts.setVisibleLogicalRange({ from: total - INITIAL_VISIBLE_BARS, to: total - 1 + RIGHT_PAD_BARS });
+    };
+    applyView();
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (!chartRef.current) return;
@@ -150,6 +162,7 @@ export const IdeaChart: React.FC<IdeaChartProps> = ({
         if (W < 1 || H < 1) return;
         chartRef.current.resize(W - 1, H - 1, true);
         chartRef.current.resize(W, H, true);
+        applyView();   // re-aplicar tras el resize para que el rango pegue
         force((n) => n + 1);
       }),
     );
