@@ -1,7 +1,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(4, 8, 6, 0.55);
+  background: rgba(42, 39, 34, 0.30);
   z-index: 99;
   animation: bdFade 120ms ease-out;
 }
@@ -13,13 +13,12 @@
   top: 56px;
   right: 18px;
   width: 320px;
-  background: linear-gradient(180deg, rgba(16, 22, 18, 0.96), rgba(12, 16, 14, 0.96));
-  backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
-  border: 1px solid var(--nbc-border-dim);
-  box-shadow:
-    0 0 0 1px rgba(106, 215, 255, 0.10),
-    0 20px 40px -8px rgba(0, 0, 0, 0.6);
+  background: var(--nbc-surface);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  border: 1px solid var(--nbc-border-color);
+  border-radius: var(--nbc-radius);
+  box-shadow: var(--nbc-shadow-lg);
   animation: menuIn 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
   transform-origin: top right;
   display: flex;
@@ -125,5 +124,5 @@
   text-align: left;
   transition: background 80ms ease;
 }
-.logout:hover { background: rgba(255, 184, 78, 0.08); }
+.logout:hover { background: var(--nbc-danger-dim); }
 .logoutIcon { font-size: 13px; }
