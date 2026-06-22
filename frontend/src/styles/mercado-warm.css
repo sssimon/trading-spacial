@@ -14,7 +14,6 @@
    ============================================================ */
 .mw, .mw * { box-sizing: border-box; }
 .mw {
-  min-height: 100%;
   background:
     radial-gradient(120% 70% at 50% -8%, rgba(184,84,46,0.05), transparent 55%),
     radial-gradient(90% 60% at 100% 108%, rgba(94,112,72,0.05), transparent 60%),
