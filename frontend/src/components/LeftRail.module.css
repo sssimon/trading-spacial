@@ -11,12 +11,43 @@
      ítems + el footer .user no caben en un viewport bajo, el rail scrollea
      internamente. .spacer{flex:1} sigue empujando .user al fondo. */
   overflow-y: auto;
+  /* Stacking propio para que los tooltips del modo colapsado floten por
+     encima de .main (que es hermano y se pinta después). */
+  position: relative;
+  z-index: 5;
+  transition: width 160ms var(--ease, ease);
 }
 
 .brand {
-  padding: 0 18px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px 18px;
   border-bottom: 1px solid var(--nbc-border-dimmer);
   margin-bottom: 4px;
+}
+
+/* Toggle colapsar/expandir (en la cabecera del rail, junto al logo) */
+.collapseBtn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--nbc-fg-muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
+}
+.collapseBtn:hover {
+  color: var(--nbc-fg);
+  border-color: var(--nbc-border-dim);
+  background: var(--nbc-surface-alt);
 }
 .brandMark { color: var(--bull); width: 22px; height: 22px; }
 
@@ -176,3 +207,80 @@
   color: var(--bear);
   border-color: var(--bear);
 }
+.logoutIcon { font-size: 12px; line-height: 1; }
+
+/* ════════════════════════════════════════════════════════════
+   COLAPSADO — solo iconos centrados + tooltips a la derecha
+   ════════════════════════════════════════════════════════════ */
+.collapsed {
+  width: 64px;
+  /* overflow visible para que los tooltips escapen del rail; en colapsado
+     el contenido es corto y no necesita scroll vertical. */
+  overflow: visible;
+}
+
+/* cabecera: solo el toggle (›) centrado, sin el wordmark */
+.collapsed .brand {
+  justify-content: center;
+  padding: 0 0 14px;
+}
+.collapsed .brandMark { display: none; }
+
+/* etiquetas de sección → línea divisoria fina */
+.collapsed .section { padding: 0 8px; }
+.collapsed .sectionLabel {
+  height: 1px;
+  margin: 8px 8px 4px;
+  padding: 0;
+  background: var(--nbc-border-dimmer);
+  text-indent: -9999px;
+  overflow: hidden;
+}
+.collapsed .sectionLabel::before { content: none; }
+
+/* items: icono centrado; sin label, contador ni badge */
+.collapsed .item {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 9px 0;
+}
+.collapsed .indicator,
+.collapsed .label,
+.collapsed .count,
+.collapsed .badge { display: none; }
+
+/* footer: solo el avatar; "salir" queda como icono */
+.collapsed .user { padding: 12px 0; align-items: center; }
+.collapsed .userRow { justify-content: center; }
+.collapsed .userText { display: none; }
+.collapsed .logout {
+  align-self: center;
+  padding: 6px 8px;
+}
+.collapsed .logoutLabel { display: none; }
+
+/* tooltips (solo en colapsado) a la derecha del icono */
+.collapsed .logout { position: relative; }
+.collapsed .item::after,
+.collapsed .logout::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  padding: 4px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: var(--nbc-shadow-lg);
+  transition: opacity 90ms ease;
+  z-index: 60;
+}
+.collapsed .item:hover::after,
+.collapsed .logout:hover::after { opacity: 1; }
