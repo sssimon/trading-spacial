@@ -7,6 +7,10 @@
   flex-direction: column;
   padding: 18px 0;
   gap: 10px;
+  /* El shell (.appDesktop) acota el rail a la altura del viewport; si los
+     ítems + el footer .user no caben en un viewport bajo, el rail scrollea
+     internamente. .spacer{flex:1} sigue empujando .user al fondo. */
+  overflow-y: auto;
 }
 
 .brand {
