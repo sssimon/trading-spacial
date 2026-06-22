@@ -45,6 +45,13 @@
   flex-direction: column;
   align-items: center;
 }
+/* Bajo el app-shell de desktop, .main scrollea y mide viewport − (header +
+   ticker). Un .vw de 100vh excedería ese alto y forzaría un scroll permanente
+   aunque el contenido quepa. min-height:100% lo ancla a .main; el fill de
+   --paper lo sigue dando .vwRoot. Mobile mantiene 100vh del viewport. */
+[data-shell="desktop"] .vw {
+  min-height: 100%;
+}
 
 /* barra superior fina: wordmark + progreso de las tres lentes */
 .vwTop {

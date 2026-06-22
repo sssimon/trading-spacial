@@ -12,6 +12,13 @@
 .appDesktop {
   padding: 0;
   gap: 0;
+  /* App-shell: fija el shell al viewport y deja que el flex reparta la
+     altura (Header + Ticker son flex-shrink:0; .body absorbe el resto con
+     flex:1). Solo .main scrollea — así el rail queda a altura de viewport
+     y su footer .user se ve siempre. 100vh ancla al viewport, no al padre,
+     así que no hace falta tocar html/body/#root. Mobile NO usa esta regla. */
+  height: 100vh;
+  overflow: hidden;
 }
 .appMobile {
   padding: 0 0 64px;
@@ -37,6 +44,12 @@
 .appMobile .main {
   padding: 0 12px;
   gap: 12px;
+}
+/* Desktop: .main es el ÚNICO scroller. min-height:0 deja que el flex item
+   se encoja por debajo de su contenido para que el overflow surta efecto. */
+.appDesktop .main {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .errorBanner {

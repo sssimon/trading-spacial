@@ -628,7 +628,10 @@ const App: React.FC = () => {
   useEffect(() => { setOpenOverlay(null); }, [mainTab]);
 
   return (
-    <div className={[appStyles.app, mobile ? appStyles.appMobile : appStyles.appDesktop].join(' ')}>
+    <div
+      className={[appStyles.app, mobile ? appStyles.appMobile : appStyles.appDesktop].join(' ')}
+      data-shell={mobile ? 'mobile' : 'desktop'}
+    >
       <NotificationToast />
 
       <Header

@@ -4,7 +4,7 @@
 // análisis (historial / auto-tune / config). Footer = user.
 // ============================================================
 
-import React from 'react';
+import React, { useState } from 'react';
 import styles from './LeftRail.module.css';
 import RailIcon, { type RailIconName } from './atoms/RailIcon';
 import type { MainTab } from '../types-ui';
@@ -41,6 +41,19 @@ const LeftRail: React.FC<LeftRailProps> = ({
 }) => {
   const { user } = useAuth();
 
+  // Colapsable (solo desktop; en mobile se usa BottomNav). Persiste para que
+  // el operador no tenga que recolapsar en cada sesión.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('rail_collapsed') === '1'; } catch { return false; }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem('rail_collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   const tradingItems: RailItemDef[] = [
     { id: 'mercado',     label: 'Mercado',     icon: 'mercado',    count: counts.market,     tab: 'mercado' },
     { id: 'posiciones',  label: 'Posiciones',  icon: 'positions',  count: counts.positions,  tab: 'posiciones' },
@@ -54,7 +67,10 @@ const LeftRail: React.FC<LeftRailProps> = ({
   ];
 
   return (
-    <nav className={styles.rail} aria-label="Navegación principal">
+    <nav
+      className={[styles.rail, collapsed ? styles.collapsed : ''].filter(Boolean).join(' ')}
+      aria-label="Navegación principal"
+    >
       <div className={styles.brand}>
         <div className={styles.brandMark}>
           <svg width="22" height="22" viewBox="0 0 20 20" fill="none">
@@ -63,6 +79,15 @@ const LeftRail: React.FC<LeftRailProps> = ({
             <rect x="8" y="8" width="4"  height="4"  fill="var(--nbc-bg)" />
           </svg>
         </div>
+        <button
+          type="button"
+          className={styles.collapseBtn}
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? '›' : '‹'}
+        </button>
       </div>
 
       <div className={styles.section}>
@@ -107,8 +132,14 @@ const LeftRail: React.FC<LeftRailProps> = ({
             </div>
           </div>
           {onLogout && (
-            <button className={styles.logout} onClick={onLogout} title="Cerrar sesión">
-              <span>↗</span> salir
+            <button
+              className={styles.logout}
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+              data-tip="Cerrar sesión"
+            >
+              <span className={styles.logoutIcon}>↗</span>
+              <span className={styles.logoutLabel}>salir</span>
             </button>
           )}
         </div>
@@ -134,6 +165,8 @@ const RailItem: React.FC<RailItemProps> = ({ def, active, onClick }) => {
       ].filter(Boolean).join(' ')}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
+      aria-label={def.label}
+      data-tip={def.label}
     >
       <span className={styles.indicator} />
       <RailIcon name={def.icon} className={styles.icon} />
