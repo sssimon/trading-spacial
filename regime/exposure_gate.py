@@ -24,13 +24,17 @@ class GateDecision:
     umbral_version: str
 
 
+def _hash_thresholds(eff: dict) -> str:
+    """Hash determinista de un dict de umbrales ya computado."""
+    blob = json.dumps(eff, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
 def umbral_version(cfg: dict) -> str:
     """Sello determinista de los umbrales EFECTIVOS (6 de lean + 2 de gobierno de
     evidencia + overrides). Ata cada fila de auditoría a la calibración exacta."""
     overrides = (cfg.get("regime_gate") or {}).get("umbral_overrides") or {}
-    eff = effective_thresholds(overrides)
-    blob = json.dumps(eff, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+    return _hash_thresholds(effective_thresholds(overrides))
 
 
 def evaluar_gate(estado: str, frescura: str, votos_vivos: int,
@@ -60,5 +64,5 @@ def evaluar_gate(estado: str, frescura: str, votos_vivos: int,
     return GateDecision(
         nivel=nivel, estado_regimen=estado, es_alt=es_alt,
         regime_frescura=frescura, votos_vivos=votos_vivos, razon=razon,
-        enforced=enforced, umbral_version=umbral_version(cfg),
+        enforced=enforced, umbral_version=_hash_thresholds(eff),
     )

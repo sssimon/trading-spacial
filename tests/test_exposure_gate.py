@@ -45,3 +45,7 @@ def test_umbral_version_changes_with_overrides():
     base = umbral_version({"regime_gate": {"umbral_overrides": {}}})
     moved = umbral_version({"regime_gate": {"umbral_overrides": {"BREADTH_ALT": 0.7}}})
     assert base != moved
+
+def test_cfg_vacio_failopen():
+    d = evaluar_gate("btc", "fresco", 3, True, {})
+    assert d.nivel == "pasa" and d.enforced is False
