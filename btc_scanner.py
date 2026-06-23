@@ -113,6 +113,9 @@ except (AttributeError, io.UnsupportedOperation):
 
 log = logging.getLogger("btc_scanner")
 
+from regime.alt_season_read import leer_regimen, RegimenVivo
+from regime.exposure_gate import evaluar_gate
+
 
 from strategy._validators import (
     validated_max_participation_rate as _shared_validated_max_pov,
@@ -134,6 +137,23 @@ def _validated_cooldown_hours(value, symbol: str) -> float:
 # from _build_e5_cooldown. Keyed by (symbol, exception type name) — one log line
 # per (symbol, kind) per process.
 _db_fail_warned: set[tuple[str, str]] = set()
+
+
+def aplicar_gate_scanner(*, symbol: str, señal: bool, estado_actual: str,
+                         rv: RegimenVivo, cfg: dict):
+    """Aplica el gate (motor 'scanner'). Devuelve (señal, estado, fila_auditoria|None).
+    fila=None cuando el gate está off (no se audita con enabled=false → byte-idéntico)."""
+    if not (cfg.get("regime_gate") or {}).get("enabled", False):
+        return señal, estado_actual, None
+    es_alt = symbol != "BTCUSDT"
+    d = evaluar_gate(rv.estado, rv.frescura, rv.votos_vivos, es_alt, cfg)
+    fila = {"motor": "scanner", "symbol": symbol, "estado_regimen": d.estado_regimen,
+            "nivel": d.nivel, "es_alt": es_alt, "regime_frescura": d.regime_frescura,
+            "votos_vivos": d.votos_vivos, "enforced": d.enforced,
+            "umbral_version": d.umbral_version, "tenant_id": None}
+    if señal and d.nivel == "suprime":
+        return False, f"🌧️  SEÑAL {symbol} suprimida — fuera de alt-season (clima '{d.estado_regimen}')", fila
+    return señal, estado_actual, fila
 
 
 def _build_e5_cooldown(symbol: str, cfg: dict) -> dict:
@@ -245,6 +265,14 @@ def scan(symbol: str = None):
                 _cfg = json.load(_f)
         except Exception:
             pass
+
+    # Gate de exposición por régimen (#alt-season): leer el régimen UNA vez por scan.
+    _gate_rv = None
+    try:
+        _frescura_umbral = float((_cfg.get("regime_gate") or {}).get("frescura_umbral_seg", 27000))
+        _gate_rv = leer_regimen(_frescura_umbral)
+    except Exception as _gate_read_err:
+        log.warning("regime_gate: lectura de régimen falló para %s — fail-open: %s", symbol, _gate_read_err)
 
     # Kill switch #138 PR 4: PAUSED symbols do not generate signals. Early-return
     # with a structured report that mimics the "disabled in config" shape used below.
@@ -712,6 +740,17 @@ def scan(symbol: str = None):
         estado = f"✅ SEÑAL {direction} + GATILLO CONFIRMADOS — Calidad: {sl}"
         señal  = True
 
+    # Gate de exposición: esconde señales alt en mal clima (fail-open propio).
+    _gate_fila = None
+    if _gate_rv is not None:
+        try:
+            señal, estado, _gate_fila = aplicar_gate_scanner(
+                symbol=symbol, señal=señal, estado_actual=estado, rv=_gate_rv, cfg=_cfg)
+        except Exception as _gate_err:
+            log.warning("regime_gate: aplicar falló para %s — fail-open: %s", symbol, _gate_err)
+    # No flush aquí — el orchestrador (scanner_loop) lo batcha al final del ciclo.
+    # Ver spec §5 y scanner/runtime.py scanner_loop.
+
     # ── Consolidar ────────────────────────────────────────────────────────────
     rep.update({
         "estado":         estado,
@@ -771,6 +810,13 @@ def scan(symbol: str = None):
             },
         },
     })
+    # Exponer la fila de auditoría del gate para que el orchestrador
+    # la batche al final del ciclo (spec §5). Sólo se añade la clave
+    # cuando el gate está habilitado y produjo una fila — así rep es
+    # byte-identical cuando el gate está deshabilitado.
+    if _gate_fila is not None:
+        rep["_regime_gate_fila"] = _gate_fila
+
     # Convertir tipos numpy a tipos Python nativos para serialización JSON
     import numpy as np
     def clean_dict(d):

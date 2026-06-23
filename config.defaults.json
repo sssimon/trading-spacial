@@ -54,6 +54,11 @@
     "min_position_usd": 50.0,
     "max_leverage": 2.0
   },
+  "regime_gate": {
+    "enabled": false,
+    "frescura_umbral_seg": 27000,
+    "umbral_overrides": {}
+  },
   "symbol_overrides": {
     "BTCUSDT":    { "atr_sl_mult": 1.0, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010,  "cooldown_hours": 14 },
     "ETHUSDT":    { "atr_sl_mult": 1.2, "atr_tp_mult": 4.0, "atr_be_mult": 1.5, "time_limit_hours": 14, "max_participation_rate": 0.010,  "cooldown_hours": 14 },

@@ -356,6 +356,39 @@
 .vwCandGo { color: var(--clay); font-size: 18px; flex: none; transition: transform 160ms var(--ease); }
 .vwCand:hover .vwCandGo { transform: translateX(3px); }
 
+/* marcador "clima ambiguo" — régimen mixto en candidata visible */
+.vwClimaAmbiguo {
+  display: inline-flex; align-items: center;
+  margin-left: 10px;
+  font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600;
+  color: var(--ochre); background: var(--ochre-tint); border: 1px solid var(--ochre-soft);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap; cursor: help;
+}
+
+/* válvula "ver ocultas" — alts fuera de alt-season */
+.vwOcultas { margin-top: 18px; }
+.vwVerOcultas {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--sans); font-size: 13.5px; font-weight: 500;
+  color: var(--ink-3); background: none; border: 1px solid var(--card-edge);
+  border-radius: 999px; padding: 8px 18px; cursor: pointer;
+  transition: all 140ms var(--ease);
+}
+.vwVerOcultas:hover { color: var(--ink-2); border-color: var(--card-edge-2); background: var(--card); }
+.vwOcultasList { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* fila de candidata atenuada (oculta por régimen) */
+.vwCandAtenuada { opacity: 0.72; }
+.vwCandAtenuada:hover { opacity: 1; }
+
+/* hecho de clima — texto de régimen en fila oculta */
+.vwClimaHecho {
+  display: block; margin-top: 4px;
+  font-size: 11.5px; color: var(--ink-3); font-style: italic;
+  white-space: normal; overflow: hidden; text-overflow: ellipsis;
+  max-width: 38ch;
+}
+
 /* meta honesta: cobertura + orden */
 .vwEntryMeta {
   margin-top: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;

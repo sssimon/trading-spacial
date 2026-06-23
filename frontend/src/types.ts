@@ -542,13 +542,15 @@ export interface ValleyCandidate {
   volumen_usd_dia:      number;
   distancia_ath_pct:    number;
   razones_vida:         string[];
+  clima_ambiguo?:       boolean;   // presente cuando el gate está activo y el régimen es mixto
 }
 
 export interface ValleySnapshot {
-  generated_at: string | null;
-  coverage:     { universe: number; evaluated: number; complete: boolean };
-  candidates:   ValleyCandidate[];
-  frescura?:    Frescura;
+  generated_at:        string | null;
+  coverage:            { universe: number; evaluated: number; complete: boolean };
+  candidates:          ValleyCandidate[];
+  frescura?:           Frescura;
+  candidatas_ocultas?: (ValleyCandidate & { clima: string })[];   // solo cuando el gate enforza
 }
 
 // ---- Régimen de mercado "¿es alt-season?" (hecho de mercado, no veredicto) ----

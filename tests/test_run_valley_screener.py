@@ -138,3 +138,46 @@ def test_fetch_dominance_error_de_red_es_none():
     import requests
     with patch("tools.run_valley_screener.requests.get", side_effect=requests.RequestException("boom")):
         assert rvs._fetch_dominance() is None
+
+
+# ---------------------------------------------------------------------------
+# Tests de aplicar_gate_candidatas (Task 5)
+# ---------------------------------------------------------------------------
+
+def _candidatas():
+    """2 candidatas alt de juguete."""
+    return [{"symbol": "ADAUSDT", "price": 1.0}, {"symbol": "DOGEUSDT", "price": 0.1}]
+
+
+def test_disabled_byte_identico(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config", lambda: {"regime_gate": {"enabled": False}})
+    called = []
+    monkeypatch.setattr(rvs, "registrar_decisiones", lambda filas: called.append(filas))
+    original = _candidatas()
+    snap = rvs.aplicar_gate_candidatas(original, estado="btc", votos_vivos=3)
+    assert snap == {"candidates": original}      # exactamente una llave
+    assert snap["candidates"] is original         # zero-copy
+    assert called == []                           # NO audita con flag off
+
+
+def test_enabled_btc_esconde(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config",
+                        lambda: {"regime_gate": {"enabled": True, "umbral_overrides": {}}})
+    captured = []
+    monkeypatch.setattr(rvs, "registrar_decisiones", lambda filas: captured.append(filas))
+    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="btc", votos_vivos=3)
+    assert snap["candidates"] == []                  # todas escondidas
+    assert len(snap["candidatas_ocultas"]) == 2
+    # Audit: una sola llamada con 2 filas (una por candidata), todas suprime, tenant_id None.
+    assert len(captured) == 1
+    assert len(captured[0]) == 2
+    assert all(f["nivel"] == "suprime" for f in captured[0])
+    assert all(f["tenant_id"] is None for f in captured[0])
+
+
+def test_enabled_mixto_empate_atenua(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config",
+                        lambda: {"regime_gate": {"enabled": True, "umbral_overrides": {}}})
+    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="mixto", votos_vivos=3)
+    assert len(snap["candidates"]) == 2 and all(c["clima_ambiguo"] for c in snap["candidates"])
+    assert snap.get("candidatas_ocultas", []) == []

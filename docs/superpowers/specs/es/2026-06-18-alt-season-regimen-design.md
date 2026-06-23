@@ -237,6 +237,13 @@ Fila a añadir en `docs/superpowers/inventario-estado-vivo.md`:
 - El payload pasa la misma disciplina léxica que los 5 candados server-side existentes. La frase
   honesta ES la doctrina dicha fuerte: entrega la verdad incómoda (régimen > coin) sin esconderla.
 
+> **Enmienda 2026-06-23:** esta regla queda SUPERADA para el eje de EXPOSICIÓN.
+> El régimen ahora gatea qué alts afloran (esconde en clima 'btc', atenúa en
+> 'mixto' por empate). NO es scoring per-coin: es un filtro de exposición sobre un
+> hecho de mercado, igual para todas las alts; el veredicto per-coin sigue
+> prohibido. Las candidatas suprimidas son destapables (no desaparecen). Ver
+> `docs/superpowers/specs/es/2026-06-23-regimen-al-trade-gate-design.md`.
+
 ## Testing (TDD)
 
 **Núcleo puro (`tests/test_alt_season.py`):**

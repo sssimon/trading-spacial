@@ -19,7 +19,10 @@ from datetime import datetime, timezone
 
 import requests
 
-from regime.alt_season import compose_regime, symbol_contribution
+from api.config import load_config
+from db.regime_gate_audit import registrar_decisiones
+from regime.alt_season import compose_regime, effective_thresholds, symbol_contribution
+from regime.exposure_gate import evaluar_gate
 from screener.universe import list_live_usdt_spot
 from screener.valley_filter import evaluate_symbol, order_neutral
 
@@ -95,6 +98,36 @@ def _atomic_write_json(path: str, obj: dict) -> None:
         raise
 
 
+def aplicar_gate_candidatas(candidatas: list[dict], *, estado: str, votos_vivos: int) -> dict:
+    """Aplica el gate (motor 'valles') a las candidatas. Devuelve un dict con
+    'candidates' (las que pasan/atenúan) y, SOLO si enabled, 'candidatas_ocultas'.
+    Frescura='fresco' trivial: el régimen se computó en esta misma pasada."""
+    cfg = load_config()
+    if not (cfg.get("regime_gate") or {}).get("enabled", False):
+        return {"candidates": candidatas}            # byte-idéntico: sin campos nuevos
+    # El régimen es market-wide: la GateDecision es uniforme para todas las candidatas.
+    d = evaluar_gate(estado, "fresco", votos_vivos, es_alt=True, cfg=cfg)
+    visibles: list[dict] = []
+    ocultas: list[dict] = []
+    filas: list[dict] = []
+    for c in candidatas:
+        filas.append({"motor": "valles", "symbol": c["symbol"], "estado_regimen": d.estado_regimen,
+                      "nivel": d.nivel, "es_alt": True, "regime_frescura": d.regime_frescura,
+                      "votos_vivos": d.votos_vivos, "enforced": d.enforced,
+                      "umbral_version": d.umbral_version, "tenant_id": None})
+        if d.nivel == "suprime":
+            ocultas.append({**c, "clima": d.razon})
+        elif d.nivel == "atenua":
+            visibles.append({**c, "clima_ambiguo": True})
+        else:
+            visibles.append(c)
+    try:
+        registrar_decisiones(filas)
+    except Exception:
+        log.warning("regime_gate_audit (valles) falló — fail-open", exc_info=True)
+    return {"candidates": visibles, "candidatas_ocultas": ocultas}
+
+
 def build_snapshot(*, pause_s: float = 0.0,
                    generated_at: str | None = None) -> tuple[dict, dict]:
     """Construye AMBAS fotos (candidatas + régimen) en UNA pasada del universo.
@@ -132,13 +165,18 @@ def build_snapshot(*, pause_s: float = 0.0,
 
     coverage = {"universe": len(universo), "evaluated": evaluadas,
                 "complete": evaluadas == len(universo)}
-    cand_snap = {"generated_at": ts, "coverage": coverage,
-                 "candidates": order_neutral(candidatas)}
 
     dominance = _fetch_dominance()
     dom_ts = datetime.now(timezone.utc).isoformat() if dominance is not None else None
     coverage_ratio = (evaluadas / len(universo)) if universo else 0.0
-    regime = compose_regime(alt_contribs, btc_ret_30d, dominance, coverage_ratio)
+    _overrides = (load_config().get("regime_gate") or {}).get("umbral_overrides") or {}
+    regime = compose_regime(alt_contribs, btc_ret_30d, dominance, coverage_ratio,
+                            thresholds=effective_thresholds(_overrides))
+
+    gate_out = aplicar_gate_candidatas(order_neutral(candidatas),
+                                       estado=regime["estado"],
+                                       votos_vivos=regime["votos"]["vivos"])
+    cand_snap = {"generated_at": ts, "coverage": coverage, **gate_out}
     alt_season_snap = {
         "generated_at": ts,
         "coverage": coverage,
@@ -153,10 +191,8 @@ def build_snapshot(*, pause_s: float = 0.0,
 def regenerate(*, pause_s: float = 0.05) -> tuple[dict, dict]:
     """build_snapshot + escribe ambos JSON. Usado por main() y por _regenerate_screener."""
     cand_snap, alt_season_snap = build_snapshot(pause_s=pause_s)
-    os.makedirs(os.path.dirname(_OUTPUT), exist_ok=True)
-    with open(_OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(cand_snap, f, indent=2, ensure_ascii=False)
-    _atomic_write_json(_ALT_SEASON_OUTPUT, alt_season_snap)   # atómico (BLOCKER del review)
+    _atomic_write_json(_OUTPUT, cand_snap)            # antes: open(...,"w")+json.dump no-atómico
+    _atomic_write_json(_ALT_SEASON_OUTPUT, alt_season_snap)
     return cand_snap, alt_season_snap
 
 

@@ -1,5 +1,10 @@
 """Tests del núcleo puro del régimen de mercado (alt-season). Sin red, sin DB."""
-from regime.alt_season import symbol_contribution, MIN_HISTORY_DAYS
+from regime.alt_season import (
+    symbol_contribution,
+    compose_regime,
+    effective_thresholds,
+    MIN_HISTORY_DAYS,
+)
 
 
 def _bars(closes):
@@ -28,9 +33,6 @@ def test_contribution_below_sma50():
     c = symbol_contribution("X", _bars(closes))
     assert c["above_sma50"] is False
     assert abs(c["ret_30d"] - (-0.20)) < 1e-9
-
-
-from regime.alt_season import compose_regime
 
 
 def _contrib(above, ret):
@@ -146,3 +148,43 @@ def test_compose_cero_votantes_vivos_es_mixto():
     out = compose_regime([], btc_ret_30d=None, btc_dominance=None, coverage_ratio=1.0)
     assert out["estado"] == "mixto"
     assert out["votos"]["vivos"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests de effective_thresholds + compose_regime parametrizable (Task 1)
+# ---------------------------------------------------------------------------
+def test_effective_thresholds_defaults_match_constants():
+    import regime.alt_season as m
+    t = effective_thresholds(None)
+    assert t["BREADTH_ALT"] == m.BREADTH_ALT
+    assert t["OUTPERF_ALT"] == m.OUTPERF_ALT
+    assert t["DOM_BTC"] == m.DOM_BTC
+    assert t["COVERAGE_MIN"] == m.COVERAGE_MIN
+    assert t["MIN_LIVE_VOTERS"] == m.MIN_LIVE_VOTERS
+    assert t["BREADTH_BEAR"] == m.BREADTH_BEAR
+    assert t["OUTPERF_BEAR"] == m.OUTPERF_BEAR
+    assert t["DOM_ALT"] == m.DOM_ALT
+
+
+def test_effective_thresholds_overrides_win():
+    t = effective_thresholds({"BREADTH_ALT": 0.7})
+    assert t["BREADTH_ALT"] == 0.7
+    import regime.alt_season as m
+    assert t["OUTPERF_ALT"] == m.OUTPERF_ALT  # los no-pisados quedan
+
+
+def test_compose_regime_thresholds_none_is_default():
+    # Una pasada donde breadth=1.0 (todos sobre SMA50) y BTC ret bajo → 'alts'.
+    contribs = [{"above_sma50": True, "ret_30d": 0.20} for _ in range(5)]
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.45,
+                         coverage_ratio=1.0, thresholds=None)
+    assert out["estado"] == "alts"
+
+
+def test_compose_regime_override_flips_state():
+    contribs = [{"above_sma50": True, "ret_30d": 0.01} for _ in range(5)]
+    # breadth=1.0; con BREADTH_ALT=0.6 por defecto vota 'alts'. Subiendo a 1.1
+    # (imposible de alcanzar) el voto de breadth deja de ser 'alts'.
+    out = compose_regime(contribs, btc_ret_30d=0.0, btc_dominance=0.55,
+                         coverage_ratio=1.0, thresholds=effective_thresholds({"BREADTH_ALT": 1.1}))
+    assert out["estado"] != "alts"

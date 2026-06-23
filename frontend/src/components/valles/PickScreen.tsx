@@ -8,7 +8,9 @@ import styles from './valles.module.css';
 
 export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: string) => void }> = ({ snapshot, onPick }) => {
   const [q, setQ] = useState('');
-  const { candidates, coverage, frescura } = snapshot;
+  const [mostrarOcultas, setMostrarOcultas] = useState(false);
+  const { candidates, coverage, frescura, candidatas_ocultas } = snapshot;
+  const ocultas = candidatas_ocultas ?? [];
 
   return (
     <div className={styles.vwScreen}>
@@ -39,12 +41,56 @@ export const PickScreen: React.FC<{ snapshot: ValleySnapshot; onPick: (sym: stri
             <div className={styles.vwCandFact}>
               <span className={styles.vwCandTag} aria-hidden="true">● parte baja del rango</span>
               cuartil inferior (pos <b>{(c.pos_in_30d_range * 100).toFixed(0)}%</b>) · RSI <b>{c.rsi14.toFixed(0)}</b>
+              {c.clima_ambiguo && (
+                <span className={styles.vwClimaAmbiguo} title="El régimen del mercado es mixto — ni claramente hacia alts ni hacia BTC">
+                  clima ambiguo
+                </span>
+              )}
             </div>
             <div className={styles.vwCandPrice}>${formatPrice(c.price)}</div>
             <div className={styles.vwCandGo} aria-hidden="true">→</div>
           </button>
         ))}
       </div>
+
+      {/* Válvula "ver ocultas" — solo si el gate está activo y hay alts excluidas */}
+      {ocultas.length > 0 && (
+        <div className={styles.vwOcultas}>
+          <button
+            className={styles.vwVerOcultas}
+            onClick={() => setMostrarOcultas((v) => !v)}
+            aria-expanded={mostrarOcultas}
+          >
+            {mostrarOcultas
+              ? 'Ocultar'
+              : `${ocultas.length} ${ocultas.length === 1 ? 'alt' : 'alts'} fuera de alt-season — ver`}
+          </button>
+          {mostrarOcultas && (
+            <div className={styles.vwOcultasList} role="list">
+              {ocultas.map((c) => (
+                <button
+                  key={c.symbol}
+                  role="listitem"
+                  className={`${styles.vwCand} ${styles.vwCandAtenuada}`}
+                  onClick={() => onPick(c.symbol)}
+                >
+                  <div className={styles.vwCandId}>
+                    <div className={styles.vwCandName}>{humanName(c.symbol)}</div>
+                    <div className={styles.vwCandSym}>{c.symbol}</div>
+                  </div>
+                  <div className={styles.vwCandFact}>
+                    <span className={styles.vwCandTag} aria-hidden="true">● parte baja del rango</span>
+                    cuartil inferior (pos <b>{(c.pos_in_30d_range * 100).toFixed(0)}%</b>) · RSI <b>{c.rsi14.toFixed(0)}</b>
+                    <span className={styles.vwClimaHecho} title={c.clima}>{c.clima}</span>
+                  </div>
+                  <div className={styles.vwCandPrice}>${formatPrice(c.price)}</div>
+                  <div className={styles.vwCandGo} aria-hidden="true">→</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={styles.vwEntryMeta}>
         <span>Se miraron <b>{coverage.evaluated}</b> de {coverage.universe} monedas del universo.</span>

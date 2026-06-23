@@ -1549,3 +1549,195 @@ class TestScanEmitsV2ShadowDecision:
         assert per_symbol["status"] in ("ok", "failed")
         # per_symbol_tier column must equal tier in reasons
         assert shadow_rows[0]["per_symbol_tier"] == per_symbol["tier"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  GATE DE EXPOSICIÓN POR RÉGIMEN — aplicar_gate_scanner (Task 6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import btc_scanner
+from regime.alt_season_read import RegimenVivo
+
+_RV_BTC = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                      generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+_ON = {"regime_gate": {"enabled": True, "umbral_overrides": {}}}
+
+
+def test_gate_suprime_alt_en_btc():
+    # enabled + régimen 'btc' fresco + un símbolo alt con señal → señal suprimida.
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="ADAUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC, cfg=_ON)
+    assert señal is False and "alt-season" in estado.lower() and fila["nivel"] == "suprime"
+
+
+def test_gate_no_toca_btc():
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="BTCUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC, cfg=_ON)
+    assert señal is True and fila["nivel"] == "pasa"   # BTC no es alt → pasa
+
+
+def test_gate_disabled_no_toca():
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="ADAUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC,
+        cfg={"regime_gate": {"enabled": False}})
+    assert señal is True and fila is None             # disabled: no toca señal, no audita
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  BATCH AUDIT CONTRACT — scan() expone fila en rep; execute_scan_for_symbol
+#  la surfacea en result; byte-identity cuando gate deshabilitado (Task 9)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_minimal_rep(**extra):
+    """Devuelve un rep mínimo que scan() produciría (sin llamadas a red)."""
+    base = {
+        "timestamp": "2026-06-23T00:00:00+00:00",
+        "symbol": "ADAUSDT",
+        "estado": "✅ SEÑAL LONG",
+        "señal_activa": True,
+        "direction": "LONG",
+        "regime": "neutral",
+        "regime_score": 0.5,
+        "regime_details": {},
+        "price": 0.5,
+        "lrc_1h": {"pct": 0.0, "upper": 0.0, "lower": 0.0, "mid": 0.0},
+        "rsi_1h": 50.0,
+        "adx_1h": 25.0,
+        "macro_4h": {"sma100": 0.5, "price_above": True},
+        "score": 5,
+        "score_label": "medio",
+        "confirmations": [],
+        "exclusions": [],
+        "blocks_auto": [],
+        "gatillo_5m": {},
+        "gatillo_activo": False,
+        "sizing_1h": {},
+    }
+    base.update(extra)
+    return base
+
+
+@patch("btc_scanner.md.get_klines")
+def test_scan_expone_gate_fila_en_rep_cuando_habilitado(mock_klines, monkeypatch, tmp_path):
+    """La REAL scan() pone _regime_gate_fila en rep cuando el gate está habilitado
+    y el régimen suprime la señal de un alt.
+
+    Ejerce el bloque de producción btc_scanner.py líneas 743-818 directamente —
+    no una réplica. Falla si se revierte el guard `if _gate_fila is not None`.
+    """
+    import btc_scanner as sc
+
+    # Datos sintéticos: reusar el helper existente (mismo patrón que TestScan).
+    df1h, df4h, df5m = TestScan()._make_scan_mock()
+    mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+    # Régimen 'btc' fresco → aplicar_gate_scanner suprimirá el alt ADAUSDT.
+    rv_btc = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                         generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+    monkeypatch.setattr(sc, "leer_regimen", lambda *a, **kw: rv_btc)
+
+    # Config con gate habilitado.
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"regime_gate": {"enabled": True}}))
+    monkeypatch.setattr(sc, "SCRIPT_DIR", str(tmp_path))
+
+    rep = sc.scan("ADAUSDT")
+
+    assert "_regime_gate_fila" in rep, (
+        "scan() debe exponer _regime_gate_fila en rep cuando el gate está habilitado "
+        "— el bloque `if _gate_fila is not None: rep[...] = _gate_fila` fue revertido"
+    )
+    fila = rep["_regime_gate_fila"]
+    assert fila["nivel"] == "suprime", (
+        f"La fila debe registrar nivel='suprime' para un alt en régimen 'btc', "
+        f"se obtuvo nivel='{fila.get('nivel')}'"
+    )
+
+
+@patch("btc_scanner.md.get_klines")
+def test_scan_no_añade_clave_cuando_gate_deshabilitado(mock_klines, monkeypatch, tmp_path):
+    """Byte-identity: la REAL scan() NO añade _regime_gate_fila cuando el gate está off.
+
+    Ejerce el mismo bloque de producción (líneas 743-818) con gate disabled.
+    El contrato: `aplicar_gate_scanner` retorna fila=None cuando enabled=False,
+    y el guard `if _gate_fila is not None` preserva el rep byte-idéntico.
+    """
+    import btc_scanner as sc
+
+    df1h, df4h, df5m = TestScan()._make_scan_mock()
+    mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+    # leer_regimen puede retornar cualquier cosa — el gate no debe tocar el rep.
+    rv_btc = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                         generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+    monkeypatch.setattr(sc, "leer_regimen", lambda *a, **kw: rv_btc)
+
+    # Config con gate deshabilitado → aplicar_gate_scanner retorna fila=None.
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"regime_gate": {"enabled": False}}))
+    monkeypatch.setattr(sc, "SCRIPT_DIR", str(tmp_path))
+
+    rep = sc.scan("ADAUSDT")
+
+    assert "_regime_gate_fila" not in rep, (
+        "Cuando regime_gate.enabled=False, _regime_gate_fila NO debe aparecer en rep "
+        "(byte-identity preservada) — aplicar_gate_scanner retorna None cuando disabled"
+    )
+
+
+def test_execute_scan_for_symbol_surfacea_gate_fila(monkeypatch):
+    """execute_scan_for_symbol() debe incluir _gate_fila en su resultado."""
+    from scanner import runtime as rt
+
+    fila_esperada = {"symbol": "ADAUSDT", "nivel": "suprime", "ts": "t"}
+    rep_con_fila = _make_minimal_rep(symbol="ADAUSDT", _regime_gate_fila=fila_esperada)
+
+    # runtime.py importa scan con `from btc_scanner import scan` en el nivel de
+    # módulo, así que el nombre local en runtime es rt.scan — parchamos ahí.
+    monkeypatch.setattr(rt, "scan", lambda sym: rep_con_fila)
+    monkeypatch.setattr(rt, "save_scan", lambda rep: 42)
+    monkeypatch.setattr(rt, "push_telegram_direct", lambda rep, cfg: None)
+    monkeypatch.setattr(rt, "push_webhook", lambda rep, scan_id, cfg: None)
+
+    # Stub de imports lazy dentro de execute_scan_for_symbol
+    import types
+    fake_positions = types.ModuleType("api.positions")
+    fake_positions.check_position_stops = lambda sym, price: None
+    fake_signals = types.ModuleType("api.signals")
+    fake_signals._is_duplicate_signal = lambda sym, cfg: False
+    fake_signals._mark_notified = lambda sym: None
+    fake_signals.append_signal_csv = lambda rep, scan_id: None
+    fake_signals.append_signal_log = lambda rep, scan_id: None
+    fake_signals.should_notify_signal = lambda rep, cfg: False
+    monkeypatch.setitem(sys.modules, "api.positions", fake_positions)
+    monkeypatch.setitem(sys.modules, "api.signals", fake_signals)
+
+    result = rt.execute_scan_for_symbol("ADAUSDT", {})
+    assert "_gate_fila" in result, "execute_scan_for_symbol debe retornar _gate_fila"
+    assert result["_gate_fila"] is fila_esperada
+
+
+def test_execute_scan_for_symbol_gate_fila_none_cuando_no_hay_fila(monkeypatch):
+    """Cuando scan() no produce fila, _gate_fila en result debe ser None."""
+    from scanner import runtime as rt
+
+    rep_sin_fila = _make_minimal_rep(symbol="BTCUSDT")  # sin _regime_gate_fila
+    monkeypatch.setattr(rt, "scan", lambda sym: rep_sin_fila)
+    monkeypatch.setattr(rt, "save_scan", lambda rep: 1)
+    monkeypatch.setattr(rt, "push_telegram_direct", lambda rep, cfg: None)
+    monkeypatch.setattr(rt, "push_webhook", lambda rep, scan_id, cfg: None)
+
+    import types
+    fake_positions = types.ModuleType("api.positions")
+    fake_positions.check_position_stops = lambda sym, price: None
+    fake_signals = types.ModuleType("api.signals")
+    fake_signals._is_duplicate_signal = lambda sym, cfg: False
+    fake_signals._mark_notified = lambda sym: None
+    fake_signals.append_signal_csv = lambda rep, scan_id: None
+    fake_signals.append_signal_log = lambda rep, scan_id: None
+    fake_signals.should_notify_signal = lambda rep, cfg: False
+    monkeypatch.setitem(sys.modules, "api.positions", fake_positions)
+    monkeypatch.setitem(sys.modules, "api.signals", fake_signals)
+
+    result = rt.execute_scan_for_symbol("BTCUSDT", {})
+    assert result.get("_gate_fila") is None
