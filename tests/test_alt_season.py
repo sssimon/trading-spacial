@@ -1,5 +1,10 @@
 """Tests del núcleo puro del régimen de mercado (alt-season). Sin red, sin DB."""
-from regime.alt_season import symbol_contribution, MIN_HISTORY_DAYS
+from regime.alt_season import (
+    symbol_contribution,
+    compose_regime,
+    effective_thresholds,
+    MIN_HISTORY_DAYS,
+)
 
 
 def _bars(closes):
@@ -28,9 +33,6 @@ def test_contribution_below_sma50():
     c = symbol_contribution("X", _bars(closes))
     assert c["above_sma50"] is False
     assert abs(c["ret_30d"] - (-0.20)) < 1e-9
-
-
-from regime.alt_season import compose_regime
 
 
 def _contrib(above, ret):
@@ -151,9 +153,6 @@ def test_compose_cero_votantes_vivos_es_mixto():
 # ---------------------------------------------------------------------------
 # Tests de effective_thresholds + compose_regime parametrizable (Task 1)
 # ---------------------------------------------------------------------------
-from regime.alt_season import effective_thresholds
-
-
 def test_effective_thresholds_defaults_match_constants():
     import regime.alt_season as m
     t = effective_thresholds(None)
@@ -162,6 +161,9 @@ def test_effective_thresholds_defaults_match_constants():
     assert t["DOM_BTC"] == m.DOM_BTC
     assert t["COVERAGE_MIN"] == m.COVERAGE_MIN
     assert t["MIN_LIVE_VOTERS"] == m.MIN_LIVE_VOTERS
+    assert t["BREADTH_BEAR"] == m.BREADTH_BEAR
+    assert t["OUTPERF_BEAR"] == m.OUTPERF_BEAR
+    assert t["DOM_ALT"] == m.DOM_ALT
 
 
 def test_effective_thresholds_overrides_win():
