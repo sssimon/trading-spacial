@@ -138,3 +138,35 @@ def test_fetch_dominance_error_de_red_es_none():
     import requests
     with patch("tools.run_valley_screener.requests.get", side_effect=requests.RequestException("boom")):
         assert rvs._fetch_dominance() is None
+
+
+# ---------------------------------------------------------------------------
+# Tests de aplicar_gate_candidatas (Task 5)
+# ---------------------------------------------------------------------------
+
+def _candidatas():
+    """2 candidatas alt de juguete."""
+    return [{"symbol": "ADAUSDT", "price": 1.0}, {"symbol": "DOGEUSDT", "price": 0.1}]
+
+
+def test_disabled_byte_identico(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config", lambda: {"regime_gate": {"enabled": False}})
+    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="btc", votos_vivos=3)
+    assert snap["candidates"] == _candidatas()      # sin tocar
+    assert "candidatas_ocultas" not in snap          # sin campos nuevos
+
+
+def test_enabled_btc_esconde(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config",
+                        lambda: {"regime_gate": {"enabled": True, "umbral_overrides": {}}})
+    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="btc", votos_vivos=3)
+    assert snap["candidates"] == []                  # todas escondidas
+    assert len(snap["candidatas_ocultas"]) == 2
+
+
+def test_enabled_mixto_empate_atenua(monkeypatch):
+    monkeypatch.setattr(rvs, "load_config",
+                        lambda: {"regime_gate": {"enabled": True, "umbral_overrides": {}}})
+    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="mixto", votos_vivos=3)
+    assert len(snap["candidates"]) == 2 and all(c["clima_ambiguo"] for c in snap["candidates"])
+    assert snap.get("candidatas_ocultas", []) == []
