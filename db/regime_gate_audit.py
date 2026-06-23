@@ -4,9 +4,9 @@ para no ensanchar el burst de writes que ya causó contención de locks (2026-05
 tenant_id NULLABLE: la decisión es un hecho de mercado global. Spec §5."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from db.transaction import transaction
+from db.transaction import snapshot_connection, transaction
 
 _COLS = (
     "motor", "symbol", "estado_regimen", "nivel", "es_alt",
@@ -48,7 +48,6 @@ def registrar_decisiones(filas: list[dict]) -> int:
 
 def purgar_antiguos(dias: int) -> int:
     """Retención: borra filas con más de `dias` días. Devuelve cuántas borró."""
-    from datetime import timedelta
     corte = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
     with transaction() as con:
         cur = con.execute("DELETE FROM regime_gate_audit WHERE ts < ?", (corte,))
@@ -57,7 +56,7 @@ def purgar_antiguos(dias: int) -> int:
 
 def _query_all() -> list[dict]:
     """Helper de test: todas las filas como dicts."""
-    with transaction() as con:
+    with snapshot_connection() as con:
         rows = con.execute(
             "SELECT ts, " + ", ".join(_COLS) + " FROM regime_gate_audit ORDER BY id"
         ).fetchall()
