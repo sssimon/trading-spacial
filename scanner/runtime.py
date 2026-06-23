@@ -294,15 +294,18 @@ def execute_scan_for_symbol(sym: str, cfg: dict) -> dict:
             log.info(f"{sym}: {estado[:55]}")
 
         return {
-            "symbol":    sym,
-            "scan_id":   scan_id,
-            "timestamp": rep.get("timestamp"),
-            "estado":    rep.get("estado"),
-            "price":     rep.get("price"),
-            "lrc_pct":   rep.get("lrc_1h", {}).get("pct"),
-            "score":     rep.get("score"),
-            "señal":     rep.get("señal_activa"),
-            "gatillo":   rep.get("gatillo_activo"),
+            "symbol":     sym,
+            "scan_id":    scan_id,
+            "timestamp":  rep.get("timestamp"),
+            "estado":     rep.get("estado"),
+            "price":      rep.get("price"),
+            "lrc_pct":    rep.get("lrc_1h", {}).get("pct"),
+            "score":      rep.get("score"),
+            "señal":      rep.get("señal_activa"),
+            "gatillo":    rep.get("gatillo_activo"),
+            # Fila de auditoría del gate (None cuando gate deshabilitado).
+            # scanner_loop la batchea al final del ciclo (spec §5).
+            "_gate_fila": rep.get("_regime_gate_fila"),
         }
 
     except Exception as e:
@@ -352,12 +355,24 @@ def scanner_loop(stop_event: threading.Event | None = None):
             log.warning(f"prefetch batch fallo: {e}")
 
         cycle_prices = {}
+        _cycle_gate_filas: list = []
         for sym in symbols:
             if not _scanner_state["running"] or stop_event.is_set():
                 break
             result = execute_scan_for_symbol(sym, cfg)
             if result and result.get("price"):
                 cycle_prices[sym] = result["price"]
+            if result and result.get("_gate_fila"):
+                _cycle_gate_filas.append(result["_gate_fila"])
+
+        # Flush del audit del gate por ciclo — spec §5: UNA transacción por
+        # ciclo en vez de N writes por símbolo (evita writer-lock contention).
+        if _cycle_gate_filas:
+            try:
+                from db.regime_gate_audit import registrar_decisiones  # noqa: PLC0415
+                registrar_decisiones(_cycle_gate_filas)
+            except Exception:
+                log.warning("regime_gate_audit (scanner cycle) falló — fail-open", exc_info=True)
 
         # Actualizar data/symbols_status.json al final de cada ciclo
         try:

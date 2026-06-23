@@ -748,12 +748,8 @@ def scan(symbol: str = None):
                 symbol=symbol, señal=señal, estado_actual=estado, rv=_gate_rv, cfg=_cfg)
         except Exception as _gate_err:
             log.warning("regime_gate: aplicar falló para %s — fail-open: %s", symbol, _gate_err)
-    if _gate_fila is not None:
-        try:
-            from db.regime_gate_audit import registrar_decisiones
-            registrar_decisiones([_gate_fila])
-        except Exception:
-            log.warning("regime_gate_audit (scanner) falló — fail-open", exc_info=True)
+    # No flush aquí — el orchestrador (scanner_loop) lo batcha al final del ciclo.
+    # Ver spec §5 y scanner/runtime.py scanner_loop.
 
     # ── Consolidar ────────────────────────────────────────────────────────────
     rep.update({
@@ -814,6 +810,13 @@ def scan(symbol: str = None):
             },
         },
     })
+    # Exponer la fila de auditoría del gate para que el orchestrador
+    # la batche al final del ciclo (spec §5). Sólo se añade la clave
+    # cuando el gate está habilitado y produjo una fila — así rep es
+    # byte-identical cuando el gate está deshabilitado.
+    if _gate_fila is not None:
+        rep["_regime_gate_fila"] = _gate_fila
+
     # Convertir tipos numpy a tipos Python nativos para serialización JSON
     import numpy as np
     def clean_dict(d):
