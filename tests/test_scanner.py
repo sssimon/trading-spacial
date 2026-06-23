@@ -1549,3 +1549,35 @@ class TestScanEmitsV2ShadowDecision:
         assert per_symbol["status"] in ("ok", "failed")
         # per_symbol_tier column must equal tier in reasons
         assert shadow_rows[0]["per_symbol_tier"] == per_symbol["tier"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  GATE DE EXPOSICIÓN POR RÉGIMEN — aplicar_gate_scanner (Task 6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import btc_scanner
+from regime.alt_season_read import RegimenVivo
+
+_RV_BTC = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                      generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+_ON = {"regime_gate": {"enabled": True, "umbral_overrides": {}}}
+
+
+def test_gate_suprime_alt_en_btc():
+    # enabled + régimen 'btc' fresco + un símbolo alt con señal → señal suprimida.
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="ADAUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC, cfg=_ON)
+    assert señal is False and "alt-season" in estado.lower() and fila["nivel"] == "suprime"
+
+
+def test_gate_no_toca_btc():
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="BTCUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC, cfg=_ON)
+    assert señal is True and fila["nivel"] == "pasa"   # BTC no es alt → pasa
+
+
+def test_gate_disabled_no_toca():
+    señal, estado, fila = btc_scanner.aplicar_gate_scanner(
+        symbol="ADAUSDT", señal=True, estado_actual="✅ SEÑAL LONG", rv=_RV_BTC,
+        cfg={"regime_gate": {"enabled": False}})
+    assert señal is True and fila is None             # disabled: no toca señal, no audita
