@@ -1617,73 +1617,72 @@ def _make_minimal_rep(**extra):
     return base
 
 
-def test_scan_expone_gate_fila_en_rep_cuando_habilitado(monkeypatch):
-    """scan() debe poner _regime_gate_fila en rep cuando el gate produce fila."""
-    import btc_scanner as sc
-    fila_esperada = {"symbol": "ADAUSDT", "nivel": "suprime", "ts": "t"}
+@patch("btc_scanner.md.get_klines")
+def test_scan_expone_gate_fila_en_rep_cuando_habilitado(mock_klines, monkeypatch, tmp_path):
+    """La REAL scan() pone _regime_gate_fila en rep cuando el gate está habilitado
+    y el régimen suprime la señal de un alt.
 
-    # Stub: aplicar_gate_scanner devuelve señal suprimida + fila de auditoría.
-    monkeypatch.setattr(sc, "aplicar_gate_scanner",
-                        lambda **kw: (False, "suprimida por alt-season", fila_esperada))
-
-    # Stub: todo lo que scan() necesita para llegar al bloque del gate.
-    # Usamos un rep dict parcheado interceptando rep.update internamente.
-    # La forma más limpia: monkeypatch scan() y probar el contrato de rep
-    # directamente inspeccionando lo que la función retorna.
-    #
-    # Como scan() hace muchas llamadas de red, substituimos scan() completa
-    # con una versión que sólo ejerce la lógica del gate + exposición en rep.
-
-    def fake_scan(symbol):
-        """Replica sólo el bloque del gate + la clave _regime_gate_fila."""
-        rep = _make_minimal_rep(symbol=symbol)
-        _gate_rv = object()  # cualquier truthy → entra al if
-        _gate_fila = None
-        try:
-            _, estado_g, _gate_fila = sc.aplicar_gate_scanner(
-                symbol=symbol, señal=True, estado_actual="✅ SEÑAL LONG",
-                rv=_gate_rv, cfg=_ON)
-        except Exception:
-            pass
-        if _gate_fila is not None:
-            rep["_regime_gate_fila"] = _gate_fila
-        return rep
-
-    monkeypatch.setattr(sc, "scan", fake_scan)
-
-    rep = sc.scan("ADAUSDT")
-    assert "_regime_gate_fila" in rep, "scan() debe exponer _regime_gate_fila en rep"
-    assert rep["_regime_gate_fila"] is fila_esperada
-
-
-def test_scan_no_añade_clave_cuando_gate_deshabilitado(monkeypatch):
-    """Byte-identity: cuando gate devuelve fila=None, _regime_gate_fila NO aparece en rep."""
+    Ejerce el bloque de producción btc_scanner.py líneas 743-818 directamente —
+    no una réplica. Falla si se revierte el guard `if _gate_fila is not None`.
+    """
     import btc_scanner as sc
 
-    # gate disabled → aplicar_gate_scanner devuelve fila=None
-    monkeypatch.setattr(sc, "aplicar_gate_scanner",
-                        lambda **kw: (True, "sin cambio", None))
+    # Datos sintéticos: reusar el helper existente (mismo patrón que TestScan).
+    df1h, df4h, df5m = TestScan()._make_scan_mock()
+    mock_klines.side_effect = [df5m, df1h, df4h, df1h]
 
-    def fake_scan(symbol):
-        rep = _make_minimal_rep(symbol=symbol)
-        _gate_rv = object()
-        _gate_fila = None
-        try:
-            _, _, _gate_fila = sc.aplicar_gate_scanner(
-                symbol=symbol, señal=True, estado_actual="✅ SEÑAL LONG",
-                rv=_gate_rv, cfg={"regime_gate": {"enabled": False}})
-        except Exception:
-            pass
-        if _gate_fila is not None:
-            rep["_regime_gate_fila"] = _gate_fila
-        return rep
+    # Régimen 'btc' fresco → aplicar_gate_scanner suprimirá el alt ADAUSDT.
+    rv_btc = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                         generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+    monkeypatch.setattr(sc, "leer_regimen", lambda *a, **kw: rv_btc)
 
-    monkeypatch.setattr(sc, "scan", fake_scan)
+    # Config con gate habilitado.
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"regime_gate": {"enabled": True}}))
+    monkeypatch.setattr(sc, "SCRIPT_DIR", str(tmp_path))
 
     rep = sc.scan("ADAUSDT")
+
+    assert "_regime_gate_fila" in rep, (
+        "scan() debe exponer _regime_gate_fila en rep cuando el gate está habilitado "
+        "— el bloque `if _gate_fila is not None: rep[...] = _gate_fila` fue revertido"
+    )
+    fila = rep["_regime_gate_fila"]
+    assert fila["nivel"] == "suprime", (
+        f"La fila debe registrar nivel='suprime' para un alt en régimen 'btc', "
+        f"se obtuvo nivel='{fila.get('nivel')}'"
+    )
+
+
+@patch("btc_scanner.md.get_klines")
+def test_scan_no_añade_clave_cuando_gate_deshabilitado(mock_klines, monkeypatch, tmp_path):
+    """Byte-identity: la REAL scan() NO añade _regime_gate_fila cuando el gate está off.
+
+    Ejerce el mismo bloque de producción (líneas 743-818) con gate disabled.
+    El contrato: `aplicar_gate_scanner` retorna fila=None cuando enabled=False,
+    y el guard `if _gate_fila is not None` preserva el rep byte-idéntico.
+    """
+    import btc_scanner as sc
+
+    df1h, df4h, df5m = TestScan()._make_scan_mock()
+    mock_klines.side_effect = [df5m, df1h, df4h, df1h]
+
+    # leer_regimen puede retornar cualquier cosa — el gate no debe tocar el rep.
+    rv_btc = RegimenVivo(estado="btc", frescura="fresco", votos_vivos=3,
+                         generated_at="2026-06-23T00:00:00+00:00", snapshot={})
+    monkeypatch.setattr(sc, "leer_regimen", lambda *a, **kw: rv_btc)
+
+    # Config con gate deshabilitado → aplicar_gate_scanner retorna fila=None.
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"regime_gate": {"enabled": False}}))
+    monkeypatch.setattr(sc, "SCRIPT_DIR", str(tmp_path))
+
+    rep = sc.scan("ADAUSDT")
+
     assert "_regime_gate_fila" not in rep, (
-        "Cuando gate está deshabilitado, _regime_gate_fila NO debe aparecer en rep "
-        "(byte-identity preservada)")
+        "Cuando regime_gate.enabled=False, _regime_gate_fila NO debe aparecer en rep "
+        "(byte-identity preservada) — aplicar_gate_scanner retorna None cuando disabled"
+    )
 
 
 def test_execute_scan_for_symbol_surfacea_gate_fila(monkeypatch):
