@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import requests
 
 from api.config import load_config
+from db.regime_gate_audit import registrar_decisiones
 from regime.alt_season import compose_regime, effective_thresholds, symbol_contribution
 from regime.exposure_gate import evaluar_gate
 from screener.universe import list_live_usdt_spot
@@ -104,11 +105,12 @@ def aplicar_gate_candidatas(candidatas: list[dict], *, estado: str, votos_vivos:
     cfg = load_config()
     if not (cfg.get("regime_gate") or {}).get("enabled", False):
         return {"candidates": candidatas}            # byte-idéntico: sin campos nuevos
+    # El régimen es market-wide: la GateDecision es uniforme para todas las candidatas.
+    d = evaluar_gate(estado, "fresco", votos_vivos, es_alt=True, cfg=cfg)
     visibles: list[dict] = []
     ocultas: list[dict] = []
     filas: list[dict] = []
     for c in candidatas:
-        d = evaluar_gate(estado, "fresco", votos_vivos, es_alt=True, cfg=cfg)
         filas.append({"motor": "valles", "symbol": c["symbol"], "estado_regimen": d.estado_regimen,
                       "nivel": d.nivel, "es_alt": True, "regime_frescura": d.regime_frescura,
                       "votos_vivos": d.votos_vivos, "enforced": d.enforced,
@@ -119,7 +121,6 @@ def aplicar_gate_candidatas(candidatas: list[dict], *, estado: str, votos_vivos:
             visibles.append({**c, "clima_ambiguo": True})
         else:
             visibles.append(c)
-    from db.regime_gate_audit import registrar_decisiones
     try:
         registrar_decisiones(filas)
     except Exception:

@@ -151,17 +151,28 @@ def _candidatas():
 
 def test_disabled_byte_identico(monkeypatch):
     monkeypatch.setattr(rvs, "load_config", lambda: {"regime_gate": {"enabled": False}})
-    snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="btc", votos_vivos=3)
-    assert snap["candidates"] == _candidatas()      # sin tocar
-    assert "candidatas_ocultas" not in snap          # sin campos nuevos
+    called = []
+    monkeypatch.setattr(rvs, "registrar_decisiones", lambda filas: called.append(filas))
+    original = _candidatas()
+    snap = rvs.aplicar_gate_candidatas(original, estado="btc", votos_vivos=3)
+    assert snap == {"candidates": original}      # exactamente una llave
+    assert snap["candidates"] is original         # zero-copy
+    assert called == []                           # NO audita con flag off
 
 
 def test_enabled_btc_esconde(monkeypatch):
     monkeypatch.setattr(rvs, "load_config",
                         lambda: {"regime_gate": {"enabled": True, "umbral_overrides": {}}})
+    captured = []
+    monkeypatch.setattr(rvs, "registrar_decisiones", lambda filas: captured.append(filas))
     snap = rvs.aplicar_gate_candidatas(_candidatas(), estado="btc", votos_vivos=3)
     assert snap["candidates"] == []                  # todas escondidas
     assert len(snap["candidatas_ocultas"]) == 2
+    # Audit: una sola llamada con 2 filas (una por candidata), todas suprime, tenant_id None.
+    assert len(captured) == 1
+    assert len(captured[0]) == 2
+    assert all(f["nivel"] == "suprime" for f in captured[0])
+    assert all(f["tenant_id"] is None for f in captured[0])
 
 
 def test_enabled_mixto_empate_atenua(monkeypatch):
