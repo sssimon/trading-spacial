@@ -242,6 +242,23 @@ def evaluar_gate(estado, frescura, votos_vivos, es_alt, cfg) -> GateDecision:
   provisionales. El riesgo residual (esconder de más durante un régimen mal clasificado) se mitiga
   con la señal de daño + la reversa por flag, NO se elimina. Es una decisión consciente del dueño.
 
+## Precondiciones de activación (gates antes de `enabled=true` en prod)
+
+La feature se mergea **apagada** (`enabled=false`, byte-idéntica). Antes de encenderla en prod,
+estos gates son obligatorios (marcados por el review final de rama):
+
+1. **`config.json` de prod debe llevar el bloque `regime_gate`.** El scanner lee su config de
+   `config.json` (no de `config.defaults.json`), mientras el screener usa `load_config()` (que sí
+   mergea defaults). Poner `enabled=true` solo en `config.defaults.json` activaría el gate del
+   screener pero NO el del scanner. Para activar AMBOS motores, `config.json` debe incluir
+   `regime_gate.enabled=true` (+ `frescura_umbral_seg`, `umbral_overrides`). Con la clave ausente,
+   ambos motores leen `enabled=False` (byte-idéntico) — el default es seguro.
+2. **Calibrar los umbrales antes de encender** (correr `edge_study.py` vs panel 2020-2025 → sembrar
+   `umbral_overrides`), o aceptar explícitamente el riesgo de enforcing con provisionales.
+3. **Auditoría batcheada por ciclo:** el scanner acumula las filas del ciclo y hace UN solo
+   `registrar_decisiones(filas)` por ciclo (no per-símbolo), para no recrear el burst de write-lock
+   del 2026-05-29. (Implementado; verificar que sigue así si se toca `scanner_loop`.)
+
 ## Manejo de errores y frescura (#8)
 
 - **Fail-open sobre régimen rancio/muerto:** `frescura != "fresco"` → `enforced=False` → `pasa`.
