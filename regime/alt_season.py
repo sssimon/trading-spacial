@@ -29,6 +29,22 @@ COVERAGE_MIN = 0.70
 MIN_LIVE_VOTERS = 2
 
 
+def effective_thresholds(overrides: dict | None) -> dict:
+    """Umbrales efectivos: constantes de módulo pisadas por `overrides` (calibración
+    sin deploy). Claves fijas — única fuente para compose_regime y umbral_version."""
+    base = {
+        "BREADTH_ALT": BREADTH_ALT, "BREADTH_BEAR": BREADTH_BEAR,
+        "OUTPERF_ALT": OUTPERF_ALT, "OUTPERF_BEAR": OUTPERF_BEAR,
+        "DOM_ALT": DOM_ALT, "DOM_BTC": DOM_BTC,
+        "COVERAGE_MIN": COVERAGE_MIN, "MIN_LIVE_VOTERS": MIN_LIVE_VOTERS,
+    }
+    if overrides:
+        for k, v in overrides.items():
+            if k in base:
+                base[k] = v
+    return base
+
+
 def symbol_contribution(symbol: str, bars: list[dict]) -> dict | None:
     """Contribución de UN símbolo al régimen. None si len(bars) < MIN_HISTORY_DAYS."""
     if len(bars) < MIN_HISTORY_DAYS:
@@ -60,17 +76,20 @@ def _lean_lower_alt(value: float, alt_thr: float, bear_thr: float) -> str:
 
 
 def compose_regime(alt_contribs: list[dict], btc_ret_30d: float | None,
-                   btc_dominance: float | None, coverage_ratio: float) -> dict:
+                   btc_dominance: float | None, coverage_ratio: float,
+                   thresholds: dict | None = None) -> dict:
     """Compone el estado de régimen por voto de 3 componentes. Hecho de mercado,
-    cero campo per-símbolo, cero valencia. Ver spec §Núcleo."""
+    cero campo per-símbolo, cero valencia. Ver spec §Núcleo.
+    Si thresholds is None usa effective_thresholds(None) (comportamiento por defecto)."""
+    t = thresholds if thresholds is not None else effective_thresholds(None)
     voters: list[str] = []
     componentes: dict[str, dict] = {}
 
     # 1. breadth50 — vota sólo si la cobertura alcanza el piso.
     breadth50 = (mean(1.0 if c["above_sma50"] else 0.0 for c in alt_contribs)
                  if alt_contribs else None)
-    if breadth50 is not None and coverage_ratio >= COVERAGE_MIN:
-        lean = _lean_higher_alt(breadth50, BREADTH_ALT, BREADTH_BEAR)
+    if breadth50 is not None and coverage_ratio >= t["COVERAGE_MIN"]:
+        lean = _lean_higher_alt(breadth50, t["BREADTH_ALT"], t["BREADTH_BEAR"])
         componentes["breadth50"] = {"valor": breadth50, "lean": lean,
                                     "estado": "fresco", "n": len(alt_contribs)}
         voters.append(lean)
@@ -83,7 +102,7 @@ def compose_regime(alt_contribs: list[dict], btc_ret_30d: float | None,
     # 2. outperf_30d — mediana de (ret alt - ret BTC). Muerto si BTC no evaluable.
     if alt_contribs and btc_ret_30d is not None:
         outperf = median(c["ret_30d"] - btc_ret_30d for c in alt_contribs)
-        lean = _lean_higher_alt(outperf, OUTPERF_ALT, OUTPERF_BEAR)
+        lean = _lean_higher_alt(outperf, t["OUTPERF_ALT"], t["OUTPERF_BEAR"])
         componentes["outperf_30d"] = {"valor": outperf, "lean": lean, "estado": "fresco"}
         voters.append(lean)
     else:
@@ -91,7 +110,7 @@ def compose_regime(alt_contribs: list[dict], btc_ret_30d: float | None,
 
     # 3. dominancia_btc — muerta si la llamada a CoinGecko falló.
     if btc_dominance is not None:
-        lean = _lean_lower_alt(btc_dominance, DOM_ALT, DOM_BTC)
+        lean = _lean_lower_alt(btc_dominance, t["DOM_ALT"], t["DOM_BTC"])
         componentes["dominancia_btc"] = {"valor": btc_dominance, "lean": lean,
                                          "estado": "fresco"}
         voters.append(lean)
@@ -102,7 +121,7 @@ def compose_regime(alt_contribs: list[dict], btc_ret_30d: float | None,
     n_btc = voters.count("btc")
     n_neutral = voters.count("neutral")
     n_live = len(voters)
-    if n_live < MIN_LIVE_VOTERS:
+    if n_live < t["MIN_LIVE_VOTERS"]:
         estado = "mixto"
     elif n_alts > n_btc and n_alts > n_neutral:
         estado = "alts"
