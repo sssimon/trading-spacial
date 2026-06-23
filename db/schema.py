@@ -326,6 +326,30 @@ def init_db() -> None:
                 ON kill_switch_recommendations(ts)
         """)
         con.execute("""
+            CREATE TABLE IF NOT EXISTS regime_gate_audit (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              TEXT NOT NULL,
+                motor           TEXT NOT NULL,          -- 'valles' | 'scanner'
+                symbol          TEXT NOT NULL,
+                estado_regimen  TEXT NOT NULL,          -- 'alts' | 'mixto' | 'btc'
+                nivel           TEXT NOT NULL,          -- 'pasa' | 'atenua' | 'suprime'
+                es_alt          INTEGER NOT NULL,
+                regime_frescura TEXT NOT NULL,          -- 'fresco' | 'rancio' | 'muerto'
+                votos_vivos     INTEGER NOT NULL,
+                enforced        INTEGER NOT NULL,
+                umbral_version  TEXT NOT NULL,
+                tenant_id       INTEGER                 -- NULLABLE: decisión de mercado global
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_gate_audit_ts
+                ON regime_gate_audit(ts)
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_gate_audit_motor_ts
+                ON regime_gate_audit(motor, ts)
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS portfolio_health_events (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_tier       TEXT NOT NULL,
