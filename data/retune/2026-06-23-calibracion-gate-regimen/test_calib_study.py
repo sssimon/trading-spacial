@@ -128,3 +128,56 @@ def test_acceptance_no_pasa_margen_chico():
     b2 = _stats(0.10)
     r = cs.evaluate_acceptance(by, b2)
     assert r["verdict"] == "NO_PASA"   # delta=+0.1pp < 2pp
+
+
+# ----------------------------------------------------------------------------
+# Task 6: smoke end-to-end sintético
+# ----------------------------------------------------------------------------
+
+def _mk_panel_multi(tmp_path):
+    """BTCUSDT + 9 alts, 220 días horarios. Determinista, sin random.
+    6 alts rising (pos_in_30d_range≈1, no hits), 3 alts declining (pos≈0.1, hits rule_minimal).
+    not_dying válido desde día 179 → alive=True desde 2021-06-29.
+    """
+    import sqlite3
+    p = tmp_path / "panel_multi.db"
+    con = sqlite3.connect(str(p))
+    con.execute(
+        "CREATE TABLE spot_klines(symbol TEXT, open_time INTEGER, "
+        "open REAL, high REAL, low REAL, close REAL, volume REAL, "
+        "PRIMARY KEY(symbol, open_time)) WITHOUT ROWID"
+    )
+    H = 3_600_000  # ms per hour
+    start_ms = int(pd.Timestamp("2021-01-01", tz="UTC").timestamp() * 1000)
+    DAYS = 220
+    # index 0=BTCUSDT, 1-6=ALT0-ALT5 (rising), 7-9=ALT6-ALT8 (declining)
+    symbols = ["BTCUSDT"] + [f"ALT{i}USDT" for i in range(9)]
+    rows = []
+    for sym_idx, sym in enumerate(symbols):
+        for h in range(DAYS * 24):
+            d = h // 24
+            if sym == "BTCUSDT":
+                close, vol = 40_000.0 + d, 1.0          # daily quote_vol ≈ 24*(40k+d) ≥ 960k
+            elif sym_idx <= 6:                            # ALT0-ALT5: 6 rising alts, pos≈1
+                close, vol = 1.0 + d * 0.01, 50_000.0
+            else:                                        # ALT6-ALT8: 3 slow-declining, pos≈0.1
+                close, vol = max(0.5, 1.0 - d * 0.0002), 50_000.0
+            rows.append((sym, start_ms + h * H,
+                         close, close * 1.001, close * 0.999, close, vol))
+    con.executemany("INSERT INTO spot_klines VALUES (?,?,?,?,?,?,?)", rows)
+    con.commit(); con.close()
+    return p
+
+
+def test_run_study_smoke(tmp_path, monkeypatch):
+    # panel sintético mínimo en sqlite + CSV BTC.D → run_study produce un dict con la forma esperada
+    dbp = _mk_panel_multi(tmp_path)   # helper: BTCUSDT + 9 alts, >150 barras diarias, 2 regímenes
+    csvp = tmp_path / "dom.csv"
+    # dominancia que cae (alts) y sube (btc) en distintos tramos
+    dates = pd.date_range("2021-01-01", periods=200, freq="1D")
+    dom = ["date,dominance"] + [f"{d.date()},{45 if i<100 else 60}" for i, d in enumerate(dates)]
+    csvp.write_text("\n".join(dom))
+    res = cs.run_study(str(dbp), str(csvp))
+    assert "verdict" in res and res["verdict"] in ("PASA", "NO_PASA", "INVERTIDO")
+    assert "by_estado" in res and "production_thresholds" in res
+    assert "grid_exploratory" in res

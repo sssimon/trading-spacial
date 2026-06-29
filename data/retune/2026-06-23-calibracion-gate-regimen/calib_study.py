@@ -7,6 +7,7 @@ NO toca data/holdout/, NO llama open_holdout/simulate_strategy. Período de señ
 termina 2025-04-29 (barra antes del holdout 2025-04-30→2026-04-30).
 Reusa regime.alt_season.compose_regime para el voto de 3 componentes (fidelidad).
 """
+import json as _json
 import sqlite3
 import sys
 from pathlib import Path
@@ -316,3 +317,187 @@ def _compute_rule_return(df):
             close_idx = min(start + RULE_HOLD_DAYS - 1, n - 1)
             out[i] = (closes[close_idx] - entry) / entry
     return out
+
+
+# ---------------------------------------------------------------------------
+# Task 6: orquestación + salidas + grid exploratorio
+# ---------------------------------------------------------------------------
+
+# CSV de BTC dominance congelado (externo; debe existir antes de correr main())
+_DEFAULT_BTC_DOM_CSV = str(HERE / "btc_dominance.csv")
+
+
+def _build_panel(symbol_dfs: dict) -> pd.DataFrame:
+    frames = []
+    for sym, df in symbol_dfs.items():
+        sub = df.copy()
+        sub["symbol"] = sym
+        frames.append(sub.reset_index().rename(columns={"index": "date", "ts": "date"}))
+    panel = pd.concat(frames, ignore_index=True)
+    panel["date"] = pd.to_datetime(panel["date"], utc=True).dt.normalize()
+    return panel[(panel["date"] >= SIGNAL_START) & (panel["date"] <= SIGNAL_END)]
+
+
+def _bucketed(panel: pd.DataFrame, regime_series: pd.Series, mask: pd.Series):
+    rows = panel[mask].copy()
+    rows = rows.merge(
+        regime_series.rename("regime"), left_on="date", right_index=True, how="left"
+    )
+    rows = rows.dropna(subset=["max_fwd_14d"])
+    by: dict = {}
+    for estado, g in rows.groupby("regime"):
+        by[estado] = {
+            "max_fwd_14d": g["max_fwd_14d"].dropna().tolist(),
+            "rule_return": g["rule_return"].dropna().tolist(),
+            "stats": cell_stats(g),
+        }
+    return by, rows
+
+
+def run_study(db_path: str, btc_dom_csv: str) -> dict:
+    from regime.alt_season import effective_thresholds
+    btc_dom = load_btc_dominance(btc_dom_csv)
+    symbol_dfs = {s: compute_features(df) for s, df in load_spot_daily(db_path).items()}
+    panel = _build_panel(symbol_dfs)
+    regime_prod = regime_by_date(panel, btc_dom, thresholds=None)
+    m_min = select_rule_minimal(panel)
+    by_estado, _ = _bucketed(panel, regime_prod, m_min)
+    b2_stats = cell_stats(panel[panel["alive"]].dropna(subset=["max_fwd_14d"]))
+    acceptance = evaluate_acceptance(by_estado, b2_stats)
+    grid = grid_search(panel, btc_dom)
+    return {
+        "by_estado": {k: v["stats"] for k, v in by_estado.items()},
+        "b2": b2_stats,
+        "verdict": acceptance["verdict"],
+        "acceptance": acceptance,
+        "production_thresholds": effective_thresholds(None),
+        "grid_exploratory": grid,
+        "signal_period": [str(SIGNAL_START.date()), str(SIGNAL_END.date())],
+        "caveats": [
+            "Survivorship: panel retiene delistadas pero su cobertura no es total (187 símbolos del ingest 2026-06-05).",
+            "quote_vol derivado = volume × close (≈ quote-vol de Binance).",
+            "BTC.D de fuente externa congelada (ver METODOLOGIA §Procedencia).",
+            "Retorno en USDT incluye beta de BTC.",
+            "Grid-search es EXPLORATORIO (overfitting); la decisión es a umbrales de producción.",
+        ],
+    }
+
+
+def grid_search(panel: pd.DataFrame, btc_dom: pd.Series) -> list:
+    """Exploratorio: varía umbrales en grilla gruesa, reporta el mejor delta. Cota superior."""
+    from regime.alt_season import effective_thresholds
+    best = []
+    for breadth_alt in (0.55, 0.60, 0.65, 0.70):
+        for outperf_alt in (0.0, 0.05, 0.10):
+            ov = {"BREADTH_ALT": breadth_alt, "OUTPERF_ALT": outperf_alt}
+            reg = regime_by_date(panel, btc_dom, thresholds=effective_thresholds(ov))
+            by, _ = _bucketed(panel, reg, select_rule_minimal(panel))
+            a = by.get("alts", {}).get("stats", {}).get("median_max_fwd_14d")
+            b = by.get("btc", {}).get("stats", {}).get("median_max_fwd_14d")
+            if a is not None and b is not None:
+                best.append({
+                    "overrides": ov,
+                    "delta_pp": (a - b) * 100.0,
+                    "n_alts": by["alts"]["stats"]["n"],
+                    "n_btc": by["btc"]["stats"]["n"],
+                })
+    best.sort(key=lambda x: x["delta_pp"], reverse=True)
+    return best[:10]
+
+
+def _fmt_pp(v) -> str:
+    return f"{v:.1f}" if isinstance(v, (int, float)) else "?"
+
+
+def write_findings(res: dict) -> None:
+    """Genera findings.md con el veredicto honesto."""
+    verdict = res["verdict"]
+    acceptance = res.get("acceptance", {})
+    by_estado = res.get("by_estado", {})
+    grid = res.get("grid_exploratory", [])
+    signal_period = res.get("signal_period", ["?", "?"])
+    caveats = res.get("caveats", [])
+
+    prose = {
+        "PASA": (
+            f"El gate pasa los criterios pre-comprometidos: "
+            f"delta={_fmt_pp(acceptance.get('delta_pp'))}pp, "
+            f"p_alts_gt_btc={acceptance.get('p_value')}, "
+            f"btc<B2={acceptance.get('btc_below_b2')}, "
+            f"rr no invierte. Condición técnica de activación cumplida."
+        ),
+        "NO_PASA": (
+            f"El gate NO pasa: {acceptance.get('razon', 'criterios incumplidos')}. "
+            f"Delta={_fmt_pp(acceptance.get('delta_pp'))}pp "
+            f"(umbral mínimo requerido ≥{MARGEN_PP}pp). "
+            f"No hay evidencia suficiente para encender."
+        ),
+        "INVERTIDO": (
+            f"El gate está INVERTIDO: en régimen btc el retorno forward supera a alts "
+            f"(delta={_fmt_pp(acceptance.get('delta_pp'))}pp, "
+            f"p_btc_gt_alts={acceptance.get('p_value_invertido')}). "
+            f"Encender el gate causaría daño."
+        ),
+    }.get(verdict, f"Veredicto inesperado: {verdict}")
+
+    lines = [
+        "# Findings — Calibración del gate de régimen",
+        "",
+        f"_Período de señales: {signal_period[0]} → {signal_period[1]}._",
+        "",
+        "## Veredicto",
+        "",
+        f"**{verdict}** — {prose}",
+        "",
+        "## Resultados por estado (umbrales de producción)",
+        "",
+    ]
+
+    if by_estado:
+        for estado, stats in by_estado.items():
+            n = stats.get("n", 0)
+            med = stats.get("median_max_fwd_14d")
+            w15 = stats.get("win15")
+            med_s = f"{med * 100:.1f}" if med is not None else "—"
+            w15_s = f"{w15 * 100:.0f}" if w15 is not None else "—"
+            lines.append(
+                f"- **{estado}** n={n} mediana max_fwd_14d={med_s}% win15={w15_s}%"
+            )
+    else:
+        lines.append("_(sin datos por estado — panel insuficiente)_")
+
+    lines += [
+        "",
+        "## Grid exploratorio (COTA SUPERIOR — no usar para decisión)",
+        "",
+    ]
+    if grid:
+        for row in grid[:5]:
+            ov = row["overrides"]
+            lines.append(
+                f"- BREADTH_ALT={ov['BREADTH_ALT']} OUTPERF_ALT={ov['OUTPERF_ALT']}: "
+                f"delta={_fmt_pp(row['delta_pp'])}pp "
+                f"(n_alts={row['n_alts']}, n_btc={row['n_btc']})"
+            )
+    else:
+        lines.append("_(grid vacío: sin datos suficientes en ambos estados simultáneamente)_")
+
+    lines += ["", "## Caveats", ""]
+    for c in caveats:
+        lines.append(f"- {c}")
+
+    out = HERE / "findings.md"
+    out.write_text("\n".join(lines), encoding="utf-8")
+    print(f"escrito {out}")
+
+
+def main() -> None:
+    res = run_study(_DEFAULT_DB, _DEFAULT_BTC_DOM_CSV)
+    out_json = HERE / "results.json"
+    out_json.write_text(_json.dumps(res, indent=2, default=str), encoding="utf-8")
+    print(f"escrito {out_json}")
+    write_findings(res)
+
+
+if __name__ == "__main__":
+    main()
