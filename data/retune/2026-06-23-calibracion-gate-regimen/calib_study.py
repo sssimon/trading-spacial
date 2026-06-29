@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from scipy.stats import mannwhitneyu
 
 HERE = Path(__file__).resolve().parent
 # raíz del repo: .../data/retune/<dir>/ → subir 3
@@ -170,6 +171,84 @@ def compute_features(df):
     df["ret_30d"] = (close - close.shift(30)) / close.shift(30)
 
     return df
+
+
+# ----------------------------------------------------------------------------
+# Selección — verbatim de edge_study.py línea 373-374
+# ----------------------------------------------------------------------------
+def select_rule_minimal(panel):
+    return panel["alive"] & (panel["pos_in_30d_range"] <= POS_THRESHOLD)
+
+
+# ----------------------------------------------------------------------------
+# Métricas — verbatim de edge_study.py líneas 433-460
+# ----------------------------------------------------------------------------
+def cell_stats(rows):
+    """n, mediana/media de max_fwd_14d, mediana rule_return, win15. Sobre filas con forward válido."""
+    valid = rows.dropna(subset=["max_fwd_14d"])
+    n = int(len(valid))
+    if n == 0:
+        return {"n": 0, "median_max_fwd_14d": None, "mean_max_fwd_14d": None,
+                "median_rule_return": None, "win15": None}
+    rr = valid["rule_return"].dropna()
+    return {
+        "n": n,
+        "median_max_fwd_14d": float(valid["max_fwd_14d"].median()),
+        "mean_max_fwd_14d": float(valid["max_fwd_14d"].mean()),
+        "median_rule_return": float(rr.median()) if len(rr) else None,
+        "win15": float(valid["win15"].mean()),
+    }
+
+
+def mann_whitney(setup_vals, base_vals):
+    s = pd.Series(setup_vals).dropna().to_numpy()
+    b = pd.Series(base_vals).dropna().to_numpy()
+    if len(s) < 3 or len(b) < 3:
+        return {"p_value": None, "note": "n insuficiente para Mann-Whitney"}
+    try:
+        stat, p = mannwhitneyu(s, b, alternative="greater")
+        return {"u_statistic": float(stat), "p_value": float(p),
+                "alternative": "setup > baseline (one-sided)"}
+    except Exception as e:
+        return {"p_value": None, "note": f"Mann-Whitney falló: {e}"}
+
+
+# ----------------------------------------------------------------------------
+# Criterio de aceptación pre-comprometido
+# ----------------------------------------------------------------------------
+MARGEN_PP = 2.0
+P_MAX = 0.01
+
+
+def evaluate_acceptance(by_estado: dict, b2_stats: dict) -> dict:
+    alts = by_estado.get("alts", {})
+    btc = by_estado.get("btc", {})
+    if not alts.get("max_fwd_14d") or not btc.get("max_fwd_14d"):
+        return {"verdict": "NO_PASA", "razon": "sin datos en alts o btc", "delta_pp": None,
+                "p_value": None, "rule_return_inverts": None}
+    med_alts = float(np.median(alts["max_fwd_14d"]))
+    med_btc = float(np.median(btc["max_fwd_14d"]))
+    delta_pp = (med_alts - med_btc) * 100.0
+    mw_fwd = mann_whitney(alts["max_fwd_14d"], btc["max_fwd_14d"])        # alts > btc
+    mw_inv = mann_whitney(btc["max_fwd_14d"], alts["max_fwd_14d"])        # btc > alts
+    p_fwd = mw_fwd.get("p_value")
+    p_inv = mw_inv.get("p_value")
+    # rule_return: ¿la dirección se mantiene? (alts >= btc en realizado)
+    rr_alts = float(np.median(alts["rule_return"])) if alts.get("rule_return") else None
+    rr_btc = float(np.median(btc["rule_return"])) if btc.get("rule_return") else None
+    rr_inverts = (rr_alts is not None and rr_btc is not None and rr_alts < rr_btc)
+    btc_below_b2 = med_btc < (b2_stats.get("median_max_fwd_14d") or float("inf"))
+
+    if (delta_pp >= MARGEN_PP and btc_below_b2 and p_fwd is not None and p_fwd < P_MAX
+            and not rr_inverts):
+        verdict, razon = "PASA", "separación direccional + significativa + btc<B2 + rr no invierte"
+    elif (delta_pp <= -MARGEN_PP and p_inv is not None and p_inv < P_MAX):
+        verdict, razon = "INVERTIDO", "btc le gana a alts con significancia — el gate está al revés"
+    else:
+        verdict, razon = "NO_PASA", "no se cumple el criterio pre-comprometido"
+    return {"verdict": verdict, "delta_pp": delta_pp, "p_value": p_fwd,
+            "p_value_invertido": p_inv, "rule_return_inverts": rr_inverts,
+            "btc_below_b2": btc_below_b2, "razon": razon}
 
 
 def regime_by_date(panel, btc_dom, thresholds=None):

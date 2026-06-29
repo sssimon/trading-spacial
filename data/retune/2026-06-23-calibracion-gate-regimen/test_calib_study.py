@@ -93,3 +93,38 @@ def test_rule_return_sl_primero():
     df["quote_vol"] = [v * cv for v, cv in zip(df["volume"], df["close"])]
     df = cs.compute_features(df)
     assert abs(df["rule_return"].iloc[1] - (-0.12)) < 1e-9   # SL primero (conservador)
+
+
+# ----------------------------------------------------------------------------
+# Task 5: evaluate_acceptance
+# ----------------------------------------------------------------------------
+def _stats(median, n=500):
+    return {"n": n, "median_max_fwd_14d": median, "mean_max_fwd_14d": median,
+            "median_rule_return": median, "win15": 0.4}
+
+def test_acceptance_pasa():
+    by = {
+        "alts": {"max_fwd_14d": [0.15]*500, "rule_return": [0.10]*500, "stats": _stats(0.15)},
+        "btc":  {"max_fwd_14d": [0.10]*500, "rule_return": [0.05]*500, "stats": _stats(0.10)},
+    }
+    b2 = _stats(0.13)  # btc(0.10) < b2(0.13) ✓
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "PASA"   # delta=+5pp, btc<b2, alts>btc significativo, rr no invierte
+
+def test_acceptance_invertido():
+    by = {
+        "alts": {"max_fwd_14d": [0.08]*500, "rule_return": [0.03]*500, "stats": _stats(0.08)},
+        "btc":  {"max_fwd_14d": [0.14]*500, "rule_return": [0.09]*500, "stats": _stats(0.14)},
+    }
+    b2 = _stats(0.11)
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "INVERTIDO"
+
+def test_acceptance_no_pasa_margen_chico():
+    by = {
+        "alts": {"max_fwd_14d": [0.111]*500, "rule_return": [0.05]*500, "stats": _stats(0.111)},
+        "btc":  {"max_fwd_14d": [0.110]*500, "rule_return": [0.05]*500, "stats": _stats(0.110)},
+    }
+    b2 = _stats(0.10)
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "NO_PASA"   # delta=+0.1pp < 2pp
