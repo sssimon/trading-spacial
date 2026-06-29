@@ -49,3 +49,30 @@ def test_load_spot_daily_resample(tmp_path):
     assert abs(df.loc[d1, "quote_vol"] - (100.0*24)*(12.0+23)) < 1e-6
     d2 = pd.Timestamp("2021-03-02", tz="UTC")
     assert df.loc[d2, "close"] == 58.0          # último close del día parcial
+
+
+def test_pos_in_30d_range_y_forward():
+    import numpy as np
+    # serie monótona creciente 40 días → pos≈1 (cierra en el techo del rango)
+    idx = pd.date_range("2021-01-01", periods=40, freq="1D", tz="UTC")
+    close = pd.Series(np.arange(1.0, 41.0), index=idx)
+    df = pd.DataFrame({"open": close, "high": close*1.01, "low": close*0.99,
+                       "close": close, "volume": 1e6})
+    df["quote_vol"] = df["volume"] * df["close"]
+    df = cs.compute_features(df)
+    # en una serie creciente, el último cierre está cerca del máximo del rango 30d
+    assert df["pos_in_30d_range"].iloc[35] > 0.9
+    # max_fwd_7d en t = (max high de t+1..t+7 - open_{t+1}) / open_{t+1} > 0 en serie creciente
+    assert df["max_fwd_7d"].iloc[10] > 0
+
+
+def test_rule_return_sl_primero():
+    import numpy as np
+    idx = pd.date_range("2021-01-01", periods=20, freq="1D", tz="UTC")
+    # entrada en t+1 = open=100; al día siguiente toca SL (low=80 < 88) y TP (high=130>120) → SL primero
+    o = [100.0]*20; h=[101.0]*20; l=[99.0]*20; c=[100.0]*20
+    o[1]=100.0; h[2]=130.0; l[2]=80.0
+    df = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume":[1e6]*20}, index=idx)
+    df["quote_vol"] = [v * cv for v, cv in zip(df["volume"], df["close"])]
+    df = cs.compute_features(df)
+    assert abs(df["rule_return"].iloc[1] - (-0.12)) < 1e-9   # SL primero (conservador)
