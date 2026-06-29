@@ -172,6 +172,30 @@ def compute_features(df):
     return df
 
 
+def regime_by_date(panel, btc_dom, thresholds=None):
+    """Régimen de 3 componentes por fecha. Reusa compose_regime (fidelidad)."""
+    from regime.alt_season import compose_regime
+    BTC = "BTCUSDT"
+    out = {}
+    for date, g in panel.groupby("date"):
+        alive = g[g["alive"]]
+        n_universe = len(g)
+        n_eval = len(alive)
+        coverage_ratio = (n_eval / n_universe) if n_universe else 0.0
+        alts = alive[alive["symbol"] != BTC]
+        alt_contribs = [
+            {"above_sma50": bool(r.above_sma50), "ret_30d": float(r.ret_30d)}
+            for r in alts.itertuples() if pd.notna(r.ret_30d)
+        ]
+        btc_row = alive[alive["symbol"] == BTC]
+        btc_ret_30d = float(btc_row["ret_30d"].iloc[0]) if len(btc_row) and pd.notna(btc_row["ret_30d"].iloc[0]) else None
+        dom = btc_dom.get(date, None)
+        dom = float(dom) if dom is not None and pd.notna(dom) else None
+        res = compose_regime(alt_contribs, btc_ret_30d, dom, coverage_ratio, thresholds=thresholds)
+        out[date] = res["estado"]
+    return pd.Series(out, name="regime")
+
+
 def _compute_rule_return(df):
     """rule_return vectorizado-ish: recorre t+1..t+14 buscando TP/SL intrabar, sino cierre t+14.
 

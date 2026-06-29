@@ -66,6 +66,23 @@ def test_pos_in_30d_range_y_forward():
     assert df["max_fwd_7d"].iloc[10] > 0
 
 
+def test_regime_by_date_reusa_compose():
+    import numpy as np
+    # construir un panel de 1 fecha: 5 alts todas sobre SMA50 con ret_30d alto, BTC ret bajo,
+    # dominancia baja → debe votar 'alts'
+    d = pd.Timestamp("2022-01-01", tz="UTC")
+    rows = []
+    for i in range(5):
+        rows.append({"date": d, "symbol": f"A{i}USDT", "above_sma50": True,
+                     "ret_30d": 0.30, "alive": True, "close": 1.0, "sma50": 0.5})
+    rows.append({"date": d, "symbol": "BTCUSDT", "above_sma50": True,
+                 "ret_30d": 0.02, "alive": True, "close": 1.0, "sma50": 0.5})
+    panel = pd.DataFrame(rows)
+    btc_dom = pd.Series([0.40], index=[d])   # dominancia baja → lean alts
+    reg = cs.regime_by_date(panel, btc_dom, thresholds=None)
+    assert reg.loc[d] == "alts"
+
+
 def test_rule_return_sl_primero():
     import numpy as np
     idx = pd.date_range("2021-01-01", periods=20, freq="1D", tz="UTC")
