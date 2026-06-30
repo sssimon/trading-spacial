@@ -1,0 +1,183 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+import pandas as pd
+import calib_study as cs
+
+def test_load_btc_dominance_normaliza_porcentaje(tmp_path):
+    p = tmp_path / "d.csv"
+    p.write_text("date,dominance\n2021-01-01,70.0\n2021-01-02,68.5\n")
+    s = cs.load_btc_dominance(str(p))
+    assert abs(s.loc[pd.Timestamp("2021-01-01", tz="UTC")] - 0.70) < 1e-9
+    assert s.max() <= 1.0  # normalizado a fracción
+
+def test_load_btc_dominance_ya_fraccion(tmp_path):
+    p = tmp_path / "d.csv"
+    p.write_text("date,dominance\n2021-01-01,0.70\n2021-01-02,0.685\n")
+    s = cs.load_btc_dominance(str(p))
+    assert abs(s.loc[pd.Timestamp("2021-01-01", tz="UTC")] - 0.70) < 1e-9
+
+
+def _mk_db(tmp_path):
+    import sqlite3
+    p = tmp_path / "panel.db"
+    con = sqlite3.connect(str(p))
+    con.execute("CREATE TABLE spot_klines(symbol TEXT, open_time INTEGER, open REAL, high REAL, low REAL, close REAL, volume REAL, PRIMARY KEY(symbol, open_time)) WITHOUT ROWID")
+    # 2 días de barras horarias para FOOUSDT: día1 (24 barras), día2 (2 barras)
+    H = 3600_000
+    d1 = int(pd.Timestamp("2021-03-01", tz="UTC").timestamp() * 1000)
+    rows = []
+    for h in range(24):
+        rows.append(("FOOUSDT", d1 + h*H, 10.0+h, 20.0+h, 5.0+h, 12.0+h, 100.0))
+    d2 = int(pd.Timestamp("2021-03-02", tz="UTC").timestamp() * 1000)
+    rows.append(("FOOUSDT", d2, 50.0, 60.0, 40.0, 55.0, 7.0))
+    rows.append(("FOOUSDT", d2 + H, 55.0, 65.0, 45.0, 58.0, 3.0))
+    con.executemany("INSERT INTO spot_klines VALUES (?,?,?,?,?,?,?)", rows)
+    con.commit(); con.close()
+    return str(p)
+
+
+def test_load_spot_daily_resample(tmp_path):
+    dbp = _mk_db(tmp_path)
+    out = cs.load_spot_daily(dbp)
+    df = out["FOOUSDT"]
+    d1 = pd.Timestamp("2021-03-01", tz="UTC")
+    assert df.loc[d1, "open"] == 10.0          # primer open del día
+    assert df.loc[d1, "high"] == 20.0 + 23      # max high (h=23)
+    assert df.loc[d1, "low"] == 5.0             # min low (h=0)
+    assert df.loc[d1, "close"] == 12.0 + 23     # último close
+    assert df.loc[d1, "volume"] == 100.0 * 24   # suma
+    assert abs(df.loc[d1, "quote_vol"] - (100.0*24)*(12.0+23)) < 1e-6
+    d2 = pd.Timestamp("2021-03-02", tz="UTC")
+    assert df.loc[d2, "close"] == 58.0          # último close del día parcial
+
+
+def test_pos_in_30d_range_y_forward():
+    import numpy as np
+    # serie monótona creciente 40 días → pos≈1 (cierra en el techo del rango)
+    idx = pd.date_range("2021-01-01", periods=40, freq="1D", tz="UTC")
+    close = pd.Series(np.arange(1.0, 41.0), index=idx)
+    df = pd.DataFrame({"open": close, "high": close*1.01, "low": close*0.99,
+                       "close": close, "volume": 1e6})
+    df["quote_vol"] = df["volume"] * df["close"]
+    df = cs.compute_features(df)
+    # en una serie creciente, el último cierre está cerca del máximo del rango 30d
+    assert df["pos_in_30d_range"].iloc[35] > 0.9
+    # max_fwd_7d en t = (max high de t+1..t+7 - open_{t+1}) / open_{t+1} > 0 en serie creciente
+    assert df["max_fwd_7d"].iloc[10] > 0
+
+
+def test_regime_by_date_reusa_compose():
+    import numpy as np
+    # construir un panel de 1 fecha: 5 alts todas sobre SMA50 con ret_30d alto, BTC ret bajo,
+    # dominancia baja → debe votar 'alts'
+    d = pd.Timestamp("2022-01-01", tz="UTC")
+    rows = []
+    for i in range(5):
+        rows.append({"date": d, "symbol": f"A{i}USDT", "above_sma50": True,
+                     "ret_30d": 0.30, "alive": True, "close": 1.0, "sma50": 0.5})
+    rows.append({"date": d, "symbol": "BTCUSDT", "above_sma50": True,
+                 "ret_30d": 0.02, "alive": True, "close": 1.0, "sma50": 0.5})
+    panel = pd.DataFrame(rows)
+    btc_dom = pd.Series([0.40], index=[d])   # dominancia baja → lean alts
+    reg = cs.regime_by_date(panel, btc_dom, thresholds=None)
+    assert reg.loc[d] == "alts"
+
+
+def test_rule_return_sl_primero():
+    import numpy as np
+    idx = pd.date_range("2021-01-01", periods=20, freq="1D", tz="UTC")
+    # entrada en t+1 = open=100; al día siguiente toca SL (low=80 < 88) y TP (high=130>120) → SL primero
+    o = [100.0]*20; h=[101.0]*20; l=[99.0]*20; c=[100.0]*20
+    o[1]=100.0; h[2]=130.0; l[2]=80.0
+    df = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume":[1e6]*20}, index=idx)
+    df["quote_vol"] = [v * cv for v, cv in zip(df["volume"], df["close"])]
+    df = cs.compute_features(df)
+    assert abs(df["rule_return"].iloc[1] - (-0.12)) < 1e-9   # SL primero (conservador)
+
+
+# ----------------------------------------------------------------------------
+# Task 5: evaluate_acceptance
+# ----------------------------------------------------------------------------
+def _stats(median, n=500):
+    return {"n": n, "median_max_fwd_14d": median, "mean_max_fwd_14d": median,
+            "median_rule_return": median, "win15": 0.4}
+
+def test_acceptance_pasa():
+    by = {
+        "alts": {"max_fwd_14d": [0.15]*500, "rule_return": [0.10]*500, "stats": _stats(0.15)},
+        "btc":  {"max_fwd_14d": [0.10]*500, "rule_return": [0.05]*500, "stats": _stats(0.10)},
+    }
+    b2 = _stats(0.13)  # btc(0.10) < b2(0.13) ✓
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "PASA"   # delta=+5pp, btc<b2, alts>btc significativo, rr no invierte
+
+def test_acceptance_invertido():
+    by = {
+        "alts": {"max_fwd_14d": [0.08]*500, "rule_return": [0.03]*500, "stats": _stats(0.08)},
+        "btc":  {"max_fwd_14d": [0.14]*500, "rule_return": [0.09]*500, "stats": _stats(0.14)},
+    }
+    b2 = _stats(0.11)
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "INVERTIDO"
+
+def test_acceptance_no_pasa_margen_chico():
+    by = {
+        "alts": {"max_fwd_14d": [0.111]*500, "rule_return": [0.05]*500, "stats": _stats(0.111)},
+        "btc":  {"max_fwd_14d": [0.110]*500, "rule_return": [0.05]*500, "stats": _stats(0.110)},
+    }
+    b2 = _stats(0.10)
+    r = cs.evaluate_acceptance(by, b2)
+    assert r["verdict"] == "NO_PASA"   # delta=+0.1pp < 2pp
+
+
+# ----------------------------------------------------------------------------
+# Task 6: smoke end-to-end sintético
+# ----------------------------------------------------------------------------
+
+def _mk_panel_multi(tmp_path):
+    """BTCUSDT + 9 alts, 220 días horarios. Determinista, sin random.
+    6 alts rising (pos_in_30d_range≈1, no hits), 3 alts declining (pos≈0.1, hits rule_minimal).
+    not_dying válido desde día 179 → alive=True desde 2021-06-29.
+    """
+    import sqlite3
+    p = tmp_path / "panel_multi.db"
+    con = sqlite3.connect(str(p))
+    con.execute(
+        "CREATE TABLE spot_klines(symbol TEXT, open_time INTEGER, "
+        "open REAL, high REAL, low REAL, close REAL, volume REAL, "
+        "PRIMARY KEY(symbol, open_time)) WITHOUT ROWID"
+    )
+    H = 3_600_000  # ms per hour
+    start_ms = int(pd.Timestamp("2021-01-01", tz="UTC").timestamp() * 1000)
+    DAYS = 220
+    # index 0=BTCUSDT, 1-6=ALT0-ALT5 (rising), 7-9=ALT6-ALT8 (declining)
+    symbols = ["BTCUSDT"] + [f"ALT{i}USDT" for i in range(9)]
+    rows = []
+    for sym_idx, sym in enumerate(symbols):
+        for h in range(DAYS * 24):
+            d = h // 24
+            if sym == "BTCUSDT":
+                close, vol = 40_000.0 + d, 1.0          # daily quote_vol ≈ 24*(40k+d) ≥ 960k
+            elif sym_idx <= 6:                            # ALT0-ALT5: 6 rising alts, pos≈1
+                close, vol = 1.0 + d * 0.01, 50_000.0
+            else:                                        # ALT6-ALT8: 3 slow-declining, pos≈0.1
+                close, vol = max(0.5, 1.0 - d * 0.0002), 50_000.0
+            rows.append((sym, start_ms + h * H,
+                         close, close * 1.001, close * 0.999, close, vol))
+    con.executemany("INSERT INTO spot_klines VALUES (?,?,?,?,?,?,?)", rows)
+    con.commit(); con.close()
+    return p
+
+
+def test_run_study_smoke(tmp_path, monkeypatch):
+    # panel sintético mínimo en sqlite + CSV BTC.D → run_study produce un dict con la forma esperada
+    dbp = _mk_panel_multi(tmp_path)   # helper: BTCUSDT + 9 alts, >150 barras diarias, 2 regímenes
+    csvp = tmp_path / "dom.csv"
+    # dominancia que cae (alts) y sube (btc) en distintos tramos
+    dates = pd.date_range("2021-01-01", periods=200, freq="1D")
+    dom = ["date,dominance"] + [f"{d.date()},{45 if i<100 else 60}" for i, d in enumerate(dates)]
+    csvp.write_text("\n".join(dom))
+    res = cs.run_study(str(dbp), str(csvp))
+    assert "verdict" in res and res["verdict"] in ("PASA", "NO_PASA", "INVERTIDO")
+    assert "by_estado" in res and "production_thresholds" in res
+    assert "grid_exploratory" in res

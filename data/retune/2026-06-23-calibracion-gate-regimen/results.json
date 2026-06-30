@@ -1,0 +1,155 @@
+{
+  "by_estado": {
+    "alts": {
+      "n": 468,
+      "median_max_fwd_14d": 0.06437079943504775,
+      "mean_max_fwd_14d": 0.14101438193713886,
+      "median_rule_return": -0.12,
+      "win15": 0.25213675213675213
+    },
+    "btc": {
+      "n": 23826,
+      "median_max_fwd_14d": 0.1256831191463655,
+      "mean_max_fwd_14d": 0.1846977899693751,
+      "median_rule_return": -0.06275485931542987,
+      "win15": 0.4264668849156384
+    },
+    "mixto": {
+      "n": 34092,
+      "median_max_fwd_14d": 0.12191912196447144,
+      "mean_max_fwd_14d": 2.480707029807234,
+      "median_rule_return": -0.05157791160849774,
+      "win15": 0.420978528687082
+    }
+  },
+  "b2": {
+    "n": 164464,
+    "median_max_fwd_14d": 0.12411776510455874,
+    "mean_max_fwd_14d": 0.6840011634623071,
+    "median_rule_return": -0.06274860842570937,
+    "win15": 0.4323681778383111
+  },
+  "verdict": "INVERTIDO",
+  "acceptance": {
+    "verdict": "INVERTIDO",
+    "delta_pp": -6.1312319711317755,
+    "p_value": 1.0,
+    "p_value_invertido": 2.236305100385723e-22,
+    "rule_return_inverts": true,
+    "btc_below_b2": false,
+    "razon": "btc le gana a alts con significancia \u2014 el gate est\u00e1 al rev\u00e9s"
+  },
+  "production_thresholds": {
+    "BREADTH_ALT": 0.6,
+    "BREADTH_BEAR": 0.4,
+    "OUTPERF_ALT": 0.05,
+    "OUTPERF_BEAR": -0.05,
+    "DOM_ALT": 0.5,
+    "DOM_BTC": 0.58,
+    "COVERAGE_MIN": 0.7,
+    "MIN_LIVE_VOTERS": 2
+  },
+  "grid_exploratory": [
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.6,
+        "OUTPERF_ALT": 0.0
+      },
+      "delta_pp": -3.149603803741652,
+      "n_alts": 872,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.55,
+        "OUTPERF_ALT": 0.0
+      },
+      "delta_pp": -3.186456191317398,
+      "n_alts": 905,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.65,
+        "OUTPERF_ALT": 0.0
+      },
+      "delta_pp": -3.254193953601045,
+      "n_alts": 845,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.7,
+        "OUTPERF_ALT": 0.0
+      },
+      "delta_pp": -3.3580687470015276,
+      "n_alts": 811,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.55,
+        "OUTPERF_ALT": 0.05
+      },
+      "delta_pp": -6.1312319711317755,
+      "n_alts": 468,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.6,
+        "OUTPERF_ALT": 0.05
+      },
+      "delta_pp": -6.1312319711317755,
+      "n_alts": 468,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.65,
+        "OUTPERF_ALT": 0.05
+      },
+      "delta_pp": -6.1312319711317755,
+      "n_alts": 468,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.7,
+        "OUTPERF_ALT": 0.05
+      },
+      "delta_pp": -6.1312319711317755,
+      "n_alts": 468,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.55,
+        "OUTPERF_ALT": 0.1
+      },
+      "delta_pp": -8.099038171619794,
+      "n_alts": 155,
+      "n_btc": 23826
+    },
+    {
+      "overrides": {
+        "BREADTH_ALT": 0.6,
+        "OUTPERF_ALT": 0.1
+      },
+      "delta_pp": -8.099038171619794,
+      "n_alts": 155,
+      "n_btc": 23826
+    }
+  ],
+  "signal_period": [
+    "2021-01-01",
+    "2025-04-29"
+  ],
+  "caveats": [
+    "Survivorship: panel retiene delistadas pero su cobertura no es total (187 s\u00edmbolos del ingest 2026-06-05).",
+    "quote_vol derivado = volume \u00d7 close (\u2248 quote-vol de Binance).",
+    "BTC.D de fuente externa congelada (ver METODOLOGIA \u00a7Procedencia).",
+    "Retorno en USDT incluye beta de BTC.",
+    "Grid-search es EXPLORATORIO (overfitting); la decisi\u00f3n es a umbrales de producci\u00f3n."
+  ]
+}
