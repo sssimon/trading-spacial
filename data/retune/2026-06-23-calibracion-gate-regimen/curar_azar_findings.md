@@ -29,12 +29,17 @@ No hay selección — la entrada es una moneda al aire. El valor sale de tres pa
 Es cosecha de convexidad sobre draws aleatorios diversificados, con un freno de drawdown. Clase de
 estrategia conocida que funciona — no fantasía.
 
-## Caveat honesto (no lavado)
+## Endurecimiento (`harden_cura.py`) — caveat de bear CERRADO
 
-El validate (2024-25) fue **bull**. Validamos que la cura generaliza a un bull no visto; la
-**protección de bear específicamente sigue in-sample** (2022 solo en train). No hay segundo bear en la
-data para OOS-testear "sobrevive un bear nuevo". La convexidad + diversificación SÍ se validaron OOS;
-el circuit-breaker-en-bear no. Es caveat de magnitud/confianza, no un "está muerto".
+- **(A) Multi-fold:** la config robusta en 5 cortes × 5 semillas = **25/25 positivas**. No es artefacto
+  de un solo split; aguanta en todo el eje temporal (med por corte 1.14-1.74x, Calmar +0.47 a +1.55).
+- **(B) Stress-test de bear OOS:** la cura aplicada al 2021-2022 (incluye el bear 2022), con config
+  elegida SIN ver 2022 → **CURADO 1.48x, maxDD 9%** vs **NAIVE 0.54x, maxDD 71%**. La protección de
+  bear **generaliza out-of-sample** — "corta cuando pierdes" es regla general, no fit al 2022.
+
+**Caveat que queda (chico):** sigue siendo **un solo bear histórico**. Lo probamos ciego y protegió,
+pero un bear de forma distinta (goteo lento vs crash) es teoría no probada. En vivo, el slippage en un
+crash empeoraría algo el 9%. No tumba la tesis; solo dice "no prometas el 9% exacto en el próximo bear".
 
 ## Conclusión
 
