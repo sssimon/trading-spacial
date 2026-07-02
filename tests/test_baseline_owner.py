@@ -26,6 +26,27 @@ def test_baseline_loop_ticks_and_persists(tmp_path, monkeypatch):
     assert gen is not None  # generated_at presente => la frescura será 'fresco'
 
 
+def test_baseline_loop_skips_on_no_bars(tmp_path, monkeypatch):
+    # apagón total: _baseline_bar devuelve None para todos => bars={} => no debe persistir
+    monkeypatch.setattr(rt, "_baseline_universe", lambda: ["ETHUSDT", "SOLUSDT"])
+    monkeypatch.setattr(rt, "_baseline_bar", lambda sym: None)
+    monkeypatch.setattr(rt, "_baseline_today", lambda: "2026-07-02")
+    path = str(tmp_path / "state_empty.json")
+    monkeypatch.setattr(rt, "_BASELINE_PATH", path)
+
+    ev = threading.Event()
+    t = threading.Thread(target=rt.baseline_loop, kwargs={"stop_event": ev}, daemon=True)
+    t.start()
+    time.sleep(0.5)
+    ev.set()
+    t.join(timeout=3)
+
+    from scanner.baseline.store import load
+    ensemble, gen = load(path=path)
+    # nada debe haberse persistido: el store devuelve (None, None)
+    assert ensemble is None and gen is None
+
+
 def test_baseline_thread_registered_in_managed():
     # start_scanner_thread debe registrar el baseline_thread para el teardown (#8)
     import inspect

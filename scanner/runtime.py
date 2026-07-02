@@ -506,10 +506,11 @@ def _baseline_universe() -> list[str]:
 
 def _baseline_bar(symbol: str) -> dict | None:
     """Última barra diaria del símbolo, o None si no disponible."""
+    import requests  # noqa: PLC0415
     from api.levels import _fetch_daily_bars, BinanceUnavailable  # noqa: PLC0415
     try:
         bars = _fetch_daily_bars(symbol)
-    except BinanceUnavailable:
+    except (requests.RequestException, BinanceUnavailable):
         return None
     return bars[-1] if bars else None
 
@@ -533,11 +534,18 @@ def baseline_loop(stop_event: threading.Event | None = None) -> None:
             if ensemble.last_date is None or today > ensemble.last_date:
                 universe = _baseline_universe()
                 bars = {s: b for s in universe if (b := _baseline_bar(s)) is not None}
-                ensemble.advance_day(today, bars, list(bars.keys()))
-                from datetime import datetime, timezone  # noqa: PLC0415
-                gen = datetime.now(timezone.utc).isoformat()
-                _baseline_store.persist(ensemble, gen, path=_BASELINE_PATH)
-                log.info("baseline_loop: avanzado a %s (%d símbolos)", today, len(bars))
+                if not bars:
+                    log.warning(
+                        "baseline_loop: sin barras usables para %s; no avanza "
+                        "(frescura degradara honestamente)",
+                        today,
+                    )
+                else:
+                    ensemble.advance_day(today, bars, list(bars.keys()))
+                    from datetime import datetime, timezone  # noqa: PLC0415
+                    gen = datetime.now(timezone.utc).isoformat()
+                    _baseline_store.persist(ensemble, gen, path=_BASELINE_PATH)
+                    log.info("baseline_loop: avanzado a %s (%d símbolos)", today, len(bars))
         except Exception:  # noqa: BLE001
             log.exception("baseline_loop cycle error (continúa)")
         if stop_event.wait(_BASELINE_INTERVAL_SEC):
@@ -643,7 +651,7 @@ def start_scanner_thread():
 
 
 def stop_managed_threads(timeout_per_thread: float = 2.0) -> dict[str, bool]:
-    """Signal and join all managed background threads (five after the liveness fix).
+    """Signal and join all managed background threads (six after the liveness fix).
 
     Called from the lifespan teardown. Sets the shared stop_event (which
     breaks each loop's interruptible sleep within ≤1 wake-up cycle),
