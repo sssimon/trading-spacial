@@ -76,3 +76,38 @@ class PaperPortfolio:
                     "hi_max": bar["high"], "lo_min": bar["low"], "bars_left": HORIZON,
                 })
         self.eq.append(self.cap)
+
+
+def _percentile(sorted_vals: list[float], q: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    idx = min(len(sorted_vals) - 1, max(0, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[idx]
+
+
+class BaselineEnsemble:
+    """N portafolios paper independientes; emite la DISTRIBUCIÓN, no un camino."""
+
+    def __init__(self, n_seeds: int = N_SEEDS) -> None:
+        self.seeds = list(range(n_seeds))
+        self.portfolios = [PaperPortfolio() for _ in self.seeds]
+        self.last_date: str | None = None
+
+    def advance_day(self, date: str, bars: dict[str, dict], universe: list[str]) -> None:
+        if self.last_date is not None and date <= self.last_date:
+            return  # idempotente / monotónico por fecha
+        for seed, p in zip(self.seeds, self.portfolios):
+            p.advance_day(date, bars, universe, seed)
+        self.last_date = date
+
+    def snapshot(self) -> dict:
+        caps = sorted(p.cap for p in self.portfolios)
+        tiers = sorted(p._tier() for p in self.portfolios)
+        return {
+            "mediana": statistics.median(caps) if caps else 1.0,
+            "banda_p10": _percentile(caps, 0.10),
+            "banda_p90": _percentile(caps, 0.90),
+            "n_seeds": len(self.portfolios),
+            "tier_mediana": tiers[len(tiers) // 2] if tiers else "NORMAL",
+            "last_date": self.last_date,
+        }
