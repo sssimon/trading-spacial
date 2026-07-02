@@ -491,18 +491,72 @@ def sync_loop(stop_event: threading.Event | None = None) -> None:
             break
 
 
+# ── Baseline forward-log (yardstick cured-random, #8 freshness owner) ──
+from scanner.baseline.ensemble import BaselineEnsemble  # noqa: E402
+from scanner.baseline import store as _baseline_store  # noqa: E402
+
+_BASELINE_PATH = _baseline_store._DEFAULT_PATH
+_BASELINE_INTERVAL_SEC = 3600  # despierta c/hora; avanza solo si hay día nuevo (idempotente)
+
+
+def _baseline_universe() -> list[str]:
+    """Universo alt vivo trackeado (símbolos activos, sin BTC)."""
+    return [s for s in get_active_symbols() if s != "BTCUSDT"]
+
+
+def _baseline_bar(symbol: str) -> dict | None:
+    """Última barra diaria del símbolo, o None si no disponible."""
+    from api.levels import _fetch_daily_bars, BinanceUnavailable  # noqa: PLC0415
+    try:
+        bars = _fetch_daily_bars(symbol)
+    except BinanceUnavailable:
+        return None
+    return bars[-1] if bars else None
+
+
+def _baseline_today() -> str:
+    from datetime import datetime, timezone  # noqa: PLC0415
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def baseline_loop(stop_event: threading.Event | None = None) -> None:
+    """Freshness owner del baseline. Cada hora: si hay día nuevo, avanza el ensemble
+    con las barras diarias del universo y persiste con generated_at (#8)."""
+    if stop_event is None:
+        stop_event = threading.Event()
+    while not stop_event.is_set():
+        try:
+            ensemble, _ = _baseline_store.load(path=_BASELINE_PATH)
+            if ensemble is None:
+                ensemble = BaselineEnsemble()
+            today = _baseline_today()
+            if ensemble.last_date is None or today > ensemble.last_date:
+                universe = _baseline_universe()
+                bars = {s: b for s in universe if (b := _baseline_bar(s)) is not None}
+                ensemble.advance_day(today, bars, list(bars.keys()))
+                from datetime import datetime, timezone  # noqa: PLC0415
+                gen = datetime.now(timezone.utc).isoformat()
+                _baseline_store.persist(ensemble, gen, path=_BASELINE_PATH)
+                log.info("baseline_loop: avanzado a %s (%d símbolos)", today, len(bars))
+        except Exception:  # noqa: BLE001
+            log.exception("baseline_loop cycle error (continúa)")
+        if stop_event.wait(_BASELINE_INTERVAL_SEC):
+            break
+    log.info("baseline_loop exiting cleanly")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  THREAD MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def start_scanner_thread():
-    """Launch the five managed background threads with shared ownership.
+    """Launch the six managed background threads with shared ownership.
 
-    Creates a single `stop_event` that all five loops respect (scanner via
+    Creates a single `stop_event` that all six loops respect (scanner via
     interruptible `stop_event.wait()` between cycles; health + calibrator +
-    screener + sync via the `stop_event` parameter). Registers the threads in
-    `_managed_threads` so `stop_managed_threads()` can join them on lifespan
-    teardown.
+    screener + sync + baseline via the `stop_event` parameter). Registers the
+    threads in `_managed_threads` so `stop_managed_threads()` can join them on
+    lifespan teardown.
 
     Threads managed:
       1. crypto-scanner       — main scan loop
@@ -510,6 +564,7 @@ def start_scanner_thread():
       3. kill-switch-calibrator — auto-calibrator (#214 B4b.1)
       4. screener_loop        — valley screener regen every 6h (spec §5)
       5. sync_loop            — Binance sync per active tenant every 5min (spec §5)
+      6. baseline_loop        — forward-log freshness owner, hourly (#8)
 
     Backward-compatible return: still returns the scanner thread (the
     pre-#495-fix shape) so existing callers (`btc_api.lifespan`, tests)
@@ -575,6 +630,14 @@ def start_scanner_thread():
     sync_thread.start()
     _managed_threads.append(sync_thread)
     log.info("Sync loop thread started (every 5min)")
+
+    baseline_thread = threading.Thread(
+        target=baseline_loop, name="baseline_loop",
+        kwargs={"stop_event": _thread_stop_event}, daemon=True,
+    )
+    baseline_thread.start()
+    _managed_threads.append(baseline_thread)
+    log.info("Baseline forward-log thread started (freshness owner, hourly)")
 
     return t
 
