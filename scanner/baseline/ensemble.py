@@ -77,6 +77,17 @@ class PaperPortfolio:
                 })
         self.eq.append(self.cap)
 
+    def to_dict(self) -> dict:
+        return {"cap": self.cap, "eq": self.eq, "open_pos": self.open_pos}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PaperPortfolio":
+        p = cls()
+        p.cap = d["cap"]
+        p.eq = list(d["eq"])
+        p.open_pos = [dict(x) for x in d["open_pos"]]
+        return p
+
 
 def _percentile(sorted_vals: list[float], q: float) -> float:
     if not sorted_vals:
@@ -111,3 +122,15 @@ class BaselineEnsemble:
             "tier_mediana": tiers[len(tiers) // 2] if tiers else "NORMAL",
             "last_date": self.last_date,
         }
+
+    def to_dict(self) -> dict:
+        return {"seeds": self.seeds, "last_date": self.last_date,
+                "portfolios": [p.to_dict() for p in self.portfolios]}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BaselineEnsemble":
+        e = cls(n_seeds=len(d["seeds"]))
+        e.seeds = list(d["seeds"])
+        e.last_date = d["last_date"]
+        e.portfolios = [PaperPortfolio.from_dict(x) for x in d["portfolios"]]
+        return e
