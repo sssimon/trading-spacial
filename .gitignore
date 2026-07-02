@@ -29,6 +29,7 @@ backups/
 data/symbols_status.json
 data/signals_history.csv
 data/positions_summary.json
+data/baseline_state.json
 data/ohlcv.db
 data/ohlcv.db-wal
 data/ohlcv.db-shm
@@ -138,7 +139,7 @@ SIGNAL_*.txt
 data/retune/2026-06-01-cost-model-diagnosis/live_trades.json
 data/retune/2026-06-01-cost-model-diagnosis/per_trade.json
 
-# Realizacion per-tenant — data familiar sensible, el tool se versiona, la data no
+# Realizacion per-tenant ï¿½ data familiar sensible, el tool se versiona, la data no
 data/realizacion/
 
 # Playwright E2E screenshots (diagnostic output, not source)

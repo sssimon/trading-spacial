@@ -93,6 +93,7 @@ from api.alt_season import router as alt_season_router
 from api.dossier import router as dossier_router
 from api.levels import router as levels_router
 from api.plan import router as plan_router
+from api.baseline import baseline_router
 from btc_scanner import scan  # noqa: F401 — patch("btc_api.scan", ...) in test_api.py line 421
 from data import market_data as md  # used directly at line 145; patch.object(btc_api.md) in test_api.py
 # DB_FILE: monkeypatched as btc_api.DB_FILE by ~25 test files to redirect SQLite path
@@ -320,6 +321,7 @@ app.include_router(alt_season_router)
 app.include_router(dossier_router)
 app.include_router(levels_router)
 app.include_router(plan_router)
+app.include_router(baseline_router)
 
 
 @app.get("/", summary="Bienvenida y estado general")
